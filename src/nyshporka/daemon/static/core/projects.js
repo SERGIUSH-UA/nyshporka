@@ -40,6 +40,12 @@ export function currentPid() {
   return cur === DATA.hub_id ? '' : cur;
 }
 
+/** Назва проєкту вкладки для рядків наслідку; `''` — Майстерня без проєкту. */
+export function currentName() {
+  const p = projectInfo(currentPid());
+  return p ? (p.name || p.id) : '';
+}
+
 /** Скільки проєктів у Майстерні — зрізи «хто ще» мають сенс лише з двома. */
 export function projectCount() {
   return DATA && Array.isArray(DATA.projects) ? DATA.projects.length : 0;

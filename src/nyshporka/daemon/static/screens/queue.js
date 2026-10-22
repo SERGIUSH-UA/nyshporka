@@ -7,7 +7,7 @@ import { esc, el, setView, busy, failure, boxError,
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { ic } from '/ui/icons.js';
 import { swapHtml } from '/ui/dom.js';
-import { loadProjects, projectCount, projectChip } from '../core/projects.js';
+import { loadProjects, projectCount, projectChip, currentName } from '../core/projects.js';
 
 /**
  * 🔴 Чергу веде ОКРЕМИЙ процес (`nysh queue run`), а не застосунок: він
@@ -156,7 +156,7 @@ async function queueLoad(full = false) {
     if (box && !typing) swapHtml(box, queueBody(env));
     return;
   }
-  setView(`<h2>${t('queue.title')}</h2>
+  setView(`
     <p class="muted">${t('queue.why')}</p>
     <form class="row" data-act="queue.add">
       <input name="refs" required placeholder="${esc(t('queue.add.ph'))}">
@@ -164,6 +164,7 @@ async function queueLoad(full = false) {
         ${t('queue.add.share')}</label>
       <button>${ic('plus')} ${t('queue.add')}</button>
     </form>
+    <p class="consequence">${esc(t('read.lands').replace('{p}', currentName() || t('read.for.hub')))}</p>
     <div id="queue-msg"></div>
     <div id="queue-body">${queueBody(env)}</div>`);
 }

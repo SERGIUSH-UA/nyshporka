@@ -258,8 +258,9 @@ def test_every_screen_is_reachable_and_belongs_to_a_section() -> None:
     assert not (screens - order - free), \
         f"екран без кнопки: {sorted(screens - order - free)}"
     assert not (order - labels), f"кнопка без підпису: {sorted(order - labels)}"
-    assert not (order - set(S.SCREENS)), \
-        f"екран без секції: {sorted(order - set(S.SCREENS))}"
+    # Налаштування — і в меню «Сервіс», але без секції: ними секції й вмикають.
+    assert not (order - set(S.SCREENS) - S.UNGATED_SCREENS), \
+        f"екран без секції: {sorted(order - set(S.SCREENS) - S.UNGATED_SCREENS)}"
 
 
 # ── 4. екран кличе те, що існує ──────────────────────────────────────────────
@@ -377,7 +378,7 @@ def test_translations_cover_every_key_in_every_language() -> None:
         empty = [k for k, v in d.items() if not str(v).strip()]
         assert not empty, f"{lang}: порожні {empty[:20]}"
     used = set(re.findall(r"\bt\('([\w.]+)'\)", _js())) | set(
-        re.findall(r'data-i18n="([\w.]+)"', _html()))
+        re.findall(r'data-i18n(?:-title)?="([\w.]+)"', _html()))
     assert not (used - uk), f"ужито без перекладу: {sorted(used - uk)}"
 
 

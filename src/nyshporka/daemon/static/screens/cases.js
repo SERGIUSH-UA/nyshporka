@@ -53,7 +53,6 @@ SCREENS.cases = async () => {
   const c = d.counts || {};
   const waiting = d.waiting || [];
   setView(`
-    <h2>${t('nav.cases')}</h2>
     <p class="muted">${t('intake.why')}</p>
     <div class="row">
       <button type="button" data-act="intake.other">${ic('pencil-line', 'ic-sm')} ${t('intake.other')}</button>

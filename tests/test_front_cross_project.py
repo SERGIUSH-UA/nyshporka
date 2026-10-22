@@ -66,9 +66,8 @@ const out = {};
 await SCREENS.library();
 await tick();
 out.lib = view();
-document.getElementById('lib-searched').value = 'todo';
 globalThis.__OPS = [];
-await ACTIONS['lib.filter']();
+await ACTIONS['lib.scope'](null, { dataset: { arg: 'todo' } });
 out.libTodo = sent('library.list');
 
 const S = await import('./screens/search.js');

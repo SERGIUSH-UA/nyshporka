@@ -37,7 +37,6 @@ SCREENS.geog = async () => {
   if (!alive(gen)) return;
   const ok = ((packs.data || {}).packs || []).filter((x) => x.state === 'ok');
   setView(`
-    <h2>${t('geog.title')}</h2>
     <p class="muted">${t('geog.why')}</p>
     ${ok.length ? '' : `<div class="warn">${t('catalog.none')}</div>`}
     <form class="row" data-act="geog.find">

@@ -1014,6 +1014,14 @@ class _ProjectScope:
         try:
             slot = self.spaces.slot(pid)
         except (ProjectError, ValueError) as exc:
+            if scope.get("method") == "GET" and (scope.get("path") or "/") == "/":
+                # Сторінка консолі з закладки на видалений чи перейменований
+                # проєкт: Майстерня, а не сирий JSON зі шляхом до теки на диску
+                # (прохід консолі 22.10.2026).
+                await send({"type": "http.response.start", "status": 302,
+                            "headers": [(b"location", b"/"), (b"cache-control", b"no-store")]})
+                await send({"type": "http.response.body", "body": b""})
+                return
             body = json.dumps({"ok": False, "v": 1, "data": {}, "warnings": [],
                                "error": str(exc)}, ensure_ascii=False).encode("utf-8")
             await send({"type": "http.response.start", "status": 404,
@@ -1043,11 +1051,20 @@ class _NoFraming:
             await self.app(scope, receive, send)
             return
 
+        # 🔴 Відповіді `/api` залежать від проєкту в заголовку (`X-Nysh-Project`),
+        # а не лише від адреси. Браузер, повертаючись «Назад» з Майстерні в рід,
+        # брав `/api/projects` і `/api/sections` зі свого кешу — від Майстерні —
+        # і рід в адресі показувався з меню й шапкою Майстерні (22.10.2026).
+        api = "/api/" in str(scope.get("path") or "")
+
         async def send_framed(msg: dict[str, Any]) -> None:
             if msg.get("type") == "http.response.start":
                 names = {k.lower() for k, _ in msg.get("headers") or []}
-                msg["headers"] = [*(msg.get("headers") or []),
-                                  *(h for h in NO_FRAMING_HEADERS if h[0] not in names)]
+                extra = [h for h in NO_FRAMING_HEADERS if h[0] not in names]
+                if api and b"cache-control" not in names:
+                    extra += [(b"cache-control", b"no-store"),
+                              (b"vary", PROJECT_HEADER.encode("ascii"))]
+                msg["headers"] = [*(msg.get("headers") or []), *extra]
             await send(msg)
 
         await self.app(scope, receive, send_framed)

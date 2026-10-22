@@ -32,14 +32,14 @@ SCREENS.history = async () => {
   const auto = await callOp('history.auto', {});
   if (!alive(gen)) return;
   if (!auto.ok) return failure(auto);
-  setView(`<h2>${t('hist.title')}</h2>
+  setView(`
     <p class="muted">${t('hist.why')}</p>
     <div class="dash-box" id="hist-auto">${autoBox(auto.data || {})}</div>
     <div class="dash-box">
       <div class="row"><h3>${PATH ? esc(PATH) : t('hist.all')}</h3>
         ${PATH ? `<button class="ctl-sm" data-act="hist.all">${t('hist.showall')}</button>` : ''}
         <button data-act="hist.save">${t('hist.save')}</button></div>
-      <div id="hist-log"><p class="muted">${t('common.loading')}</p></div>
+      <div id="hist-log"><p class="muted">${t('load.history')}</p></div>
     </div>`);
   await drawLog();
 };
@@ -75,7 +75,7 @@ async function openDiff(i, file = '') {
   if (!r) return;
   const files = r.files || (PATH ? [PATH] : []);
   const path = file || files[0];
-  openModal({ title: `${r.rev} · ${r.date}`, body: `<p class="muted">${t('common.loading')}</p>` });
+  openModal({ title: `${r.rev} · ${r.date}`, body: `<p class="muted">${t('load.diff')}</p>` });
   const seq = modalSeq();
   const env = await callOp('history.diff', { path, rev: r.rev });
   if (seq !== modalSeq()) return;

@@ -95,3 +95,15 @@ def test_home_machine_step_is_red_only_on_failure(monkeypatch: pytest.MonkeyPatc
     got = ob._pulse_machine()
     assert got["ready"] is ready
     assert got["bad"] == ([] if ready else ["п1"])
+
+
+def test_home_machine_step_without_engines_is_not_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    """✅ «Машина читає рукопис» без рушіїв суперечило «Перевірці машини» поруч."""
+    import nyshporka.ops_builtin as ob
+    from nyshporka.setup import doctor
+
+    monkeypatch.setattr(doctor, "run", lambda: [
+        doctor.Check(name=doctor.ENGINES, level="warn", detail="немає інтерпретатора")])
+    monkeypatch.setitem(ob._MACHINE, "data", None)
+    got = ob._pulse_machine()
+    assert got["ready"] is False and got["bad"] == [doctor.ENGINES]

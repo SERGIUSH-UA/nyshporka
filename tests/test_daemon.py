@@ -1024,6 +1024,26 @@ def test_nothing_can_be_framed(client: TestClient, ws: Workspace) -> None:
     _no_framing(_lan(_lan_app(ws)).get("/"))
 
 
+def test_api_answers_are_never_cached_by_the_browser(client: TestClient) -> None:
+    """Відповідь `/api` залежить від проєкту в заголовку, а не лише від адреси.
+
+    «Назад» з Майстерні в рід брав `/api/projects` з кешу браузера — від
+    Майстерні, — і рід в адресі показувався з меню Майстерні (22.10.2026).
+    """
+    for url in ("/api/projects", "/api/sections", "/api/health"):
+        r = client.get(url)
+        assert r.headers.get("cache-control") == "no-store", (url, r.headers)
+        assert "X-Nysh-Project" in r.headers.get("vary", ""), url
+
+
+def test_page_of_an_unknown_project_falls_back_to_the_hub(client: TestClient) -> None:
+    """Закладка на видалений проєкт — Майстерня, а не сирий JSON з шляхом."""
+    r = client.get("/?p=nonexistent", follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"] == "/"
+    api = client.get("/api/projects", headers={"X-Nysh-Project": "nonexistent"})
+    assert api.status_code == 404 and api.json()["ok"] is False
+
+
 def test_bracketed_ipv6_loopback_is_our_own_name(client: TestClient) -> None:
     """`Host: [::1]` без порту розбирався в «:» і отримував хибний 403."""
     for own in ("[::1]", "[::1]:8788", "127.0.0.1", "localhost:8788"):

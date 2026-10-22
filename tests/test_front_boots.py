@@ -873,22 +873,27 @@ globalThis.__CASE_INFO = null;
   out.formsHiddenForOthers = shownForFamily && hint.hidden === true;
 }
 
-// ── хвиля 7а: етапи, головна дія етапу, вибір проєкту, вікна, «Що зробити?» ──
+// ── бічне меню, заголовок сторінки, вибір проєкту, вікна, «Що зробити?» ──
 {
   const nav = await import('./core/nav.js');
-  const stages = [
-    { id: 'overview', label: 'Огляд', screens: ['home', 'profile', 'site', 'jobs'] },
-    { id: 'material', label: 'Матеріал', screens: ['sources', 'library', 'cases'] },
+  const groups = [
+    { id: 'project', label: 'Рід', block: 'own', fold: false, screens: ['home', 'profile', 'site'] },
+    { id: 'hub', label: 'Майстерня', block: 'hub', fold: false, screens: ['home'] },
+    { id: 'material', label: 'Матеріали', block: 'shared', fold: true, screens: ['sources', 'library', 'cases'] },
+    { id: 'service', label: 'Сервіс', block: 'service', fold: false, screens: ['jobs'] },
   ];
-  nav.setSections({ stages, project_screens: ['profile', 'site'],
-    stage_action: { material: 'newcase', overview: 'newproject' }, hub_only: false });
+  nav.setSections({ nav: groups, blocks: ['own', 'hub', 'shared', 'service'],
+    layers: { library: 'mixed', profile: 'own', home: 'context', jobs: 'service' },
+    project_screens: ['profile', 'site'],
+    screen_action: { library: 'newcase', cases: 'newcase', home: 'newproject' }, hub_only: false });
   await nav.show('library');
-  out.stageTabs = document.getElementById('nav').innerHTML || '';
-  out.stageScreens = document.getElementById('subnav').innerHTML || '';
-  // Майстерня без проєкту: закладок роду немає, екран роду — вибір проєкту.
+  out.side = document.getElementById('side').innerHTML || '';
+  out.head = document.getElementById('phead').innerHTML || '';
+  // Майстерня без проєкту: блоку роду немає, екран роду — вибір проєкту.
   nav.setSections({ hub_only: true });
   await nav.show('home');
-  out.hubSubnav = document.getElementById('subnav').innerHTML || '';
+  out.hubSide = document.getElementById('side').innerHTML || '';
+  out.hubHead = document.getElementById('phead').innerHTML || '';
   await nav.show('profile');
   out.hubProfileView = document.getElementById('view').innerHTML || '';
   // Вікно: екран малює в тіло вікна, а екран під ним лишається.
@@ -1482,22 +1487,31 @@ def test_every_launch_goes_through_the_plan_and_says_what_it_reads(probe) -> Non
         assert probe.get(key) is True, key
 
 
-def test_top_tier_is_work_stages_with_the_stage_action(probe) -> None:
-    """🔴 Верхній ярус — етапи роботи, а не секції-сховища (макет хвилі 6).
+def test_side_menu_splits_by_whose_data_with_a_page_head(probe) -> None:
+    """🔴 Меню ділиться за тим, де живуть дані; заголовок каже «де я» словами.
 
-    «Завести справу» — головна дія етапу «Матеріал», праворуч у рядку його
-    екранів: у шапці вона виявилась зайвою, а кроком «Нових тек» її не знаходили.
+    Доти «Огляд», «Читання», «Пошук» були і етапом, і вкладкою, а екрани роду
+    стояли поруч зі спільними (оцінка консолі 22.10.2026).
     """
-    assert 'data-arg="material"' in probe["stageTabs"]
-    assert 'data-arg="overview"' in probe["stageTabs"]
-    assert 'class="stage-act"' in probe["stageScreens"]
-    assert 'data-arg="newcase"' in probe["stageScreens"]
+    side, head = probe["side"], probe["head"]
+    assert 'class="sb sb-own"' in side and 'class="sb sb-shared"' in side
+    assert 'class="sb sb-hub"' not in side, "у проєкті блоку Майстерні немає"
+    assert 'data-arg="library" class="on"' in side
+    assert "Спільне Майстерні" in side
+    # Заголовок: крихти з контекстом, одна назва, шар і дія сторінки.
+    assert 'class="crumbs"' in head and "Матеріали" in head
+    assert "<h1>Бібліотека справ</h1>" in head
+    assert 'class="tag layer-mixed"' in head and "зріз для" in head
+    assert 'data-arg="newcase"' in head, "«＋ Завести справу» — дія сторінки бібліотеки"
 
 
 def test_hub_without_project_offers_projects_instead_of_a_refusal(probe) -> None:
-    """У Майстерні без проєкту закладок роду немає, а екран роду — вибір проєкту."""
-    assert 'data-arg="profile"' not in probe["hubSubnav"]
-    assert 'data-arg="newproject"' in probe["hubSubnav"], "«＋ Новий проєкт» — дія Огляду Майстерні"
+    """У Майстерні без проєкту блоку роду немає, а екран роду — вибір проєкту."""
+    assert 'data-arg="profile"' not in probe["hubSide"]
+    assert 'class="sb sb-hub"' in probe["hubSide"]
+    assert 'class="sb sb-own"' not in probe["hubSide"], "блок роду в Майстерні без проєкту"
+    assert "<h1>Огляд Майстерні</h1>" in probe["hubHead"]
+    assert 'data-arg="newproject"' in probe["hubHead"], "«＋ Новий проєкт» — дія Огляду Майстерні"
     assert "Цей екран — про рід" in probe["hubProfileView"]
 
 

@@ -26,8 +26,8 @@ import { LANG, LANGS, ENABLED, setLang, t } from './core/strings.js';
 import { esc, el, setView, curGen, alive } from './core/view.js';
 import { ACTIONS, KEYS, SCREENS, PAGERS, screenOfOp } from './core/registry.js';
 import { ST } from './core/state.js';
-import { SECTIONS, loadSections, renderNav, groupScreens, show, goto,
-  refreshJobs, watchJobs, setGroup, currentScreen } from './core/nav.js';
+import { SECTIONS, loadSections, show, goto,
+  refreshJobs, watchJobs, foldGroup, currentScreen, sideBtnState } from './core/nav.js';
 
 // 🔴 Міст до файлової системи ставиться ДО екранів: він реєструє дію кнопки
 // вибору шляху, а екрани цю кнопку вже малюють. Порядок тут значення не має
@@ -101,13 +101,14 @@ Object.assign(ACTIONS, {
     return fn ? fn(Number(elm.dataset.arg)) : undefined;
   },
 
-  /** Клік по розділу веде на його перший екран, а не просто перемальовує
-      смугу: розділ без відкритого екрана виглядав би як кнопка, що нічого не
-      робить. */
-  group: (_ev, elm) => {
-    setGroup(elm.dataset.arg);
-    const first = groupScreens(elm.dataset.arg)[0];
-    return first ? show(first) : renderNav();
+  /** Група бічного меню: розкрити чи згорнути. Розкриті пам'ятаються. */
+  'side.fold': (_ev, elm) => foldGroup(elm.dataset.arg),
+
+  /** ☰ на телефоні: висунути меню чи сховати (тінь поруч теж ховає). */
+  'side.toggle': () => {
+    const cl = document.body.classList;
+    if (cl.contains('side-open')) cl.remove('side-open'); else cl.add('side-open');
+    sideBtnState();
   },
 
   /** Тема: авто → світла → темна → авто. Значок показує поточний режим. */
@@ -258,6 +259,11 @@ function routeHash() {
 async function boot() {
   document.querySelectorAll('[data-i18n]').forEach((n) => {
     n.textContent = t(n.dataset.i18n);
+  });
+  // Кнопки-значки (☰, ⚙): підказка й ім'я для читалки екрана — зі словника.
+  document.querySelectorAll('[data-i18n-title]').forEach((n) => {
+    n.title = t(n.dataset.i18nTitle);
+    n.setAttribute('aria-label', n.title);
   });
   // Тема — перед мережею: вона малює кнопку в шапці й вішає слухач системної
   // налаштованості, і затримка тут дала б видимий стрибок вигляду вже після

@@ -37,7 +37,7 @@ SCREENS.give = async () => {
       <td class="mono">${esc(r.shifra || r.case_key)}</td><td>${esc(r.title || '')}</td>
       <td class="num">${esc(r.pages || 0)} / ${esc(r.frames || '?')}</td>
       <td>${pill(READY.includes(r.status) ? 'ok' : 'neutral', stLabel(r.status))}</td></tr>`).join('');
-  setView(`<h2>${t('give.title')}</h2>
+  setView(`
     <p class="muted">${t('give.why')}</p>
     ${renderWarnings(env)}
     <div class="dash-box">${GIVE.length ? `<table class="tbl-wide"><thead><tr><th></th><th>${t('give.case')}</th>
@@ -63,7 +63,7 @@ function countPicked() {
 
 // ── Взяти ────────────────────────────────────────────────────────────────────
 SCREENS.pull = async () => {
-  setView(`<h2>${t('pull.title')}</h2>
+  setView(`
     <p class="muted">${t('pull.why')}</p>
     <form class="row" data-act="pull.find">
       ${fld(t('pull.q'), `<input name="query" placeholder="${esc(t('pull.q.ph'))}" required autofocus>`)}
@@ -99,7 +99,7 @@ SCREENS.cards = async () => {
           ${esc(String(r.at || '').slice(0, 10))}${r.pages ? ` · ${esc(t('pull.pages').replace('{n}', r.pages))}` : ''}</small></div>
       ${r.case_key || r.shifra ? `<button data-act="cards.open" data-arg="${esc(r.case_key || r.shifra)}">${t('cards.card')}</button>` : ''}
     </div>`).join('');
-  setView(`<h2>${t('cards.title')}</h2>
+  setView(`
     <p class="muted">${t('cards.why')}</p>
     <div class="dash-box">${rows || `<p class="muted">${t('cards.none')}</p>`}</div>`);
 };

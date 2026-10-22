@@ -189,7 +189,8 @@ def test_screen_glyphs_cover_the_screens() -> None:
     """
     from nyshporka.core import sections as S
 
-    screens = set(S.SCREENS)
+    # Налаштування — у бічному меню, тож знак потрібен і їм, хоч секції немає.
+    screens = set(S.SCREENS) | S.UNGATED_SCREENS
     glyphs = set(B.active().screen_glyphs)
     assert screens == glyphs, (
         f"екрани без знака: {sorted(screens - glyphs)}; "

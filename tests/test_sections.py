@@ -70,24 +70,43 @@ def test_every_screen_belongs_to_a_declared_section() -> None:
     assert set(S.SCREENS.values()) <= S.ids()
 
 
-def test_every_tab_screen_belongs_to_one_work_stage() -> None:
-    """🔴 Верхній ярус консолі — етапи роботи (`STAGES`), секції лишились вимикачами.
+def test_every_tab_screen_has_one_place_in_the_side_menu() -> None:
+    """🔴 Бічне меню ділиться за тим, де живуть дані (`NAV_GROUPS`).
 
-    Екран поза етапом не має вкладки взагалі: він є у файлі й зникає з
-    консолі — тиша, яка читається як «функцію прибрали». Кроки-вікна
-    (`newcase`, `newproject`) і налаштування вкладок не мають за задумом.
+    Екран поза меню не має пункту взагалі: він є у файлі й зникає з консолі —
+    тиша, яка читається як «функцію прибрали». Кроки-вікна (`newcase`,
+    `newproject`, `sprofile`) пунктів не мають за задумом. Огляд — єдиний у
+    двох блоках: Огляд роду в проєкті й Огляд Майстерні без проєкту.
     """
     from nyshporka.core import sections as S
 
-    staged = [scr for st in S.STAGES for scr in st.screens]
-    assert len(staged) == len(set(staged)), "екран стоїть у двох етапах"
+    placed = [scr for g in S.NAV_GROUPS for scr in g.screens]
+    twice = {x for x in placed if placed.count(x) > 1}
+    assert twice == {"home"}, f"екран у двох групах: {sorted(twice)}"
     no_tab = {"newcase", "newproject", "sprofile"}
-    assert set(staged) == set(S.SCREENS) - no_tab, (
-        f"поза етапами: {sorted(set(S.SCREENS) - no_tab - set(staged))}; "
-        f"невідомі: {sorted(set(staged) - set(S.SCREENS))}")
-    assert set(staged) >= S.PROJECT_SCREENS
-    assert set(S.STAGE_ACTION.values()) <= set(S.SCREENS)
-    assert S.stage_of("newcase") == "material" and S.stage_of("search") == "search"
+    assert set(placed) == (set(S.SCREENS) | S.UNGATED_SCREENS) - no_tab, (
+        f"поза меню: {sorted(set(S.SCREENS) - no_tab - set(placed))}; "
+        f"невідомі: {sorted(set(placed) - set(S.SCREENS) - S.UNGATED_SCREENS)}")
+    assert {g.block for g in S.NAV_GROUPS} <= set(S.BLOCKS)
+    own = {x for g in S.NAV_GROUPS if g.block == "own" for x in g.screens}
+    assert own - {"home"} == S.PROJECT_SCREENS, "блок проєкту — це рівно екрани проєкту"
+    assert set(S.SCREEN_ACTION.values()) <= set(S.SCREENS)
+    assert S.group_of("newcase") == "material" and S.group_of("search") == "search"
+
+
+def test_every_screen_says_whose_data_it_shows() -> None:
+    """Заголовок сторінки називає шар: належить роду, спільне чи сервіс.
+
+    Без шару людина не відрізняє спільну бібліотеку від висновків роду — саме
+    це була перша вада консолі в оцінці 22.10.2026.
+    """
+    from nyshporka.core import sections as S
+
+    every = set(S.SCREENS) | S.UNGATED_SCREENS
+    assert set(S.LAYERS) == every, (
+        f"без шару: {sorted(every - set(S.LAYERS))}; зайві: {sorted(set(S.LAYERS) - every)}")
+    assert set(S.LAYERS.values()) <= {"own", "shared", "mixed", "service", "context"}
+    assert {k for k, v in S.LAYERS.items() if v == "own"} == S.PROJECT_SCREENS
 
 
 def test_every_op_declares_a_known_section() -> None:
@@ -266,8 +285,10 @@ def test_http_hides_disabled_ops_and_lists_sections(space: Path) -> None:
     # що вона при цьому НЕ активна в профілі «core+material», — окреме поле.
     assert by_id["lab"]["visible"] and not by_id["lab"]["active"]
     # Етапи консолі й стан «Майстерня без проєкту» — у тій самій довідці.
-    assert [st["id"] for st in data["stages"]][:2] == ["overview", "material"]
-    assert data["stage_action"]["material"] == "newcase"
+    assert [g["id"] for g in data["nav"]][:3] == ["project", "hub", "material"]
+    assert data["blocks"] == ["own", "hub", "shared", "service"]
+    assert data["layers"]["library"] == "mixed" and data["layers"]["canon"] == "own"
+    assert data["screen_action"]["library"] == "newcase"
     assert data["hub_only"] is False
     # «Що зробити?» — те саме, що `nysh ops find`, плюс екран дії.
     hits = client.get("/api/ops/find", params={"q": "завести справу шифра"}).json()["hits"]

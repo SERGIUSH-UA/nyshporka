@@ -34,7 +34,6 @@ SCREENS.sources = async () => {
   if (!env.ok) return failure(env);
   const d = env.data;
   setView(`
-    <h2>${t('nav.sources')}</h2>
     <p class="muted">${t('sources.why')}</p>
     <form class="row" data-act="sources.find">
       <input name="q" placeholder="${t('sources.q')}" value="${esc(seed.q || '')}" autofocus>

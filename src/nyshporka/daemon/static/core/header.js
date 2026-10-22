@@ -68,8 +68,12 @@ async function fillProject() {
   const kind = el('proj-k');
   const name = el('proj-v');
   if (kind) kind.textContent = mine ? t(`np.kind.${mine.kind === 'order' ? 'order' : 'family'}`) : t('project.hub.kind');
-  if (name) name.textContent = mine ? `${mine.glyph ? `${mine.glyph} ` : ''}${mine.name || mine.id}` : t('project.hub.none');
+  if (name) name.textContent = mine ? (mine.name || mine.id) : t('project.hub.none');
   box.classList.toggle('in-hub', !mine);
+  // Кружок зі знаком роду — поруч із назвою, а не замість неї: колір лише
+  // підтримує напис (правила інтерфейсу, 22.10.2026).
+  const bdg = el('proj-badge');
+  if (bdg) bdg.innerHTML = mine ? projectBadge(mine) : '<span class="pj-badge pj-hub">⌂</span>';
   // Колір проєкту — на крапці перемикача й смузі шапки: у чужому роді людина
   // має це бачити ще до першого кліку.
   const color = mine ? projectColor(mine) : '';
@@ -268,7 +272,10 @@ Object.assign(ACTIONS, {
     if (was) return;
     const m = el(id);
     if (!m) return;
-    m.innerHTML = id === 'proj-menu' ? projectMenu() : id === 'jobs-menu' ? jobsMenu() : meMenu();
+    // Меню ⚙ стоїть у розмітці (мова, тема): його вміст не перебудовується.
+    if (id !== 'set-menu') {
+      m.innerHTML = id === 'proj-menu' ? projectMenu() : id === 'jobs-menu' ? jobsMenu() : meMenu();
+    }
     m.hidden = false;
     fitMenu(m);
     elm.setAttribute('aria-expanded', 'true');
@@ -289,7 +296,10 @@ function wire() {
     if (!OPEN_MENU) return;
     const inside = ev.target.closest && ev.target.closest('.hmenu');
     if (!inside) closeMenus();
-    else if (ev.target.closest('.hmenu-pop [data-act]')) closeMenus();
+    // Перелік мов — теж `data-act`, але клік лише розкриває його: закрити меню
+    // тут означало б забрати перелік з-під пальця.
+    // Тема теж лишає меню відкритим: її перемикають кілька разів поспіль.
+    else if (ev.target.closest('.hmenu-pop [data-act]:not(select):not(#theme-btn)')) closeMenus();
   });
   document.addEventListener('keydown', (ev) => {
     if (ev.key === 'Escape') closeMenus();

@@ -84,7 +84,6 @@ SCREENS.search = async () => {
   const fromJob = (ST.search || {}).job || '';
   ST.search = null;
   setView(`
-    <h2>${t('nav.search')}</h2>
     <p class="muted">${t('search.why')}</p>
     <form data-act="search.run" id="search-form">
       <div class="row">
@@ -178,7 +177,7 @@ async function fillScopes(q) {
   if (!box) return;
   // Перший виклик на холодній консолі чекає, поки `search.state` обійде стор, —
   // без цього рядка панель стояла б порожня, ніби обирати нема з чого.
-  if (!box.innerHTML) box.innerHTML = `<p class="muted">${t('common.loading')}</p>`;
+  if (!box.innerHTML) box.innerHTML = `<p class="muted">${t('load.search')}</p>`;
   const env = await callOp('search.scopes', { q, limit: 200 });
   if (!env.ok) { box.innerHTML = `<div class="warn err">${esc(env.error)}</div>`; return; }
   const items = (env.data || {}).items || [];

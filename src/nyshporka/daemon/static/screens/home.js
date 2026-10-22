@@ -24,6 +24,7 @@ import { SCREENS, ACTIONS, screenOfOp } from '../core/registry.js';
 import { SECTIONS, NAV_LABEL, show, renderNav, screenOn,
   refreshJobs } from '../core/nav.js';
 import { ST } from '../core/state.js';
+import { openModal } from '../core/modal.js';
 import { ic, eng } from '/ui/icons.js';
 import { swapHtml, skelRows, skelCards } from '/ui/dom.js';
 import { attachCombobox } from '/ui/combobox.js';
@@ -111,20 +112,51 @@ function doors() {
 
 SCREENS.home = async () => {
   const gen = curGen();
-  // Проєкт, відкритий перемикачем (`?p=`), — каркас роду одразу, ще до зрізу.
-  if (PROJECT) projectFrame(gen);
-  else busy(6);
+  // Огляд роду — лише рід: показники, «що вирішити», що нового. Стан
+  // Майстерні (реєстр, читання, диск) — окремим екраном «Стан Майстерні»:
+  // згорнутим під родом він конкурував із ним (оцінка консолі 22.10.2026).
+  if (PROJECT) { projectFrame(gen); return; }
+  busy(6);
   const env = await callOp('home.pulse', {});
   if (!alive(gen)) return;
-  if (!env.ok) {
-    if (el('ov-ws-body')) { boxError('ov-ws-body', env); return; }
-    return failure(env);
-  }
+  if (!env.ok) return failure(env);
+  PULSE = env.data;
+  // Простір, відкритий просто в теці проєкту (без `?p=`), — теж рід.
+  if (PULSE && PULSE.project) { projectFrame(gen); return; }
   paintHome(env, gen);
   hubCards(gen);
   // Без `await`: екран уже намальовано, і чекати на цей рядок нема чого.
   machineLater(gen);
-  if (env.data && env.data.refreshing) freshLater(gen);
+  if (env.data && env.data.refreshing) freshLater(gen, () => { paintHome(PULSE_ENV, gen); hubCards(gen); });
+};
+
+/**
+ * 🩺 Стан Майстерні: реєстр, читання, матеріал, пошук, час, частини застосунку.
+ *
+ * Діагностика, що стояла на Огляді Майстерні під картками проєктів і на Огляді
+ * роду згорнутою. Спільна для всієї Майстерні, тож однакова з будь-якого роду.
+ */
+SCREENS.status = async () => {
+  const gen = curGen();
+  busy(6);
+  const env = await callOp('home.pulse', {});
+  if (!alive(gen)) return;
+  if (!env.ok) return failure(env);
+  PULSE = env.data;
+  setView(dashboard(env, PULSE));
+  machineLater(gen);
+  if (env.data && env.data.refreshing) {
+    freshLater(gen, () => setView(dashboard(PULSE_ENV, PULSE)));
+  }
+};
+
+/** Проєкти Майстерні: картки всіх, архівні — окремо. */
+SCREENS.projects = async () => {
+  const gen = curGen();
+  busy(3);
+  const html = await projectCards({ all: true });
+  if (!alive(gen)) return;
+  setView(html || `<p class="muted">${t('project.none')}</p>`);
 };
 
 /**
@@ -133,7 +165,7 @@ SCREENS.home = async () => {
  * холодний зріз — 10 с. Перепитуємо, доки не прийде свіжий, і перемальовуємо
  * на місці, без сірих смуг.
  */
-async function freshLater(gen) {
+async function freshLater(gen, paint) {
   for (let i = 0; i < 40; i += 1) {
     await new Promise((r) => setTimeout(r, 1500));
     if (!alive(gen)) return;
@@ -141,8 +173,9 @@ async function freshLater(gen) {
     if (!alive(gen) || !env.ok) return;
     if (!(env.data && env.data.refreshing)) {
       const machine = PULSE && PULSE.machine;
-      paintHome(env, gen);
-      hubCards(gen);
+      PULSE = env.data;
+      PULSE_ENV = env;
+      paint();
       if (machine && !machine.pending) {
         PULSE.machine = machine;
         const box = el('dash-steps');
@@ -156,18 +189,12 @@ async function freshLater(gen) {
 /** Чи цей Огляд — про проєкт: відкритий перемикачем або простір у теці проєкту. */
 const inProject = () => !!PROJECT || !!(PULSE && PULSE.project);
 
-/**
- * Огляд проєкту: зверху рід (показники, «що вирішити», що нового), під ним
- * згорнутий «Стан Майстерні» — той самий дашборд, що й без проєкту.
- *
- * 🔴 Дашборд Майстерні тут другорядний: людина відкрила рід, а реєстр, читання
- * й диск — спільне для всіх проєктів. Розгорнутим він топив верх роду в
- * десятку однакових коробок (дослідник, 22.10.2026: «усе зливається»).
- */
+/** Остання відповідь зрізу — для перемальовки, коли доїде свіжий. */
+let PULSE_ENV = null;
+
+/** Огляд роду: показники, «що вирішити», що нового — і більше нічого. */
 function projectFrame(gen) {
-  setView(`${projectShell()}
-    <details class="ov-ws" id="ov-ws"><summary>${t('ov.ws')}</summary>
-      <div id="ov-ws-body"><span class="skel-cell"></span></div></details>`);
+  setView(projectShell());
   fillProject(() => alive(gen));
 }
 
@@ -179,20 +206,17 @@ function projectFrame(gen) {
  */
 async function hubCards(gen) {
   if (!SECTIONS.hub_only) return;
-  const html = await projectCards();
-  const view = el('view');
-  if (!alive(gen) || !html || !view || el('hub-cards')) return;
-  view.insertAdjacentHTML('afterbegin', `<div id="hub-cards">${html}</div>`);
+  const html = await projectCards({ limit: 4 });
+  // Місце для карток стоїть у розмітці Огляду: перша секція — продовжити роботу.
+  const box = el('hub-cards');
+  if (!alive(gen) || !html || !box) return;
+  box.innerHTML = html;
 }
 
 function paintHome(env, gen = curGen()) {
   PULSE = env.data;
-  if (inProject() && !el('ov-head')) projectFrame(gen);
-  const put = (html) => {
-    const body = inProject() ? el('ov-ws-body') : null;
-    if (body) swapHtml(body, html);
-    else setView(html);
-  };
+  PULSE_ENV = env;
+  const put = (html) => setView(html);
   const ws = PULSE.workspace || {};
   const reg = PULSE.registry || {};
 
@@ -202,7 +226,7 @@ function paintHome(env, gen = curGen()) {
   if (empty) {
     // Порожній простір — перша зустріч, тож маскот вітає. Це стан ПРОЦЕСУ
     // («ще нічого не поклали»), а не висновок про архів.
-    put(`<div class="vitannia">${maskot('vitaie', 140)}
+    put(`${SECTIONS.hub_only ? '<div id="hub-cards"></div>' : ''}<div class="vitannia">${maskot('vitaie', 140)}
         <div><h2>${t('home.title')}</h2><p>${t('home.hello')}</p></div></div>
       ${agentCard(PULSE)}
       ${renderWarnings(env)}
@@ -210,8 +234,51 @@ function paintHome(env, gen = curGen()) {
       ${stepsBox(PULSE)}
       <p class="muted mono">${esc(ws.root || '')}</p>`);
   } else {
-    put(dashboard(env, PULSE));
+    // Майстерня з проєктами — продовження роботи; простір старого типу (один,
+    // без Майстерні) лишається з повним дашбордом.
+    put(SECTIONS.hub_only ? hubOverview(env, PULSE) : dashboard(env, PULSE));
   }
+}
+
+/**
+ * Огляд Майстерні: проєкти (продовжити) → інструменти → чотири числа →
+ * останні прогони. Діагностика — на «Стані Майстерні».
+ *
+ * 🔴 Доти Огляд був водночас переліком проєктів, моніторингом і технічною
+ * статистикою — тринадцять блоків підряд (оцінка консолі 22.10.2026).
+ */
+function hubOverview(env, d) {
+  const tools = [
+    ['read', 'quill', 'nav.read', 'tool.read.hint'],
+    ['library', 'books', 'nav.library', 'tool.library.hint'],
+    ['newcase', 'plus', 'stage.act.newcase', 'tool.newcase.hint'],
+    ['newproject', 'plus', 'stage.act.newproject', 'tool.newproject.hint'],
+  ].filter(([scr]) => screenOn(scr)).map(([scr, icon, label, hint]) =>
+    `<button class="tool" data-act="nav" data-arg="${scr}">${ic(icon, 'ic-o')}<span><b>${
+      esc(t(label).replace(/^＋\s*/, ''))}</b><small>${esc(t(hint))}</small></span></button>`).join('');
+  const recent = lastRuns(d.reading, 5);
+  return `<div id="hub-cards"></div>
+    ${renderWarnings(env)}
+    ${stepsBox(d)}
+    <div class="dash-sec"><h3>${t('home.tools')}</h3><div class="tools">${tools}</div></div>
+    ${tiles(d)}
+    ${recent ? `<div class="dash-sec"><h3>${t('dash.reading.last')}
+      <button class="ctl-sm aside" data-act="nav" data-arg="runs">${t('home.allruns')} →</button></h3>
+      <div class="dash-box">${recent}</div></div>` : ''}
+    <p><button class="ghost" data-act="nav" data-arg="status">${t('home.status.link')} →</button></p>`;
+}
+
+/** Останні прогони таблицею — на Огляді Майстерні й у «Стані Майстерні». */
+function lastRuns(r, limit = 0) {
+  const rows = (r && r.ok && r.last) || [];
+  if (!rows.length) return '';
+  return `<table><tbody>${(limit ? rows.slice(0, limit) : rows).map((x) => `<tr>
+        <td class="mono">${esc(x.shifra || x.name || '')}</td>
+        <td>${num(x.pages)}${x.frames ? ` <span class="muted">${t('dash.reading.of')} ${num(x.frames)}</span>` : ''}</td>
+        <td>${runState({ ...x, pages_done: x.pages })}${x.state === 'stopped' && x.case_dir
+    ? ` <button class="ctl-sm" data-act="runs.resume" data-arg="${esc(x.case_dir)}">${t('runs.resume')}</button>` : ''}</td>
+        <td class="mono muted">${esc(x.model || '')}</td>
+        <td class="muted">${esc(when(x.updated))}</td></tr>`).join('')}</tbody></table>`;
 }
 
 
@@ -300,7 +367,7 @@ function dashboard(env, d) {
   // У проєкті канон — уже вгорі (показники роду), а двері першого запуску в
   // наповненій Майстерні з проєктами лише подовжують сторінку.
   const proj = inProject();
-  return `<div class="dash-top"><div>${proj ? '' : `<h2>${t('dash.title')}</h2>`}
+  return `<div class="dash-top"><div>
     ${headline(d, ws)}</div>${proj ? '' : maskot('lupa', 92)}</div>
     ${renderWarnings(env)}
     ${stepsBox(d)}
@@ -360,7 +427,7 @@ function tiles(d) {
   const out = [];
 
   out.push(tile('cases', 'drawers', t('dash.tile.cases'), reg.cases,
-    'cases', { hist: 'cases' }));
+    'library', { hist: 'cases' }));
   out.push(tile('frames', 'image', t('dash.tile.frames'), reg.frames,
     'library', { hist: 'frames' }));
   if (screenOn('runs') && rd.ok) {
@@ -545,17 +612,8 @@ function readingSection(d) {
   if ((r.by_model || []).length) {
     two.push(`<div><h4>${t('dash.reading.models')}</h4>${bars(r.by_model)}</div>`);
   }
-  const last = (r.last || []).length
-    ? `<div><h4>${t('dash.reading.last')}</h4><table><tbody>${
-      r.last.map((x) => `<tr>
-        <td class="mono">${esc(x.shifra || x.name || '')}</td>
-        <td>${num(x.pages)}${x.frames ? ` <span class="muted">${t('dash.reading.of')} ${num(x.frames)}</span>` : ''}</td>
-        <td>${runState({ ...x, pages_done: x.pages })}${x.state === 'stopped' && x.case_dir
-    ? ` <button class="ctl-sm" data-act="runs.resume" data-arg="${esc(x.case_dir)}">${t('runs.resume')}</button>` : ''}</td>
-        <td class="mono muted">${esc(x.model || '')}</td>
-        <td class="muted">${esc(when(x.updated))}</td></tr>`).join('')
-    }</tbody></table></div>`
-    : '';
+  const lastRows = lastRuns(r);
+  const last = lastRows ? `<div><h4>${t('dash.reading.last')}</h4>${lastRows}</div>` : '';
   return sec('quill', t('dash.reading'),
     `<div class="dash-nums">${nums}</div>
      ${two.length ? `<div class="dash-two">${two.join('')}</div>` : ''}
@@ -671,7 +729,8 @@ function spaceSection(d) {
   if (jobs.queue && jobs.running) {
     bits.push(`<span class="flag">${t('dash.jobs.running')}: <b>${num(jobs.running)}</b></span>`);
   }
-  const prof = p.present
+  // Рід — питання проєкту: у самій Майстерні «рід ще не названо» вводило б в оману.
+  const prof = SECTIONS.hub_only ? '' : p.present
     ? `<div class="dash-nums">
         <span><b>${esc(p.display || p.name || '')}</b></span>
         ${n(t('dash.profile.roots'), (p.roots || []).length)}
@@ -770,9 +829,9 @@ Object.assign(ACTIONS, {
     // «перевірити, що читання працює на цій машині». Питання правильне, а
     // відповідь була не тими словами й не про те: людина, яка щойно поставила
     // застосунок, мусить прочитати, чого бракує і чим це ставиться.
-    busy();
+    const box = openModal({ title: t('check.title'), body: `<p class="muted">${t('load.check')}</p>` });
     const env = await callOp('setup.check', {});
-    if (!env.ok) return failure(env);
+    if (!env.ok) { if (box) box.innerHTML = `<div class="warn err">${esc(env.error || '')}</div>`; return; }
     const rows = (env.data.checks || []).map((c) => {
       const mark = { ok: '✅', warn: '⚠', fail: '🔴' }[c.level] || '•';
       // 🔴 Колонка «чим це ставиться» була суцільним терміналом: дев'ять
@@ -789,13 +848,16 @@ Object.assign(ACTIONS, {
         <span class="muted">${esc(c.detail)}</span></td>
         <td>${act}</td></tr>`;
     }).join('');
-    setView(`<h2>▶ ${t('check.title')}</h2>
+    // Вікно, а не сторінка: «Стан Майстерні» під ним лишається, і повертатись
+    // нема звідки (прохід консолі 22.10.2026).
+    const html = `
       <p class="muted">${t('check.why')}</p>
       ${env.data.ready ? `<div class="warn">✅ ${t('check.ready')}</div>`
         : `<div class="warn">${t('check.notready')}</div>`}
-      ${renderWarnings(env)}
+      ${renderWarnings({ ...env, warnings: (env.warnings || []).filter((w) => w.code !== 'not_ready') })}
       <table><tbody>${rows}</tbody></table>
-      ${sampleBlock(env.data)}`);
+      ${sampleBlock(env.data)}`;
+    if (box) box.innerHTML = html;
   },
 
   /**

@@ -148,9 +148,13 @@ SCREENS: dict[str, str] = {
     "home": "core",
     "cases": "core",
     "newcase": "core",
-    # Новий проєкт — вікно з Огляду Майстерні (`STAGE_ACTION`), не вкладка.
+    # Новий проєкт — вікно з Огляду Майстерні (`SCREEN_ACTION`), не вкладка.
     "newproject": "core",
     "jobs": "core",
+    # Перелік проєктів Майстерні й діагностика (реєстр, читання, диск), що
+    # переїхала з Огляду: Огляд — про продовження роботи, а не про цифри.
+    "projects": "core",
+    "status": "core",
     # 🔴 «Рід» у `core`, а не в «Дослідженні»: він вирішує, як працює пошук,
     # і замкнути його всередині секції, яку вимикають, означало б «увімкни
     # частину застосунку, щоб налаштувати те, від чого вона залежить».
@@ -209,58 +213,92 @@ UNGATED_SCREENS: frozenset[str] = frozenset({"settings"})
 
 
 @dataclass(frozen=True)
-class Stage:
-    """Етап роботи — верхній ярус навігації консолі.
+class NavGroup:
+    """Група бічного меню консолі.
 
-    🔴 Ярус іде за роботою (знайти → прочитати → шукати → поділитися), а не за
-    секціями-сховищами. Секції лишаються тим, чим були: вимикачами частин
-    застосунку. Екран вимкненої секції просто випадає з етапу, а етап без
-    жодного екрана не показується (макет хвилі 6, апрув дослідника 21.10.2026).
+    🔴 Меню ділиться за тим, ДЕ ЖИВУТЬ ДАНІ, а не за етапами роботи: людина
+    мусить бачити, що належить роду, а що спільне на всю Майстерню (правила
+    інтерфейсу, 22.10.2026; `docs/agents/screens.md`, «Три питання»). Блок —
+    рівень меню з підписом, група — розкривний пункт усередині блоку. Секції
+    лишаються тим, чим були: вимикачами частин застосунку. Екран вимкненої
+    секції випадає з групи, а група без жодного екрана не показується.
     """
 
     id: str
     label_uk: str
     label_en: str
     screens: tuple[str, ...]
+    #: блок меню: `own` — проєкт, `hub` — сама Майстерня, `shared`, `service`
+    block: str = "shared"
+    #: розкривна група з підписом; `False` — пункти стоять просто в блоці
+    fold: bool = True
 
     def label(self, lang: str = "uk") -> str:
         return self.label_en if lang == "en" else self.label_uk
 
 
-#: Етапи в порядку роботи; екрани всередині — у порядку вкладок.
-#: Огляд проєкту несе тематичні закладки роду (профіль, сайт); у Майстерні без
-#: проєкту вони випадають (`PROJECT_SCREENS`).
-STAGES: tuple[Stage, ...] = (
-    Stage("overview", "Огляд", "Overview",
-          ("home", "canon", "hyp", "research", "profile", "site", "history", "jobs")),
-    Stage("material", "Матеріал", "Material",
-          ("sources", "geog", "fonds", "library", "cases", "frames")),
-    Stage("reading", "Читання", "Reading", ("read", "queue", "runs", "cloud", "view", "export")),
-    Stage("search", "Пошук", "Search", ("search", "sift", "eye")),
-    Stage("share", "Супряга", "Commons", ("give", "pull", "cards")),
-    Stage("lab", "Лабораторія", "Lab", ("sets", "label")),
+#: Блоки меню в порядку показу. `own` є лише в проєкті, `hub` — лише в
+#: Майстерні без проєкту.
+BLOCKS: tuple[str, ...] = ("own", "hub", "shared", "service")
+
+#: Групи меню; екрани всередині — у порядку пунктів. Огляд стоїть у двох
+#: блоках: у проєкті це Огляд роду, у Майстерні — Огляд Майстерні.
+NAV_GROUPS: tuple[NavGroup, ...] = (
+    NavGroup("project", "Рід", "Family",
+             ("home", "canon", "hyp", "sift", "research", "history", "site", "profile"),
+             block="own", fold=False),
+    NavGroup("hub", "Майстерня", "Workshop", ("home", "projects"), block="hub", fold=False),
+    NavGroup("material", "Матеріали", "Materials",
+             ("library", "cases", "frames", "sources", "geog", "fonds")),
+    NavGroup("reading", "Читання", "Reading", ("read", "queue", "runs", "cloud", "view")),
+    NavGroup("search", "Пошук", "Search", ("search", "eye")),
+    NavGroup("share", "Супряга", "Commons", ("give", "pull", "cards")),
+    NavGroup("service", "Сервіс", "Service", ("jobs", "status", "export", "settings"),
+             block="service", fold=False),
+    NavGroup("lab", "Лабораторія", "Lab", ("sets", "label"), block="service"),
 )
 
-#: Екрани, що належать проєкту: у Майстерні без проєкту їх немає у вкладках, а
+#: Екрани, що належать проєкту: у Майстерні без проєкту їх немає в меню, а
 #: перехід на них показує вибір проєкту замість відмови операції.
 PROJECT_SCREENS: frozenset[str] = frozenset(
     {"profile", "site", "sift", "canon", "hyp", "research", "history"})
 
-#: Головна дія етапу — кнопкою праворуч у рядку його екранів.
+#: Шар даних екрана — мітка в заголовку сторінки («де я»).
+#:
+#: `own` — висновки проєкту; `shared` — спільне Майстерні; `mixed` — спільне
+#: з позначками для проєкту (бібліотека, пошук); `service` — робота машини;
+#: `context` — Огляд: у проєкті це огляд роду, у Майстерні — її власний.
+LAYERS: dict[str, str] = {
+    **dict.fromkeys(PROJECT_SCREENS, "own"),
+    "home": "context",
+    **dict.fromkeys(("library", "search", "eye"), "mixed"),
+    **dict.fromkeys(("projects", "status", "sources", "geog", "fonds", "cases", "newcase", "frames", "read",
+                     "queue", "runs", "cloud", "view", "export", "give", "pull", "cards",
+                     "sprofile"), "shared"),
+    **dict.fromkeys(("jobs", "sets", "label", "settings", "newproject"), "service"),
+}
+
+#: Дія сторінки — кнопкою в її заголовку.
 #: 🔴 «Завести справу» стояла кроком «Нових тек», і людина її не знаходила
 #: (чат Нишпорки, 19.10.2026); у шапці вона виявилась зайвою (дослідник,
-#: 21.10.2026). Місце — етап, де з'являється матеріал.
-STAGE_ACTION: dict[str, str] = {"material": "newcase", "overview": "newproject"}
+#: 21.10.2026). Місце — сторінки, де з'являється матеріал. «Новий проєкт» —
+#: лише в Майстерні без проєкту (вирішує консоль).
+SCREEN_ACTION: dict[str, str] = {"library": "newcase", "cases": "newcase",
+                                 "home": "newproject", "projects": "newproject"}
 
 
-def stage_of(screen: str) -> str | None:
-    """Етап екрана; екран-крок (`newcase`) — етап того, хто його відкриває."""
-    for st in STAGES:
-        if screen in st.screens:
-            return st.id
-    for sid, scr in STAGE_ACTION.items():
-        if scr == screen:
-            return sid
+def group_of(screen: str) -> str | None:
+    """Група екрана; екран-крок (`newcase`) — група сторінки, що його відкриває.
+
+    Огляд стоїть у двох блоках; тут — перший (проєктний), бо питання «до чого
+    належить екран» для Майстерні й проєкту відповідає консоль.
+    """
+    for g in NAV_GROUPS:
+        if screen in g.screens:
+            return g.id
+    for scr, act in SCREEN_ACTION.items():
+        if act == screen:
+            return group_of(scr)
     return None
 
 #: Операція → екран, на якому людина її бачить.
@@ -280,7 +318,7 @@ OP_SCREEN: dict[str, str] = {
     "workspace.info": "home",
     # Проєкти Майстерні: новий — вікном, перелік — картками на Огляді.
     "project.new": "newproject",
-    "project.list": "home",
+    "project.list": "projects",
     "project.style": "home",
     # Огляд проєкту стоїть на «що вирішити».
     "canon.next": "home",

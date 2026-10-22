@@ -6,7 +6,7 @@ import { esc, el, setView, setViewTarget, curGen, bumpGen, alive, maskot,
 import { openModal, closeModal, modalOpen, modalTitle } from './modal.js';
 import { SCREENS, OP_SCREEN } from './registry.js';
 import { ST } from './state.js';
-import { projectChip } from './projects.js';
+import { projectChip, loadProjects, projectsNow, projectInfo, currentPid } from './projects.js';
 import { ic } from '/ui/icons.js';
 
 /** Скільки робіт зараз іде — щоб значок у шапці не залежав від розділу. */
@@ -22,8 +22,8 @@ let RUNNING_JOBS = 0;
  * тихо, і виглядало б це як кнопка, що веде в порожнечу.
  */
 let SECTIONS = { sections: [], screens: {}, op_screen: {}, presets: {},
-  preset: null, glyphs: {}, stages: [], project_screens: [], stage_action: {},
-  hub_only: false };
+  preset: null, glyphs: {}, nav: [], blocks: [], layers: {}, project_screens: [],
+  screen_action: {}, hub_only: false };
 
 /** Порядок кнопок у шапці. Екрани, яких тут немає, кнопки не отримують. */
 // 🔴 «Пошук» — одразу після «Огляду»: заради нього застосунок і ставлять. І
@@ -31,7 +31,7 @@ let SECTIONS = { sections: [], screens: {}, op_screen: {}, presets: {},
 // переглянутого, а не на роботі з кандидатами (холодний прохід 07.10.2026).
 const NAV_ORDER = ['home', 'search', 'canon', 'hyp', 'research', 'profile', 'sources', 'geog', 'fonds',
   'library', 'frames', 'cases', 'read', 'queue', 'runs', 'cloud', 'view', 'sift', 'eye', 'export', 'site',
-  'history', 'give', 'pull', 'cards', 'sets', 'label', 'jobs'];
+  'history', 'give', 'pull', 'cards', 'sets', 'label', 'jobs', 'projects', 'status', 'settings'];
 
 /**
  * Екрани-кроки без власної вкладки → вкладка, яку підсвічувати.
@@ -60,7 +60,7 @@ const NAV_LABEL = {
   sets: 'nav.sets', label: 'nav.label', jobs: 'nav.jobs', queue: 'nav.queue', site: 'nav.site',
   newproject: 'nav.newproject', canon: 'nav.canon', hyp: 'nav.hyp', research: 'nav.research',
   history: 'nav.history', cloud: 'nav.cloud', give: 'nav.give', pull: 'nav.pull', cards: 'nav.cards',
-  sprofile: 'nav.sprofile', settings: 'nav.settings',
+  sprofile: 'nav.sprofile', settings: 'nav.settings', projects: 'nav.projects', status: 'nav.status',
 };
 
 /** Чи ввімкнена секція цього екрана. Невідомий екран не блокуємо. */
@@ -94,7 +94,7 @@ async function loadSections() {
 }
 
 /**
- * Розділ, чиї екрани показані нижнім ярусом.
+ * Група меню, у якій відкритий екран (вона розкрита).
  *
  * Виводиться з поточного екрана, а не зберігається окремим станом: два джерела
  * правди про «де я» розходяться при першому ж переході за посиланням, і
@@ -112,89 +112,183 @@ function tabOn(screen) {
   return NAV_ORDER.includes(screen) && screenOn(screen) && !needsProject(screen);
 }
 
-/**
- * Етапи роботи з хоч одним доступним екраном, у порядку сервера.
- *
- * Етапи приходять з `core.sections.STAGES`. Без них (довідка не прийшла)
- * ярусом лишаються секції, як було до хвилі 7: краще стара шапка, ніж порожня.
- */
-function navGroups() {
-  const stages = SECTIONS.stages && SECTIONS.stages.length ? SECTIONS.stages
-    : (SECTIONS.sections || []).filter((s) => s.visible && s.active).map((s) => ({
-      id: s.id, label: s.label, screens: NAV_ORDER.filter((x) => SECTIONS.screens[x] === s.id) }));
-  return stages.filter((g) => (g.screens || []).some(tabOn));
+/** Чи показувати блок меню тут: блок роду — у проєкті, блок Майстерні — без нього. */
+function blockOn(block) {
+  if (block === 'own') return !SECTIONS.hub_only;
+  if (block === 'hub') return !!SECTIONS.hub_only;
+  return true;
 }
 
-/** Екрани етапу — у порядку етапу. */
+/**
+ * Групи бічного меню з хоч одним доступним екраном, у порядку сервера.
+ *
+ * Групи приходять з `core.sections.NAV_GROUPS`. Без них (довідка не прийшла)
+ * меню складається із секцій, як до хвилі 7: краще старе меню, ніж порожнє.
+ */
+function navGroups() {
+  const nav = SECTIONS.nav && SECTIONS.nav.length ? SECTIONS.nav
+    : (SECTIONS.sections || []).filter((s) => s.visible && s.active).map((s) => ({
+      id: s.id, label: s.label, block: 'shared', fold: true,
+      screens: NAV_ORDER.filter((x) => SECTIONS.screens[x] === s.id) }));
+  return nav.filter((g) => blockOn(g.block || 'shared') && (g.screens || []).some(tabOn));
+}
+
+/** Екрани групи — у порядку групи. */
 function groupScreens(gid) {
   const g = navGroups().find((x) => x.id === gid);
   return g ? g.screens.filter(tabOn) : [];
 }
 
-/** Етап екрана: вкладка, крок (`STEP_OF`) чи головна дія етапу. */
+/** Група екрана: пункт меню, крок (`STEP_OF`) чи дія сторінки (`screen_action`). */
 function groupOf(screen) {
   const tab = STEP_OF[screen] || screen;
   const g = navGroups().find((x) => (x.screens || []).includes(tab));
   if (g) return g.id;
-  const act = Object.entries(SECTIONS.stage_action || {}).find(([, scr]) => scr === screen);
-  return act ? act[0] : null;
+  const act = Object.entries(SECTIONS.screen_action || {}).find(([, scr]) => scr === screen);
+  return act ? groupOf(act[0]) : null;
+}
+
+/** Назва проєкту вкладки; `''` — Майстерня або перелік ще не прийшов. */
+function projectName() {
+  const p = projectInfo(currentPid());
+  return p ? (p.name || p.id) : '';
+}
+
+/** Розкриті групи меню — пам'ять вкладки; без сховища розкрита лише активна. */
+const OPEN_KEY = 'nysh.side.open';
+function openGroups() {
+  try { return new Set(JSON.parse(localStorage.getItem(OPEN_KEY) || '[]')); } catch { return new Set(); }
+}
+function toggleGroup(gid) {
+  const set = openGroups();
+  if (set.has(gid)) set.delete(gid); else set.add(gid);
+  try { localStorage.setItem(OPEN_KEY, JSON.stringify([...set])); } catch { /* приватний режим */ }
+  renderNav();
+}
+
+/** Підпис блоку меню: назва роду, «Майстерня», «Спільне Майстерні», «Сервіс». */
+function blockLabel(block) {
+  if (block === 'own') return projectName() || t('stage.project.label');
+  if (block === 'hub') return t('stage.hub.label');
+  if (block === 'shared') return t('side.shared');
+  return t('stage.service.label');
 }
 
 /**
- * Дві смуги: розділи зверху, екрани активного розділу під ними.
+ * Бічне меню: блоки за тим, де живуть дані, у блоках — групи й пункти.
  *
- * 🔴 Одним рядом кнопок було дванадцять, і на вузькому екрані ряд ставав стіною
- * без ієрархії. Групування береться з секцій — тих самих, якими вмикають
- * частини застосунку, — а не з окремого переліку: другий список розходився б
- * із дозволеним тихо.
+ * 🔴 Один рівень навігації замість двох горизонтальних ярусів. Доти «Огляд»,
+ * «Читання» й «Пошук» були водночас етапом і вкладкою, а екрани роду стояли
+ * поруч зі спільними, і людина не бачила, що належить роду, а що Майстерні
+ * (оцінка консолі 22.10.2026). Блок підписано словами: назва роду, «Спільне
+ * Майстерні», «Сервіс».
  *
  * Знак приходить із сервера (`brand.yaml`), а не з переліку тут. Значка немає —
- * кнопка лишається підписом, а не ламається.
+ * пункт лишається підписом, а не ламається.
  */
 function renderNav() {
-  const tabs = el('nav');
-  const subs = el('subnav');
-  if (!tabs) return;
+  const side = el('side');
+  if (!side) return;
+  // Назва роду — з переліку проєктів; поки він їде, блок підписано «Рід».
+  if (!projectsNow() && !SECTIONS.hub_only) {
+    loadProjects().then((d) => {
+      if (!d) return;
+      renderNav();
+      if (CURRENT && !MODAL_SCREENS.includes(CURRENT)) renderHead(CURRENT);
+    });
+  }
   const groups = navGroups();
-  if (!GROUP || !groups.some((g) => g.id === GROUP)) GROUP = (groups[0] || {}).id || null;
-
-  const sicons = (SECTIONS.icons && SECTIONS.icons.sections) || {};
-  tabs.innerHTML = groups.map((g) => {
-    const label = esc(tOr(`stage.${g.id}.label`, tOr(`section.${g.id}.label`, g.label)));
-    return `<button data-act="group" data-arg="${esc(g.id)}"`
-      + `${g.id === GROUP ? ' class="on"' : ''}>${icon(sicons[g.id])}${label}</button>`;
-  }).join('');
-
-  if (!subs) return;
-  const icons = (SECTIONS.icons && SECTIONS.icons.screens) || {};
-  // Форма опису — крок «Нових тек», а не окрема вкладка: поки вона відкрита,
-  // підсвічено те, звідки до неї прийшли.
-  const raw = (location.hash || '').slice(1);
+  // Екран — з `show()`, а не з адреси: вікно (`newcase`) адреси не міняє.
+  const raw = CURRENT || (location.hash || '').replace(/^#/, '').split('?')[0];
   const here = STEP_OF[raw] || raw;
-  subs.innerHTML = groupScreens(GROUP).map((s) => {
-    // 🔴 Значок малюється одразу з відомим числом. Він живе лише в підсмузі
-    // розділу «core», тож при поверненні з іншого розділу з'являвся порожнім
-    // і наповнювався аж наступною ітерацією `watchJobs` — а та блокується на
-    // сервері до 25 с. Виглядало як «лічильник зник».
-    const tail = s === 'jobs'
-      ? `<sup id="jobcount">${RUNNING_JOBS || ''}</sup>` : '';
-    return `<button data-act="nav" data-arg="${s}"${s === here ? ' class="on"' : ''}>`
-      + `${icon(icons[s])}${esc(t(NAV_LABEL[s] || s))}</button>${tail}`;
-  }).join('') + stageAction(GROUP);
+  if (!GROUP || !groups.some((g) => g.id === GROUP)) GROUP = groupOf(here) || (groups[0] || {}).id || null;
+  const open = openGroups();
+  const icons = (SECTIONS.icons && SECTIONS.icons.screens) || {};
+  const item = (s) => {
+    // 🔴 Значок малюється одразу з відомим числом: інакше після перемальовки
+    // меню лічильник з'являвся порожнім аж до наступної відповіді черги.
+    const tail = s === 'jobs' ? `<sup id="jobcount">${RUNNING_JOBS || ''}</sup>` : '';
+    return `<button data-act="nav" data-arg="${s}"${s === here ? ' class="on" aria-current="page"' : ''}>`
+      + `${icon(icons[s])}<span>${esc(screenLabel(s))}</span>${tail}</button>`;
+  };
+  const blocks = (SECTIONS.blocks && SECTIONS.blocks.length ? SECTIONS.blocks
+    : ['own', 'hub', 'shared', 'service']);
+  side.innerHTML = blocks.map((b) => {
+    const mine = groups.filter((g) => (g.block || 'shared') === b);
+    if (!mine.length) return '';
+    const body = mine.map((g) => {
+      const items = g.screens.filter(tabOn).map(item).join('');
+      if (g.fold === false) return items;
+      const on = g.id === GROUP || open.has(g.id);
+      const label = esc(tOr(`stage.${g.id}.label`, tOr(`section.${g.id}.label`, g.label)));
+      // Підпис групи веде на її перший екран (група розкривається як поточна),
+      // стрілка поруч — лише розкрити й подивитись, не переходячи.
+      const first = g.screens.filter(tabOn)[0];
+      return `<div class="sg${g.id === GROUP ? ' cur' : ''}"><div class="sg-h">`
+        + `<button data-act="nav" data-arg="${esc(first)}">${label}</button>`
+        + `<button class="sg-fold" data-act="side.fold" data-arg="${esc(g.id)}" aria-expanded="${on}"`
+        + ` aria-label="${label}"><span class="caret">▾</span></button></div>`
+        + `<div class="sg-i"${on ? '' : ' hidden'}>${items}</div></div>`;
+    }).join('');
+    return `<section class="sb sb-${b}"><h4>${esc(blockLabel(b))}</h4>${body}</section>`;
+  }).join('');
+}
+
+/** Назва екрана — та сама в меню, крихтах і заголовку («одна назва на екран»). */
+function screenLabel(s) {
+  if (s === 'home') return t(SECTIONS.hub_only ? 'nav.home.hub' : 'nav.home.project');
+  return t(NAV_LABEL[s] || s);
 }
 
 /**
- * Головна дія етапу — праворуч у рядку його екранів («＋ Завести справу»).
+ * Мітка шару: чиї це дані. Відповідь на «де я» — словами, а не кольором.
  *
- * «＋ Новий проєкт» має сенс лише в Майстерні без проєкту: усередині проєкту
- * огляд — про рід, і нові проєкти заводять з Майстерні.
+ * `mixed` у проєкті — спільний матеріал зі зрізом роду, у Майстерні — просто
+ * спільне. Огляд (`context`) мітки не має: його заголовок і є назвою контексту.
  */
-function stageAction(gid) {
-  const scr = (SECTIONS.stage_action || {})[gid];
-  if (!scr || !screenOn(scr)) return '';
-  if (scr === 'newproject' && !SECTIONS.hub_only) return '';
-  return `<span class="stage-act"><button class="primary" data-act="nav" data-arg="${esc(scr)}">${
-    esc(t(`stage.act.${scr}`))}</button></span>`;
+function layerTag(screen) {
+  const raw = (SECTIONS.layers || {})[screen];
+  // Екран роду в Майстерні без проєкту — вибір проєкту: роду, якому «належить»,
+  // ще немає, і мітка «належить «Рід»» вводила б в оману.
+  if (!raw || raw === 'context' || needsProject(screen)) return '';
+  const inProject = !SECTIONS.hub_only;
+  const layer = raw === 'mixed' && !inProject ? 'shared' : raw;
+  const name = projectName() || t('stage.project.label');
+  return `<span class="tag layer-${layer}" title="${esc(t(`layer.${layer}.why`))}">${
+    esc(t(`layer.${layer}`).replace('{p}', name))}</span>`;
+}
+
+/**
+ * Заголовок сторінки: крихти, назва, шар і дія сторінки.
+ *
+ * 🔴 Спільний для всіх екранів і малюється тут, а не кожним екраном: доти
+ * кожен ставив свій `<h2>`, і він часто не збігався з назвою вкладки
+ * («Бібліотека» → «Бібліотека справ»), а сказати, де людина й чиї дані
+ * бачить, не було кому.
+ */
+function renderHead(screen) {
+  const box = el('phead');
+  if (!box) return;
+  const inProject = !SECTIONS.hub_only;
+  const ctx = inProject ? (projectName() || t('stage.project.label')) : t('stage.hub.label');
+  const gid = groupOf(screen);
+  const g = navGroups().find((x) => x.id === gid);
+  const crumbs = [`<button data-act="nav" data-arg="home">${esc(ctx)}</button>`];
+  if (g && g.fold !== false) crumbs.push(`<span>${esc(tOr(`stage.${g.id}.label`, g.label))}</span>`);
+  const title = screen === 'home' && inProject ? ctx : screenLabel(screen);
+  if (screen !== 'home') crumbs.push(`<span>${esc(screenLabel(screen))}</span>`);
+  const act = (SECTIONS.screen_action || {})[screen];
+  const actOn = act && screenOn(act) && (act !== 'newproject' || SECTIONS.hub_only);
+  box.innerHTML = `<nav class="crumbs" aria-label="${esc(t('side.crumbs'))}">${crumbs.join('<i>›</i>')}</nav>
+    <div class="ph-row"><h1>${esc(title)}</h1>${layerTag(screen)}${actOn
+    ? `<span class="ph-acts"><button class="primary" data-act="nav" data-arg="${esc(act)}">${
+      esc(t(`stage.act.${act}`))}</button></span>` : ''}</div>`;
+}
+
+/** ☰ каже читалці екрана, чи меню висунуте. */
+export function sideBtnState() {
+  const b = document.querySelector('.side-btn');
+  if (b && b.setAttribute) b.setAttribute('aria-expanded', String(document.body.classList.contains('side-open')));
 }
 
 /** Значок спрайта або порожньо — підпис кнопки читається й без нього. */
@@ -220,6 +314,9 @@ let CURRENT = '';
 export const currentScreen = () => CURRENT;
 
 async function show(screen) {
+  // Невідомий екран (стара закладка, описка в адресі) — Огляд, а не заголовок
+  // із сирим хешем і порожнім екраном (прохід консолі 22.10.2026).
+  if (!SCREENS[screen] && !MODAL_SCREENS.includes(screen)) screen = 'home';
   // 🔴 Екран вимкненої секції не мовчить і не показує порожнечу. Сюди
   // потрапляють через закладку чи посилання з часів, коли секція була
   // ввімкнена, — і «нічого не сталось» тут читається як поламаний застосунок.
@@ -232,7 +329,8 @@ async function show(screen) {
     const sec = SECTIONS.sections.find((s) => s.id === sid) || {};
     const label = tOr(`section.${sid}.label`, sec.label);
     location.hash = screen;
-    document.querySelectorAll('nav button').forEach((b) => b.classList.remove('on'));
+    renderNav();
+    renderHead(screen);
     setView(`<div class="warn">${t('sect.off.msg')}: <b>${esc(label || sid)}</b>
       <p class="muted">${esc(tOr(`section.${sid}.why`, sec.why || ''))}</p>
       <button data-act="sections.toggle" data-arg="${esc(sid)}"
@@ -256,8 +354,9 @@ async function show(screen) {
     bumpGen();
     CURRENT = screen;
     location.hash = screen;
-    GROUP = groupOf('home');
+    GROUP = groupOf(screen);
     renderNav();
+    renderHead(screen);
     await chooseProject(screen);
     return;
   }
@@ -275,14 +374,18 @@ async function show(screen) {
   // в кожному екрані, бо це властивість розкладки, а не змісту.
   const main = document.querySelector('main');
   if (main) main.classList.toggle('wide', WIDE_SCREENS.includes(screen));
+  // На телефоні меню — висувне: перехід його закриває.
+  document.body.classList.remove('side-open');
+  sideBtnState();
   renderNav();
+  renderHead(screen);
   await fn();
 }
 
 /** Екран у вікні: той самий модуль, лише `setView` малює в тіло вікна. */
 async function showInModal(screen) {
-  openModal({ title: t(NAV_LABEL[screen] || screen), onClose: () => setViewTarget('view') });
-  modalTitle(t(NAV_LABEL[screen] || screen));
+  openModal({ title: screenLabel(screen), onClose: () => setViewTarget('view') });
+  modalTitle(screenLabel(screen));
   setViewTarget('dlg-body');
   try {
     await SCREENS[screen]();
@@ -307,7 +410,7 @@ async function chooseProject(screen) {
       <b>${esc(p.name || p.id)}</b>
       <button data-act="project.go" data-arg="${esc(p.id)}" data-back="${esc(screen)}">${t('project.open')}</button>
     </div>`).join('');
-  setView(`<h2>${t('project.need.title')}</h2>
+  setView(`<p><b>${t('project.need.title')}</b></p>
     <p class="muted">${t('project.need.why')}</p>
     <div class="pcards">${cards || `<p class="muted">${t('project.none')}</p>`}</div>
     <p><button data-act="nav" data-arg="newproject">${t('stage.act.newproject')}</button></p>`);
@@ -435,7 +538,7 @@ function jobNotes(j) {
       extra.push(`<span class="mono">${esc(n.op)}</span> — ${esc(n.why || '')}`);
       continue;
     }
-    const label = t(NAV_LABEL[scr] || scr);
+    const label = screenLabel(scr);
     // Та сама дія, що в поради конверта (`next`), — щоб і тут кнопка несла
     // запит на екран, а не відкривала його порожнім.
     notes.push(`<div class="warn next"><button data-act="next" data-arg="${esc(n.op)}"${seedAttr(n)}>`
@@ -641,10 +744,8 @@ async function watchJobs() {
   }
 }
 
-/** Розділ, відкритий у шапці. Ставиться сетером: пряме присвоєння з
- *  іншого модуля мовчки не спрацювало б, і смуга екранів лишалась би на
- *  попередньому розділі. */
-export const setGroup = (v) => { GROUP = v; };
+/** Розкрити чи згорнути групу бічного меню (`side.fold`). */
+export const foldGroup = (gid) => toggleGroup(gid);
 
 /**
  * Оновити довідку секцій із відповіді `sections.show` / `sections.set`.
@@ -685,5 +786,5 @@ let LIVE_JOBS = [];
 const liveJobs = () => LIVE_JOBS;
 
 export { SECTIONS, NAV_ORDER, NAV_LABEL, GROUP, screenOn, loadSections,
-  navGroups, groupScreens, groupOf, renderNav, icon, show, refreshJobs, watchJobs,
-  jobNotes, RUNNING_JOBS, MODAL_SCREENS, needsProject, liveJobs };
+  navGroups, groupScreens, groupOf, renderNav, renderHead, screenLabel, icon, show,
+  refreshJobs, watchJobs, jobNotes, RUNNING_JOBS, MODAL_SCREENS, needsProject, liveJobs };

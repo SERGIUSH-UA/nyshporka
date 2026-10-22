@@ -30,7 +30,7 @@ SCREENS.canon = async () => {
     callOp('canon.check', {}), callOp('canon.next', { limit: 3 })]);
   if (!alive(gen)) return;
   if (!chk.ok) return failure(chk);
-  setView(`<h2>${t('canon.title')}</h2>
+  setView(`
     <p class="muted">${t('canon.why')}</p>
     <div class="dash-two">
       <div class="dash-box" id="cn-check">${checkBox(chk)}</div>
@@ -48,7 +48,7 @@ SCREENS.canon = async () => {
     esc(t(`canon.kind.${k}`))}</option>`).join('')}
           </select></label>
       </div>
-      <div id="cn-list"><p class="muted">${t('common.loading')}</p></div>
+      <div id="cn-list"><p class="muted">${t('load.cards')}</p></div>
     </div>`);
   // Прийшли з позначки «уже в каноні» іншого проєкту (`?card=`): одразу
   // картка. Параметр знімається — інакше вона відкривалась би на кожному вході.
@@ -127,7 +127,7 @@ function citeRow(c, where = '') {
 
 /** Картка у вікні: поля, факти з доказами, зауваження перевірки, гіпотези. */
 async function openCard(id) {
-  const box = openModal({ title: id, body: `<p class="muted">${t('common.loading')}</p>` });
+  const box = openModal({ title: id, body: `<p class="muted">${t('load.open')}</p>` });
   const seq = modalSeq();
   const env = await callOp('canon.card', { id });
   if (!box || seq !== modalSeq()) return;
@@ -173,7 +173,7 @@ Object.assign(ACTIONS, {
   },
   'canon.recheck': async () => {
     const box = el('cn-check');
-    if (box) box.innerHTML = `<p class="muted">${t('common.loading')}</p>`;
+    if (box) box.innerHTML = `<p class="muted">${t('load.open')}</p>`;
     const env = await callOp('canon.check', {});
     if (!el('cn-check')) return;
     if (!env.ok) { boxError('cn-check', env); return; }
