@@ -127,6 +127,30 @@ def test_chronology_errors(family: Path) -> None:
     assert "мати I9002 мав(ла) 3 років" in texts
 
 
+def test_an_issue_speaks_to_a_person_about_the_person(family: Path) -> None:
+    """🔴 Людині — речення про особу, агентові — поля й ID родини.
+
+    Консоль показувала `text`: «parent_family і hypothetical_parent_family»,
+    «мав(ла) 51 років» під іменами обох подружжів (прохід канону 22.10.2026).
+    """
+    _write(family, "persons", _person("I9003", "Петро", "M", born="1860",
+                                      parent_family="F9001"))
+    _write(family, "persons", _person("I9004", "Олена", "F", born="1830",
+                                      parent_family="F9001",
+                                      hypothetical_parent_family="F9001"))
+    _write(family, "families", Family(id="F9001", husband="I9001", wife="I9002",
+                                      children=["I9003", "I9004"]))
+    rep = C.check(family)
+    age = next(i for i in rep.issues if i.code == "chronology" and i.who == "I9002")
+    assert age.where == "F9001" and "мав(ла) 55 років" in age.text
+    assert age.say == "Мати у віці 55, дитина I9003 народжена 1860"
+    both = next(i for i in rep.issues if i.code == "both_levels")
+    assert "hypothetical_parent_family" in both.text
+    assert "_family" not in both.say and both.as_dict()["say"] == both.say
+    # Без речення поле не з'являється: вивід для агента той самий, що й був.
+    assert "say" not in C.Issue("WARN", "x", "I9001", "t").as_dict()
+
+
 def test_confirmed_without_a_strong_citation_is_flagged(family: Path) -> None:
     p = _person("I9003", "Петро", "M", parent_family="F9001")
     p.facts.append(Fact(type="residence", status="confirmed"))

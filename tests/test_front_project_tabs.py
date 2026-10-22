@@ -282,7 +282,7 @@ def probe(tmp_path_factory) -> dict:
 def test_canon_shows_check_cards_and_decisions(probe) -> None:
     c = probe["canon"]
     assert "Іван Сидорук" in c and "I9001" in c
-    assert "помилок: 1" in c and "мати без джерела" in c
+    assert "1 помилка" in c and "мати без джерела" in c
     assert 'data-act="canon.hyp" data-arg="H9001"' in c
 
 

@@ -248,7 +248,7 @@ select.inp-mini, select.ctl-sm { padding-right: 22px; }
    кольоровій кнопці мовчки ставав сірим. Тепер ознака явна — клас.
    Тон задається модифікатором; чорнило завжди --white, бо заливка
    лишається насиченою в обох темах. */
-.btn-solid { border: 0; border-radius: var(--r-pill); padding: 6px 14px;
+.btn-solid { border: 0; border-radius: var(--r-s); padding: 6px 14px;
   font-size: 13px; font-weight: 800; cursor: pointer;
   background: var(--s-4); color: var(--fg); }
 .btn-solid.sm { padding: 6px 12px; font-size: 12px; font-weight: 700; }
@@ -310,7 +310,7 @@ button.on-solid { color: var(--white); }
 .warn.next button { flex: none; }
 
 /* бейдж картки рев'ю: 11 умовних сигналів мали кожен свій інлайн-стиль */
-.badge { display: inline-block; border-radius: var(--r-pill); padding: 1px 8px; font-size: 11px;
+.badge { display: inline-block; border-radius: var(--r-xs); padding: 1px 8px; font-size: 11px;
   font-weight: 700; white-space: nowrap; background: var(--bdg-bg); color: var(--bdg-fg); }
 .badge.known   { background: var(--bdg-known-bg); color: var(--bdg-known-fg); }  /* ★ у каноні */
 .badge.new     { background: var(--bdg-new-bg);   color: var(--bdg-new-fg); }    /* новий */

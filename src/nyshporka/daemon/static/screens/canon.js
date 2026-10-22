@@ -9,13 +9,13 @@
  * «Повернути» на екрані «Історія» відновлює файл попередньою версією.
  */
 
-import { t, tOr } from '../core/strings.js';
+import { t, tOr, tn, LANG } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, renderWarnings, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { goto } from '../core/nav.js';
 import { openModal, modalSeq, modalTitle } from '../core/modal.js';
-import { kv, pill, toast, unwiki, fieldLabel, fieldValue, named, fmtDay, HYP_TONE } from '../core/bits.js';
+import { kv, pill, toast, unwiki, fieldLabel, fieldValue, named, fmtDay, HYP_TONE, decRow } from '../core/bits.js';
 import { openEvidence } from './evidence.js';
 
 const KINDS = ['persons', 'families', 'places', 'sources', 'hypotheses'];
@@ -62,32 +62,59 @@ SCREENS.canon = async () => {
   await cardsList();
 };
 
+/** Вид знахідки перевірки → мітка ліворуч від неї. Невідомий код — «інше». */
+const ISSUE_KIND = {
+  both_levels: 'family', one_sided: 'link', missing_ref: 'link', orphan: 'link',
+  chronology: 'dates', conflict: 'dup', duplicate_fact: 'dup', duplicate_id: 'dup',
+  maybe_living: 'living', uncited: 'proof', weak_confirmed: 'proof', evidence_missing: 'proof',
+  not_a_path: 'proof', manifest: 'proof', manifest_missing: 'proof', manifest_hash: 'proof',
+  hypothetical_unlinked: 'hyp', disputed_unlinked: 'hyp', wikilink: 'ref', sex: 'sex',
+  schema: 'file', unreadable: 'file', file_name: 'file', regions: 'file',
+};
+const issueKind = (code) => ISSUE_KIND[code] || (String(code).startsWith('hyp_') ? 'hyp' : 'other');
+
+/** Перші знахідки, які показує картка; решта — числом «і ще N». */
+const SHOW_ISSUES = 5;
+
+/**
+ * 🔴 Мітка стану каже правду про обидва рівні. Була одна «без помилок» —
+ * над п'ятьма попередженнями під нею (прохід канону 22.10.2026).
+ * Знахідка — реченням для людини (`say`) про особу (`who`); `text` з назвами
+ * полів лишається агентові й показується лише там, де речення ще немає.
+ */
 function checkBox(env) {
   const d = env.data || {};
   const refs = d.refs || {};
   const n = d.loaded || {};
-  const tone = d.errors ? 'err' : d.warnings ? 'warn' : 'ok';
-  const head = d.errors
-    ? t('canon.check.errors').replace('{n}', d.errors)
-    : t('canon.check.clean');
-  const issues = (d.issues || []).filter((i) => i.severity !== 'INFO').slice(0, 5)
-    .map((i) => `<li><b>${named(i.where, refs)}</b> ${named(i.text, refs)}</li>`).join('');
-  return `<div class="row"><h3>${t('canon.check')}</h3>${pill(tone, head)}</div>
-    <p class="muted">${esc(t('canon.counts')
-    .replace('{p}', n.persons || 0).replace('{f}', n.families || 0)
-    .replace('{pl}', n.places || 0).replace('{s}', n.sources || 0))}</p>
-    ${issues ? `<ul>${issues}</ul>` : ''}
+  const all = (d.issues || []).filter((i) => i.severity !== 'INFO');
+  const issues = all.slice(0, SHOW_ISSUES).map((i) => `<li>
+      <span class="tag${i.severity === 'ERROR' ? ' err' : ''}">${esc(t(`canon.iss.${issueKind(i.code)}`))}</span>
+      <span class="iss-who">${named(i.who || i.where, refs)}</span>
+      <span class="iss-what">${named(i.say || i.text, refs)}</span></li>`).join('');
+  const more = all.length - SHOW_ISSUES;
+  const at = new Date().toLocaleTimeString(LANG, { hour: '2-digit', minute: '2-digit' });
+  return `<div class="bx-head"><h3>${t('canon.check')}</h3>
+      ${d.warnings ? pill('warn', tn('canon.n.warns', d.warnings)) : ''}
+      ${pill(d.errors ? 'err' : 'ok', tn('canon.n.errs', d.errors || 0))}</div>
+    <p class="muted">${esc([tn('canon.n.persons', n.persons || 0), tn('canon.n.families', n.families || 0),
+    tn('canon.n.places', n.places || 0), tn('canon.n.sources', n.sources || 0)].join(' · '))}</p>
+    ${issues ? `<ul class="iss">${issues}</ul>` : ''}
+    ${more > 0 ? `<p class="muted">${esc(t('canon.iss.more').replace('{n}', more))}</p>` : ''}
     ${renderWarnings(env)}
-    <p><button data-act="canon.recheck">${t('canon.recheck')}</button></p>`;
+    <div class="bx-foot"><button data-act="canon.recheck">${t('canon.recheck')}</button>
+      <span class="muted">${esc(t('canon.checked.at').replace('{t}', at))}</span></div>`;
 }
 
 /** «Що вирішити» — три перші рішення; решта чекає, доки ці вирішено. */
 function nextBox(env) {
   if (!env.ok) return `<h3>${t('canon.next')}</h3><p class="muted">${esc(env.error || '')}</p>`;
-  const rows = ((env.data || {}).next || []).map((d) => `<div class="lrow">
-      <div><b>${esc(unwiki(d.claim))}</b><small class="muted">${esc(d.id)} · ${esc(unwiki(d.decides || ''))}</small></div>
-      <button data-act="canon.hyp" data-arg="${esc(d.id)}">${t('canon.open')}</button></div>`).join('');
-  return `<h3>${t('canon.next')}</h3>${rows || `<p class="muted">${t('canon.next.none')}</p>`}`;
+  const d = env.data || {};
+  const next = d.next || [];
+  const total = (d.open || 0) + (d.awaiting || 0);
+  const of = total > next.length
+    ? `<span class="aside">${esc(t('canon.next.of').replace('{n}', next.length).replace('{m}', total))}</span>` : '';
+  return `<div class="bx-head"><h3>${t('canon.next')}</h3>${of}</div>
+    ${next.map((x) => decRow(x)).join('') || `<p class="muted">${t('canon.next.none')}</p>`}`;
 }
 
 let LIST_SEQ = 0;

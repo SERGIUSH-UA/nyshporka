@@ -120,6 +120,23 @@ export function named(text, refs = {}) {
 export const HYP_TONE = { open: 'info', awaiting: 'warn', closed: 'ok' };
 
 /**
+ * Рядок «що вирішити» (`canon.next`): номер гіпотези й що її розв'яже — дрібно
+ * над твердженням, клікається весь рядок. Один на Канон і Огляд.
+ *
+ * 🔴 Твердження звичайною вагою: три абзаци суцільного жирного поруч із
+ * трьома кнопками «Відкрити» читались важче за саму суть (прохід канону
+ * 22.10.2026, варіант C). Дія — `canon.hyp` з екрана Канону: екрани
+ * вантажаться всі, тож друга, однакова дія Огляду була б дублем.
+ */
+export function decRow(x) {
+  return `<button class="dec" data-act="canon.hyp" data-arg="${esc(x.id)}">
+    <span class="dec-meta"><span class="tag ${HYP_TONE[x.status] || ''}">${esc(x.id)}</span>
+      <span class="dec-why">${esc(unwiki(x.decides || ''))}</span>
+      <span class="dec-go">${esc(t('canon.open'))} →</span></span>
+    <span class="dec-claim">${esc(unwiki(x.claim))}</span></button>`;
+}
+
+/**
  * Модель словами: «pysar_cyr_v28.pt+diak_v10» → «Писар v28 + Дяк v10».
  *
  * Рушії мають імена (Писар, Дяк, Скриба), і в консолі ними вже названо блок

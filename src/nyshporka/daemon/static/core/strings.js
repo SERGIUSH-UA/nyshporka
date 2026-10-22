@@ -61,7 +61,16 @@ const tOr = (key, fallback) => (STRINGS[LANG] && STRINGS[LANG][key]) || fallback
 
 if (typeof document !== 'undefined') document.documentElement.lang = LANG;
 
-export { STRINGS, LANG, LANGS, DISABLED, ENABLED, t, tOr };
+/** Число з відмінком: «1 особа · 3 особи · 393 осіб» замість «393 осіб» на все.
+ *  Ключ має форми `.one/.few/.many/.other` у кожній мові (приймач вимагає
+ *  однакового набору); категорію дає `Intl.PluralRules` мови, відсутню — `.other`. */
+const PLURAL = new Intl.PluralRules(LANG);
+const tn = (key, n) => {
+  const form = t(`${key}.${PLURAL.select(n)}`);
+  return (form.startsWith(key) ? t(`${key}.other`) : form).replace('{n}', n);
+};
+
+export { STRINGS, LANG, LANGS, DISABLED, ENABLED, t, tOr, tn };
 
 /** Перемкнути мову. Пише лише сховище: сама змінна не переживає
  *  перезавантаження, а воно тут і відбувається. */

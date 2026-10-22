@@ -55,7 +55,8 @@ def canon_check(a: CheckArgs) -> Envelope:
         return env
     rep = C.check(root, hash_evidence=a.hash)
     data = rep.as_dict()
-    data["refs"] = _refs(rep.canon, [(i.get("where"), i.get("text")) for i in data.get("issues", [])])
+    data["refs"] = _refs(rep.canon, [(i.get("where"), i.get("text"), i.get("say"), i.get("who"))
+                                     for i in data.get("issues", [])])
     env = ok(data)
     if not rep.ok:
         env.warn("canon_errors",

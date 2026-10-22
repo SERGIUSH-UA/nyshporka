@@ -6,7 +6,7 @@ import { esc, el, setView, boxError, busyForm, fld, humanError } from '../core/v
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { goto, jobDone, jobChip, currentScreen, SECTIONS } from '../core/nav.js';
 import { openModal, closeModal } from '../core/modal.js';
-import { unwiki } from '../core/bits.js';
+import { decRow } from '../core/bits.js';
 import { projectBadge as badge, projectColor, projectsNow, currentPid } from '../core/projects.js';
 
 /**
@@ -181,10 +181,7 @@ export async function fillProject(stillHere = () => true) {
       if (!nx.ok) { box.innerHTML = `<p class="muted">${humanError(nx.error)}</p>`; return; }
       const d = nx.data || {};
       const more = (d.open || 0) + (d.awaiting || 0) - (d.next || []).length;
-      box.innerHTML = (d.next || []).length ? (d.next || []).map((x) => `<button class="ov-row" data-act="phead.hyp"
-          data-arg="${esc(x.id)}"><span class="tag ${x.status === 'awaiting' ? 'warn' : 'info'}">${esc(x.id)}</span>
-          <span><b>${esc(unwiki(x.claim))}</b>${x.decides ? `<small class="muted">${esc(t('hyp.decides'))}: ${
-  esc(unwiki(x.decides))}</small>` : ''}</span></button>`).join('')
+      box.innerHTML = (d.next || []).length ? (d.next || []).map((x) => decRow(x)).join('')
         + (more > 0 ? `<p><button class="ghost ctl-sm" data-act="nav" data-arg="hyp">${
           esc(t('ov.more').replace('{n}', more))}</button></p>` : '')
         : `<p class="muted">${t('canon.next.none')}</p>`;
@@ -256,7 +253,6 @@ function styleForm() {
 }
 
 Object.assign(ACTIONS, {
-  'phead.hyp': (_ev, elm) => goto('hyp', { id: elm.dataset.arg }),
   'phead.style': () => styleForm(),
   'phead.save': async (ev) => {
     ev.preventDefault();

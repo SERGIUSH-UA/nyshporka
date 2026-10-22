@@ -305,7 +305,7 @@ BUTTON_FAMILY = {"primary", "ghost", "danger", "sm", "ctl-sm", "on", "btn"}
 #: вигляд за задумом. Новий клас сюди — лише з тим самим поясненням.
 BUTTON_COMPONENTS = {
     "card", "tile", "tool", "pj-card", "pj-new", "pj-chip", "chip",
-    "ov-kpi", "ov-row", "ov-feed", "ov-link", "ov-style",
+    "ov-kpi", "dec", "ov-feed", "ov-link", "ov-style",
     "ctx-btn", "ask", "gear", "side-btn", "thm", "sg-fold", "hm-item",
     "lib-dots", "lb-ch", "lb-do", "scope-btn", "scope-clear", "fld-btn",
     "aside",

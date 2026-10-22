@@ -218,7 +218,7 @@ pre {
 :where(#view, #dlg, .job, #phead) :where(button, a.btn) {
   padding: .45rem 1rem; font: inherit; font-weight: 500; cursor: pointer;
   color: var(--fg); background: var(--s-3); text-decoration: none;
-  border: 1px solid var(--line-2); border-radius: var(--r-pill);
+  border: 1px solid var(--line-2); border-radius: var(--r-s);
 }
 :where(#view, #dlg, .job, #phead) :where(button, a.btn):hover { border-color: var(--line-3); }
 :where(#view, #dlg, .job) button:disabled { opacity: .45; cursor: not-allowed; }
@@ -688,10 +688,10 @@ details.jobs-done > summary { cursor: pointer; color: var(--fg-3); }
 
 /* Другий ряд фільтрів — під розкриттям; вибраний фільтр відкриває його сам. */
 details.more-filters { margin: .3rem 0 .6rem; border: 0; background: none; padding: 0; }
-/* «Ще фільтри», «Точніше» — та сама пігулка, що й кнопка родини. */
+/* «Ще фільтри», «Точніше» — той самий кут, що й у кнопки родини. */
 details.more-filters > summary { cursor: pointer; color: var(--fg-2); font-size: .88rem; display: inline-flex;
   align-items: center; gap: .3rem; padding: .3rem .9rem; list-style: none; background: var(--s-3);
-  border: 1px solid var(--line-2); border-radius: var(--r-pill); }
+  border: 1px solid var(--line-2); border-radius: var(--r-s); }
 details.more-filters > summary::-webkit-details-marker { display: none; }
 details.more-filters > summary::before { content: "▸"; color: var(--fg-4); transition: transform var(--dur-1) var(--ease); }
 details.more-filters[open] > summary::before { transform: rotate(90deg); }
@@ -848,7 +848,7 @@ header { border-bottom: 3px solid var(--proj-color, transparent); }
    `inline-flex` і `flex: none`: у рядку-флексі мітка інакше розтягувалась у
    круг, а текст вилазив за нього (Канон, «без помилок»). */
 .tag { display: inline-flex; align-items: center; flex: none; align-self: center;
-  font-size: .76rem; line-height: 1.5; padding: 0 .5rem; border-radius: var(--r-pill);
+  font-size: .76rem; line-height: 1.5; padding: 0 .5rem; border-radius: var(--r-xs);
   border: 1px solid var(--line-2); color: var(--fg-3); white-space: nowrap; }
 .tag.ok { border-color: var(--ok-line); color: var(--ok); background: var(--ok-bg); }
 .tag.err { border-color: var(--err-line); color: var(--err); background: var(--err-bg); }
@@ -917,11 +917,36 @@ details.raw pre { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--f
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .ov-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem; margin-bottom: 1rem; }
 .ov-cols h3 { margin: 0 0 .6rem; }
-#view .ov-row { display: flex; gap: .6rem; align-items: flex-start; width: 100%; text-align: left;
-  padding: .55rem .4rem; border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
-  background: none; color: inherit; }
-#view .ov-row:hover { background: var(--s-2); }
-.ov-row > span:last-child { display: grid; gap: .15rem; min-width: 0; }
+/* ── Коробка дашборда: шапка, перелік знахідок, рядок рішення, низ ─────────
+   🔴 Заголовки двох коробок поруч мусять стояти на одній висоті: «Що вирішити»
+   був нижчим за «Перевірку», бо одна мала h3 у рядку-флексі без поля, а друга
+   — голий h3 зі своїм полем (прохід канону 22.10.2026). Шапка — одна. */
+.bx-head { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem .6rem;
+  margin: 0 0 .75rem; padding-bottom: .55rem; border-bottom: 1px solid var(--line); }
+.bx-head > h3 { margin: 0; font-size: 1.15rem; }
+.bx-head > .aside { margin-left: auto; color: var(--fg-3); font-size: .85rem; }
+.bx-foot { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .7rem; margin-top: .8rem; }
+.bx-foot > .muted { font-size: .85rem; }
+/* Знахідка перевірки: мітка виду — колонкою, щоб імена стояли рівно. */
+.iss { list-style: none; margin: 0; padding: 0; }
+.iss > li { display: grid; grid-template-columns: 4.6rem minmax(0, 1fr); gap: .1rem .6rem;
+  padding: .45rem 0; border-bottom: 1px solid var(--line); }
+.iss > li:last-child { border-bottom: 0; }
+.iss .tag { grid-row: 1 / span 2; justify-self: start; align-self: start; margin-top: .15rem; }
+.iss-who { font-weight: 600; overflow-wrap: anywhere; }
+.iss-what { color: var(--fg-3); font-size: .9rem; }
+/* Рядок рішення (`decRow`): клікається весь, «Відкрити →» лише підказує. */
+#view .dec { display: grid; gap: .2rem; width: 100%; text-align: left; font: inherit;
+  padding: .6rem .5rem; border: 0; border-bottom: 1px solid var(--line); border-radius: var(--r-s);
+  background: none; color: var(--fg); }
+#view .dec:last-child { border-bottom: 0; }
+#view .dec:hover { background: color-mix(in srgb, var(--honey) 9%, transparent); filter: none; }
+.dec-meta { display: flex; align-items: flex-start; gap: .5rem; font-size: .8rem; line-height: 1.35;
+  color: var(--fg-3); }
+.dec-meta .tag { align-self: flex-start; font-family: var(--font-mono); font-size: .72rem; line-height: 1.35; }
+.dec-why { min-width: 0; }
+.dec-go { margin-left: auto; flex: none; color: var(--accent); font-weight: 600; }
+.dec-claim { line-height: 1.45; font-weight: 500; }
 /* Дата — однією колонкою й без переносу, назва — поруч: рядки стоять рівно
    (дата «2026-10-21» ламалась на два рядки й зсувала назву). */
 .ov-feed { display: grid; grid-template-columns: 6.4rem minmax(0, 1fr); gap: .7rem; align-items: baseline;
@@ -936,7 +961,6 @@ details.raw pre { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--f
 }
 .ask { white-space: nowrap; flex: 0 1 auto; }
 .ov-wait { font-size: .95rem; }
-.ov-row .tag { align-self: flex-start; margin-top: .2rem; }
 /* Реєстр відстав — один тихий рядок, без тла попередження. */
 .stale-line { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .3rem 0 .8rem;
   font-size: .85rem; color: var(--fg-3); }
