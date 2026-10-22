@@ -44,6 +44,7 @@ def canon_check(a: CheckArgs) -> Envelope:
     якщо `errors > 0`, — щоб її можна було вішати на pre-commit.
     """
     from nyshporka.canon import check as C
+    from nyshporka.canon import memo
 
     root = _root()
     if not (root / "data" / "canonical").is_dir():
@@ -53,7 +54,7 @@ def canon_check(a: CheckArgs) -> Envelope:
                              "Засіяти можна з GEDCOM (`nysh canon import`) або першою "
                              "карткою особи за скілом keep-canon")
         return env
-    rep = C.check(root, hash_evidence=a.hash)
+    rep = C.check(root, hash_evidence=True) if a.hash else memo.report(root)
     data = rep.as_dict()
     data["refs"] = _refs(rep.canon, [(i.get("where"), i.get("text"), i.get("say"), i.get("who"))
                                      for i in data.get("issues", [])])
@@ -147,10 +148,11 @@ def canon_next(a: NextArgs) -> Envelope:
     Кожне рішення: твердження, що його розв'яже, хіти з готовою командою кропу.
     Людині показувати не більше трьох за раз: решта чекає, доки ці вирішено.
     """
+    from nyshporka.canon import memo
     from nyshporka.canon.next import next_decisions
 
     root = _root()
-    got = next_decisions(root, a.limit)
+    got = next_decisions(root, a.limit, canon=memo.canon(root))
     env = ok(got)
     if _no_canon(env):
         pass
@@ -239,10 +241,10 @@ def _no_canon(env: Envelope) -> bool:
 
 
 def _loaded() -> tuple[Path, Any]:
-    from nyshporka.canon.check import load
+    from nyshporka.canon import memo
 
     root = _root()
-    return root, load(root)
+    return root, memo.canon(root)
 
 
 class CardsArgs(BaseModel):
@@ -282,13 +284,13 @@ class CardArgs(BaseModel):
     args=CardArgs, section="research", tier="rare", scope="project", skill="keep-canon",
     when="подивитись картку канону з доказами й зауваженнями перевірки")
 def canon_card(a: CardArgs) -> Envelope:
-    from nyshporka.canon.check import check
+    from nyshporka.canon import memo
     from nyshporka.core import workspace as W
 
     root = _root()
     if not W.workspace().canonical.is_dir():
         return fail("канону в проєкті немає (data/canonical)")
-    rep = check(root)
+    rep = memo.report(root)
     canon = rep.canon
     kind = next((k for k in CARD_KINDS if a.id in getattr(canon, k)), "")
     if not kind:

@@ -180,9 +180,13 @@ def test_citation_from_project_canon_resolves_from_hub(tmp_path: Path) -> None:
     (hub / ref).parent.mkdir(parents=True)
     (hub / ref).write_bytes(b"x")
     assert refs.resolve(alpha, ref) == hub / ref
-    assert C._resolves(alpha, ref)
+    assert C._resolves(refs.resolver(alpha), ref)
     # нотатка проєкту — від проєкту
     assert refs.resolve(alpha, "reports/x.md") == alpha / "reports/x.md"
+    # резолвер на весь прохід перевірки веде туди само, що й `resolve`
+    one = refs.resolver(alpha)
+    assert one(ref) == hub / ref
+    assert one(r"reports\x.md") == alpha / "reports/x.md"
     assert C.manifest_path(alpha) == hub / "data/source/citations/MANIFEST_citations.json"
 
 

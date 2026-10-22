@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from nyshporka.core import workspace as W
@@ -37,6 +38,21 @@ def resolve(root: Path, ref: str) -> Path:
     """Файл, на який вказує посилання картки проєкту `root`."""
     norm = ref.replace("\\", "/")
     return (hub_of(root) if norm.startswith(HUB_PREFIXES) else root) / norm
+
+
+def resolver(root: Path) -> Callable[[str], Path]:
+    """`resolve` для багатьох посилань одного кореня: хаб шукається один раз.
+
+    🔴 `hub_of` читає маркер проєкту й хаба з диска. Перевірка канону кличе
+    `resolve` на кожне посилання доказу (~1500 у роду на 400 осіб), і картка в
+    консолі чекала 5 с лише на розбір того самого TOML (22.10.2026).
+    """
+    hub = hub_of(root)
+
+    def one(ref: str) -> Path:
+        norm = ref.replace("\\", "/")
+        return (hub if norm.startswith(HUB_PREFIXES) else root) / norm
+    return one
 
 
 def citations_dir(root: Path) -> Path:

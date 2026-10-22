@@ -71,8 +71,9 @@ def rank(canon: Canon, *, closed: bool = False) -> list[Decision]:
     return out
 
 
-def next_decisions(root: Path, limit: int = 3) -> dict[str, Any]:
-    canon = load(root)
+def next_decisions(root: Path, limit: int = 3, *, canon: Canon | None = None) -> dict[str, Any]:
+    """`canon` — уже прочитаний (консоль бере його з `canon.memo`)."""
+    canon = canon if canon is not None else load(root)
     ranked = rank(canon)
     return {
         "open": sum(1 for h in canon.hypotheses.values() if h.status == "open"),

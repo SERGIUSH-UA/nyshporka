@@ -87,3 +87,71 @@ def test_without_canon_the_answer_says_so(space: Path) -> None:  # noqa: F811
                    for w in env.warnings), name
     assert O.call("canon.cards", {}).data["rows"] == []
     assert O.call("canon.next", {}).data["next"] == []
+
+
+# ── канон у пам'яті консолі ──────────────────────────────────────────────────
+def _age(root: Path, seconds: float = 60) -> None:
+    """Канон «відстоявся»: усі файли змінено хвилину тому."""
+    import os
+    import time
+
+    old = time.time() - seconds
+    for f in (root / "data").rglob("*"):
+        if f.is_file():
+            os.utime(f, (old, old))
+
+
+def _counting(monkeypatch, memo, name: str) -> list[int]:  # type: ignore[no-untyped-def]
+    calls: list[int] = []
+    real = getattr(memo, name)
+
+    def wrapped(*a, **kw):  # type: ignore[no-untyped-def]
+        calls.append(1)
+        return real(*a, **kw)
+    monkeypatch.setattr(memo, name, wrapped)
+    return calls
+
+
+def test_settled_canon_is_read_once_and_reread_after_an_edit(
+        family: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]  # noqa: F811
+    """Екран «Канон» кличе три операції, картка — ще одну; канон читається раз.
+
+    🔴 Правка картки мусить дати нове читання: кеш, що показує старе ім'я після
+    правки, гірший за повільний екран.
+    """
+    from nyshporka.canon import memo
+
+    memo.forget()
+    _canon(family)
+    _age(family)
+    loads = _counting(monkeypatch, memo, "load")
+    checks = _counting(monkeypatch, memo, "check")
+    O.call("canon.check", {})
+    O.call("canon.next", {})
+    O.call("canon.cards", {})
+    O.call("canon.card", {"id": "I9003"})
+    O.call("canon.hyps", {})
+    assert (len(checks), len(loads)) == (1, 0), "перевірка заразом кладе канон у пам'ять"
+
+    _write(family, "persons", _person("I9004", "Олексій Сидорук", "M", born="1850"))
+    _age(family, 30)
+    rows = O.call("canon.cards", {"q": "I9004"}).data["rows"]
+    assert rows[0]["title"] == "Олексій Сидорук" and len(loads) == 1
+    assert O.call("canon.card", {"id": "I9004"}).data["title"] == "Олексій Сидорук"
+    assert len(checks) == 2
+
+
+def test_freshly_edited_canon_is_not_cached(family: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]  # noqa: F811
+    """Щойно змінений канон читається щоразу: тік годинника NTFS грубий.
+
+    Дві правки однакового розміру в межах тіку дали б той самий відбиток, тож
+    кешувати можна лише те, що простояло без змін кілька секунд.
+    """
+    from nyshporka.canon import memo
+
+    memo.forget()
+    _canon(family)
+    loads = _counting(monkeypatch, memo, "load")
+    O.call("canon.cards", {})
+    O.call("canon.cards", {})
+    assert len(loads) == 2

@@ -413,9 +413,10 @@ def _state(ws: Any) -> dict[str, Any]:
     except Exception:
         out["surname"] = ""
     try:
+        from nyshporka.canon import memo
         from nyshporka.canon.next import next_decisions
 
-        nd = next_decisions(ws.root, limit=3)
+        nd = next_decisions(ws.root, limit=3, canon=memo.canon(ws.root))
         out["hypotheses"] = {k: nd[k] for k in ("open", "awaiting", "closed")}
         out["next"] = [f"{d['id']}: {d['claim']}" for d in nd["next"]]
     except Exception:

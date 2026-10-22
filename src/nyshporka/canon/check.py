@@ -22,7 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -612,26 +612,24 @@ def evidence_refs(text: str) -> set[str]:
     return {p.strip().rstrip(".,;:)»") for p in found}
 
 
-def _resolves(root: Path, p: str) -> bool:
+def _resolves(resolve: Callable[[str], Path], p: str) -> bool:
     """Чи вказує рядок на щось реальне.
 
     🔴 Спершу диск, потім здогадки: `PPR_1925-1930.pdf` — справжній файл, хоч
     і схожий на діапазон сторінок.
     """
-    from nyshporka.canon import refs as R
-
-    if R.resolve(root, p).exists():
+    if resolve(p).exists():
         return True
     # Ім'я з пробілами голий regex обрізав по першому пробілу. Приймаємо лише
     # єдиного кандидата з таким префіксом — кілька означають збіг, а не файл.
     parent, _, stem = p.rpartition("/")
-    folder = R.resolve(root, parent + "/")
+    folder = resolve(parent + "/")
     if stem and folder.is_dir() and len(list(folder.glob(stem + "*"))) == 1:
         return True
     if "," in p:
         parts = [x.strip() for x in p.split(",") if x.strip()]
         base = parts[0].rpartition("/")[0]
-        if all(R.resolve(root, x if "/" in x else f"{base}/{x}").exists() for x in parts):
+        if all(resolve(x if "/" in x else f"{base}/{x}").exists() for x in parts):
             return True
     return False
 
@@ -640,13 +638,14 @@ def _evidence(c: Canon, r: Report, hash_evidence: bool) -> None:
     from nyshporka.canon import refs as R
 
     root = c.root
+    resolve = R.resolver(root)
     for eid, path in c.files.items():
         refs = evidence_refs(path.read_text(encoding="utf-8"))
         for p in sorted(refs):
-            if len(p.split("/")) < 4 or _resolves(root, p):
+            if len(p.split("/")) < 4 or _resolves(resolve, p):
                 continue
             # Той самий шлях міг потрапити двічі: цілим і обрізаним по пробілу.
-            if any(q != p and q.startswith(p) and _resolves(root, q) for q in refs):
+            if any(q != p and q.startswith(p) and _resolves(resolve, q) for q in refs):
                 continue
             if _TEMPLATE.search(p):
                 r.add("WARN", "not_a_path", eid, f"{p}: шаблон або перелік — не шлях",
@@ -673,7 +672,7 @@ def _evidence(c: Canon, r: Report, hash_evidence: bool) -> None:
         if not isinstance(rec, dict):
             continue
         target = rec.get("secured_to") or key
-        f = R.resolve(root, target)
+        f = resolve(target)
         if not f.is_file():
             r.add("ERROR", "manifest_missing", target,
                   f"у маніфесті є, на диску немає (cited_by {rec.get('cited_by') or []})")
