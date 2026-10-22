@@ -62,6 +62,39 @@ def test_pages_load_the_fonts_before_the_tokens() -> None:
         assert html.index("/ui/fonts.css") < html.index("/ui/tokens.css"), page
 
 
+def test_controls_inherit_the_page_font() -> None:
+    """🔴 Кнопки й списки браузер набирає СВОЇМ шрифтом, а не шрифтом сторінки.
+
+    Без правила в `base.css` бічне меню, перемикач контексту й кнопки шапки
+    виходили системним Arial, хоч токени й файли були на місці (23.10.2026).
+    Рахується лише правило на САМ елемент: `:where(.pp) button` теж успадковує,
+    але тільки всередині `.pp`, а меню й шапка поза нею.
+    """
+    css = (UI / "base.css").read_text(encoding="utf-8")
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    covered: set[str] = set()
+    for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
+        if not re.search(r"font(-family)?\s*:\s*inherit", body):
+            continue
+        # Селектор ділиться за комами верхнього рівня; частина з пробілом поза
+        # дужками — нащадок, тобто правило не для всіх кнопок сторінки.
+        parts, depth, cur = [], 0, ""
+        for ch in sel.strip():
+            depth += {"(": 1, ")": -1}.get(ch, 0)
+            if ch == "," and depth == 0:
+                parts.append(cur.strip())
+                cur = ""
+            else:
+                cur += " " if ch.isspace() and depth == 0 else ch
+        parts.append(cur.strip())
+        for part in parts:
+            # `:not([type=button])` у полі вводу — не кнопка.
+            part = re.sub(r":not\([^()]*\)|\[[^\]]*\]", "", part)
+            if " " not in re.sub(r"\([^()]*\)", "", part):
+                covered |= set(re.findall(r"\b(button|select)\b", part))
+    assert covered == {"button", "select"}, f"шрифт сторінки успадковують лише: {covered}"
+
+
 def test_web_flavour_only_appends() -> None:
     """Різновид `web` — це `app` плюс хвіст, а не окрема система.
 
