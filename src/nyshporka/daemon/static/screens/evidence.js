@@ -17,6 +17,7 @@ import { esc, el, boxError, busyForm, fld, renderWarnings } from '../core/view.j
 import { ACTIONS } from '../core/registry.js';
 import { openModal } from '../core/modal.js';
 import { copyText } from '../core/bits.js';
+import { currentName } from '../core/projects.js';
 
 /** Що вікно знає про рядок: справа, скан, рядок (з одиниці), прочитання. */
 let EV = {};
@@ -37,6 +38,7 @@ export function openEvidence(seed = {}) {
   openModal({
     title: t('ev.title'),
     body: `<p class="muted">${t('ev.why')}</p>
+      ${currentName() ? `<p class="consequence">${esc(t('ev.lands').replace('{p}', currentName()))}</p>` : ''}
       ${EV.text ? `<blockquote class="mono">${v('text')}</blockquote>` : ''}
       <form data-act="ev.secure" id="ev-form">
         <div class="row">

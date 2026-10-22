@@ -48,7 +48,7 @@ SCREENS.canon = async () => {
     esc(t(`canon.kind.${k}`))}</option>`).join('')}
           </select></label>
       </div>
-      <div id="cn-list"><p class="muted">${t('common.loading')}</p></div>
+      <div id="cn-list"><p class="muted">${t('load.cards')}</p></div>
     </div>`);
   // Прийшли з позначки «уже в каноні» іншого проєкту (`?card=`): одразу
   // картка. Параметр знімається — інакше вона відкривалась би на кожному вході.

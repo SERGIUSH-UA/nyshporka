@@ -258,8 +258,9 @@ def test_every_screen_is_reachable_and_belongs_to_a_section() -> None:
     assert not (screens - order - free), \
         f"екран без кнопки: {sorted(screens - order - free)}"
     assert not (order - labels), f"кнопка без підпису: {sorted(order - labels)}"
-    assert not (order - set(S.SCREENS)), \
-        f"екран без секції: {sorted(order - set(S.SCREENS))}"
+    # Налаштування — і в меню «Сервіс», але без секції: ними секції й вмикають.
+    assert not (order - set(S.SCREENS) - S.UNGATED_SCREENS), \
+        f"екран без секції: {sorted(order - set(S.SCREENS) - S.UNGATED_SCREENS)}"
 
 
 # ── 4. екран кличе те, що існує ──────────────────────────────────────────────

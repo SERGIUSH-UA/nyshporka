@@ -23,7 +23,7 @@ import { ST } from '../core/state.js';
 import { ic, eng } from '/ui/icons.js';
 import { swapHtml, skelRows } from '/ui/dom.js';
 import { pager, step } from '/ui/pager.js';
-import { loadProjects, currentPid, projectInfo, projectChips } from '../core/projects.js';
+import { loadProjects, currentPid, projectInfo, projectChips, projectsNow } from '../core/projects.js';
 
 /** Діючий фільтр. Живе між входами на екран: повернувшись, людина бачить своє. */
 let LIB = {
@@ -104,6 +104,8 @@ async function libLoad(full = false) {
     if (n) n.innerHTML = libCount(d);
     const warn = el('lib-warn');
     if (warn) warn.innerHTML = libKeyChip() + renderWarnings(env);
+    const scope = el('lib-scope');
+    if (scope) scope.innerHTML = libScopeButtons();
     // Локальна змінна не зветься `pager`: під цим іменем уже стоїть спільна
     // смуга, і тінь мовчки перетворила б виклик на звертання до вузла DOM.
     const pg = el('lib-pager');
@@ -139,17 +141,18 @@ async function libLoad(full = false) {
         data-act="lib.filter"${LIB.curated ? ' checked' : ''}> ${t('lib.curated')}</label>
       </div>
     </details>
+    ${currentPid() ? `<div class="dash-pick lib-scope" id="lib-scope" role="group">${libScopeButtons()}</div>` : ''}
     <div id="lib-warn">${libKeyChip()}${renderWarnings(env)}</div>
     <p class="muted" id="lib-count">${libCount(d)}</p>
-    <div class="tbl-wide"><table><thead><tr>
+    <div class="tbl-wide"><table class="lib-tbl"><thead><tr>
       <th>${t('lib.col.shifra')}</th><th>${t('lib.col.title')}</th>
       <th class="num">${t('lib.col.years')}</th><th>${t('lib.col.place')}</th>
       <th class="num">${t('common.frames')}</th>
       <th title="${esc(t('lib.col.work.why'))}">${t('lib.col.work')}</th>
       <th title="${esc(t('lib.col.srch.why'))}">${esc(libSearchedHead())}</th>
-      <th>${t('lib.col.verdict')}</th><th></th></tr></thead>
+      ${isHub() ? '' : `<th>${t('lib.col.verdict')}</th>`}<th></th></tr></thead>
     <tbody id="lib-rows">${rows.map((r) => libRow(r, layers)).join('')
-      || skelRows(6, 9)}</tbody></table></div>
+      || skelRows(6, cols())}</tbody></table></div>
     <div id="lib-pager">${pager(d)}</div>`);
   _libFacets = true;
 }
@@ -163,7 +166,7 @@ async function libLoad(full = false) {
  */
 function libMoreActive() {
   return Boolean(LIB.htr || LIB.fuzzy || LIB.status || LIB.verdict
-    || LIB.curated || LIB.on_disk || LIB.searched);
+    || LIB.curated || LIB.on_disk);
 }
 
 /**
@@ -264,7 +267,7 @@ function libStageSelects(d) {
       ${Object.keys(kinds).map((k) =>
         _opt(k, t(`lib.verdict.${k}`), LIB.verdict)).join('')}
     </select>
-    ${libSearchedSelect()}`;
+`;
 }
 
 /** Ім'я проєкту вкладки для підписів «для «X»». */
@@ -274,18 +277,29 @@ function _pname() {
 }
 
 /**
- * Фільтр «прошукано для роду» — лише в проєкті: у Майстерні роду немає, і
- * сервер на нього відмовляє (`library.list searched`).
+ * Зріз роду — перемикачем над таблицею, лише в проєкті: у Майстерні роду немає,
+ * і сервер на нього відмовляє (`library.list searched`).
+ *
+ * 🔴 За замовчуванням — усі справи: вони спільні, а робота дослідника — знайти
+ * ще не прошукане; звуження за замовчуванням сховало б саме такі (рішення
+ * перекрою консолі 22.10.2026).
  */
-function libSearchedSelect() {
-  if (!currentPid()) return '';
+function libScopeButtons() {
   const p = _pname();
-  return `<select id="lib-searched" data-act="lib.filter" title="${esc(t('lib.col.srch.why'))}">
-      ${_opt('', t('lib.srch.all'), LIB.searched)}
-      ${_opt('todo', t('lib.srch.todo').replace('{p}', p), LIB.searched)}
-      ${_opt('here', t('lib.srch.here').replace('{p}', p), LIB.searched)}
-    </select>`;
+  const b = (v, label) => `<button type="button" class="${LIB.searched === v ? 'on' : ''}" data-act="lib.scope"`
+    + ` data-arg="${v}" aria-pressed="${LIB.searched === v}">${esc(label)}</button>`;
+  return b('', t('lib.scope.all')) + b('todo', t('lib.srch.todo').replace('{p}', p))
+    + b('here', t('lib.srch.here').replace('{p}', p));
 }
+
+/** Сама Майстерня без проєкту: вердиктів (вони проєктні) тут немає. */
+function isHub() {
+  const d = projectsNow();
+  return !!(d && d.hub_only && !currentPid());
+}
+
+/** Скільки колонок у таблиці — для розгорнутого рядка й скелета. */
+const cols = () => (isHub() ? 8 : 9);
 
 /**
  * «Прочитані, не прошукані» — це два фільтри: прошукане й хоч якийсь декод.
@@ -398,31 +412,37 @@ function libRow(r, layers) {
     : '';
   return `<tr class="lib-row" data-act="lib.more" data-arg="${esc(r.key)}">
     <td class="mono">${disk} ${esc(r.shifra || r.key || '')}</td>
-    <td>${esc((r.title || '').slice(0, 80))}</td>
-    <td class="num">${esc(years)}</td>
-    <td>${esc((r.place || '').slice(0, 30))}</td>
-    <td class="num">${r.frames ? esc(r.frames)
+    <td class="lib-title">${esc((r.title || '').slice(0, 80))}</td>
+    <td class="num" data-l="${esc(t('lib.col.years'))}">${esc(years)}</td>
+    <td data-l="${esc(t('lib.col.place'))}">${esc((r.place || '').slice(0, 30))}</td>
+    <td class="num" data-l="${esc(t('common.frames'))}">${r.frames ? esc(r.frames)
     : `<span class="dim" title="${esc(t('lib.noframes'))}">${
       r.state === 'archived' ? t('lib.offloaded') : '—'}</span>`}</td>
-    <td class="work">${libWork(r, layers)}</td>
-    <td>${libSearched(r)}</td>
-    <td>${v}</td>
-    <td class="acts">
-      ${r.path ? `<button class="ctl-sm" data-act="lib.frames" data-arg="${esc(r.path)}"
-        title="${esc(t('lib.act.frames'))}">${ic('image', 'ic-o ic-sm')}</button>` : ''}
-      ${r.path ? `<button class="ctl-sm" data-act="lib.read" data-arg="${esc(r.path)}"
-        title="${esc(t('lib.act.read'))}">${ic('quill', 'ic-o ic-sm')}</button>` : ''}
-      <button class="ctl-sm" data-act="lib.runs" data-arg="${esc(r.key)}"
-        title="${esc(t('lib.act.runs'))}">${ic('list', 'ic-o ic-sm')}</button>
-      <button class="ctl-sm" data-act="lib.find" data-arg="${esc(r.key)}"
-        title="${esc(t('lib.act.find'))}">${ic('search', 'ic-o ic-sm')}</button>
-      ${r.fond ? `<button class="ctl-sm" data-act="lib.opys"
-        data-arg="${esc(r.key)}"
-        title="${esc(t('lib.act.opys'))}">${ic('archive-box', 'ic-o ic-sm')}</button>` : ''}
-      <button class="ctl-sm" data-act="lib.verdict" data-arg="${esc(r.key)}"
-        title="${esc(t('lib.verdict.set'))}">${ic('pencil-line', 'ic-o ic-sm')}</button>
-    </td>
+    <td class="work" data-l="${esc(t('lib.col.work'))}">${libWork(r, layers)}</td>
+    <td data-l="${esc(t('lib.col.srch.short'))}">${libSearched(r)}</td>
+    ${isHub() ? '' : `<td>${v}</td>`}
+    <td class="acts">${libPrimary(r)}<button class="ctl-sm lib-dots" data-act="lib.more"
+      data-arg="${esc(r.key)}" title="${esc(t('lib.acts'))}" aria-label="${esc(t('lib.acts'))}">⋯</button></td>
   </tr>`;
+}
+
+/**
+ * Головна дія рядка — одна, підписана, за станом справи: непрочитану читати,
+ * прочитану й не прошукану для роду — шукати, решту — дивитись аркуші. Решта
+ * дій — у «⋯» (розгорнутий рядок, з підписами).
+ *
+ * 🔴 Доти в рядку стояли шість дрібних значків, чий зміст видно лише в
+ * підказці — тобто ніде на телефоні (оцінка консолі 22.10.2026).
+ */
+function libPrimary(r) {
+  const read = (r.htr_stage || 'none') !== 'none';
+  const mine = currentPid();
+  const btn = (act, arg, icon, label) => `<button class="ctl-sm" ${act} data-arg="${
+    esc(arg)}">${ic(icon, 'ic-sm')} ${esc(label)}</button>`;
+  if (r.path && !read) return btn('data-act="lib.read"', r.path, 'quill', t('lib.btn.read'));
+  if (read && !(mine && (r.searched_by || {})[mine])) return btn('data-act="lib.find"', r.key, 'search', t('lib.btn.find'));
+  if (r.path) return btn('data-act="lib.frames"', r.path, 'image', t('lib.btn.frames'));
+  return '';
 }
 
 /**
@@ -434,23 +454,23 @@ function libRow(r, layers) {
  * в рядку лишаються для тих, хто їх знає; тут — те саме словами.
  */
 function libMore(r) {
-  const btn = (act, arg, label) => `<button class="ctl-sm" data-act="${act}"
+  const btn = (act, arg, label) => `<button class="ctl-sm" ${act}
     data-arg="${esc(arg)}">${label}</button>`;
   const years = [r.year_from, r.year_to].filter(Boolean).join('–');
-  return `<tr class="lib-more"><td colspan="9">
+  return `<tr class="lib-more"><td colspan="${cols()}">
     <p><b>${esc(r.title || r.shifra || r.key || '')}</b>
       ${years ? `<span class="muted"> · ${esc(years)}</span>` : ''}
       ${r.place ? `<span class="muted"> · ${esc(r.place)}</span>` : ''}</p>
     <p class="muted mono">${esc(r.key || '')}${r.path ? ` · ${esc(r.path)}` : ''}</p>
     ${r.verdict_note ? `<p class="muted">${esc(r.verdict_note)}</p>` : ''}
     <p class="row-actions">
-      ${r.path ? btn('lib.frames', r.path, `${ic('image', 'ic-sm')} ${t('lib.btn.frames')}`) : ''}
-      ${r.path ? btn('lib.read', r.path, `${ic('quill', 'ic-sm')} ${t('lib.btn.read')}`) : ''}
-      ${btn('lib.runs', r.key, `${ic('list', 'ic-sm')} ${t('lib.btn.runs')}`)}
-      ${btn('lib.find', r.key, `${ic('search', 'ic-sm')} ${t('lib.btn.find')}`)}
-      ${r.fond ? btn('lib.opys', r.key, `${ic('archive-box', 'ic-sm')} ${t('lib.btn.opys')}`) : ''}
-      ${btn('lib.verdict', r.key, `${ic('pencil-line', 'ic-sm')} ${t('lib.btn.verdict')}`)}
-      ${r.path ? btn('case.edit', r.path, `${ic('page', 'ic-sm')} ${t('lib.btn.describe')}`) : ''}
+      ${r.path ? btn('data-act="lib.frames"', r.path, `${ic('image', 'ic-sm')} ${t('lib.btn.frames')}`) : ''}
+      ${r.path ? btn('data-act="lib.read"', r.path, `${ic('quill', 'ic-sm')} ${t('lib.btn.read')}`) : ''}
+      ${btn('data-act="lib.runs"', r.key, `${ic('list', 'ic-sm')} ${t('lib.btn.runs')}`)}
+      ${btn('data-act="lib.find"', r.key, `${ic('search', 'ic-sm')} ${t('lib.btn.find')}`)}
+      ${r.fond ? btn('data-act="lib.opys"', r.key, `${ic('archive-box', 'ic-sm')} ${t('lib.btn.opys')}`) : ''}
+      ${isHub() ? '' : btn('data-act="lib.verdict"', r.key, `${ic('pencil-line', 'ic-sm')} ${t('lib.btn.verdict')}`)}
+      ${r.path ? btn('data-act="case.edit"', r.path, `${ic('page', 'ic-sm')} ${t('lib.btn.describe')}`) : ''}
     </p></td></tr>`;
 }
 
@@ -478,6 +498,7 @@ function libVerdictForm(key) {
       value="${r.verdict_pages ? esc(String(r.verdict_pages)) : ''}"
       placeholder="${esc(t('lib.pages'))}"></div>
     <p class="muted">${t('lib.pages.why')}</p>
+    <p class="consequence">${esc(t('lib.verdict.lands').replace('{p}', _pname()))}</p>
     <div class="row"><input id="lv-note" value="${esc(r.verdict_note || '')}"
       placeholder="${esc(t('lib.note'))}"></div>
     <button data-act="lib.verdict.save" data-arg="${esc(key)}">${t('lib.save')}</button>
@@ -516,7 +537,8 @@ Object.assign(ACTIONS, {
       verdict: val('lib-verdict'),
       curated: !!(el('lib-curated') || {}).checked,
       on_disk: (el('lib-disk') || {}).checked ? true : null,
-      searched: val('lib-searched'),
+      // Зріз роду — перемикач над таблицею, не поле форми: лишається, яким був.
+      searched: LIB.searched,
       // 🔴 Будь-яка зміна фільтра повертає на першу сторінку: лишившись на
       // сьомій, людина побачила б порожньо й вирішила, що нічого не знайшлось.
       page: 0,
@@ -528,13 +550,21 @@ Object.assign(ACTIONS, {
   'lib.verdict': (_ev, elm) => libVerdictForm(elm.dataset.arg),
 
   /** Розгорнути чи згорнути деталі справи під її рядком. */
-  'lib.more': (_ev, elm) => {
+  /** Зріз роду: усі · прочитані й не прошукані · прошукані. */
+  'lib.scope': (_ev, elm) => {
+    LIB = { ...LIB, searched: elm.dataset.arg || '', key: '', page: 0 };
+    return libLoad(false);
+  },
+
+  'lib.more': (_ev, btn) => {
+    // Клік по рядку чи по «⋯» у ньому — деталі під цим самим рядком.
+    const elm = (btn.closest && btn.closest('tr')) || btn;
     const next = elm.nextElementSibling;
     if (next && next.classList && next.classList.contains('lib-more')) {
       next.remove();
       return undefined;
     }
-    const r = LIB_ROWS.get(elm.dataset.arg);
+    const r = LIB_ROWS.get(btn.dataset.arg);
     if (r) elm.insertAdjacentHTML('afterend', libMore(r));
     return undefined;
   },

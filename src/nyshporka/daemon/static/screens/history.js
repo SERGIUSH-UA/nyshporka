@@ -39,7 +39,7 @@ SCREENS.history = async () => {
       <div class="row"><h3>${PATH ? esc(PATH) : t('hist.all')}</h3>
         ${PATH ? `<button class="ctl-sm" data-act="hist.all">${t('hist.showall')}</button>` : ''}
         <button data-act="hist.save">${t('hist.save')}</button></div>
-      <div id="hist-log"><p class="muted">${t('common.loading')}</p></div>
+      <div id="hist-log"><p class="muted">${t('load.history')}</p></div>
     </div>`);
   await drawLog();
 };

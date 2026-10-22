@@ -917,8 +917,6 @@ details.raw pre { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--f
 .ov-feed { display: flex; gap: .7rem; padding: .35rem 0; border-bottom: 1px solid var(--line); font-size: .92rem; }
 #view .ov-link { width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line);
   border-radius: 0; background: none; padding: .35rem 0; color: inherit; font-weight: 400; }
-details.ov-ws { margin-top: .6rem; }
-details.ov-ws > summary { cursor: pointer; font-weight: 600; padding: .6rem 0; color: var(--fg-2); }
 @media (max-width: 760px) {
   .ov-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ov-cols { grid-template-columns: 1fr; }
@@ -1033,3 +1031,45 @@ button.pj-chip:hover { border-color: var(--accent); color: var(--fg); }
   #proj-box .ctx-btn { max-width: none; width: 100%; }
   .ph-row h1 { font-size: 1.4rem; }
 }
+
+/* Огляд Майстерні: головні інструменти — підписані кнопки-картки (R2). */
+.tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: .7rem; }
+#view .tools .tool { display: flex; align-items: flex-start; gap: .7rem; text-align: left; padding: .8rem .9rem;
+  background: var(--s-2); border: 1px solid var(--line-2); border-radius: var(--r-m); color: var(--fg); cursor: pointer; }
+#view .tools .tool:hover { border-color: var(--line-4); background: var(--s-3); }
+.tool .ic { flex: none; margin-top: .15rem; color: var(--accent); }
+.tool span { display: grid; gap: .15rem; }
+.tool small { color: var(--fg-3); font-size: .8rem; }
+.dash-sec h3 .aside { margin-left: auto; }
+details.pj-arch { margin-top: .4rem; }
+details.pj-arch > summary { cursor: pointer; color: var(--fg-3); padding: .4rem 0; }
+
+/* Бібліотека (R2): зріз роду перемикачем; одна підписана дія в рядку + «⋯»;
+   на телефоні — картки замість таблиці, яка горталась вбік. */
+.lib-scope { margin: .2rem 0 .6rem; }
+#view .lib-scope button.on { background: var(--accent-fill); color: var(--accent-ink);
+  border-color: var(--accent-fill); font-weight: 600; }
+.lib-tbl td.acts { white-space: nowrap; text-align: right; }
+.lib-tbl td.acts .ctl-sm { margin-left: .25rem; }
+.lib-dots { font-weight: 700; letter-spacing: .05em; }
+@media (max-width: 760px) {
+  .tbl-wide .lib-tbl { min-width: 0; }
+  .lib-tbl thead { display: none; }
+  .lib-tbl, .lib-tbl tbody, .lib-tbl tr, .lib-tbl td { display: block; width: 100%; box-sizing: border-box; }
+  .lib-tbl tr.lib-row { background: var(--s-2); border: 1px solid var(--line-2); border-radius: var(--r-m);
+    padding: .6rem .75rem; margin: 0 0 .6rem; }
+  .lib-tbl td { border: 0; padding: .1rem 0; text-align: left; }
+  .lib-tbl td.lib-title { font-weight: 600; }
+  .lib-tbl td[data-l]:empty { display: none; }
+  .lib-tbl td[data-l]::before { content: attr(data-l) ": "; color: var(--fg-4); font-size: .78rem; }
+  .lib-tbl td.acts { display: flex; gap: .4rem; justify-content: flex-start; margin-top: .45rem; }
+  .lib-tbl td.acts .ctl-sm { margin: 0; padding: 6px 12px; }
+}
+
+/* Читання (R2): чотири кроки — номер, бо це справді послідовність; рядок
+   наслідку — куди ляже прочитане. */
+.rd-step { display: flex; align-items: center; gap: .55rem; margin: 1.3rem 0 .55rem; font-size: 1.05rem; }
+.rd-n { display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%;
+  background: var(--s-4); color: var(--fg-2); font: 600 .85rem/1 var(--font-text); flex: none; }
+.consequence { margin: .2rem 0 .7rem; padding: .55rem .75rem; border-left: 3px solid var(--accent-fill);
+  background: var(--s-2); border-radius: var(--r-s); color: var(--fg-2); }

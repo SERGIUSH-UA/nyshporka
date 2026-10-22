@@ -31,7 +31,7 @@ let SECTIONS = { sections: [], screens: {}, op_screen: {}, presets: {},
 // переглянутого, а не на роботі з кандидатами (холодний прохід 07.10.2026).
 const NAV_ORDER = ['home', 'search', 'canon', 'hyp', 'research', 'profile', 'sources', 'geog', 'fonds',
   'library', 'frames', 'cases', 'read', 'queue', 'runs', 'cloud', 'view', 'sift', 'eye', 'export', 'site',
-  'history', 'give', 'pull', 'cards', 'sets', 'label', 'jobs'];
+  'history', 'give', 'pull', 'cards', 'sets', 'label', 'jobs', 'projects', 'status', 'settings'];
 
 /**
  * Екрани-кроки без власної вкладки → вкладка, яку підсвічувати.
@@ -60,7 +60,7 @@ const NAV_LABEL = {
   sets: 'nav.sets', label: 'nav.label', jobs: 'nav.jobs', queue: 'nav.queue', site: 'nav.site',
   newproject: 'nav.newproject', canon: 'nav.canon', hyp: 'nav.hyp', research: 'nav.research',
   history: 'nav.history', cloud: 'nav.cloud', give: 'nav.give', pull: 'nav.pull', cards: 'nav.cards',
-  sprofile: 'nav.sprofile', settings: 'nav.settings',
+  sprofile: 'nav.sprofile', settings: 'nav.settings', projects: 'nav.projects', status: 'nav.status',
 };
 
 /** Чи ввімкнена секція цього екрана. Невідомий екран не блокуємо. */

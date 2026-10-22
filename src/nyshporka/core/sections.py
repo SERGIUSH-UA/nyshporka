@@ -151,6 +151,10 @@ SCREENS: dict[str, str] = {
     # Новий проєкт — вікно з Огляду Майстерні (`SCREEN_ACTION`), не вкладка.
     "newproject": "core",
     "jobs": "core",
+    # Перелік проєктів Майстерні й діагностика (реєстр, читання, диск), що
+    # переїхала з Огляду: Огляд — про продовження роботи, а не про цифри.
+    "projects": "core",
+    "status": "core",
     # 🔴 «Рід» у `core`, а не в «Дослідженні»: він вирішує, як працює пошук,
     # і замкнути його всередині секції, яку вимикають, означало б «увімкни
     # частину застосунку, щоб налаштувати те, від чого вона залежить».
@@ -243,13 +247,13 @@ NAV_GROUPS: tuple[NavGroup, ...] = (
     NavGroup("project", "Рід", "Family",
              ("home", "canon", "hyp", "sift", "research", "history", "site", "profile"),
              block="own", fold=False),
-    NavGroup("hub", "Майстерня", "Workshop", ("home",), block="hub", fold=False),
+    NavGroup("hub", "Майстерня", "Workshop", ("home", "projects"), block="hub", fold=False),
     NavGroup("material", "Матеріали", "Materials",
              ("library", "cases", "frames", "sources", "geog", "fonds")),
     NavGroup("reading", "Читання", "Reading", ("read", "queue", "runs", "cloud", "view")),
     NavGroup("search", "Пошук", "Search", ("search", "eye")),
     NavGroup("share", "Супряга", "Commons", ("give", "pull", "cards")),
-    NavGroup("service", "Сервіс", "Service", ("jobs", "export", "settings"),
+    NavGroup("service", "Сервіс", "Service", ("jobs", "status", "export", "settings"),
              block="service", fold=False),
     NavGroup("lab", "Лабораторія", "Lab", ("sets", "label"), block="service"),
 )
@@ -268,7 +272,7 @@ LAYERS: dict[str, str] = {
     **dict.fromkeys(PROJECT_SCREENS, "own"),
     "home": "context",
     **dict.fromkeys(("library", "search", "eye"), "mixed"),
-    **dict.fromkeys(("sources", "geog", "fonds", "cases", "newcase", "frames", "read",
+    **dict.fromkeys(("projects", "status", "sources", "geog", "fonds", "cases", "newcase", "frames", "read",
                      "queue", "runs", "cloud", "view", "export", "give", "pull", "cards",
                      "sprofile"), "shared"),
     **dict.fromkeys(("jobs", "sets", "label", "settings", "newproject"), "service"),
@@ -280,7 +284,7 @@ LAYERS: dict[str, str] = {
 #: 21.10.2026). Місце — сторінки, де з'являється матеріал. «Новий проєкт» —
 #: лише в Майстерні без проєкту (вирішує консоль).
 SCREEN_ACTION: dict[str, str] = {"library": "newcase", "cases": "newcase",
-                                 "home": "newproject"}
+                                 "home": "newproject", "projects": "newproject"}
 
 
 def group_of(screen: str) -> str | None:
@@ -314,7 +318,7 @@ OP_SCREEN: dict[str, str] = {
     "workspace.info": "home",
     # Проєкти Майстерні: новий — вікном, перелік — картками на Огляді.
     "project.new": "newproject",
-    "project.list": "home",
+    "project.list": "projects",
     "project.style": "home",
     # Огляд проєкту стоїть на «що вирішити».
     "canon.next": "home",

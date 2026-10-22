@@ -18,7 +18,7 @@ import { SCREENS, ACTIONS } from '../core/registry.js';
 import { show, jobDone, jobChip } from '../core/nav.js';
 import { openModal, confirmAct, modalSeq } from '../core/modal.js';
 import { kv, pill, dayOf } from '../core/bits.js';
-import { loadProjects, projectCount, projectChip } from '../core/projects.js';
+import { loadProjects, projectCount, projectChip, currentName, projectInfo } from '../core/projects.js';
 
 const FINAL = ['done', 'failed'];
 const money = (v) => (v === null || v === undefined ? '—' : `$${Number(v).toFixed(2)}`);
@@ -140,12 +140,20 @@ export async function openCloudGo(caseRef, script = '', forArgs = {}) {
     [t('cloud.hours'), esc(est.hours || g.max_hours || '')],
     [t('cloud.decision'), esc(LAUNCHES.includes(g.launch) ? t(`cloud.launch.${g.launch}`) : t('cloud.launch.unknown'))]])}
     ${(g.notes || []).length ? `<ul>${g.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}
+    <p class="consequence">${esc(t('read.lands').replace('{p}', orderedBy(forArgs)))}</p>
     <div class="row dlg-acts">
       ${canRun(g.launch) ? `<button class="primary" data-act="cloud.run">${t('cloud.run')}</button>` : ''}
       <button class="ghost" data-act="modal.close">${t('modal.no')}</button></div>`;
   // Без відомого рішення сервера кнопки запуску немає: вигадане «можна» тут
   // показало б людині рішення, якого ніхто не ухвалював.
   GO = canRun(g.launch) ? { caseRef, script, launch: g.launch, fork, forArgs } : null;
+}
+
+/** Чий підпис ляже на хмарний прогін: вибір «Для кого» або проєкт вкладки. */
+function orderedBy(forArgs = {}) {
+  if (!Object.hasOwn(forArgs || {}, 'for_project')) return currentName() || t('read.for.hub');
+  const p = forArgs.for_project ? projectInfo(forArgs.for_project) : null;
+  return p ? (p.name || p.id) : t('read.for.hub');
 }
 
 const LAUNCHES = ['ok', 'needs_confirm', 'no_credit'];

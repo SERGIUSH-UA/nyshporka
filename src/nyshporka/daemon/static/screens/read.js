@@ -12,7 +12,7 @@ import { ic, eng } from '/ui/icons.js';
 import { attachCombobox } from '/ui/combobox.js';
 import { pathField } from '../core/paths.js';
 import { openCloudGo } from './cloud.js';
-import { loadProjects, projectsNow, currentPid, projectChip } from '../core/projects.js';
+import { loadProjects, projectsNow, currentPid, projectChip, projectInfo } from '../core/projects.js';
 
 /** Тека, для якої показана картка. Живе між входами: справа не міняється. */
 let RD = { case_dir: '', script: '', card: null };
@@ -43,6 +43,7 @@ SCREENS.read = async () => {
   ST.read = null;
   setView(`
     <p class="muted">${t('read.why')}</p>
+    ${stepHead(1, 'read.step.case')}
     <form class="row" data-act="read.pick">
       ${pathField({ name: 'case_dir', mode: 'dir', purpose: 'read.case_dir',
         value: RD.case_dir, ph: t('read.dir'), autofocus: !RD.case_dir })}
@@ -92,7 +93,7 @@ async function readCases() {
 async function readCard() {
   const box = el('card');
   if (!box) return;
-  box.innerHTML = `<p class="muted">${t('common.loading')}</p>`;
+  box.innerHTML = `<p class="muted">${t('load.card')}</p>`;
   const env = await callOp('htr.case_info',
     { case_dir: RD.case_dir, script: RD.script });
   if (!env.ok) return boxError('card', env);
@@ -111,8 +112,6 @@ async function readCard() {
       <tr><td>${t('read.done')}</td><td>${coverCell(c)}</td></tr>
     </tbody></table>
     ${renderWarnings(env)}
-    ${c.frames ? `<p class="row"><button data-act="read.cloud" title="${esc(t('read.cloud.why'))}">${
-  t('read.cloud')}</button><span class="muted">${t('read.cloud.why')}</span></p>` : ''}
     <div id="read-now"></div>
     <div id="read-form">${readForm(c)}</div>`;
   await readNow();
@@ -311,7 +310,7 @@ function readForm(c) {
   const prev = RD.prev || null;
   const second = prev ? prev.second : true;
   const alsoLatin = prev ? prev.latin : c.script === 'mixed';
-  return `<form data-act="read.plan">
+  return `${stepHead(2, 'read.step.how')}<form data-act="read.plan">
     ${prev ? `<p class="muted">${t('read.change.why')}</p>` : ''}
     ${c.script === 'latin' ? '' : `<div class="row">
       <label><input type="checkbox" name="second_voice" value="1"${second ? ' checked' : ''}>
@@ -324,7 +323,7 @@ function readForm(c) {
       <span class="muted">${t('read.also.why')}</span>
     </div>`}
     ${forField()}
-    <details><summary>${t('read.expert')}</summary>
+    <details id="rd-expert" data-act="read.expert"${expertOpen() ? ' open' : ''}><summary>${t('read.expert')}</summary>
       <div class="row">
         <label class="lbl-mini">${t('read.limit')}
           <input name="limit" size="6" placeholder="0"></label>
@@ -363,7 +362,7 @@ function readForm(c) {
  * (холодний прохід 07.10.2026). Тепер кожен запуск спершу показує план.
  */
 async function showPlan() {
-  el('hits').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
+  el('hits').innerHTML = `<p class="muted">${t('load.plan')}</p>`;
   const env = await callOp('read.plan', RD.args);
   if (!env.ok) return boxError('hits', env);
   const p = env.data.plan || {};
@@ -380,6 +379,7 @@ async function showPlan() {
   RD.nothing = nothing;
   const go = !nothing || (RD.extra || []).length;
   el('hits').innerHTML = `
+    ${stepHead(3, 'read.step.check')}
     ${renderWarnings(env)}
     <table><tbody>
       <tr><td>${t('read.frames')}</td><td class="num">${esc(p.frames)}</td></tr>
@@ -388,19 +388,51 @@ async function showPlan() {
       ${(p.voices || []).length
   ? `<tr><td>${t('read.voice')}</td><td>${p.voices.map(modelLabel).join(' + ')}</td></tr>`
   : ''}
-      <tr><td>→</td><td class="mono">${esc(p.out_dir)}</td></tr>
       ${forRow()}
       ${(RD.extra || []).length ? `<tr><td>${t('read.voice')}</td><td>
         ${RD.extra.map(modelLabel).join(' + ')}
         <span class="muted">— ${t('read.extra.why')}</span></td></tr>` : ''}
     </tbody></table>
-    ${go ? `<button id="read-go" data-act="read.go">${t('read.go')}</button>` : ''}
+    <details class="raw"><summary>${t('read.details')}</summary>
+      <p class="mono">→ ${esc(p.out_dir)}</p></details>
+    ${stepHead(4, 'read.step.go')}
+    <p class="consequence">${esc(landsLine())}</p>
+    <div class="row">
+      ${go ? `<button id="read-go" class="primary" data-act="read.go">${t('read.go')}</button>` : ''}
+      ${(RD.card || {}).frames ? `<button data-act="read.cloud" title="${esc(t('read.cloud.why'))}">${
+  t('read.cloud')}</button><span class="muted">${t('read.cloud.why')}</span>` : ''}
+    </div>
     ${reread ? `<button data-act="read.addvoice" data-arg="${esc(model)}">${
       t('read.reread')} ${esc(model)}</button>` : ''}`;
   // Кнопка «Читати» буває нижче краю екрана — показати її, а не ховати.
   const goBtn = el('read-go');
   if (goBtn && goBtn.scrollIntoView) goBtn.scrollIntoView({ block: 'nearest' });
   return undefined;
+}
+
+/** Заголовок кроку читання: номер — бо це справді послідовність. */
+function stepHead(n, key) {
+  return `<h3 class="rd-step"><span class="rd-n">${n}</span>${esc(t(key))}</h3>`;
+}
+
+/**
+ * Рядок наслідку: куди ляже прочитане і з чиїм підписом.
+ *
+ * 🔴 Прочитане лягає в спільний матеріал Майстерні, а рід — лише підпис
+ * замовника. «Результат буде додано до роду» (зовнішній макет) було б
+ * неправдою: шукати в прочитаному зможуть усі проєкти.
+ */
+function landsLine() {
+  const v = RD.forProject ?? currentPid();
+  const p = v && v !== FOR_HUB ? projectInfo(v) : null;
+  const who = p ? (p.name || p.id) : t('read.for.hub');
+  return t('read.lands').replace('{p}', who);
+}
+
+/** «Для досвідчених» — розкрите чи ні, пам'ять вкладки. */
+const EXPERT_KEY = 'nysh.read.expert';
+function expertOpen() {
+  try { return localStorage.getItem(EXPERT_KEY) === '1'; } catch { return false; }
 }
 
 /** Модель людською мовою: «Писар · pysar_cyr_v19.pt». */
@@ -412,6 +444,14 @@ function modelLabel(path) {
 }
 
 Object.assign(ACTIONS, {
+  /** Розкрили чи згорнули «Для досвідчених» — запам'ятати для наступного разу. */
+  'read.expert': (_ev, elm) => {
+    // Клік по підпису перемикає `open` уже після події: читаємо на наступному кроці.
+    setTimeout(() => {
+      try { localStorage.setItem(EXPERT_KEY, elm.open ? '1' : '0'); } catch { /* приватний режим */ }
+    }, 0);
+  },
+
   /** Велика справа — у хмару: вікно з кошторисом, оренда лише після «так». */
   // Письмо — те, що людина вибрала тут: інакше кошторис відмовляв «вкажіть
   // письмо», хоч його щойно вказали.

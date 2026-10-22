@@ -66,11 +66,13 @@ SCREENS.newproject = async () => {
  * виразний предмет (тло, тінь, смуга кольору проєкту): до 7в вона зливалась із
  * дашбордом під нею, і проєкти не читались як вхід.
  */
-export async function projectCards() {
+export async function projectCards({ limit = 0, all = false } = {}) {
   const env = await callOp('project.list', {});
   if (!env.ok) return '';
-  const list = ((env.data || {}).projects || []).filter((p) => !p.archived);
-  const cards = list.map((p) => {
+  const every = (env.data || {}).projects || [];
+  const live = every.filter((p) => !p.archived);
+  const shown = limit ? live.slice(0, limit) : live;
+  const card = (p) => {
     const h = p.hypotheses || {};
     const open = (h.open || 0) + (h.awaiting || 0);
     const color = projectColor(p) ? ` style="--pj:${esc(p.color)}"` : '';
@@ -83,13 +85,20 @@ export async function projectCards() {
       </span>
       <span class="pj-go">${t('project.open')} →</span>
     </button>`;
-  }).join('');
-  return `<section class="hub-projects"><h2>${t('project.cards')}</h2>
+  };
+  const cards = shown.map(card).join('');
+  // На Огляді — кілька проєктів і «Усі проєкти»; на екрані «Проєкти» — усі й архівні.
+  const more = limit && live.length > limit
+    ? `<p><button class="ghost" data-act="nav" data-arg="projects">${t('home.allprojects')} (${live.length}) →</button></p>` : '';
+  const archived = all ? every.filter((p) => p.archived) : [];
+  const arch = archived.length ? `<details class="pj-arch"><summary>${t('projects.archived')} (${archived.length})</summary>
+    <div class="pj-cards">${archived.map(card).join('')}</div></details>` : '';
+  return `<section class="hub-projects">${all ? '' : `<h2>${t('home.continue')}</h2>`}
     <div class="pj-cards">${cards}
       <button class="pj-card pj-new" data-act="nav" data-arg="newproject">
         <span class="pj-top"><span class="pj-badge">+</span><b>${t('stage.act.newproject')}</b></span>
         <small class="muted">${t('np.why')}</small></button>
-    </div></section>`;
+    </div>${more}${arch}</section>`;
 }
 
 /** Проєкт, на верх якого дивимось: стиль змінюється саме йому. */
@@ -99,7 +108,7 @@ let HEAD = null;
 function kpi(id, label, nav) {
   return `<button class="ov-kpi" id="${id}" data-act="nav" data-arg="${nav}">
     <span class="ov-kpi-l">${esc(label)}</span>
-    <span class="ov-kpi-v"><span class="muted ov-wait">${t('common.loading')}</span></span>
+    <span class="ov-kpi-v"><span class="muted ov-wait">${t('load.count')}</span></span>
     <span class="ov-kpi-s"></span></button>`;
 }
 
