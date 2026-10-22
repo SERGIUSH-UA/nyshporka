@@ -113,7 +113,12 @@ def _protsesy(jobs: int) -> Executor:
                                initargs=(workspace(), ctx.BoundedSemaphore(PUBLISH_SLOTS)))
 
 
-def _zalyty(path: str, row: Row, private_ok: bool = False) -> Any:
+#: Службове поле справи пачки: причина заміни свого чинного внеску
+#: (`share push --replace-own`). У `share.pack` не їде — лише в заливку.
+REPLACE_WHY = "_replace_why"
+
+
+def _zalyty(path: str, row: Row, private_ok: bool = False, replace_why: str = "") -> Any:
     """`share.publish` у слоті заливки; на 429 — пауза й ще раз (`CHEKATY`).
 
     🔴 Покроковий хід заливки («заливаю текст…», «етапи: …») тут глушиться:
@@ -124,7 +129,9 @@ def _zalyty(path: str, row: Row, private_ok: bool = False) -> Any:
 
     for pauza in (*CHEKATY, None):
         with _SLOTY if _SLOTY is not None else contextlib.nullcontext(),                 contextlib.redirect_stderr(io.StringIO()):
-            viddano = O.call("share.publish", {"path": path, "private_ok": private_ok})
+            viddano = O.call("share.publish", {
+                "path": path, "private_ok": private_ok,
+                **({"replace_own": True, "why": replace_why} if replace_why else {})})
         if viddano.ok or not (viddano.data or {}).get("rate_limited") or pauza is None:
             return viddano
         # Повтор безпечний: пул упізнає той самий зміст і не заведе другий внесок.
@@ -178,7 +185,7 @@ def odna(item: Item, notes: bool = False) -> Row:
     row: Row = {"case": str(item.get("case") or ""), "ok": False, "stage": PACK,
                 "warnings": []}
     try:
-        spakovano = O.call("share.pack", dict(item))
+        spakovano = O.call("share.pack", {k: v for k, v in item.items() if k != REPLACE_WHY})
         row["warnings"] += [w.as_dict() for w in spakovano.warnings]
         if not spakovano.ok:
             row["error"] = spakovano.error
@@ -190,7 +197,8 @@ def odna(item: Item, notes: bool = False) -> Row:
         row["path"] = str(d.get("path") or d.get("dir") or "")
         row["stage"] = PUBLISH
         # Рішення автора про приватну справу, дане на пакування, діє й на заливку.
-        viddano = _zalyty(row["path"], row, bool(item.get("private_ok")))
+        viddano = _zalyty(row["path"], row, bool(item.get("private_ok")),
+                          str(item.get(REPLACE_WHY) or ""))
         row["warnings"] += [w.as_dict() for w in viddano.warnings]
         v = viddano.data or {}
         if not viddano.ok:

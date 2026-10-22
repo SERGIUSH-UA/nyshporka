@@ -177,16 +177,20 @@ def _request(method: str, url: str, *, body: Any = None, auth: str = "") -> dict
     return got
 
 
-def _adresa_reiestratsii(home: str, replaces: int | None, why: str) -> str:
+def _adresa_reiestratsii(home: str, replaces: int | None, why: str,
+                         replace_own: bool = False) -> str:
     """Адреса реєстрації; заміна власного внеску — параметрами запиту.
 
     Параметри, а не поле маніфесту: маніфест — знімок того, що приїхало, і
     сервер зберігає його доказом, а заміна — намір видавця на цей раз.
+    `replace_own` — номер свого чинного внеску в тій самій книзі знаходить пул.
     """
-    if replaces is None:
-        return f"{home}/contributions"
     from urllib.parse import urlencode
 
+    if replace_own:
+        return f"{home}/contributions?" + urlencode({"replace_own": "true", "why": why})
+    if replaces is None:
+        return f"{home}/contributions"
     return f"{home}/contributions?" + urlencode({"replaces": int(replaces), "why": why})
 
 
@@ -244,24 +248,67 @@ def _z_chekanniam(tekst: str, retry_after: float | None) -> str:
 def publish(path: Path, *, base: str = "", auth: str = "",
             say: Callable[[str], None] | None = None,
             replaces: int | None = None, why: str = "",
-            private_ok: bool = False) -> dict[str, Any]:
+            private_ok: bool = False, replace_own: bool = False) -> dict[str, Any]:
     """Див. `_publish`; тут — хронометраж етапів у відповіді й у відмові."""
     etapy = _Etapy()
     try:
         got = _publish(path, base=base, auth=auth, say=say, etapy=etapy,
-                       replaces=replaces, why=why, private_ok=private_ok)
+                       replaces=replaces, why=why, private_ok=private_ok,
+                       replace_own=replace_own)
     except UploadError as exc:
         exc.etapy = etapy.rows
         raise
     if etapy.rows:
         _tykhyi(say)(f"етапи: {etapy.summary()}")
+    _zapamiataty(Path(path), got)
     return {**got, "etapy": etapy.rows}
+
+
+def _zapamiataty(path: Path, got: dict[str, Any]) -> None:
+    """Номер внеску — у журнал обміну, щоб `--replaces` було звідки взяти.
+
+    🔴 Доти номер друкувався один раз і зникав разом із терміналом: людина,
+    що перечитала справи, не мала де його знайти й віддала перечитане новими
+    внесками поруч зі старими (лист 20.10.2026). Журнал — не стан пулу
+    (`share list --mine` питає пул), а слід того, що віддала ця машина.
+    """
+    vnesok = got.get("contribution")
+    if not vnesok or got.get("outcome") not in (VIDDANO, VZHE_Ye):
+        return
+    import contextlib
+
+    from nyshporka.share import bundle, journal
+
+    case: dict[str, Any] = {}
+    with contextlib.suppress(Exception):
+        case = dict(getattr(bundle.read_manifest(path), "case", None) or {})
+    # Журнал — слід, а не умова заливки: внесок уже в пулі.
+    with contextlib.suppress(Exception):
+        journal.record(journal.PUBLISHED, contribution=int(vnesok),
+                       outcome=got.get("outcome"), book=got.get("book"),
+                       shifra=got.get("shifra") or case.get("shifra"),
+                       case_key=case.get("key_local"), replaces=got.get("replaces"),
+                       file=path.name)
+
+
+def mine(*, base: str = "") -> list[dict[str, Any]]:
+    """Власні внески людини в пулі, новіші першими (`GET /contributions/mine`)."""
+    tok, home = _tok_i_dim(base)
+    out: list[dict[str, Any]] = []
+    before: int | None = None
+    while True:
+        url = f"{home}/contributions/mine" + (f"?before={before}" if before else "")
+        got = _request("GET", url, auth=tok)
+        out += [i for i in got.get("items") or [] if isinstance(i, dict)]
+        before = got.get("next_before")
+        if not before:
+            return out
 
 
 def _publish(path: Path, *, base: str, auth: str,
              say: Callable[[str], None] | None, etapy: _Etapy,
              replaces: int | None = None, why: str = "",
-             private_ok: bool = False) -> dict[str, Any]:
+             private_ok: bool = False, replace_own: bool = False) -> dict[str, Any]:
     """Віддати зібраний пакет у пул.
 
     Повертає відповідь сервера. Повторний виклик із тим самим змістом
@@ -318,7 +365,7 @@ def _publish(path: Path, *, base: str, auth: str,
                               klas="private")
 
     with etapy("register"):
-        got = _request("POST", _adresa_reiestratsii(home, replaces, why),
+        got = _request("POST", _adresa_reiestratsii(home, replaces, why, replace_own),
                        body=manifest.as_json(), auth=tok)
     if got.get("duplicate"):
         if got.get("rejudge") and got.get("contribution"):

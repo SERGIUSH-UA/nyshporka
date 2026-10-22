@@ -646,6 +646,9 @@ class SharePublishArgs(BaseModel):
     replaces: int | None = Field(default=None,
                                  description="номер власного внеску, який цей заступить")
     why: str = Field(default="", description="чому заміна — побачить модератор")
+    replace_own: bool = Field(default=False,
+                              description="заступити свій чинний внесок у тій самій "
+                                          "справі — номер знайде пул (з why)")
     private_ok: bool = Field(default=False, description=PRIVATE_OK)
 
 
@@ -687,13 +690,16 @@ def share_publish(a: SharePublishArgs) -> Envelope:
     if Path(a.path).is_dir():
         return _publish_segments(Path(a.path), a, _khid)
     try:
-        if a.replaces is not None and not a.why.strip():
+        if a.replaces is not None and a.replace_own:
+            return fail("або --replaces <номер>, або --replace-own — не разом")
+        if (a.replaces is not None or a.replace_own) and not a.why.strip():
             return fail("заміна без причини не приймається: додайте --why «чому»")
         if len(a.why.strip()) > MAX_WHY_ZAMINY:
             # Причина заміни їде в адресі запиту, а довгу адресу проксі ріже (414).
             return fail(f"причина заміни — до {MAX_WHY_ZAMINY} знаків; скоротіть --why")
         got = publish(Path(a.path), base=a.base, say=_khid,
-                      replaces=a.replaces, why=a.why.strip(), private_ok=a.private_ok)
+                      replaces=a.replaces, why=a.why.strip(), private_ok=a.private_ok,
+                      replace_own=a.replace_own)
     except UploadError as exc:
         env = fail(str(exc))
         if exc.klas == "private":
@@ -756,6 +762,8 @@ def _publish_segments(teka: Any, a: SharePublishArgs, say: Any) -> Envelope:
     from nyshporka.share import bundle
     from nyshporka.share.upload import UploadError, publish
 
+    # `replace_own` сегментам не потрібен: сегмент і так заміняється новим
+    # пакуванням тієї самої справи, тож у пачці він просто не діє.
     if a.replaces is not None:
         return fail("--replaces стосується одного внеску; сегмент замінюється "
                     "новим пакуванням тієї самої справи")
@@ -796,6 +804,10 @@ class SharePushArgs(BaseModel):
                                                   "просить пул, і віддавати далі, а не "
                                                   "зупиняти пачку")
     private_ok: bool = Field(default=False, description=PRIVATE_OK + "; на всю пачку")
+    replace_own: bool = Field(default=False,
+                              description="кожна справа заступає свій чинний внесок у "
+                                          "тій самій справі, якщо він є (з why)")
+    why: str = Field(default="", description="чому заміна — для replace_own")
 
 
 def _push_from_file(path: str) -> list[dict[str, Any]]:
@@ -872,6 +884,10 @@ def share_push(a: SharePushArgs) -> Envelope:
     from nyshporka.share import suggest as S
     from nyshporka.share.upload import ENV_NAME, token
 
+    if a.replace_own and not a.why.strip():
+        return fail("заміна без причини не приймається: додайте --why «чому»")
+    if len(a.why.strip()) > MAX_WHY_ZAMINY:
+        return fail(f"причина заміни — до {MAX_WHY_ZAMINY} знаків; скоротіть --why")
     try:
         items: list[dict[str, Any]] = [{"case": c} for c in a.cases if c.strip()]
         if a.from_file:
@@ -916,7 +932,8 @@ def share_push(a: SharePushArgs) -> Envelope:
         if key in seen:
             continue
         seen.add(key)
-        cherha.append({**item, "private_ok": bool(item.get("private_ok") or a.private_ok)})
+        cherha.append({**item, "private_ok": bool(item.get("private_ok") or a.private_ok),
+                       **({B.REPLACE_WHY: a.why.strip()} if a.replace_own else {})})
 
     # 🔒 Приватні справи — теж до першої заливки, усім переліком: пачка, що
     # зупинилась на сотій справі, лишилась би наполовину відданою.
@@ -1276,7 +1293,9 @@ def share_list(a: ShareListArgs) -> Envelope:
     want = (a.what or "all").strip().lower()
     if want not in ("all", "mine", "shared"):
         return fail("what приймає: all, mine, shared")
-    event = {"mine": journal.PACKED, "shared": journal.IMPORTED}.get(want, "")
+    if want == "mine":
+        return _share_list_mine()
+    event = {"shared": journal.IMPORTED}.get(want, "")
     rows = journal.read(event)
     if not event:
         # 🔴 «Усе» — це весь ОБМІН, а не весь журнал. Відмова «цю не віддам»
@@ -1284,6 +1303,47 @@ def share_list(a: ShareListArgs) -> Envelope:
         rows = [r for r in rows if r.get("event") in journal.EXCHANGE]
     return ok({"rows": rows, "count": len(rows),
                "journal": str(journal.journal_path())})
+
+
+def _share_list_mine() -> Envelope:
+    """Свої внески — з пулу, з номерами; без пулу — журнал цієї машини.
+
+    🔴 Номер внеску потрібен для `--replaces` і `withdraw`, а журнал його не
+    знав: рядок `pack` пишеться до заливки. Людина, що перечитала справи, не
+    мала де номер узяти й віддала перечитане новими внесками поруч зі старими
+    (лист 20.10.2026). Пул знає всі свої внески людини — і з інших машин.
+    """
+    from nyshporka.share import journal
+    from nyshporka.share.upload import UploadError, mine
+
+    try:
+        items = mine()
+    except (UploadError, OSError) as exc:
+        rows = journal.read(journal.PACKED)
+        env = ok({"rows": rows, "count": len(rows), "source": "journal",
+                  "journal": str(journal.journal_path())})
+        env.warn("pool_unreachable",
+                 f"пул не відповів ({exc}) — нижче лише журнал цієї машини: що "
+                 f"спаковано, без номерів внесків і без стану в пулі")
+        return env
+    newest: dict[str, int] = {}
+    for it in items:                    # новіші першими: перший чинний — найновіший
+        if it.get("state") == "chynnyi":
+            newest.setdefault(str(it.get("book") or ""), int(it["id"]))
+    dubli = 0
+    for it in items:
+        top = newest.get(str(it.get("book") or ""))
+        if it.get("state") == "chynnyi" and top and top != it["id"]:
+            it["duplicate_of"] = top
+            dubli += 1
+    env = ok({"rows": items, "count": len(items), "source": "pool",
+              "duplicates": dubli})
+    if dubli:
+        env.warn("duplicates",
+                 f"{dubli} старих внесків стоять у пулі поруч із новішими на ту саму "
+                 f"справу (позначка «дубль»). Прибрати: nysh share withdraw <номер> "
+                 f"--why «перечитано, новий внесок N»")
+    return env
 
 
 class ShareStatsArgs(BaseModel):

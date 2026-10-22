@@ -375,6 +375,14 @@ def resolve_case(arg: str, on_line: Any = None, *, dry: bool = False) -> CaseRef
 
     index = _index()
     found = str((index.canonical(arg) if index is not None else "") or "")
+    if not found and index is not None:
+        # Людська шифра («ДАДнО R-1234-15-20», «ДАХмО ф.315 оп.1 спр.8433») —
+        # тим самим розбором, що й `nysh cases list`: `canonical` знає лише
+        # ключ, і справа, яку реєстр бачить, тут лишалась «невідомою».
+        from nyshporka.cases.resolve import normalize_key
+
+        made, _why = normalize_key(arg)
+        found = str((index.canonical(made) if made else "") or "")
     if not found:
         raise GoRefused(
             f"«{arg}»: ні теки з таким шляхом, ні справи з такою шифрою в "

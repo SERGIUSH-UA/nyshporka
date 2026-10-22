@@ -613,7 +613,11 @@ def publish_cmd(
     replaces: int | None = typer.Option(
         None, "--replaces",
         help="номер СВОГО внеску в тій самій справі, який цей заступить"),
-    why: str = typer.Option("", "--why", help="чому заміна (обов'язково з --replaces)"),
+    why: str = typer.Option("", "--why", help="чому заміна (обов'язково з --replaces "
+                                              "і --replace-own)"),
+    replace_own: bool = typer.Option(
+        False, "--replace-own",
+        help="заступити свій чинний внесок у тій самій справі — номер знайде пул"),
     private_ok: bool = typer.Option(False, "--private-ok", help=_PRIVATE_OK_HELP),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
@@ -627,6 +631,8 @@ def publish_cmd(
     `--replaces N` — нова версія власного внеску N (перечитано новою моделлю,
     виправлено): старий зникає з каталогу лише після того, як новий
     прийнято. Хибна шифра заміною не виправляється — `share withdraw`.
+    Номер свого внеску — `nysh share list --mine`; `--replace-own` знаходить
+    його сам.
     """
     from nyshporka import ops as O
     from nyshporka.share.upload import OUTCOME_TEXT, VIDDANO, VZHE_Ye
@@ -634,6 +640,7 @@ def publish_cmd(
     _kliuch_abo_vkhid(as_json)
     env = O.call("share.publish", {"path": path, "base": base,
                                    "replaces": replaces, "why": why,
+                                   "replace_own": replace_own,
                                    "private_ok": private_ok})
     if _answer(env, as_json):
         return
@@ -681,6 +688,11 @@ def push_cmd(
                                    "і віддавати далі — для заливки сотень справ без нагляду"),
     private_ok: bool = typer.Option(False, "--private-ok",
                                     help=_PRIVATE_OK_HELP + "; на всю пачку"),
+    replace_own: bool = typer.Option(
+        False, "--replace-own",
+        help="перечитане заступає свій чинний внесок у тій самій справі, а не стає "
+             "поруч (з --why)"),
+    why: str = typer.Option("", "--why", help="чому заміна (з --replace-own)"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Віддати пачку справ: кожну спакувати й залити, кілька одночасно.
@@ -695,7 +707,8 @@ def push_cmd(
     _kliuch_abo_vkhid(as_json)
     env = O.call("share.push", {"cases": list(cases or []), "ready": ready,
                                 "from_file": from_file, "jobs": jobs, "notes": notes,
-                                "wait": wait, "private_ok": private_ok})
+                                "wait": wait, "private_ok": private_ok,
+                                "replace_own": replace_own, "why": why})
     if _answer(env, as_json):
         return
     d = env.data or {}
@@ -1038,7 +1051,9 @@ def pull_cmd(
 
 @app.command("list")
 def list_cmd(
-    mine: bool = typer.Option(False, "--mine", help="лише спаковане мною"),
+    mine: bool = typer.Option(False, "--mine",
+                              help="мої внески в пулі: номери (для --replaces і "
+                                   "withdraw), стан, дублі"),
     shared: bool = typer.Option(False, "--shared", help="лише прийняте"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
@@ -1051,6 +1066,10 @@ def list_cmd(
         return
     d = env.data or {}
     rows = d.get("rows") or []
+    if d.get("source") == "pool":
+        _list_mine(rows)
+        _notes(env)
+        return
     if not rows:
         console.print("журнал порожній — нічого ще не пакували й не приймали")
         _notes(env)
@@ -1066,6 +1085,27 @@ def list_cmd(
     if len(rows) > 40:
         console.print(f"[dim]… і ще {len(rows) - 40}[/dim]")
     _notes(env)
+
+
+#: Стан внеску в пулі — людськими словами.
+_STAN_VNESKU = {"chynnyi": "у пулі", "zamineno": "замінено", "vidklykano": "забрано",
+                "skhovano": "сховано", "nedolyto": "не долито"}
+
+
+def _list_mine(rows: list[dict[str, Any]]) -> None:
+    """Свої внески з пулу: номер першим — його беруть `--replaces` і `withdraw`."""
+    if not rows:
+        console.print("у пулі ваших внесків немає")
+        return
+    for r in rows:
+        stan = _STAN_VNESKU.get(str(r.get("state") or ""), str(r.get("state") or "?"))
+        if r.get("replaced_by"):
+            stan += f" → {r['replaced_by']}"
+        if r.get("duplicate_of"):
+            stan = f"[warn]дубль: новіший {r['duplicate_of']}[/warn]"
+        console.print(f"{_e(r.get('id')):>7}  {_e(str(r.get('created_at') or '')[:10])}  "
+                      f"{_e(r.get('shifra') or '—'):<28} {_e(r.get('pages') or 0):>6} стор."
+                      f"  {stan}", highlight=False)
 
 
 @app.command("stats")

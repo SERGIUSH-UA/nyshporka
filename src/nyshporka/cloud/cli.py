@@ -23,6 +23,8 @@ fetch | verify | stop`, а для оренди — `nysh cloud go` і `nysh clou
 """
 from __future__ import annotations
 
+import subprocess
+import time
 from typing import Any
 
 import typer
@@ -43,6 +45,13 @@ rent_app = typer.Typer(
 app.add_typer(rent_app, name="rent")
 
 console = brand.console()
+
+#: `rent status`: стеля на одне питання наглядачеві й на всі разом, с. Наглядач,
+#: що не відповів, — «спитати не вдалось», а не причина висіти.
+ASK_ONE_SUPERVISOR_SEC = 20.0
+ASK_SUPERVISORS_SEC = 60.0
+#: Скільки заходів назвати поіменно в «чиї машини — неповно».
+OWNER_UNKNOWN_SHOWN = 5
 
 
 def _say(text: str) -> None:
@@ -1082,6 +1091,10 @@ def cmd_go(
         help="орендувати лише машини датацентрів, без домашніх хостів: менше "
              "обривів посеред заходу, але й машин на ринку в рази менше — "
              "частіше доведеться чекати"),
+    any_host: bool = typer.Option(
+        False, "--any-host",
+        help="брати й домашні хости одразу, без спроби датацентрів. Друк і без "
+             "цього переходить на домашні з воротами, коли датацентрів немає"),
     accept_slow_delivery: bool = typer.Option(
         False, "--accept-slow-delivery",
         help="свідомо заплатити за перевезення: без сховища кадри їдуть з дому на "
@@ -1157,6 +1170,11 @@ def cmd_go(
     if printed and script and script != "print":
         console.print("[err]`--print` читає друк — `--script` з ним не йде[/err]")
         raise typer.Exit(code=2)
+    if any_host and datacenter_only:
+        console.print("[err]`--any-host` і `--datacenter-only` — одне з двох[/err]")
+        raise typer.Exit(code=2)
+    if any_host and not any(p.split("=", 1)[0].strip() == "datacenter_only" for p in param):
+        param = [*param, "datacenter_only=false"]
     res = GO.go(case, backend=backend, budget=budget, max_hours=max_hours,
                 max_price=max_price, max_rents=max_rents, confirm=confirm, dry_run=dry_run,
                 stage=stage, with_voices=with_, second_voice=not one_voice,
@@ -1328,23 +1346,15 @@ class _Account:
         # вирішити, що гасити. Тому для них питаємо наглядача — він знає, який
         # інстанс узяв.
         ours = {str(s.box.get("id")): s.run_id for s in ST.live() if s.box}
-        #: Заходи, про власника машини яких спитати було нічим. Без цього
+        #: Заходи, про власника машини яких спитати не вдалось. Без цього
         #: рядка їхні машини мовчки лягають у «НЕ з заходів цього простору» —
         #: тобто команда радить гасити власний живий захід.
         self.owner_unknown: list[str] = []
-        for st in ST.all_runs():
-            if not st.supervisor or st.phase in ("done", "failed"):
-                continue
-            from nyshporka.cloud import supervised as SUP
-
-            try:
-                box = SUP.state_of(st).get("box")
-            except SUP.SupervisorMissing:
-                self.owner_unknown.append(st.run_id)
-                continue
-            iid = str((box or {}).get("instance_id") or "") if isinstance(box, dict) else ""
-            if iid:
-                ours.setdefault(iid, st.run_id)
+        stranger = {str(r.get("instance_id") or "") for r in (burning or [])
+                    if isinstance(r, dict)} - set(ours) - {""} \
+            if isinstance(burning, list) else set()
+        if stranger:
+            self._ask_supervisors(ST, ours, stranger)
         self.rows: list[dict[str, object]] = []
         for r in (burning if isinstance(burning, list) else []):
             if not isinstance(r, dict):
@@ -1356,6 +1366,43 @@ class _Account:
                 "status": str(r.get("status") or ""),
                 "price_usd_h": M.as_number(r.get("dph_total")),
                 "run_id": ours.get(iid, "")})
+
+    def _ask_supervisors(self, ST: Any, ours: dict[str, str], stranger: set[str]) -> None:
+        """Чиї машини `stranger` — спитати наглядачів, новіші першими.
+
+        🔴 Питати лише тоді, коли горить машина, якої ми не впізнали, і лише
+        доки її не впізнали. Колись команда питала КОЖЕН незакритий захід
+        простору, по процесу `gpurunner` на кожен: після 130 тис. сторінок
+        це тисячі записів по ~1 с, тобто година без жодного рядка виводу, і
+        людина бачила «зависло» (лист 20.10.2026). Одна сесія наглядача веде
+        цілу чергу заходів — її питаємо один раз.
+        """
+        from nyshporka.cloud import supervised as SUP
+
+        deadline = time.monotonic() + ASK_SUPERVISORS_SEC
+        asked: dict[str, str] = {}
+        for st in ST.all_runs():
+            if not stranger:
+                return
+            if not st.supervisor or st.phase in ("done", "failed"):
+                continue
+            if st.supervisor in asked:
+                continue
+            left = deadline - time.monotonic()
+            if left <= 0:
+                self.owner_unknown.append(st.run_id)
+                continue
+            asked[st.supervisor] = st.run_id
+            try:
+                box = SUP.state_of_session(
+                    st.supervisor, timeout=min(ASK_ONE_SUPERVISOR_SEC, left)).get("box")
+            except (SUP.SupervisorMissing, subprocess.TimeoutExpired):
+                self.owner_unknown.append(st.run_id)
+                continue
+            iid = str((box or {}).get("instance_id") or "") if isinstance(box, dict) else ""
+            if iid:
+                ours.setdefault(iid, st.run_id)
+                stranger.discard(iid)
 
     @property
     def exit_code(self) -> int:
@@ -1401,10 +1448,14 @@ def _print_account(view: _Account) -> None:
     if view.owner_unknown:
         # 🔴 Машину відчепленого заходу знає лише наглядач. Не спитавши його,
         # ми не маємо права називати її чужою — а нижче саме так і написано.
-        console.print(f"  [warn]⚠ чиї машини — неповно: у цьому середовищі немає "
-                      f"пакета оренди, тож заходи "
-                      f"{', '.join(view.owner_unknown)} спитати нічим. Їхня "
-                      f"машина нижче виглядатиме чужою.[/warn]")
+        named = ", ".join(view.owner_unknown[:OWNER_UNKNOWN_SHOWN])
+        more = len(view.owner_unknown) - OWNER_UNKNOWN_SHOWN
+        if more > 0:
+            named += f" і ще {more}"
+        console.print(f"  [warn]⚠ чиї машини — неповно: наглядачів заходів {named} "
+                      f"спитати не вдалось (у середовищі немає пакета оренди або "
+                      f"наглядач не відповів). Їхня машина нижче може виглядати "
+                      f"чужою.[/warn]")
     if not view.burning_known:
         console.print("  [warn]⚠ що тарифікується — НЕВІДОМО: спитати в провайдера "
                       "не вдалось. Це не «нічого»: повторіть або звірте в його "
