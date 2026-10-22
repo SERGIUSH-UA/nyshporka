@@ -248,7 +248,9 @@ function screenLabel(s) {
  */
 function layerTag(screen) {
   const raw = (SECTIONS.layers || {})[screen];
-  if (!raw || raw === 'context') return '';
+  // Екран роду в Майстерні без проєкту — вибір проєкту: роду, якому «належить»,
+  // ще немає, і мітка «належить «Рід»» вводила б в оману.
+  if (!raw || raw === 'context' || needsProject(screen)) return '';
   const inProject = !SECTIONS.hub_only;
   const layer = raw === 'mixed' && !inProject ? 'shared' : raw;
   const name = projectName() || t('stage.project.label');
@@ -283,6 +285,12 @@ function renderHead(screen) {
       esc(t(`stage.act.${act}`))}</button></span>` : ''}</div>`;
 }
 
+/** ☰ каже читалці екрана, чи меню висунуте. */
+export function sideBtnState() {
+  const b = document.querySelector('.side-btn');
+  if (b && b.setAttribute) b.setAttribute('aria-expanded', String(document.body.classList.contains('side-open')));
+}
+
 /** Значок спрайта або порожньо — підпис кнопки читається й без нього. */
 function icon(name) {
   return name ? ic(name, 'ic-sm') + ' ' : '';
@@ -306,6 +314,9 @@ let CURRENT = '';
 export const currentScreen = () => CURRENT;
 
 async function show(screen) {
+  // Невідомий екран (стара закладка, описка в адресі) — Огляд, а не заголовок
+  // із сирим хешем і порожнім екраном (прохід консолі 22.10.2026).
+  if (!SCREENS[screen] && !MODAL_SCREENS.includes(screen)) screen = 'home';
   // 🔴 Екран вимкненої секції не мовчить і не показує порожнечу. Сюди
   // потрапляють через закладку чи посилання з часів, коли секція була
   // ввімкнена, — і «нічого не сталось» тут читається як поламаний застосунок.
@@ -365,6 +376,7 @@ async function show(screen) {
   if (main) main.classList.toggle('wide', WIDE_SCREENS.includes(screen));
   // На телефоні меню — висувне: перехід його закриває.
   document.body.classList.remove('side-open');
+  sideBtnState();
   renderNav();
   renderHead(screen);
   await fn();

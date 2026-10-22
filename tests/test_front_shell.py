@@ -87,6 +87,13 @@ out.openAfterNav = document.body.classList.contains('side-open');
 // Група: підпис веде на перший екран, стрілка розкриває без переходу.
 ACTIONS['side.fold'](null, { dataset: { arg: 'material' } });
 out.sideFolded = document.getElementById('side').innerHTML;
+// Невідомий екран в адресі — Огляд, а не заголовок із сирим хешем.
+await nav.show('nosuchscreen');
+out.unknownHead = document.getElementById('phead').innerHTML;
+// Екран роду в Майстерні — вибір проєкту без мітки «належить «Рід»».
+nav.setSections({ hub_only: true });
+await nav.show('canon');
+out.hubCanonHead = document.getElementById('phead').innerHTML;
 console.log('@@' + JSON.stringify(out));
 process.exit(0);
 """
@@ -146,3 +153,13 @@ def test_group_label_leads_to_its_first_screen_and_arrow_only_unfolds(probe) -> 
     side = probe["sideFolded"]
     assert '<div class="sg-h"><button data-act="nav" data-arg="library">Матеріали</button>' in side
     assert 'data-act="side.fold" data-arg="material" aria-expanded="true"' in side
+
+
+def test_unknown_screen_falls_back_to_the_overview(probe) -> None:
+    head = probe["unknownHead"]
+    assert "nosuchscreen" not in head and "<h1>Рід Сидоруків</h1>" in head
+
+
+def test_family_screen_in_the_hub_has_no_owner_tag(probe) -> None:
+    head = probe["hubCanonHead"]
+    assert "<h1>Канон</h1>" in head and "layer-own" not in head

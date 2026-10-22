@@ -298,7 +298,8 @@ function wire() {
     if (!inside) closeMenus();
     // Перелік мов — теж `data-act`, але клік лише розкриває його: закрити меню
     // тут означало б забрати перелік з-під пальця.
-    else if (ev.target.closest('.hmenu-pop [data-act]:not(select)')) closeMenus();
+    // Тема теж лишає меню відкритим: її перемикають кілька разів поспіль.
+    else if (ev.target.closest('.hmenu-pop [data-act]:not(select):not(#theme-btn)')) closeMenus();
   });
   document.addEventListener('keydown', (ev) => {
     if (ev.key === 'Escape') closeMenus();

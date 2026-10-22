@@ -27,7 +27,7 @@ import { esc, el, setView, curGen, alive } from './core/view.js';
 import { ACTIONS, KEYS, SCREENS, PAGERS, screenOfOp } from './core/registry.js';
 import { ST } from './core/state.js';
 import { SECTIONS, loadSections, show, goto,
-  refreshJobs, watchJobs, foldGroup, currentScreen } from './core/nav.js';
+  refreshJobs, watchJobs, foldGroup, currentScreen, sideBtnState } from './core/nav.js';
 
 // 🔴 Міст до файлової системи ставиться ДО екранів: він реєструє дію кнопки
 // вибору шляху, а екрани цю кнопку вже малюють. Порядок тут значення не має
@@ -108,6 +108,7 @@ Object.assign(ACTIONS, {
   'side.toggle': () => {
     const cl = document.body.classList;
     if (cl.contains('side-open')) cl.remove('side-open'); else cl.add('side-open');
+    sideBtnState();
   },
 
   /** Тема: авто → світла → темна → авто. Значок показує поточний режим. */
