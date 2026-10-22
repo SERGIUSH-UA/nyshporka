@@ -19,6 +19,7 @@ import { t, LANG } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, renderWarnings,
   curGen, alive } from '../core/view.js';
+import { modelName, fmtDay } from '../core/bits.js';
 import { SCREENS, ACTIONS, PAGERS } from '../core/registry.js';
 import { show, goto, onJob } from '../core/nav.js';
 import { ST } from '../core/state.js';
@@ -213,7 +214,9 @@ function runsRow(r) {
   // 🔴 Відсоток лише зі справжнім знаменником. Немає кадрів справи — друкуємо
   // самі сторінки: покриття, порахане від себе самого, завжди дорівнює 100%
   // і читається як «прочитано все».
-  const n = Number(r.frames || 0);
+  // Кадрів менше, ніж прочитаних сторінок (справа одним PDF, тека кадрів не та) —
+  // знаменник ненадійний: «315 / 1 · 31500%» нічого не означало (22.10.2026).
+  const n = Number(r.frames || 0) >= Number(r.pages_done || 0) ? Number(r.frames || 0) : 0;
   const cov = n
     ? `<td class="num">${Math.round(100 * (r.pages_done || 0) / n)}%</td>`
     : `<td class="num dim" title="${esc(t('runs.nodenom'))}">—</td>`;
@@ -224,10 +227,10 @@ function runsRow(r) {
     <td>${state}${projectCount() > 1
     ? ` ${projectChip(r.project || '', { hubLabel: t('pj.hub') })}` : ''}</td>
     <td>${badges}</td>
-    <td class="mono">${esc(r.model || '')}</td>
+    <td title="${esc(r.model || '')}">${esc(modelName(r.model))}</td>
     <td class="num">${esc(r.pages_done || 0)}${n ? ` / ${esc(n)}` : ''} ${fail}</td>
     ${cov}
-    <td class="mono dim">${esc((r.updated || '').slice(0, 10))}</td>
+    <td class="dim">${esc(fmtDay((r.updated || '').slice(0, 10)))}</td>
     <td class="acts">${!runDone(r) && r.state !== 'reading' && r.case_dir ? `<button class="ctl-sm" data-act="runs.resume"
       data-arg="${esc(r.case_dir)}" title="${esc(t('runs.resume.why'))}">${ic('quill', 'ic-o ic-sm')}
       ${t('runs.resume')}</button>` : ''}<button class="ctl-sm" data-act="runs.open" data-arg="${esc(r.name)}"

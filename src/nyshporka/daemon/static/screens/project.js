@@ -244,6 +244,8 @@ function styleForm() {
   const d = HEAD || {};
   openModal({ title: t('phead.style'), narrow: true, body: `<form data-act="phead.save">
       <input type="hidden" name="touched" value="">
+      ${fld(t('np.title'), `<input name="title" required value="${esc(d.name || '')}"
+        placeholder="${esc(t('np.title.ph'))}">`)}
       <div class="row">${fld(t('np.color'), `<input name="color" type="color" data-act="phead.touch"
         value="${esc(/^#[0-9a-fA-F]{6}$/.test(d.color || '') ? d.color : '#4f6bd8')}">`)}
         ${fld(t('np.glyph'), `<input name="glyph" maxlength="2" size="3" value="${esc(d.glyph || '')}">`)}</div>
@@ -263,7 +265,8 @@ Object.assign(ACTIONS, {
     // Колір іде лише тоді, коли його змінили або зняли: міняючи знак, людина
     // не мала б мовчки дістати колір, що стояв у полі за замовчуванням.
     const color = fd.get('nocolor') ? '' : String(fd.get('color') || '');
-    const args = { name: was.project || PROJECT, glyph: String(fd.get('glyph') || '').trim() };
+    const args = { name: was.project || PROJECT, glyph: String(fd.get('glyph') || '').trim(),
+      title: String(fd.get('title') || '').trim() };
     if (color !== (was.color || '') && (was.color || fd.get('touched') || fd.get('nocolor'))) args.color = color;
     const env = await callOp('project.style', args);
     if (!env.ok) { boxError('ps-box', env); return; }

@@ -223,7 +223,7 @@ function libFacetSelects(d) {
   return `
     <select id="lib-repo" data-act="lib.filter">
       ${_opt('', t('lib.repo.any'), LIB.repo)}
-      ${(f.repos || []).map((x) => _opt(x.code, x.code + n(x), LIB.repo)).join('')}
+      ${(f.repos || []).map((x) => _opt(x.code, (x.label || x.code) + n(x), LIB.repo)).join('')}
     </select>
     <select id="lib-rtype" data-act="lib.filter">
       ${_opt('', t('lib.rtype.any'), LIB.record_type)}
@@ -461,7 +461,7 @@ function libMore(r) {
     <p><b>${esc(r.title || r.shifra || r.key || '')}</b>
       ${years ? `<span class="muted"> · ${esc(years)}</span>` : ''}
       ${r.place ? `<span class="muted"> · ${esc(r.place)}</span>` : ''}</p>
-    <p class="muted mono">${esc(r.key || '')}${r.path ? ` · ${esc(r.path)}` : ''}</p>
+    ${r.shifra ? `<p class="muted">${esc(r.shifra)}</p>` : ''}
     ${r.verdict_note ? `<p class="muted">${esc(r.verdict_note)}</p>` : ''}
     <p class="row-actions">
       ${r.path ? btn('data-act="lib.frames"', r.path, `${ic('image', 'ic-sm')} ${t('lib.btn.frames')}`) : ''}

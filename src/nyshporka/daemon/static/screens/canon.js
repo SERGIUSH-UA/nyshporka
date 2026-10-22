@@ -15,7 +15,7 @@ import { esc, el, setView, busy, failure, boxError, renderWarnings, curGen, aliv
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { goto } from '../core/nav.js';
 import { openModal, modalSeq, modalTitle } from '../core/modal.js';
-import { kv, pill, toast, unwiki, fieldLabel, fieldValue } from '../core/bits.js';
+import { kv, pill, toast, unwiki, fieldLabel, fieldValue, named, fmtDay, HYP_TONE } from '../core/bits.js';
 import { openEvidence } from './evidence.js';
 
 const KINDS = ['persons', 'families', 'places', 'sources', 'hypotheses'];
@@ -64,13 +64,14 @@ SCREENS.canon = async () => {
 
 function checkBox(env) {
   const d = env.data || {};
+  const refs = d.refs || {};
   const n = d.loaded || {};
   const tone = d.errors ? 'err' : d.warnings ? 'warn' : 'ok';
   const head = d.errors
     ? t('canon.check.errors').replace('{n}', d.errors)
     : t('canon.check.clean');
   const issues = (d.issues || []).filter((i) => i.severity !== 'INFO').slice(0, 5)
-    .map((i) => `<li><span class="mono">${esc(i.where)}</span> ${esc(i.text)}</li>`).join('');
+    .map((i) => `<li><b>${named(i.where, refs)}</b> ${named(i.text, refs)}</li>`).join('');
   return `<div class="row"><h3>${t('canon.check')}</h3>${pill(tone, head)}</div>
     <p class="muted">${esc(t('canon.counts')
     .replace('{p}', n.persons || 0).replace('{f}', n.families || 0)
@@ -119,8 +120,8 @@ function plain(v) {
   return String(v);
 }
 
-function citeRow(c, where = '') {
-  return `<li>${where ? `<b>${esc(where)}</b> · ` : ''}<span class="mono">${esc(c.source_id || '')}</span>
+function citeRow(c, where = '', refs = {}) {
+  return `<li>${where ? `<b>${esc(where)}</b> · ` : ''}${named(c.source_id || '', refs)}
     ${c.page ? ` · ${esc(c.page)}` : ''}${c.quote ? `<blockquote>${esc(c.quote)}</blockquote>` : ''}
     ${c.note ? `<small class="muted">${esc(c.note)}</small>` : ''}</li>`;
 }
@@ -134,22 +135,25 @@ async function openCard(id) {
   if (!env.ok) { boxError('dlg-body', env); return; }
   const d = env.data || {};
   const c = d.card || {};
+  const refs = d.refs || {};
   modalTitle(`${unwiki(d.title || id)} · ${id}`);
-  const skip = new Set(['id', 'facts', 'citations', 'names', 'media', 'notes', 'hits']);
+  // Службове (шлях сирого файла, ID OpenStreetMap) людині ні до чого: шлях до
+  // картки — у «Історії картки», а не текстом під нею.
+  const skip = new Set(['id', 'facts', 'citations', 'names', 'media', 'notes', 'hits', 'raw_path', 'osm_id']);
   const fields = Object.entries(c).filter(([k, v]) => !skip.has(k) && (typeof v === 'boolean' || plain(v)))
-    .map(([k, v]) => [fieldLabel(k), esc(fieldValue(k, v))]);
+    .map(([k, v]) => [fieldLabel(k), named(fieldValue(k, v), refs)]);
   const facts = (c.facts || []).map((f) => `<li><b>${esc(tOr(`canon.ft.${f.type}`, f.type))}</b>
-      ${f.date ? ` · ${esc(plain(f.date))}` : ''}${f.place_id ? ` · ${esc(f.place_id)}` : ''}
-      ${f.value ? ` · ${esc(f.value)}` : ''} ${pill(f.status === 'confirmed' ? 'ok' : f.status === 'disputed' ? 'warn' : 'neutral',
+      ${f.date ? ` · ${esc(fmtDay(plain(f.date)))}` : ''}${f.place_id ? ` · ${named(f.place_id, refs)}` : ''}
+      ${f.value ? ` · ${named(f.value, refs)}` : ''} ${pill(f.status === 'confirmed' ? 'ok' : f.status === 'disputed' ? 'warn' : 'neutral',
     tOr(`canon.fs.${f.status}`, f.status || ''))}
-      ${f.hypothesis ? ` <span class="mono">${esc(f.hypothesis)}</span>` : ''}</li>`).join('');
-  const cites = [...(c.citations || []).map((x) => citeRow(x)),
-    ...(c.facts || []).flatMap((f) => (f.citations || []).map((x) => citeRow(x, tOr(`canon.ft.${f.type}`, f.type))))].join('');
+      ${f.hypothesis ? ` ${named(f.hypothesis, refs)}` : ''}</li>`).join('');
+  const cites = [...(c.citations || []).map((x) => citeRow(x, '', refs)),
+    ...(c.facts || []).flatMap((f) => (f.citations || []).map((x) => citeRow(x, tOr(`canon.ft.${f.type}`, f.type), refs)))].join('');
   const issues = (d.issues || []).map((i) => `<li>${pill(i.severity === 'ERROR' ? 'err' : i.severity === 'WARN' ? 'warn' : 'neutral',
     tOr(`canon.sev.${i.severity}`, i.severity))}
-      ${esc(i.text)}</li>`).join('');
+      ${named(i.text, refs)}</li>`).join('');
   const hyps = (d.hypotheses || []).map((h) => `<li><button class="ctl-sm" data-act="canon.hyp"
-      data-arg="${esc(h.id)}">${esc(h.id)}</button> ${esc(unwiki(h.claim))} ${pill('info', tOr(`hyp.st.${h.status}`, h.status))}</li>`).join('');
+      data-arg="${esc(h.id)}">${esc(h.id)}</button> ${named(h.claim, refs)} ${pill(HYP_TONE[h.status] || 'neutral', tOr(`hyp.st.${h.status}`, h.status))}</li>`).join('');
   el('dlg-body').innerHTML = `<p><b>${esc(d.title || id)}</b>
       <small class="muted"> · ${esc(t(`canon.kind.${d.kind}`))}${d.private ? ` · ${esc(t('canon.private'))}` : ''}</small></p>
     ${kv(fields)}
@@ -157,7 +161,6 @@ async function openCard(id) {
     <h4>${t('canon.evidence')}</h4>${cites ? `<ul>${cites}</ul>` : `<p class="muted">${t('canon.evidence.none')}</p>`}
     ${issues ? `<h4>${t('canon.issues')}</h4><ul>${issues}</ul>` : ''}
     ${hyps ? `<h4>${t('nav.hyp')}</h4><ul>${hyps}</ul>` : ''}
-    <p class="muted mono">${esc(d.file || '')}</p>
     <div class="row dlg-acts">
       <button class="primary" data-act="canon.evidence" data-arg="${esc(id)}">${t('ev.add')}</button>
       <button data-act="canon.history" data-arg="${esc(d.file || '')}">${t('canon.history')}</button>

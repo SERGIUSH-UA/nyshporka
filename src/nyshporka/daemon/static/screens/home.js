@@ -20,6 +20,7 @@ import { t, tOr, LANG } from '../core/strings.js';
 import { TOKEN, PROJECT, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, renderCoverage, curGen, alive, maskot } from '../core/view.js';
+import { modelName } from '../core/bits.js';
 import { SCREENS, ACTIONS, screenOfOp } from '../core/registry.js';
 import { SECTIONS, NAV_LABEL, show, renderNav, screenOn,
   refreshJobs } from '../core/nav.js';
@@ -274,10 +275,11 @@ function lastRuns(r, limit = 0) {
   if (!rows.length) return '';
   return `<table><tbody>${(limit ? rows.slice(0, limit) : rows).map((x) => `<tr>
         <td class="mono">${esc(x.shifra || x.name || '')}</td>
-        <td>${num(x.pages)}${x.frames ? ` <span class="muted">${t('dash.reading.of')} ${num(x.frames)}</span>` : ''}</td>
+        <td>${num(x.pages)}${x.frames && Number(x.frames) >= Number(x.pages || 0)
+    ? ` <span class="muted">${t('dash.reading.of')} ${num(x.frames)}</span>` : ''}</td>
         <td>${runState({ ...x, pages_done: x.pages })}${x.state === 'stopped' && x.case_dir
     ? ` <button class="ctl-sm" data-act="runs.resume" data-arg="${esc(x.case_dir)}">${t('runs.resume')}</button>` : ''}</td>
-        <td class="mono muted">${esc(x.model || '')}</td>
+        <td class="muted" title="${esc(x.model || '')}">${esc(modelName(x.model))}</td>
         <td class="muted">${esc(when(x.updated))}</td></tr>`).join('')}</tbody></table>`;
 }
 

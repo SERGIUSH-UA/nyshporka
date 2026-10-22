@@ -885,7 +885,7 @@ globalThis.__CASE_INFO = null;
   nav.setSections({ nav: groups, blocks: ['own', 'hub', 'shared', 'service'],
     layers: { library: 'mixed', profile: 'own', home: 'context', jobs: 'service' },
     project_screens: ['profile', 'site'],
-    screen_action: { library: 'newcase', cases: 'newcase', home: 'newproject' }, hub_only: false });
+    screen_action: { library: 'newcase', cases: 'newcase', projects: 'newproject' }, hub_only: false });
   await nav.show('library');
   out.side = document.getElementById('side').innerHTML || '';
   out.head = document.getElementById('phead').innerHTML || '';
@@ -1511,7 +1511,8 @@ def test_hub_without_project_offers_projects_instead_of_a_refusal(probe) -> None
     assert 'class="sb sb-hub"' in probe["hubSide"]
     assert 'class="sb sb-own"' not in probe["hubSide"], "блок роду в Майстерні без проєкту"
     assert "<h1>Огляд Майстерні</h1>" in probe["hubHead"]
-    assert 'data-arg="newproject"' in probe["hubHead"], "«＋ Новий проєкт» — дія Огляду Майстерні"
+    # «＋ Новий проєкт» на Огляді вже є карткою й у «Головному» — без третьої в заголовку.
+    assert 'data-arg="newproject"' not in probe["hubHead"]
     assert "Цей екран — про рід" in probe["hubProfileView"]
 
 

@@ -16,11 +16,10 @@ import { SCREENS, ACTIONS } from '../core/registry.js';
 import { show } from '../core/nav.js';
 import { openModal, modalSeq } from '../core/modal.js';
 import { ST } from '../core/state.js';
-import { kv, pill, unwiki } from '../core/bits.js';
+import { kv, pill, named, HYP_TONE } from '../core/bits.js';
 
-// Чекає вердикту — дія людини (warn); відкрита — у роботі (info). Той самий
-// тон, що на Огляді роду й у картці канону.
-const TONE = { open: 'info', awaiting: 'warn', closed: 'ok' };
+// Той самий тон стану, що на Огляді роду й у картці канону (`bits.HYP_TONE`).
+const TONE = HYP_TONE;
 
 /** Відкрита гіпотеза: хіти з прогоном, який дав `text.crop`. */
 let OPEN = null;
@@ -36,10 +35,11 @@ SCREENS.hyp = async () => {
   const tone = { open: 'ov-info', awaiting: 'ov-warn', closed: 'ov-ok' };
   const tile = (k) => `<div class="ov-kpi${c[k] ? ` ${tone[k]}` : ''}"><span class="ov-kpi-l">${t(`hyp.st.${k}`)}</span>
     <span class="ov-kpi-v"><b class="num">${esc(c[k] || 0)}</b></span></div>`;
+  const refs = d.refs || {};
   const rows = (d.rows || []).map((h) => `<div class="lrow">
-      <div><b>${esc(unwiki(h.claim))}</b>
+      <div><b>${named(h.claim, refs)}</b>
         <small class="muted"><span class="mono">${esc(h.id)}</span>${
-  h.decides ? ` · ${esc(t('hyp.decides'))}: ${esc(h.decides)}` : ''}</small>
+  h.decides ? ` · ${esc(t('hyp.decides'))}: ${named(h.decides, refs)}` : ''}</small>
         <span>${pill(TONE[h.status] || 'neutral', t(`hyp.st.${h.status}`))}${
   h.hits ? ` ${pill(h.strong ? 'warn' : 'neutral', t('hyp.hits').replace('{n}', h.hits))}` : ''}</span></div>
       <button data-act="hyp.open" data-arg="${esc(h.id)}">${t('canon.open')}</button></div>`).join('');
@@ -61,6 +61,7 @@ async function openHyp(id) {
   if (!env.ok) { boxError('dlg-body', env); return; }
   const d = env.data || {};
   const card = d.card || {};
+  const refs = d.refs || {};
   OPEN = { id, seq, hits: (d.hits || []).map((h) => ({ ...h })) };
   const hits = OPEN.hits.map((h, i) => `<div class="lrow">
       <div><div id="hyp-crop-${i}" class="hyp-crop"></div>
@@ -69,11 +70,11 @@ async function openHyp(id) {
           · ${esc(t(`hyp.str.${h.strength}`))} · ${esc(h.eye ? t('hyp.eye.yes') : t('hyp.eye.no'))}</small></div>
     </div>`).join('');
   const withLine = OPEN.hits.some((h) => h.line);
-  el('dlg-body').innerHTML = `<p><b>${esc(unwiki(card.claim || id))}</b>
+  el('dlg-body').innerHTML = `<p><b>${named(card.claim || id, refs)}</b>
       ${pill(TONE[card.status] || 'neutral', t(`hyp.st.${card.status}`))}</p>
-    ${kv([[t('hyp.basis'), esc(card.basis || '')], [t('hyp.decides'), esc(card.decides || '')],
-    [t('hyp.facts'), esc((d.facts || []).join(', '))], [t('hyp.versus'), esc((d.versus || []).join(', '))],
-    [t('hyp.about'), esc((card.about || []).join(', '))]])}
+    ${kv([[t('hyp.basis'), named(card.basis || '', refs)], [t('hyp.decides'), named(card.decides || '', refs)],
+    [t('hyp.facts'), named((d.facts || []).join(', '), refs)], [t('hyp.versus'), named((d.versus || []).join(', '), refs)],
+    [t('hyp.about'), named((card.about || []).join(', '), refs)]])}
     <h4>${t('hyp.cands')}</h4>
     ${hits || `<p class="muted">${t('hyp.cands.none')}</p>`}
     <div class="row dlg-acts">

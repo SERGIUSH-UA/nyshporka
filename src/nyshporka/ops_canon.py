@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Literal
 
@@ -53,7 +54,9 @@ def canon_check(a: CheckArgs) -> Envelope:
                              "карткою особи за скілом keep-canon")
         return env
     rep = C.check(root, hash_evidence=a.hash)
-    env = ok(rep.as_dict())
+    data = rep.as_dict()
+    data["refs"] = _refs(rep.canon, [(i.get("where"), i.get("text")) for i in data.get("issues", [])])
+    env = ok(data)
     if not rep.ok:
         env.warn("canon_errors",
                  f"{rep.count('ERROR')} помилок у каноні — індекс і сайт будуть "
@@ -179,6 +182,31 @@ def _title(canon: Any, kind: str, ent: Any) -> str:
     return str(ent.claim)
 
 
+#: ID картки канону в тексті чи значенні поля: особа, родина, місце, гіпотеза, джерело.
+_REF = re.compile(r"\b(?:I|F|PL|H)\d{2,}\b|\bS_[A-Za-z0-9_]+\b")
+
+
+def _refs(canon: Any, *blobs: Any) -> dict[str, str]:
+    """ID → назва для кожного ID, що трапився в переданих даних.
+
+    🔴 Консоль показувала «Чоловік I9001 · Дружина I9002», «PL9001», «[[I9012]]»
+    там, де людина чекає імен (прохід консолі 22.10.2026). Назви кладе сервер:
+    канон у нього вже завантажений, а браузер мусив би тягнути всі картки.
+    """
+    import json
+
+    text = " ".join(b if isinstance(b, str) else json.dumps(b, ensure_ascii=False, default=str)
+                    for b in blobs)
+    out: dict[str, str] = {}
+    for rid in set(_REF.findall(text)):
+        for kind in CARD_KINDS:
+            ent = getattr(canon, kind).get(rid)
+            if ent is not None:
+                out[rid] = _title(canon, kind, ent)
+                break
+    return out
+
+
 def _haystack(kind: str, ent: Any, title: str) -> str:
     extra: list[str] = []
     if kind == "persons":
@@ -271,10 +299,12 @@ def canon_card(a: CardArgs) -> Envelope:
     hyps = [{"id": hid, "claim": h.claim, "status": h.status}
             for hid, h in sorted(canon.hypotheses.items()) if a.id in h.about]
     card = ent.model_dump(mode="json", exclude={"notes"})
+    notes = getattr(ent, "notes", "") or ""
     return ok({"id": a.id, "kind": kind, "title": _title(canon, kind, ent),
                "private": bool(getattr(ent, "private", False)), "file": rel,
-               "card": card, "notes": getattr(ent, "notes", "") or "",
-               "issues": issues, "hypotheses": hyps})
+               "card": card, "notes": notes,
+               "issues": issues, "hypotheses": hyps,
+               "refs": _refs(canon, card, notes, issues, hyps)})
 
 
 class HypsArgs(BaseModel):
@@ -300,7 +330,7 @@ def canon_hyps(a: HypsArgs) -> Envelope:
                      "decides": d.decides, "weight": d.weight, "hits": len(d.hits),
                      "strong": any(x["strength"] == "strong" for x in d.hits),
                      "updated": h.updated.isoformat()})
-    env = ok({"counts": counts, "rows": rows})
+    env = ok({"counts": counts, "rows": rows, "refs": _refs(canon, rows)})
     _no_canon(env)
     return env
 
@@ -316,10 +346,11 @@ def canon_hyp(a: CardArgs) -> Envelope:
     if h is None:
         return fail(f"гіпотези «{a.id}» у каноні немає")
     d = next(x for x in rank(canon, closed=True) if x.id == a.id)
+    card = h.model_dump(mode="json", exclude={"notes", "hits"})
     return ok({"id": a.id, "file": canon.files[a.id].relative_to(root).as_posix(),
-               "card": h.model_dump(mode="json", exclude={"notes", "hits"}),
-               "notes": h.notes or "", "weight": d.weight, "hits": d.hits,
-               "facts": d.facts, "versus": d.versus})
+               "card": card, "notes": h.notes or "", "weight": d.weight, "hits": d.hits,
+               "facts": d.facts, "versus": d.versus,
+               "refs": _refs(canon, card, h.notes or "", d.facts, d.versus)})
 
 
 class ImportArgs(BaseModel):

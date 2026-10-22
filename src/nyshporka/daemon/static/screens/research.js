@@ -10,7 +10,7 @@ import { t, tOr, LANG } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
-import { openModal, modalSeq } from '../core/modal.js';
+import { openModal, modalSeq, modalTitle } from '../core/modal.js';
 import { mdLite, dayOf } from '../core/bits.js';
 
 /** Перелік з останньої відповіді — фільтр у браузері, без запиту на кожну літеру. */
@@ -56,7 +56,6 @@ function drawList() {
   const rows = filterReports(ROWS, RS.q, RS.kind);
   box.innerHTML = rows.length ? rows.map((r) => `<div class="lrow">
       <div><b>${esc(r.title)}</b>
-        <small class="muted mono">${esc(r.path)}</small>
         <small class="muted">${r.kind ? `<span class="tag">${esc(kindLabel(r.kind))}</span> ` : ''}${esc(dayOf(r.mtime, LANG))}</small></div>
       <button data-act="rs.read" data-arg="${esc(r.path)}">${t('rs.read')}</button></div>`).join('')
     : `<p class="muted">${ROWS.length ? t('rs.nomatch') : t('rs.none')}</p>`;
@@ -69,8 +68,9 @@ async function readReport(path) {
   if (seq !== modalSeq()) return;
   if (!env.ok) { boxError('dlg-body', env); return; }
   const d = env.data || {};
-  el('dlg-body').innerHTML = `<div class="md">${mdLite(d.text)}</div>
-    <p class="muted mono">reports/${esc(d.path || path)}</p>
+  // Назва звіту, а не шлях до файла: шлях людині нічого не каже.
+  if (d.title) modalTitle(d.title);
+  el('dlg-body').innerHTML = `<div class="md">${mdLite(d.text, d.refs || {})}</div>
     <div class="row dlg-acts"><button class="ghost" data-act="modal.close">${t('modal.close')}</button></div>`;
 }
 

@@ -9,7 +9,7 @@ import { t } from './strings.js';
 import { callOp, apiFetch } from './net.js';
 import { esc, el } from './view.js';
 import { ACTIONS, OP_SCREEN } from './registry.js';
-import { show, liveJobs, jobChip, jobDone } from './nav.js';
+import { show, liveJobs, jobChip, jobDone, screenLabel } from './nav.js';
 import { ic } from '/ui/icons.js';
 import { openModal, closeModal, confirmAct } from './modal.js';
 import { renderWarnings } from './view.js';
@@ -198,8 +198,12 @@ async function askFind() {
   if (!got) { box.innerHTML = `<p class="warn">${t('common.error')}</p>`; return; }
   box.innerHTML = hits.length ? hits.map((h) => {
     const scr = h.screen || OP_SCREEN[h.name] || '';
+    // Дія з екраном — куди поведе кнопка; команда терміналу — лише для дії, яку
+    // інакше як командою чи формою не зробити (людина не читає `nysh op …`).
+    const sub = scr ? `<small class="muted">→ ${esc(screenLabel(scr))}</small>`
+      : `<small class="mono">nysh ${esc(String(h.cli || '').replace(/^nysh\s+/, ''))}</small>`;
     return `<div class="ask-hit"><div><b>${esc(h.when || h.summary)}</b>
-        <small class="mono">nysh ${esc(String(h.cli || '').replace(/^nysh\s+/, ''))}</small></div>
+        ${sub}</div>
       ${scr ? `<button type="button" data-act="ask.go" data-arg="${esc(scr)}">${t('ask.open')}</button>`
     : `<button type="button" data-act="ask.form" data-arg="${esc(h.name)}">${t('ask.form')}</button>`}</div>`;
   }).join('') : `<p class="muted">${t('ask.none')}</p>`;

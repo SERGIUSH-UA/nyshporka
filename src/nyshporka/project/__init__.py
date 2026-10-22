@@ -248,12 +248,17 @@ def sync(root: Path, version: str) -> dict[str, str]:
     return out
 
 
-def set_style(root: Path, *, color: str | None = None, glyph: str | None = None) -> None:
-    """Колір і знак проєкту в маркері; порожній рядок знімає, `None` — не чіпає."""
+def set_style(root: Path, *, color: str | None = None, glyph: str | None = None,
+              title: str | None = None) -> None:
+    """Назва, колір і знак проєкту в маркері; порожній рядок знімає колір чи
+    знак, `None` — не чіпає. Назву не знімають: без неї лишився б id."""
     import json
 
     text = (root / W.MARKER).read_text(encoding="utf-8")
-    for key, val in (("color", color), ("glyph", glyph)):
+    pairs = [("color", color), ("glyph", glyph)]
+    if title and title.strip():
+        pairs.append(("name", title.strip()))
+    for key, val in pairs:
         if val is not None:
             text = W._marker_set(text, key, f"{key} = {json.dumps(val, ensure_ascii=False)}"
                                  if val else None, "project")

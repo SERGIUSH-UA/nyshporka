@@ -198,7 +198,12 @@ def facets(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
         return [{"code": k, "n": n}
                 for k, n in sorted(got.items(), key=lambda x: (-x[1], x[0]))]
 
-    return {"repos": count("repo"), "record_types": count("record_types", True),
+    # Архів у фільтрі — тією ж міткою, що в таблиці («ДАВіО», а не `DAVO`):
+    # доти фільтр і рядки називали той самий архів по-різному (22.10.2026).
+    from nyshporka.library import _REPO_LABEL
+
+    repos = [{**x, "label": _REPO_LABEL.get(x["code"], x["code"])} for x in count("repo")]
+    return {"repos": repos, "record_types": count("record_types", True),
             "uezds": count("uezd"), "doc_types": count("doc_type")}
 
 

@@ -108,6 +108,13 @@ const table = { querySelectorAll: (q) => (q === 'thead th'
   ? [{ textContent: ' Шифра ' }, { textContent: 'Стан' }] : [{ children: [td, own] }]) };
 V.labelCells({ querySelectorAll: (q) => (q === 'table.tbl-cards' ? [table] : []) });
 out.labels = [td.dataset.l, own.dataset.l];
+const BT = await import('./core/bits.js');
+const refs = { I9001: 'Іван Сидорук', PL9001: 'Городківка' };
+out.named = BT.named('Чоловік I9001, [[PL9001]], [[I9002|Петро]], **важливо**, I9999', refs);
+out.day = [BT.fmtDay('2026-07-23T00:00:00Z'), BT.fmtDay('1993-08-28'), BT.fmtDay('1850')];
+out.forms = BT.fieldValue('name_variants', [{ form: 'Городківка' }, { form: 'Городковка' }]);
+out.md = BT.mdLite(['Вступ', '', '| Справа | Сторінок |', '|---|---|', '| [[I9001]] | 12 |', '',
+  'Кінець'].join(String.fromCharCode(10)), refs);
 console.log('@@' + JSON.stringify(out));
 process.exit(0);
 """
@@ -220,3 +227,18 @@ def test_verdict_form_without_a_verdict_does_not_offer_to_clear(proj) -> None:
 def test_phone_cards_take_field_labels_from_the_table_head(hub) -> None:
     """Таблиця-картка на телефоні: підпис поля — з заголовка колонки, своє лишається."""
     assert hub["labels"] == ["Шифра", "своє"]
+
+
+def test_canon_text_names_ids_and_renders_marks(hub) -> None:
+    """ID → ім'я з `refs` (ID у підказці), вікі-посилання, жирне; невідомий ID лишається."""
+    html = hub["named"]
+    assert 'title="I9001">Іван Сидорук</span>' in html and "Городківка" in html and "Петро" in html
+    assert "<b>важливо</b>" in html and "I9999" in html and "[[" not in html
+    assert hub["day"] == ["23.07.2026", "28.08.1993", "1850"]
+    assert hub["forms"] == "Городківка, Городковка", "варіанти назв, а не «записів: 2»"
+
+
+def test_report_tables_are_tables(hub) -> None:
+    md = hub["md"]
+    assert '<table class="md-table">' in md and "<th>Справа</th>" in md and "Іван Сидорук" in md
+    assert "---" not in md and "<p>Кінець</p>" in md

@@ -174,13 +174,14 @@ def project_archive(a: ProjectArchiveArgs) -> Envelope:
 
 
 class ProjectStyleArgs(ProjectNameArgs):
+    title: str | None = Field(default=None, description="назва для людини («Рід Сидоруків»)")
     color: str | None = Field(default=None, description="#rrggbb; порожньо — зняти")
     glyph: str | None = Field(default=None, description="буква чи емодзі; порожньо — зняти")
 
 
-@op("project.style", summary="Колір і знак проєкту в консолі",
+@op("project.style", summary="Назва, колір і знак проєкту в консолі",
     args=ProjectStyleArgs, mutates=True, tier="rare",
-    when="змінити колір чи знак проєкту в перемикачі консолі")
+    when="змінити назву, колір чи знак проєкту в перемикачі консолі")
 def project_style(a: ProjectStyleArgs) -> Envelope:
     from nyshporka import project as T
     from nyshporka.core import projects as P
@@ -195,9 +196,11 @@ def project_style(a: ProjectStyleArgs) -> Envelope:
         P.check_glyph(a.glyph or "")
     except P.ProjectError as exc:
         return fail(str(exc))
-    T.set_style(root, color=a.color, glyph=a.glyph)
+    # 🔴 Назва — для людини: перенесення роду в проєкт (`project adopt`) лишало
+    # в ній id, і консоль скрізь показувала id проєкту (22.10.2026).
+    T.set_style(root, color=a.color, glyph=a.glyph, title=a.title)
     pr = P._from_dir(root)
-    return ok({"name": a.name, "color": pr.color if pr else "",
+    return ok({"name": a.name, "title": pr.name if pr else "", "color": pr.color if pr else "",
                "glyph": pr.glyph if pr else ""})
 
 
@@ -334,8 +337,16 @@ def reports_read(a: ReportReadArgs) -> Envelope:
     size = path.stat().st_size
     if size > REPORT_MAX_BYTES:
         return fail(f"звіт завеликий для консолі ({size // 1000} КБ): {path}")
-    return ok({"path": rel.as_posix(), "title": _report_title(path),
-               "text": path.read_text(encoding="utf-8", errors="replace")})
+    text = path.read_text(encoding="utf-8", errors="replace")
+    # Імена для `[[I9012]]` у звіті — як у картках канону. Канону може не бути.
+    refs: dict[str, str] = {}
+    try:
+        from nyshporka.ops_canon import _loaded, _refs
+
+        refs = _refs(_loaded()[1], text)
+    except Exception:
+        refs = {}
+    return ok({"path": rel.as_posix(), "title": _report_title(path), "text": text, "refs": refs})
 
 
 def _terminal_cmd(root: Path, agent: str) -> list[str] | None:

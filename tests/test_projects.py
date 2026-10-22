@@ -377,6 +377,12 @@ def test_project_color_glyph_and_variants(tmp_path: Path) -> None:
     st = O.call("project.style", {"name": "rid-s", "color": "", "glyph": "🌳"})
     assert st.ok and (st.data["color"], st.data["glyph"]) == ("", "🌳")
     assert "color" not in (hub / "projects/rid-s/nyshporka.toml").read_text(encoding="utf-8")
+    # Назва для людини: перенесення роду лишало в ній id, і консоль скрізь
+    # показувала id проєкту (22.10.2026). Порожня назва нічого не стирає.
+    st = O.call("project.style", {"name": "rid-s", "title": "Рід Сидоруків"})
+    assert st.ok and st.data["title"] == "Рід Сидоруків"
+    assert O.call("project.style", {"name": "rid-s", "title": "  "}).data["title"] == "Рід Сидоруків"
+    assert {r["id"]: r for r in O.call("project.list").data["projects"]}["rid-s"]["name"] == "Рід Сидоруків"
 
 
 def test_a_broken_color_in_the_marker_does_not_break_the_list(tmp_path: Path) -> None:
