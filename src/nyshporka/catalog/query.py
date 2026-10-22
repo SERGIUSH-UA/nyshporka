@@ -1160,6 +1160,8 @@ _NEAR_KM = 20.0
 #: кличе це для всіх 4566 карток, і без memo кожен виклик коштував би стільки ж.
 _LOCATE_CACHE: dict[str, tuple[Any, dict[str, Any] | None]] = {}
 _MODERN_INDEX: tuple[Any, dict[str, list[dict[str, Any]]]] | None = None
+_LATIN_INDEX: tuple[Any, dict[str, list[dict[str, Any]]]] | None = None
+_VILLAGE_KINDS = frozenset({"село", "селище", "хутір", "покинуте село"})
 
 
 def _packs_stamp(*domains: str) -> Any:
@@ -1211,6 +1213,35 @@ def _modern_index() -> dict[str, list[dict[str, Any]]]:
     return idx
 
 
+def _skeleton(s: str) -> str:
+    from nyshporka.utils.translit import normalize_for_matching
+
+    return re.sub(r"[\s'’ʼ-]", "", normalize_for_matching(s))
+
+
+def _latin_index() -> dict[str, list[dict[str, Any]]]:
+    """ASCII-кістяк uk/ru-назви → поселення: «Winnica» і «Вінниця» дають `vinnica`.
+
+    Лише точний збіг кістяка — фаззі тут дав би чуже село з точкою.
+    """
+    global _LATIN_INDEX
+    idx = _modern_index()
+    stamp = _packs_stamp("places")
+    if _LATIN_INDEX is not None and _LATIN_INDEX[0] == stamp:
+        return _LATIN_INDEX[1]
+    out: dict[str, list[dict[str, Any]]] = {}
+    seen: set[tuple[str, str]] = set()
+    for rows in idx.values():
+        for d in rows:
+            for name in (d["name_uk"], d["name_ru"]):
+                k = _skeleton(name or "")
+                if k and (k, d["qid"]) not in seen:
+                    seen.add((k, d["qid"]))
+                    out.setdefault(k, []).append(d)
+    _LATIN_INDEX = (stamp, out)
+    return out
+
+
 def locate(card: str) -> dict[str, Any] | None:
     """Точка для картки газетира: {qid, lat, lng, name_uk, how, candidates}.
 
@@ -1244,12 +1275,19 @@ def locate(card: str) -> dict[str, Any] | None:
     return out
 
 
-def locate_name(name: str, oblast: str = "", raion: str = "") -> dict[str, Any] | None:
+def locate_name(name: str, oblast: str = "", raion: str = "", *,
+                prefer_city: bool = False) -> dict[str, Any] | None:
     """Точка для села за назвою — та сама політика, що в `locate()` для картки.
 
     Область — жорсткий фільтр (однойменних сіл по країні десятки: «Новоселиця» —
     29), район обирає серед однойменних в області. Без області точка лише при
     єдиному кандидаті. `None` — збігу немає або пака немає.
+
+    Назва з дефісом, якої немає («Ново-Олександрівка»), шукається злитно;
+    латинська («Winnica») — за ASCII-кістяком uk/ru-назв. `prefer_city` — для
+    підказки з допису, де «Київ» чи «Львів» без області означає місто, а не
+    однойменне село: серед кандидатів береться єдиний із `kind="місто"`.
+    Звідки точка, сказано в `by` («дефіс», «латинка», «місто»).
     """
     try:
         idx = _modern_index()
@@ -1257,8 +1295,19 @@ def locate_name(name: str, oblast: str = "", raion: str = "") -> dict[str, Any] 
         return None
     parts = [f"{raion.split()[0]} р-н" if raion.strip() else "",
              f"{oblast.split()[0]} обл" if oblast.strip() else ""]
-    return _locate_row({"village_uk": name,
-                        "modern_place": ", ".join(p for p in parts if p)}, idx)
+    place = {"village_uk": name, "modern_place": ", ".join(p for p in parts if p)}
+    out = _locate_row(place, idx, prefer_city=prefer_city)
+    if out is None and "-" in name:
+        out = _locate_row({**place, "village_uk": name.replace("-", "")}, idx,
+                          prefer_city=prefer_city)
+        if out is not None:
+            out["by"] = out.get("by") or "дефіс"
+    if out is None and _LATIN_RE.search(name):
+        latin = {_norm(name): _latin_index().get(_skeleton(name), [])}
+        out = _locate_row(place, latin, prefer_city=prefer_city)
+        if out is not None:
+            out["by"] = out.get("by") or "латинка"
+    return out
 
 
 _PAREN_RE = re.compile(r"\(([^)]*)\)")
@@ -1282,8 +1331,8 @@ def _locate_keys(place: dict[str, Any]) -> list[str]:
     return [k for k in dict.fromkeys(keys) if k]
 
 
-def _locate_row(place: dict[str, Any], idx: dict[str, list[dict[str, Any]]]
-                ) -> dict[str, Any] | None:
+def _locate_row(place: dict[str, Any], idx: dict[str, list[dict[str, Any]]], *,
+                prefer_city: bool = False) -> dict[str, Any] | None:
     modern = place.get("modern_place") or ""
     m_obl = _OBL_RE.search(modern)
     m_rai = _RAION_RE.search(modern)
@@ -1308,16 +1357,28 @@ def _locate_row(place: dict[str, Any], idx: dict[str, list[dict[str, Any]]]
         by_raion = [d for d in rows if rai in _norm(d["admin"] or "")]
         if by_raion:
             rows = by_raion
+    by = ""
+    # 🪤 1522 поселення пака мають вид «населений пункт», серед них і міста
+    # (черкаська Кам'янка): поруч із таким «Каменка» дісталась би єдиному
+    # «місту» — придністровському. Тому решта кандидатів мусить бути селами.
+    if prefer_city and len(rows) > 1:
+        cities = [d for d in rows if d["kind"] == "місто"]
+        if len(cities) == 1 and all(d["kind"] in _VILLAGE_KINDS
+                                    for d in rows if d is not cities[0]):
+            rows, by = cities, "місто"
     # без області в газетирі (285 карток) — точка лише при єдиному кандидаті
     if not obl and len(rows) > 1:
         return {"qid": "", "lat": None, "lng": None, "how": "ambiguous",
                 "candidates": [{"qid": d["qid"], "top": d["top"]} for d in rows]}
     best = rows[0]
-    return {"qid": best["qid"], "lat": best["lat"], "lng": best["lng"],
-            "name_uk": best["name_uk"], "kind": best["kind"], "top": best["top"],
-            "how": "unique" if len(rows) == 1 else "ambiguous",
-            "candidates": [{"qid": d["qid"], "admin": d["admin"]} for d in rows]
-            if len(rows) > 1 else []}
+    out = {"qid": best["qid"], "lat": best["lat"], "lng": best["lng"],
+           "name_uk": best["name_uk"], "kind": best["kind"], "top": best["top"],
+           "how": "unique" if len(rows) == 1 else "ambiguous",
+           "candidates": [{"qid": d["qid"], "admin": d["admin"]} for d in rows]
+           if len(rows) > 1 else []}
+    if by:
+        out["by"] = by
+    return out
 
 
 def locate_all() -> dict[str, dict[str, Any]]:
