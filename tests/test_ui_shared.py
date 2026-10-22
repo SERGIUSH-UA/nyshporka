@@ -296,3 +296,56 @@ def test_every_brand_image_the_pages_name_is_in_the_package() -> None:
     names |= {f"maskot-{p}.webp" for p in poses}
     missing = sorted(n for n in names if not (img / n).is_file())
     assert not missing, f"сторінки називають картинки, яких у пакеті немає: {missing}"
+
+
+# ── кнопки: одна родина (перекрій консолі, R3) ──────────────────────────────
+#: Модифікатори родини кнопок (`app.css`, «Кнопки: ОДНА родина»).
+BUTTON_FAMILY = {"primary", "ghost", "danger", "sm", "ctl-sm", "on", "btn"}
+#: Кнопки-компоненти: плитка, картка, чип, елемент шапки чи меню — у кожної свій
+#: вигляд за задумом. Новий клас сюди — лише з тим самим поясненням.
+BUTTON_COMPONENTS = {
+    "card", "tile", "tool", "pj-card", "pj-new", "pj-chip", "chip",
+    "ov-kpi", "ov-row", "ov-feed", "ov-link", "ov-style",
+    "ctx-btn", "ask", "gear", "side-btn", "thm", "sg-fold",
+    "lib-dots", "lb-ch", "lb-do", "scope-btn", "scope-clear", "fld-btn",
+    "aside",
+}
+
+
+def test_buttons_stay_in_one_family() -> None:
+    """🔴 Шість родин кнопок і правило `#view button`, що перебивало класи, —
+    саме з цього почалось розходження вигляду (оцінка консолі 22.10.2026).
+
+    Кнопка бере модифікатор родини (`primary`, `ghost`, `danger`, `sm`, `on`) або
+    є відомим компонентом. Новий клас кнопки поза цим — або модифікатор родини
+    в `app.css`, або компонент, доданий сюди з поясненням.
+    """
+    from _front import FRONT_DIR
+
+    found: dict[str, str] = {}
+    for p in [*FRONT_DIR.rglob("*.js"), FRONT_DIR / "index.html"]:
+        s = p.read_text(encoding="utf-8")
+        for m in re.finditer(r"<(button|a)\b[^>]*?\bclass=\"([^\"]*)\"", s):
+            raw = re.sub(r"\$\{[^}]*\}", " ", m.group(2))
+            if m.group(1) == "a" and "btn" not in raw.split():
+                continue
+            for c in raw.split():
+                found.setdefault(c, p.name)
+    stray = {c: f for c, f in found.items() if c not in BUTTON_FAMILY | BUTTON_COMPONENTS}
+    assert not stray, f"клас кнопки поза родиною: {stray}"
+
+
+def test_no_id_weight_base_for_buttons_and_no_old_tags() -> None:
+    """Базове правило кнопок — без ваги ідентифікатора; мітки — лише `.tag`.
+
+    `#view button` перебивав будь-який клас-модифікатор; `.pill` і `.badge` жили
+    поруч із `.tag` і показували ту саму думку по-різному.
+    """
+    from _front import FRONT_DIR
+
+    css = (FRONT_DIR / "app.css").read_text(encoding="utf-8")
+    code = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    assert not re.search(r"(^|[,{}]\s*)#(view|dlg) button\s*[,{:\[]", code, re.M), \
+        "базове правило кнопок з вагою #view/#dlg повернулось"
+    js = "".join(p.read_text(encoding="utf-8") for p in FRONT_DIR.rglob("*.js"))
+    assert not re.search(r"class=\"(pill|badge)\b", js), "мітка поза родиною `.tag`"

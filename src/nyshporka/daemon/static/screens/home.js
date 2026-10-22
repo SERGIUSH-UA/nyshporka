@@ -87,7 +87,7 @@ function agentCard(d) {
   return `<div class="dash-box agent-card">
     <h3>🤝 ${t('home.agent.title')}</h3>
     <p>${t('home.agent.why')}</p>
-    <p><a class="btn-solid ok" href="${agentDoc()}" target="_blank" rel="noopener">${
+    <p><a class="btn primary" href="${agentDoc()}" target="_blank" rel="noopener">${
       t('home.agent.go')} →</a></p>
   </div>`;
 }
@@ -353,7 +353,7 @@ function onboarding(d) {
         <span class="muted">${t(x.k + '.why')}</span></span>
       <span class="step-n muted">${esc(x.note)}</span>
       <span>${x.ok ? '' : x.href
-        ? `<a class="btn-solid sm" href="${esc(x.href)}" target="_blank" rel="noopener">${t('step.go')}</a>`
+        ? `<a class="btn sm" href="${esc(x.href)}" target="_blank" rel="noopener">${t('step.go')}</a>`
         : `<button data-act="${x.nav ? 'nav' : esc(x.act)}"${
           x.nav ? ` data-arg="${esc(x.nav)}"` : ''}>${t('step.go')}</button>`}</span>
     </div>`).join('')}</div>

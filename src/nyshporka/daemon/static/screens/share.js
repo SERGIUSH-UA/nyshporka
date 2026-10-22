@@ -40,7 +40,7 @@ SCREENS.give = async () => {
   setView(`
     <p class="muted">${t('give.why')}</p>
     ${renderWarnings(env)}
-    <div class="dash-box">${GIVE.length ? `<table class="tbl-wide"><thead><tr><th></th><th>${t('give.case')}</th>
+    <div class="dash-box">${GIVE.length ? `<table class="tbl-wide tbl-cards"><thead><tr><th></th><th>${t('give.case')}</th>
       <th>${t('give.name')}</th><th>${t('give.pages')}</th><th>${t('give.state')}</th></tr></thead><tbody>${rows}</tbody></table>
       <p class="row"><button class="primary" data-act="give.go" id="give-go"></button>
         <span class="muted">${t('give.go.why')}</span></p>

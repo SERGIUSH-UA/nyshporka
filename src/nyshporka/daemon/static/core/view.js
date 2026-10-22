@@ -259,6 +259,25 @@ function boxError(id, env) {
   return undefined;
 }
 
+/**
+ * Підписи клітинок для карток на телефоні: заголовок колонки → `data-l`.
+ *
+ * Таблиця з класом `tbl-cards` на вузькому екрані стає картками (`app.css`), і
+ * кожне поле мусить мати підпис. Береться з `<thead>`, щоб не дублювати назви
+ * колонок у кожному рядку кожного екрана; явний `data-l` лишається.
+ */
+function labelCells(root) {
+  if (!root || !root.querySelectorAll) return;
+  for (const tbl of root.querySelectorAll('table.tbl-cards')) {
+    const heads = [...tbl.querySelectorAll('thead th')].map((th) => (th.textContent || '').trim());
+    for (const tr of tbl.querySelectorAll('tbody tr')) {
+      [...tr.children].forEach((td, i) => {
+        if (heads[i] && td.dataset && !td.dataset.l) td.dataset.l = heads[i];
+      });
+    }
+  }
+}
+
 /** Заблокувати кнопки форми на час запиту; повертає, як розблокувати. */
 function busyForm(form) {
   const btns = form && form.tagName === 'FORM'
@@ -305,4 +324,4 @@ function fld(label, control, cls = '') {
 
 export { esc, safeHref, el, renderWarnings, renderCoverage, setView, setViewTarget, busy, fld,
   splitWarnings, notesBlock, hasAlerts, seedAttr,
-  failure, boxError, busyForm, alive, maskot, MASKOT, humanError };
+  failure, boxError, busyForm, alive, maskot, MASKOT, humanError, labelCells };

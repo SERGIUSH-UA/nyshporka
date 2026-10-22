@@ -121,7 +121,7 @@ function queueRunner(data) {
       <button class="ctl-sm" data-act="queue.stopnow">${ic('stop')} ${t('queue.stopnow')}</button></p>`;
   }
   return `<p class="muted">${t('queue.runner.off')}
-    <button class="btn-solid ok" data-act="queue.start">${ic('play')} ${t('queue.start')}</button></p>`;
+    <button class="primary" data-act="queue.start">${ic('play')} ${t('queue.start')}</button></p>`;
 }
 
 function queueBody(env) {
@@ -129,7 +129,7 @@ function queueBody(env) {
   const rows = data.rows || [];
   const pulse = (data.runner || {}).pulse || {};
   const table = rows.length
-    ? `<table><thead><tr><th>${t('queue.col.case')}</th><th>${t('queue.col.state')}</th>
+    ? `<table class="tbl-cards"><thead><tr><th>${t('queue.col.case')}</th><th>${t('queue.col.state')}</th>
         <th>${t('queue.col.pages')}</th><th></th></tr></thead>
         <tbody>${rows.map((r) => queueRow(r, pulse)).join('')}</tbody></table>`
     : `<p class="muted">${t('queue.empty')}</p>`;

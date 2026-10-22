@@ -101,6 +101,13 @@ if (MINE) {
   EV.openEvidence({ case: 'TEST/1/1/2', page: '4', line: 3, card: 'I9001' });
   out.evidence = document.getElementById('dlg-body').innerHTML || '';
 }
+const V = await import('./core/view.js');
+const td = { dataset: {} };
+const own = { dataset: { l: 'своє' } };
+const table = { querySelectorAll: (q) => (q === 'thead th'
+  ? [{ textContent: ' Шифра ' }, { textContent: 'Стан' }] : [{ children: [td, own] }]) };
+V.labelCells({ querySelectorAll: (q) => (q === 'table.tbl-cards' ? [table] : []) });
+out.labels = [td.dataset.l, own.dataset.l];
 console.log('@@' + JSON.stringify(out));
 process.exit(0);
 """
@@ -208,3 +215,8 @@ def test_verdict_form_without_a_verdict_does_not_offer_to_clear(proj) -> None:
     f = proj["verdict"]
     assert "оберіть рішення" in f and "зняти вердикт" not in f
     assert 'class="fld-l"' in f, "поля форми підписані"
+
+
+def test_phone_cards_take_field_labels_from_the_table_head(hub) -> None:
+    """Таблиця-картка на телефоні: підпис поля — з заголовка колонки, своє лишається."""
+    assert hub["labels"] == ["Шифра", "своє"]

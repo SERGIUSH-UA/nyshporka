@@ -38,7 +38,7 @@ function card(kind, info, canon, can = true) {
     : `<span class="muted">${t('site.none')}</span>`}</p>
     ${stale ? `<p class="warn">${esc(t('site.stale').replace('{n}', canon).replace('{s}', c.persons))}</p>` : ''}
     <div class="row">
-      ${info.built ? `<a class="btn-solid" href="${esc(info.url)}" target="_blank" rel="noopener">${
+      ${info.built ? `<a class="btn primary" href="${esc(info.url)}" target="_blank" rel="noopener">${
     ic('link', 'ic-sm')} ${t('site.open')}</a>` : ''}
       <button type="button" data-act="site.rebuild" ${can ? '' : 'disabled'}
         data-arg="${pub ? '1' : ''}">${ic('refresh', 'ic-sm')} ${t(info.built ? 'site.rebuild' : 'site.build')}</button>

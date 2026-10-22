@@ -182,7 +182,7 @@ export async function fillProject(stillHere = () => true) {
       const d = nx.data || {};
       const more = (d.open || 0) + (d.awaiting || 0) - (d.next || []).length;
       box.innerHTML = (d.next || []).length ? (d.next || []).map((x) => `<button class="ov-row" data-act="phead.hyp"
-          data-arg="${esc(x.id)}"><span class="pill ${x.status === 'awaiting' ? 'warn' : 'info'}">${esc(x.id)}</span>
+          data-arg="${esc(x.id)}"><span class="tag ${x.status === 'awaiting' ? 'warn' : 'info'}">${esc(x.id)}</span>
           <span><b>${esc(unwiki(x.claim))}</b>${x.decides ? `<small class="muted">${esc(t('hyp.decides'))}: ${
   esc(unwiki(x.decides))}</small>` : ''}</span></button>`).join('')
         + (more > 0 ? `<p><button class="ghost ctl-sm" data-act="nav" data-arg="hyp">${

@@ -331,8 +331,8 @@ function libSearched(r) {
   const read = (r.htr_stage || 'none') !== 'none';
   const day = String(by[mine] || '').slice(0, 10);
   const here = by[mine]
-    ? `<span class="pill ok" title="${esc(day)}">${esc(t('lib.srch.yes'))}</span>`
-    : (read ? `<span class="pill warn">${esc(t('lib.srch.no'))}</span>` : '<span class="dim">—</span>');
+    ? `<span class="tag ok" title="${esc(day)}">${esc(t('lib.srch.yes'))}</span>`
+    : (read ? `<span class="tag warn">${esc(t('lib.srch.no'))}</span>` : '<span class="dim">—</span>');
   return chips ? `${here} <span class="dim">${esc(t('lib.srch.also'))}</span> ${chips}` : here;
 }
 
@@ -407,7 +407,7 @@ function libRow(r, layers) {
     ? `<span title="${esc(t('lib.disk'))}">${ic('disk', 'ic-sm')}</span>`
     : `<span class="muted" title="${esc(t('lib.nodisk'))}">—</span>`;
   const v = r.verdict
-    ? `<span class="badge ${r.verdict === 'clan_found' ? 'known' : ''}"
+    ? `<span class="tag ${r.verdict === 'clan_found' ? 'ok' : r.verdict === 'recheck' ? 'warn' : ''}"
          title="${esc(r.verdict_note || '')}">${esc(t(`lib.verdict.${r.verdict}`))}</span>`
     : '';
   return `<tr class="lib-row" data-act="lib.more" data-arg="${esc(r.key)}">

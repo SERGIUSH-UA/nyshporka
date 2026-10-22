@@ -251,7 +251,7 @@ async function fondLoad(full = false) {
   const body = `${renderWarnings(env)}
     <p class="muted">${sprChip()}${t('fonds.matched')} <b>${esc(d.matched)}</b>
       ${t('fonds.of')} <b>${esc((d.summary || {}).rows)}</b></p>
-    ${(d.rows || []).length ? `<div class="tbl-wide"><table><thead><tr>
+    ${(d.rows || []).length ? `<div class="tbl-wide"><table class="tbl-cards"><thead><tr>
       <th>${t('fonds.col.shifra')}</th><th>${t('fonds.col.title')}</th>
       <th>${t('fonds.col.years')}</th><th class="num">${t('fonds.col.folios')}</th>
       <th class="num">${t('fonds.col.dv')}</th><th>${t('fonds.col.scan')}</th>

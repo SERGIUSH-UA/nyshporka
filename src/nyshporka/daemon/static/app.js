@@ -23,7 +23,7 @@
  */
 import { initTheme, cycleTheme } from '/ui/theme.js';
 import { LANG, LANGS, ENABLED, setLang, t } from './core/strings.js';
-import { esc, el, setView, curGen, alive } from './core/view.js';
+import { esc, el, setView, curGen, alive, labelCells } from './core/view.js';
 import { ACTIONS, KEYS, SCREENS, PAGERS, screenOfOp } from './core/registry.js';
 import { ST } from './core/state.js';
 import { SECTIONS, loadSections, show, goto,
@@ -295,6 +295,16 @@ async function boot() {
     const want = routeHash();
     if (want && (want !== currentScreen() || raw.includes('?'))) show(want);
   });
+  // Таблиці-картки на телефоні дістають підписи з заголовків, хоч би як екран
+  // перемальовувався (повністю чи лише рядки — `swapHtml`).
+  if (typeof MutationObserver === 'function') {
+    for (const id of ['view', 'dlg-body']) {
+      const root = document.getElementById(id);
+      if (root && root.nodeType) {
+        new MutationObserver(() => labelCells(root)).observe(root, { childList: true, subtree: true });
+      }
+    }
+  }
   watchJobs();
 }
 boot();

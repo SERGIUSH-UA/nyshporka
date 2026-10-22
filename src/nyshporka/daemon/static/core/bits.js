@@ -15,9 +15,9 @@ export function kv(rows) {
   return body ? `<dl class="kv">${body}</dl>` : '';
 }
 
-/** Плашка: `ok` · `warn` · `info` · `err` · `neutral`. */
+/** Мітка родини `.tag`: `ok` · `warn` · `info` · `err` · `neutral`. */
 export function pill(tone, text) {
-  return `<span class="pill ${esc(tone)}">${esc(text)}</span>`;
+  return `<span class="tag ${esc(tone)}">${esc(text)}</span>`;
 }
 
 /**

@@ -245,7 +245,7 @@ function runsGroupHtml(g) {
       ${g.key ? `<button class="ctl-sm" data-act="runs.lib" data-arg="${esc(g.key)}"
         title="${esc(t('runs.act.lib'))}">${ic('books', 'ic-o ic-sm')}</button>` : ''}
     </h3>
-    <table><thead><tr>
+    <table class="tbl-cards"><thead><tr>
       <th>${t('runs.col.state')}</th><th>${t('runs.col.engine')}</th>
       <th>${t('runs.col.model')}</th>
       <th class="num">${t('runs.col.pages')}</th>

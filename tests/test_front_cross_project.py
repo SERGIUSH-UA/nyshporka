@@ -132,11 +132,11 @@ def test_library_shows_who_searched(probe) -> None:
     assert "Прошукано для «Рід Сидоруків»" in lib
     one, two, three = (_row(lib, f"TEST/1/1/{i}") for i in (1, 2, 3))
     # Свій рід шукав — «так», і сусідній рід видно чипом.
-    assert 'class="pill ok"' in one and "Рід Ковальчуків" in one and "також:" in one
+    assert 'class="tag ok"' in one and "Рід Ковальчуків" in one and "також:" in one
     # Прочитане, але свій рід ще не шукав — жовте «ні», сусід — чипом.
-    assert 'class="pill warn"' in two and "Рід Ковальчуків" in two
+    assert 'class="tag warn"' in two and "Рід Ковальчуків" in two
     # Непрочитане — не «ні»: шукати ще нема в чому.
-    assert "pill" not in three
+    assert "tag ok" not in three and "tag warn" not in three
 
 
 def test_library_filter_read_but_not_searched_here(probe) -> None:
