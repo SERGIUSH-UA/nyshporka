@@ -26,7 +26,7 @@ function queueWord(key, fallback) {
 
 function queueStages(row) {
   return (row.stages || []).map((s) => {
-    const cls = s.state === 'done' ? 'chip tight' : 'chip';
+    const cls = s.state === 'done' ? 'tag ok' : 'tag';
     const mark = s.state === 'done' ? '✓ ' : s.state === 'skip' ? '– ' : '';
     const dim = s.state === 'skip' ? ' dim' : '';
     const name = queueWord(`queue.stage.${s.stage}`, s.title);
@@ -162,7 +162,7 @@ async function queueLoad(full = false) {
       <input name="refs" required placeholder="${esc(t('queue.add.ph'))}">
       <label class="lbl-mini"><input type="checkbox" name="share" value="1">
         ${t('queue.add.share')}</label>
-      <button>${ic('plus')} ${t('queue.add')}</button>
+      <button type="submit">${ic('plus')} ${t('queue.add')}</button>
     </form>
     <p class="consequence">${esc(t('read.lands').replace('{p}', currentName() || t('read.for.hub')))}</p>
     <div id="queue-msg"></div>

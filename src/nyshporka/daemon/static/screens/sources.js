@@ -196,7 +196,7 @@ function srcCount(d) {
 }
 
 function srcTable(rows) {
-  return `<table><tbody>${rows.map((s) => {
+  return `<table class="tbl-cards"><tbody>${rows.map((s) => {
     const c = s.catalog || {};
     return `<tr>
       <td><b>${esc(s.label)}</b><br>

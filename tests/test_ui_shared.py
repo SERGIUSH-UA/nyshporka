@@ -349,3 +349,7 @@ def test_no_id_weight_base_for_buttons_and_no_old_tags() -> None:
         "базове правило кнопок з вагою #view/#dlg повернулось"
     js = "".join(p.read_text(encoding="utf-8") for p in FRONT_DIR.rglob("*.js"))
     assert not re.search(r"class=\"(pill|badge)\b", js), "мітка поза родиною `.tag`"
+    # Дія сторінки стоїть у заголовку (`#phead`), поза `#view`: без нього в базі
+    # «＋ Завести справу» малювалась системною кнопкою (прохід R3).
+    base = re.search(r":where\(([^)]*)\) :where\(button, a\.btn\) \{", code)
+    assert base and "#phead" in base.group(1), "кнопка в заголовку сторінки поза родиною"

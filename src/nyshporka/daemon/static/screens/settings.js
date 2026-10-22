@@ -60,7 +60,7 @@ SCREENS.settings = async () => {
     ${renderWarnings(env)}
     <p>${t('sect.preset')}:
       ${presets.map((p) => `<button data-act="sections.preset" data-arg="${esc(p)}"
-        ${p === env.data.preset ? 'disabled' : ''}>${esc(t('preset.' + p))}</button>`).join(' ')}
+        ${p === env.data.preset ? 'class="on" aria-pressed="true" disabled' : ''}>${esc(t('preset.' + p))}</button>`).join(' ')}
       <span class="muted">${env.data.preset ? '' : t('sect.custom')}</span></p>
     <table><tbody>${rows}</tbody></table>
     <div id="roots"></div>

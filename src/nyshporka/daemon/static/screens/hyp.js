@@ -18,7 +18,9 @@ import { openModal, modalSeq } from '../core/modal.js';
 import { ST } from '../core/state.js';
 import { kv, pill, unwiki } from '../core/bits.js';
 
-const TONE = { open: 'warn', awaiting: 'info', closed: 'ok' };
+// Чекає вердикту — дія людини (warn); відкрита — у роботі (info). Той самий
+// тон, що на Огляді роду й у картці канону.
+const TONE = { open: 'info', awaiting: 'warn', closed: 'ok' };
 
 /** Відкрита гіпотеза: хіти з прогоном, який дав `text.crop`. */
 let OPEN = null;

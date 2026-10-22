@@ -855,7 +855,7 @@ Object.assign(ACTIONS, {
       ${env.data.ready ? `<div class="warn">✅ ${t('check.ready')}</div>`
         : `<div class="warn">${t('check.notready')}</div>`}
       ${renderWarnings({ ...env, warnings: (env.warnings || []).filter((w) => w.code !== 'not_ready') })}
-      <table><tbody>${rows}</tbody></table>
+      <table class="check-tbl"><tbody>${rows}</tbody></table>
       ${sampleBlock(env.data)}`;
     if (box) box.innerHTML = html;
   },
