@@ -127,7 +127,7 @@ function citeRow(c, where = '') {
 
 /** Картка у вікні: поля, факти з доказами, зауваження перевірки, гіпотези. */
 async function openCard(id) {
-  const box = openModal({ title: id, body: `<p class="muted">${t('common.loading')}</p>` });
+  const box = openModal({ title: id, body: `<p class="muted">${t('load.open')}</p>` });
   const seq = modalSeq();
   const env = await callOp('canon.card', { id });
   if (!box || seq !== modalSeq()) return;
@@ -173,7 +173,7 @@ Object.assign(ACTIONS, {
   },
   'canon.recheck': async () => {
     const box = el('cn-check');
-    if (box) box.innerHTML = `<p class="muted">${t('common.loading')}</p>`;
+    if (box) box.innerHTML = `<p class="muted">${t('load.open')}</p>`;
     const env = await callOp('canon.check', {});
     if (!el('cn-check')) return;
     if (!env.ok) { boxError('cn-check', env); return; }

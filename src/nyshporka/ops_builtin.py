@@ -570,7 +570,7 @@ def _check_machine() -> dict[str, Any]:
 
     now = time.monotonic()
     try:
-        from nyshporka.setup.doctor import run
+        from nyshporka.setup.doctor import ENGINES, run
 
         checks = list(run())
     except Exception as exc:
@@ -584,8 +584,11 @@ def _check_machine() -> dict[str, Any]:
     # 🔴 «Готова» — коли нічого не зламано, а не коли все зелене. Жовтий пункт
     # («про новішу версію не питали») ставив ⚠ на «Машина читає рукопис» тій
     # машині, яка щойно читала справу; подробиці лишаються в «Перевірці».
-    out = {"ok": True, "level": worst, "ready": worst != "fail",
-           "bad": [c.name for c in checks if c.level == "fail"]}
+    # Крім рушіїв: без них читання не запуститься, і ✅ у чеклісті суперечило
+    # «Перевірці машини» поруч (прохід консолі 22.10.2026).
+    no_engines = [c.name for c in checks if c.name == ENGINES and c.level != "ok"]
+    out = {"ok": True, "level": worst, "ready": worst != "fail" and not no_engines,
+           "bad": [c.name for c in checks if c.level == "fail"] + no_engines}
     _MACHINE.update(at=now, data=out)
     if not PULSE_SNAPSHOT:
         return out

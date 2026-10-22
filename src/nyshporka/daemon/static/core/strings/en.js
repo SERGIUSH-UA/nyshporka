@@ -1423,4 +1423,9 @@ export default {
     'load.cards': 'Reading the canon cards…',
     'load.history': 'Reading the change log…',
     'load.search': 'Searching what was read…',
+    'load.open': 'Opening the card…',
+    'load.diff': 'Comparing versions…',
+    'load.site': 'Checking the family site…',
+    'load.check': 'Checking the machine, up to a minute…',
+    'lib.verdict.pick': '— choose a decision —',
 };

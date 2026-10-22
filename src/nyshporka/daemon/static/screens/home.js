@@ -24,6 +24,7 @@ import { SCREENS, ACTIONS, screenOfOp } from '../core/registry.js';
 import { SECTIONS, NAV_LABEL, show, renderNav, screenOn,
   refreshJobs } from '../core/nav.js';
 import { ST } from '../core/state.js';
+import { openModal } from '../core/modal.js';
 import { ic, eng } from '/ui/icons.js';
 import { swapHtml, skelRows, skelCards } from '/ui/dom.js';
 import { attachCombobox } from '/ui/combobox.js';
@@ -426,7 +427,7 @@ function tiles(d) {
   const out = [];
 
   out.push(tile('cases', 'drawers', t('dash.tile.cases'), reg.cases,
-    'cases', { hist: 'cases' }));
+    'library', { hist: 'cases' }));
   out.push(tile('frames', 'image', t('dash.tile.frames'), reg.frames,
     'library', { hist: 'frames' }));
   if (screenOn('runs') && rd.ok) {
@@ -728,7 +729,8 @@ function spaceSection(d) {
   if (jobs.queue && jobs.running) {
     bits.push(`<span class="flag">${t('dash.jobs.running')}: <b>${num(jobs.running)}</b></span>`);
   }
-  const prof = p.present
+  // Рід — питання проєкту: у самій Майстерні «рід ще не названо» вводило б в оману.
+  const prof = SECTIONS.hub_only ? '' : p.present
     ? `<div class="dash-nums">
         <span><b>${esc(p.display || p.name || '')}</b></span>
         ${n(t('dash.profile.roots'), (p.roots || []).length)}
@@ -827,9 +829,9 @@ Object.assign(ACTIONS, {
     // «перевірити, що читання працює на цій машині». Питання правильне, а
     // відповідь була не тими словами й не про те: людина, яка щойно поставила
     // застосунок, мусить прочитати, чого бракує і чим це ставиться.
-    busy();
+    const box = openModal({ title: t('check.title'), body: `<p class="muted">${t('load.check')}</p>` });
     const env = await callOp('setup.check', {});
-    if (!env.ok) return failure(env);
+    if (!env.ok) { if (box) box.innerHTML = `<div class="warn err">${esc(env.error || '')}</div>`; return; }
     const rows = (env.data.checks || []).map((c) => {
       const mark = { ok: '✅', warn: '⚠', fail: '🔴' }[c.level] || '•';
       // 🔴 Колонка «чим це ставиться» була суцільним терміналом: дев'ять
@@ -846,13 +848,16 @@ Object.assign(ACTIONS, {
         <span class="muted">${esc(c.detail)}</span></td>
         <td>${act}</td></tr>`;
     }).join('');
-    setView(`<h2>▶ ${t('check.title')}</h2>
+    // Вікно, а не сторінка: «Стан Майстерні» під ним лишається, і повертатись
+    // нема звідки (прохід консолі 22.10.2026).
+    const html = `
       <p class="muted">${t('check.why')}</p>
       ${env.data.ready ? `<div class="warn">✅ ${t('check.ready')}</div>`
         : `<div class="warn">${t('check.notready')}</div>`}
-      ${renderWarnings(env)}
+      ${renderWarnings({ ...env, warnings: (env.warnings || []).filter((w) => w.code !== 'not_ready') })}
       <table><tbody>${rows}</tbody></table>
-      ${sampleBlock(env.data)}`);
+      ${sampleBlock(env.data)}`;
+    if (box) box.innerHTML = html;
   },
 
   /**

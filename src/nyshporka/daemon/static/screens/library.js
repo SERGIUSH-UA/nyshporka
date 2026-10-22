@@ -489,18 +489,19 @@ function libVerdictForm(key) {
   const opt = (v, label) => `<option value="${v}"${(r.verdict || '') === v ? ' selected' : ''}>${esc(label)}</option>`;
   setView(`<h2>${esc(key)}</h2>
     <div class="row"><select id="lv-kind">
-      ${opt('', t('lib.verdict.clear'))}
+      ${opt('', t(r.verdict ? 'lib.verdict.clear' : 'lib.verdict.pick'))}
       ${opt('no_clan', t('lib.verdict.no_clan'))}
       ${opt('clan_found', t('lib.verdict.clan_found'))}
       ${opt('recheck', t('lib.verdict.recheck'))}
     </select></div>
-    <div class="row"><input id="lv-pages" type="number" min="0"
+    <div class="row"><label class="fld"><span class="fld-l">${esc(t('lib.pages'))}</span>
+      <input id="lv-pages" type="number" min="0"
       value="${r.verdict_pages ? esc(String(r.verdict_pages)) : ''}"
-      placeholder="${esc(t('lib.pages'))}"></div>
+      placeholder="0"></label></div>
     <p class="muted">${t('lib.pages.why')}</p>
     <p class="consequence">${esc(t('lib.verdict.lands').replace('{p}', _pname()))}</p>
-    <div class="row"><input id="lv-note" value="${esc(r.verdict_note || '')}"
-      placeholder="${esc(t('lib.note'))}"></div>
+    <div class="row"><label class="fld"><span class="fld-l">${esc(t('lib.note'))}</span>
+      <input id="lv-note" value="${esc(r.verdict_note || '')}"></label></div>
     <button data-act="lib.verdict.save" data-arg="${esc(key)}">${t('lib.save')}</button>
     <button data-act="nav" data-arg="library">${t('lib.cancel')}</button>`);
 }

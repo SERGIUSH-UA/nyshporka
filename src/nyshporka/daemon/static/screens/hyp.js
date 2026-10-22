@@ -52,7 +52,7 @@ SCREENS.hyp = async () => {
 
 /** Гіпотеза у вікні: підстава, спірні факти, кандидати з кропами. */
 async function openHyp(id) {
-  openModal({ title: id, body: `<p class="muted">${t('common.loading')}</p>` });
+  openModal({ title: id, body: `<p class="muted">${t('load.open')}</p>` });
   const seq = modalSeq();
   const env = await callOp('canon.hyp', { id });
   if (seq !== modalSeq()) return;

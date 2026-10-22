@@ -77,6 +77,12 @@ if (!MINE) {
   out.cards = document.getElementById('hub-cards').innerHTML || '';
   await SCREENS.status(); await tick(80); out.status = view();
   await SCREENS.projects(); await tick(80); out.projects = view();
+  await SCREENS.status(); await tick(80);
+  const beforeCheck = view();
+  DATA['setup.check'] = { level: 'warn', ready: false, checks: [], sample_case: true, sample_available: false };
+  await ACTIONS['home.demo'](); await tick(80);
+  out.statusKept = view() === beforeCheck;
+  out.checkBox = document.getElementById('dlg-body').innerHTML || '';
 }
 await SCREENS.library(); await tick(80); out.library = view();
 if (MINE) {
@@ -185,3 +191,20 @@ def test_writing_actions_say_where_the_result_lands(proj) -> None:
     assert 'class="consequence"' in proj["verdict"] and "для «Рід Сидоруків»" in proj["verdict"]
     assert 'class="consequence"' in proj["evidence"] and "канон «Рід Сидоруків»" in proj["evidence"]
     assert 'class="consequence"' in proj["queue"] and "Замовник: Рід Сидоруків" in proj["queue"]
+
+
+def test_cases_tile_leads_to_the_library(hub) -> None:
+    """Плитка «справ» вела в «Нові теки» — там «нових тек немає» проти числа 3."""
+    assert 'data-arg="library"' in hub["status"]
+    assert 'data-arg="cases"' not in hub["status"].split('class="tiles"')[1].split("</div></div>")[0]
+
+
+def test_machine_check_opens_over_the_status_screen(hub) -> None:
+    assert hub["statusKept"], "перевірка машини замінила «Стан Майстерні»"
+    assert "Читання поки не запуститься" in hub["checkBox"]
+
+
+def test_verdict_form_without_a_verdict_does_not_offer_to_clear(proj) -> None:
+    f = proj["verdict"]
+    assert "оберіть рішення" in f and "зняти вердикт" not in f
+    assert 'class="fld-l"' in f, "поля форми підписані"

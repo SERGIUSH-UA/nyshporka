@@ -1493,4 +1493,9 @@ export default {
     'load.cards': 'Citesc fișele canonului…',
     'load.history': 'Citesc jurnalul modificărilor…',
     'load.search': 'Caut în textul citit…',
+    'load.open': 'Deschid fișa…',
+    'load.diff': 'Compar versiunile…',
+    'load.site': 'Verific site-ul familiei…',
+    'load.check': 'Verific mașina, până la un minut…',
+    'lib.verdict.pick': '— alegeți decizia —',
 };

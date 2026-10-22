@@ -1493,4 +1493,9 @@ export default {
     'load.cards': 'Lecture des fiches du canon…',
     'load.history': 'Lecture du journal des modifications…',
     'load.search': 'Recherche dans le texte lu…',
+    'load.open': 'Ouverture de la fiche…',
+    'load.diff': 'Comparaison des versions…',
+    'load.site': 'Vérification du site de la famille…',
+    'load.check': 'Vérification de la machine, jusqu’à une minute…',
+    'lib.verdict.pick': '— choisissez une décision —',
 };

@@ -75,7 +75,7 @@ async function openDiff(i, file = '') {
   if (!r) return;
   const files = r.files || (PATH ? [PATH] : []);
   const path = file || files[0];
-  openModal({ title: `${r.rev} · ${r.date}`, body: `<p class="muted">${t('common.loading')}</p>` });
+  openModal({ title: `${r.rev} · ${r.date}`, body: `<p class="muted">${t('load.diff')}</p>` });
   const seq = modalSeq();
   const env = await callOp('history.diff', { path, rev: r.rev });
   if (seq !== modalSeq()) return;

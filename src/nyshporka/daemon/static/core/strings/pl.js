@@ -1493,4 +1493,9 @@ export default {
     'load.cards': 'Czytam karty kanonu…',
     'load.history': 'Czytam dziennik zmian…',
     'load.search': 'Szukam w odczytanym…',
+    'load.open': 'Otwieram kartę…',
+    'load.diff': 'Porównuję wersje…',
+    'load.site': 'Sprawdzam stronę rodziny…',
+    'load.check': 'Sprawdzam maszynę, do minuty…',
+    'lib.verdict.pick': '— wybierz decyzję —',
 };
