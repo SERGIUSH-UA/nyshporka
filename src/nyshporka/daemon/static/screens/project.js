@@ -167,12 +167,36 @@ export async function projectCards({ limit = 0, all = false } = {}) {
 /** Проєкт, на верх якого дивимось: стиль змінюється саме йому. */
 let HEAD = null;
 
-/** Картка-показник Огляду проєкту: число, підпис, перехід на закладку. */
-function kpi(id, label, nav, pic = '') {
-  return `<button class="ov-kpi" id="${id}" data-act="nav" data-arg="${nav}">${mini(pic, 52)}
-    <span class="ov-kpi-l">${esc(label)}</span>
-    <span class="ov-kpi-v"><span class="muted ov-wait">${t('load.count')}</span></span>
-    <span class="ov-kpi-s"></span></button>`;
+/**
+ * Мальовані речі карток Огляду (ілюстрації дослідника, 23.10.2026). Шляхи
+ * повністю, без шаблону: тест пакета звіряє кожну названу картинку з файлом.
+ */
+const ART = {
+  canon: '/ui/img/art-konverty.webp', hyp: '/ui/img/art-kompas.webp',
+  mat: '/ui/img/art-shukhliada.webp', hist: '/ui/img/art-suvii.webp',
+  decide: '/ui/img/art-selo.webp', news: '/ui/img/art-pero.webp',
+};
+
+/**
+ * Картка-показник Огляду проєкту: значок у кружку, назва, число, мальована річ
+ * у куті й стрілка переходу. Річ — оздоба під текстом: на вузькій картці вона
+ * меншає, а текст лишається читабельним.
+ */
+function kpi(id, label, nav, icon, art) {
+  return `<button class="ov-kpi" id="${id}" data-act="nav" data-arg="${nav}">
+    <span class="ov-ic">${ic(icon, 'ic-plain')}</span>
+    <span class="ov-kpi-t"><span class="ov-kpi-l">${esc(label)}</span>
+      <span class="ov-kpi-v"><span class="muted ov-wait">${t('load.count')}</span></span>
+      <span class="ov-kpi-s"></span></span>
+    <img class="ov-art" src="${art}" alt="" loading="lazy" decoding="async">
+    <span class="ov-go" aria-hidden="true"></span></button>`;
+}
+
+/** Розділ Огляду з шапкою-стрічкою: значок, назва, гравюра праворуч. */
+function ovSection(icon, title, art, body) {
+  return `<div class="dash-box ov-sec"><div class="ov-sec-h"><span class="ov-ic">${ic(icon, 'ic-plain')}</span>
+      <h3>${esc(title)}</h3><img class="ov-sec-art" src="${art}" alt="" loading="lazy" decoding="async"></div>
+    <div class="ov-sec-b">${body}</div></div>`;
 }
 
 function setKpi(id, value, sub, tone = '') {
@@ -199,14 +223,14 @@ export function projectShell() {
       <span class="muted" id="ov-sub"></span>
       <button class="ghost ctl-sm ov-style" data-act="phead.style">${t('phead.style')}</button></div>
     <div class="ov-kpis">
-      ${kpi('ov-k-canon', t('nav.canon'), 'canon', 'pechatka')}
-      ${kpi('ov-k-hyp', t('nav.hyp'), 'hyp', 'lupa')}
-      ${kpi('ov-k-mat', t('phead.material'), 'search', 'shukhliada')}
-      ${kpi('ov-k-hist', t('nav.history'), 'history', 'hodynnyk')}
+      ${kpi('ov-k-canon', t('nav.canon'), 'canon', 'page', ART.canon)}
+      ${kpi('ov-k-hyp', t('nav.hyp'), 'hyp', 'scale', ART.hyp)}
+      ${kpi('ov-k-mat', t('phead.material'), 'search', 'drawers', ART.mat)}
+      ${kpi('ov-k-hist', t('nav.history'), 'history', 'clock', ART.hist)}
     </div>
     <div class="ov-cols">
-      <div class="dash-box"><h3>${t('canon.next')}</h3><div id="ov-decide"><span class="skel-cell"></span></div></div>
-      <div class="dash-box"><h3>${t('ov.new')}</h3><div id="ov-new"><span class="skel-cell"></span></div></div>
+      ${ovSection('book-open', t('canon.next'), ART.decide, '<div id="ov-decide"><span class="skel-cell"></span></div>')}
+      ${ovSection('ledger', t('ov.new'), ART.news, '<div id="ov-new"><span class="skel-cell"></span></div>')}
     </div>
     <div class="dash-box" id="ov-mat" hidden></div>
   </section>`;

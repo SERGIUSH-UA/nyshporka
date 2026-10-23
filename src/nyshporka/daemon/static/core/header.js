@@ -75,7 +75,7 @@ async function fillProject() {
   // Кружок зі знаком роду — поруч із назвою, а не замість неї: колір лише
   // підтримує напис (правила інтерфейсу, 22.10.2026).
   const bdg = el('proj-badge');
-  if (bdg) bdg.innerHTML = mine ? projectBadge(mine) : '<span class="pj-badge pj-hub">⌂</span>';
+  if (bdg) bdg.innerHTML = mine ? projectBadge(mine) : HUB_BADGE;
   // Колір проєкту — на крапці перемикача й смузі шапки: у чужому роді людина
   // має це бачити ще до першого кліку.
   const color = mine ? projectColor(mine) : '';
@@ -87,17 +87,22 @@ async function fillProject() {
   box.hidden = false;
 }
 
+/** Знак Майстерні без проєкту: мальовані коробки з теками — спільний матеріал. */
+const HUB_BADGE = '<span class="pj-badge pj-hub"><img src="/ui/img/art-skrynky.webp" alt=""></span>';
+
 function projectMenu() {
   const p = PROJECTS || { projects: [] };
   const cur = p.current ?? p.hub_id;
-  // Кружок кольору зі знаком — щоб і серед десятка проєктів свій знаходився оком.
-  const row = (id, name, sub, badge = '') => `<button type="button" data-act="project.go" data-arg="${esc(id)}"${
-    id === cur ? ' aria-current="true"' : ''}>${badge}<span>${esc(name)}<small>${esc(sub)}</small></span></button>`;
-  return (p.hub_only ? row(p.hub_id, t('project.hub'), t('project.hub.why')) + '<div class="sep"></div>' : '')
+  // Кружок кольору зі знаком — щоб і серед десятка проєктів свій знаходився оком;
+  // поточний — ще й галочкою, а не лише тлом рядка.
+  const row = (id, name, sub, badge = '') => `<button type="button" class="pm-row" data-act="project.go" data-arg="${esc(id)}"${
+    id === cur ? ' aria-current="true"' : ''}>${badge}<span class="pm-t">${esc(name)}<small>${esc(sub)}</small></span>${
+    id === cur ? ic('check', 'pm-check ic-plain') : ''}</button>`;
+  return (p.hub_only ? row(p.hub_id, t('project.hub'), t('project.hub.why'), HUB_BADGE) : '')
     + p.projects.map((x) => row(x.id, x.name || x.id,
       t(`np.kind.${x.kind === 'order' ? 'order' : 'family'}`), projectBadge(x))).join('')
-    + (p.hub_only ? `<div class="sep"></div><button type="button" data-act="nav" data-arg="newproject"><span>${
-      t('stage.act.newproject')}</span></button>` : '');
+    + (p.hub_only ? `<div class="sep"></div><button type="button" class="pm-row pm-new" data-act="nav" data-arg="newproject"><span class="pm-plus">${
+      ic('plus', 'ic-plain')}</span><span class="pm-t"><b>${esc(t('stage.act.newproject').replace(/^＋\s*/, ''))}</b></span></button>` : '');
 }
 
 // ── робота ───────────────────────────────────────────────────────────────────

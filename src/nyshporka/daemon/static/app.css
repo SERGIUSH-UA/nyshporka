@@ -1325,3 +1325,108 @@ details.np-folder > summary { padding: 0; background: none; font-size: .85rem; c
 .bell-pop button.linkish { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline;
   font-size: inherit; }
 .bell-pop .hm-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .3rem .4rem 0; }
+
+/* ══ Вигляд за макетом дослідника (23.10.2026): папір, мальовані речі, засічка ══
+   Огляд роду — картки з річчю в куті й розділи зі стрічкою-гравюрою; перемикач
+   проєкту більший і засічкою; бічне меню засічкою; гравюра дерева на тлі
+   робочої частини. Ілюстрації — мальовані дослідником (`/ui/img/art-*.webp`).
+   Кольори лише токенами: макет світлий, але консоль за замовчуванням темна, і
+   речі на темному папері стоять стриманіше (`--art-op`, `--tree-op`). */
+/* Власні змінні оформлення — не токени бренду, тож скрізь із запасним значенням. */
+:root { --art-op: .88; --tree-op: .06; --rim: color-mix(in srgb, var(--honey) 38%, var(--line-2)); }
+:root[data-theme="light"] { --art-op: 1; --tree-op: .22; }
+
+/* Тло робочої частини: гравюра дерева в правому верхньому куті, під вмістом. */
+#shell > main { position: relative; isolation: isolate; }
+#shell > main::before { content: ""; position: absolute; top: -.5rem; right: -1.5rem; z-index: -1;
+  width: min(28rem, 42%); aspect-ratio: 676 / 900; pointer-events: none;
+  background: url("/ui/img/art-derevo.webp") no-repeat right top / contain; opacity: var(--tree-op, .06); }
+
+/* Шапка зливається з полотном: лого стоїть над бічним меню його ж тлом, а
+   перемикач проєкту — над робочою частиною. */
+@media (min-width: 761px) {
+  header { background: linear-gradient(to right, var(--s-1) 15.5rem, var(--bg) 15.5rem); }
+  header .brand { flex: 0 0 calc(15.5rem - 22px); }
+}
+
+/* ── Перемикач проєкту ── */
+#proj-box .ctx-btn { gap: .7rem; padding: 5px 14px 5px 6px; margin-left: .2rem; max-width: 22rem;
+  background: var(--s-2); border: 1px solid var(--rim, var(--line-2)); border-radius: var(--r-m); box-shadow: var(--sh-1); }
+#proj-box .ctx-btn:hover { border-color: var(--honey); }
+#proj-box .ctx-badge .pj-badge { width: 2.3rem; height: 2.3rem; font: 600 1.1rem/1 var(--font-serif); }
+#proj-box .ctx-t small { color: var(--honey); font-family: var(--font-serif); letter-spacing: .16em; }
+#proj-box .ctx-t b { font: 600 1.08rem/1.25 var(--font-serif); }
+.chev { flex: none; width: .5rem; height: .5rem; margin: 0 .15rem 0 .45rem;
+  border-right: 2px solid var(--fg-3); border-bottom: 2px solid var(--fg-3);
+  transform: translateY(-2px) rotate(45deg); transition: transform var(--dur-1) var(--ease); }
+#proj-box .ctx-btn[aria-expanded="true"] .chev { transform: translateY(2px) rotate(-135deg); }
+/* Знак Майстерні без проєкту — мальовані коробки, а не літера. */
+.pj-badge.pj-hub { overflow: hidden; background: color-mix(in srgb, var(--honey) 14%, var(--s-2));
+  border: 1px solid color-mix(in srgb, var(--honey) 35%, transparent); }
+.pj-badge.pj-hub img { width: 80%; height: auto; }
+#proj-menu { min-width: 20rem; padding: 8px; border-color: var(--rim, var(--line-2)); }
+#proj-menu .pm-row { align-items: center; gap: .8rem; padding: 9px 10px; }
+#proj-menu .pm-row .pj-badge { width: 2.6rem; height: 2.6rem; margin-right: 0; font: 600 1.15rem/1 var(--font-serif); }
+#proj-menu .pm-t { flex: 1 1 auto; min-width: 0; font: 500 1.02rem/1.25 var(--font-serif); }
+#proj-menu .pm-t small { font-family: var(--font-serif); margin-top: .1rem; }
+#proj-menu .pm-row[aria-current="true"] { background: color-mix(in srgb, var(--accent-fill) 12%, var(--s-2)); }
+#proj-menu .pm-check { flex: none; width: 1.25rem; height: 1.25rem; color: var(--ok); }
+#proj-menu .pm-plus { flex: none; display: grid; place-items: center; width: 2.6rem; height: 2.6rem;
+  border-radius: 50%; border: 1.5px solid var(--fg-3); color: var(--fg-2); }
+#proj-menu .pm-new b { font: 600 1.02rem/1.25 var(--font-serif); }
+
+/* ── Бічне меню засічкою ── */
+.side button { font: 400 .97rem/1.3 var(--font-serif); padding: 7px 10px; }
+.side button.on { background: color-mix(in srgb, var(--accent-fill) 14%, transparent);
+  box-shadow: inset 3px 0 0 var(--proj-color, var(--accent-fill)); }
+.side h4 { font: 600 .7rem/1.3 var(--font-serif); letter-spacing: .15em;
+  color: color-mix(in srgb, var(--honey) 70%, var(--fg-3)); }
+.side .sb-own h4 { font: 600 1.02rem/1.3 var(--font-serif); letter-spacing: 0; }
+
+/* ── Огляд роду: картки-показники ── */
+.ov-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+#view .ov-kpi { position: relative; overflow: hidden; display: flex; align-items: flex-start; gap: 1rem;
+  min-height: 9.5rem; padding: 1.15rem 1.25rem; background: var(--s-2);
+  border: 1px solid var(--rim, var(--line-2)); border-left: 5px solid var(--honey); border-radius: var(--r-l);
+  box-shadow: var(--sh-1); }
+#view .ov-kpi:hover { border-color: var(--honey); background: var(--s-2); }
+/* Тон — лише «увага» (гіпотези чекають вердикту): «гаразд» і «є що» лишаються медом, як у макеті. */
+#view .ov-kpi.ov-ok, #view .ov-kpi.ov-info { border-left-color: var(--honey); }
+.ov-ic { flex: none; display: grid; place-items: center; width: 3.1rem; height: 3.1rem; border-radius: 50%;
+  background: color-mix(in srgb, var(--honey) 16%, var(--s-2));
+  border: 1px solid color-mix(in srgb, var(--honey) 40%, transparent);
+  color: color-mix(in srgb, var(--honey) 62%, var(--fg)); }
+.ov-ic .ic { width: 1.45rem; height: 1.45rem; }
+.ov-kpi-t { position: relative; z-index: 1; display: grid; gap: .3rem; min-width: 0; max-width: 58%; }
+#view .ov-kpi-l { font: 600 1.02rem/1.2 var(--font-serif); letter-spacing: .14em; color: var(--fg); }
+#view .ov-kpi-v { font-family: var(--font-serif); font-size: 1.8rem; line-height: 1.15; }
+/* Річ — у правому нижньому куті, висотою картки, і тане ліворуч, щоб текст лишався на папері. */
+.ov-art { position: absolute; right: -.2rem; bottom: -.2rem; height: 76%; width: auto; max-width: 44%;
+  object-fit: contain; object-position: right bottom; opacity: var(--art-op, .88); pointer-events: none;
+  -webkit-mask-image: linear-gradient(to right, transparent 0, black 28%);
+  mask-image: linear-gradient(to right, transparent 0, black 28%); }
+.ov-go { position: absolute; top: 1.2rem; right: 1.25rem; z-index: 1; width: .55rem; height: .55rem;
+  border-right: 2px solid var(--fg-3); border-top: 2px solid var(--fg-3); transform: rotate(45deg); }
+
+/* ── Огляд роду: розділи зі стрічкою-гравюрою ── */
+.ov-cols { grid-template-columns: 1fr; gap: 1rem; }
+#view .ov-sec { padding: 0; overflow: hidden; border: 1px solid var(--rim, var(--line-2)); border-left: 5px solid var(--honey);
+  border-radius: var(--r-l); box-shadow: var(--sh-1); }
+.ov-sec-h { position: relative; display: flex; align-items: center; gap: 1rem; min-height: 5.4rem;
+  padding: .9rem 1.25rem; border-bottom: 1px solid var(--line-2); overflow: hidden; }
+#view .ov-sec-h h3 { position: relative; z-index: 1; margin: 0; font: 600 1.1rem/1.2 var(--font-serif);
+  letter-spacing: .14em; text-transform: uppercase; }
+.ov-sec-art { position: absolute; right: 0; bottom: 0; height: 100%; width: auto; max-width: 62%;
+  object-fit: cover; object-position: right bottom; opacity: var(--art-op, .88); pointer-events: none;
+  -webkit-mask-image: linear-gradient(to right, transparent 0, black 40%);
+  mask-image: linear-gradient(to right, transparent 0, black 40%); }
+.ov-sec-b { padding: .85rem 1.25rem 1.05rem; }
+
+@media (max-width: 760px) {
+  .ov-kpis { grid-template-columns: 1fr; }
+  #view .ov-kpi { min-height: 8rem; }
+  .ov-art { max-width: 34%; height: 68%; }
+  .ov-kpi-t { max-width: 64%; }
+  .ov-sec-art { max-width: 46%; opacity: calc(var(--art-op, .88) * .7); }
+  #shell > main::before { width: 60%; }
+}
