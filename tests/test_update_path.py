@@ -410,3 +410,20 @@ def test_the_fast_index_survives_an_update_and_is_added_by_name(monkeypatch):
     assert U.command("researcher", add=("fast",))[-1] == want, "без повтору"
     monkeypatch.setattr(U, "has_rent", lambda: True)
     assert U.command("lab")[-1] == "nyshporka[app,archives,htr,site,train,rent,fast]"
+
+
+def test_serve_without_a_workspace_says_how_to_start(monkeypatch):
+    """Без простору — пояснення й `nysh init`, а не рамка трасування `WorkspaceError`."""
+    from typer.testing import CliRunner
+
+    from nyshporka.cli import app
+    from nyshporka.core import workspace as W
+
+    def nowhere() -> W.Workspace:
+        raise W.WorkspaceError("робочий простір не знайдено.")
+
+    monkeypatch.setattr(W, "workspace", nowhere)
+    got = CliRunner().invoke(app, ["serve", "--no-browser"])
+    assert got.exit_code == 1, got.output
+    assert "nysh init" in got.output and "Traceback" not in got.output
+    assert got.exception is None or isinstance(got.exception, SystemExit)

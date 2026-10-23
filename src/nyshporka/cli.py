@@ -3944,6 +3944,20 @@ def serve(
     def _refuse(text: str) -> None:
         console.print(f"[err]{escape(text)}[/err]", emoji=False, highlight=False)
 
+    # 🔴 Без простору `_serve` падав `WorkspaceError` рамкою трасування на пів
+    # екрана — у того, хто поставив пакет `pip`/`uv` і одразу набрав `nysh serve`
+    # (прохід новачка 23.10.2026). Те саме пояснення — текстом.
+    from nyshporka.core.workspace import WorkspaceError
+    from nyshporka.core.workspace import workspace as _ws_probe
+
+    try:
+        _ws_probe()
+    except WorkspaceError as exc:
+        console.print(f"[err]{escape(str(exc))}[/err]")
+        console.print("[muted]почати з нуля: `nysh init` — простір у типовій теці "
+                      "(Документи\\Нишпорка), потім знову `nysh serve`[/muted]")
+        raise typer.Exit(code=1) from None
+
     extras = bool(tls_cert or tls_key or rotate_key or confirm_host or confirm_public)
     if D.is_loopback_host(host):
         if extras:
