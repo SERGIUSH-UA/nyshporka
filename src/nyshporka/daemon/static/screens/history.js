@@ -9,7 +9,7 @@
  * людина звіряє дату народження, а не рядки YAML.
  */
 
-import { t } from '../core/strings.js';
+import { t, srv } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, curGen, alive, emptyMini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
@@ -85,7 +85,7 @@ async function drawLog() {
   box.innerHTML = ROWS.length ? ROWS.map((r, i) => {
     const files = r.files || (PATH ? [PATH] : []);
     return `<div class="lrow">
-      <div><b>${esc(noEmoji(r.subject))}</b>
+      <div><b>${esc(srv(noEmoji(r.subject)))}</b>
         <small class="muted" title="${esc(r.rev)}">${esc(fmtDay(r.date))}${files.length ? ` · ${areasLine(files, r.more)}` : ''}</small>
         ${files.length ? `<details class="hist-files"><summary>${t('hist.files')}</summary>
           <small class="muted mono">${esc(files.join(', '))}</small></details>` : ''}</div>
@@ -107,7 +107,7 @@ async function openDiff(i, file = '') {
       <select data-act="hist.pick" data-arg="${i}">${files.map((f) => `<option${f === path ? ' selected' : ''}>${
   esc(f)}</option>`).join('')}</select></label>` : `<p class="mono">${esc(path)}</p>`;
   const body = env.ok ? diffBody(env.data || {}) : `<p class="warn">${esc(env.error || '')}</p>`;
-  el('dlg-body').innerHTML = `<p>${esc(r.subject)}</p>${pick}${body}
+  el('dlg-body').innerHTML = `<p>${esc(srv(r.subject))}</p>${pick}${body}
     <div class="row dlg-acts">
       <button class="danger" data-act="hist.restore" data-arg="${i}" data-file="${esc(path)}">${
   esc(t('hist.restore').replace('{rev}', r.rev))}</button>

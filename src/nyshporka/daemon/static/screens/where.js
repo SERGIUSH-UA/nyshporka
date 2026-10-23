@@ -72,6 +72,8 @@ function repoCode(v) {
 
 /** Що не так із роками — словами мовою вікна; порожньо — усе гаразд. */
 export function whereProblem() {
+  // Село без назви, але з іншими назвами чи повітом, доти мовчки відкидалось.
+  if (rows('wh-places').some((p) => !p.name && (p.also || p.uezd))) return t('wc.f.place.noname');
   const y1 = Number((el('wh-y1') || {}).value || 0) || null;
   const y2 = Number((el('wh-y2') || {}).value || 0) || null;
   if (!y1 && !y2) return '';

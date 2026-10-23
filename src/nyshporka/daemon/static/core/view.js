@@ -1,6 +1,6 @@
 /** Розмітка екрана: підміна вмісту, застереження, покриття, покоління. */
 import { ic } from '/ui/icons.js';
-import { t } from './strings.js';
+import { t, srv } from './strings.js';
 import { screenOfOp } from './registry.js';
 import { swapHtml, skelRows } from '/ui/dom.js';
 
@@ -62,7 +62,7 @@ function splitWarnings(list) {
   for (const w of list || []) {
     const level = w.level || 'note';
     if (level === 'agent' || !String(w.text || '').trim()) continue;
-    (level === 'alert' ? alerts : notes).push(String(w.text));
+    (level === 'alert' ? alerts : notes).push(srv(w.text));
   }
   return { alerts, notes };
 }
@@ -90,7 +90,7 @@ function renderWarnings(env) {
     // прогону й кожного занесеного аркуша, і банер, що стоїть «на кожен
     // пчих», перестають читати (дослідник, 22.10.2026). Причина й кнопка —
     // на місці; агент і термінал і далі отримують це в конверті.
-    bits.push(`<div class="stale-line">${ic('clock', 'ic-sm')} ${esc(t('stale.line'))}: ${esc(env.stale.reasons.join('; '))}
+    bits.push(`<div class="stale-line">${ic('clock', 'ic-sm')} ${esc(t('stale.line'))}: ${esc(env.stale.reasons.map(srv).join('; '))}
       <button class="ctl-sm" data-act="cases.build">${t('stale.refresh')}</button></div>`);
   }
   const { alerts, notes } = splitWarnings(env.warnings);
@@ -142,11 +142,11 @@ function renderNext(env) {
     // Порада без екрана — команда терміналу: людині з консолі її нема куди
     // натиснути, тож вона йде в примітки, а не окремою смугою.
     if (!scr) {
-      notes.push(`<span class="mono">${esc(n.op)}</span> — ${esc(n.why)}`);
+      notes.push(`<span class="mono">${esc(n.op)}</span> — ${esc(srv(n.why))}`);
       return '';
     }
     return `<div class="warn next"><button data-act="next" data-arg="${esc(n.op)}"${seedAttr(n)}>`
-      + `${esc(t(`nav.${scr}`))} →</button> <span>${esc(n.why)}</span></div>`;
+      + `${esc(t(`nav.${scr}`))} →</button> <span>${esc(srv(n.why))}</span></div>`;
   });
   return { rows: rows.join(''), notes };
 }

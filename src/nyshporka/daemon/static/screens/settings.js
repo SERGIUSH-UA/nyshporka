@@ -110,9 +110,9 @@ async function renderRoots() {
   if (!env.ok) return boxError('roots', env);
   const rows = (env.data.roots || []).map((r) => `<tr>
     <td>${r.kind === 'space' ? ic('house', 'ic-o ic-sm') : ic('anchor', 'ic-o ic-sm')}</td>
-    <td class="mono">${esc(r.path)}${r.gone
+    <td class="mono wrap-any">${esc(r.path)}${r.gone
       ? ` <span class="warn-inline">${t('roots.gone')}</span>` : ''}</td>
-    <td>${r.kind === 'space'
+    <td class="nowrap">${r.kind === 'space'
       ? `<span class="muted">${t('roots.always')}</span>`
       : `<button data-act="roots.forget" data-arg="${esc(r.path)}"
            >${t('roots.forget')}</button>`}</td>

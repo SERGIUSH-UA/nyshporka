@@ -80,3 +80,40 @@ export { STRINGS, LANG, LANGS, DISABLED, ENABLED, t, tOr, tn };
 export function setLang(next) {
   try { localStorage.setItem('nysh.lang', next); } catch (_e) { /* див. stored() */ }
 }
+
+/**
+ * Фраза сервера мовою вікна.
+ *
+ * Сервер пише застереження, назви перевірок і рядки історії українською — їх
+ * читають агент і термінал. Ключ `srv.*` в `uk.js` тримає точний текст сервера,
+ * `{x}` у ньому — змінну частину; збіг дає переклад того самого ключа, а змінні
+ * частини перекладаються так само (назва шару в «каталог справ змінено …»).
+ * Незнайома фраза лишається як є: краще українською, ніж зникнути.
+ */
+let SRV = null;
+function srvPatterns() {
+  if (SRV) return SRV;
+  SRV = Object.entries(STRINGS.uk).filter(([k]) => k.startsWith('srv.')).map(([k, v]) => {
+    const names = [];
+    const src = String(v).split(/(\{\w+\})/).map((bit) => {
+      const m = /^\{(\w+)\}$/.exec(bit);
+      if (m) { names.push(m[1]); return '(.+?)'; }
+      return bit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }).join('');
+    return { key: k, re: new RegExp(`^${src}$`), names };
+  });
+  return SRV;
+}
+
+export function srv(text) {
+  const s = String(text ?? '');
+  if (LANG === 'uk' || !s) return s;
+  for (const p of srvPatterns()) {
+    const m = p.re.exec(s);
+    if (!m) continue;
+    let out = t(p.key);
+    p.names.forEach((n, i) => { out = out.split(`{${n}}`).join(srv(m[i + 1])); });
+    return out;
+  }
+  return s;
+}

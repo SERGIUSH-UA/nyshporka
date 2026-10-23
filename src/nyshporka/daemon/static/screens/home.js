@@ -16,7 +16,7 @@
  * нулем там, де питання не ставили.
  */
 
-import { t, tOr, LANG } from '../core/strings.js';
+import { t, tOr, LANG, srv } from '../core/strings.js';
 import { TOKEN, PROJECT, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, renderCoverage, curGen, alive, maskot, emptyMini, mini } from '../core/view.js';
@@ -379,7 +379,7 @@ function onboarding(d) {
     { on: true, ok: !!(d.agent || {}).connected, k: 'step.agent',
       href: agentDoc() },
     { on: true, ok: m.ok ? m.ready : null, k: 'step.machine',
-      act: 'home.demo', note: (m.bad || []).join(' · ') },
+      act: 'home.demo', note: (m.bad || []).map(srv).join(' · ') },
     // Чий рід шукаємо — питання проєкту; у чистій Майстерні кроку немає.
     { on: !SECTIONS.hub_only, ok: (d.profile || {}).present, k: 'step.profile',
       nav: 'profile', note: (d.profile || {}).display || '' },
@@ -897,7 +897,7 @@ Object.assign(ACTIONS, {
         ? `<button class="ctl-sm" data-act="check.fix" data-arg="${esc(c.op)}"
              >${esc(t('check.fix'))}</button>`
         : (c.fix ? `<code>${esc(c.fix)}</code>` : '');
-      return `<tr><td>${mark}</td><td><b>${esc(c.name)}</b><br>
+      return `<tr><td>${mark}</td><td><b>${esc(srv(c.name))}</b><br>
         <span class="muted">${esc(c.detail)}</span></td>
         <td>${act}</td></tr>`;
     }).join('');

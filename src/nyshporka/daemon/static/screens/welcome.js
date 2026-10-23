@@ -103,9 +103,9 @@ function projectBody() {
   }
   return `<form id="wc-form" data-act="wc.project" class="wc-form">
       <div class="wc-kinds" role="radiogroup">
-        <label class="wc-kind"><input type="radio" name="kind" value="family" checked>
+        <label class="wc-kind"><input type="radio" name="kind" value="family" checked data-act="wc.kind">
           <b>${esc(t('wc.kind.family'))}</b><small>${esc(t('wc.kind.family.why'))}</small></label>
-        <label class="wc-kind"><input type="radio" name="kind" value="order">
+        <label class="wc-kind"><input type="radio" name="kind" value="order" data-act="wc.kind">
           <b>${esc(t('wc.kind.order'))}</b><small>${esc(t('wc.kind.order.why'))}</small></label>
       </div>
       ${fld(t('wc.p.title'), `<input name="title" id="wc-title" required placeholder="${esc(t('wc.p.title.ph'))}">`)}
@@ -156,7 +156,37 @@ function paint(step) {
           <button type="button" class="wc-out" data-act="wc.out">${esc(t('wc.out'))}</button></div>
         <div class="wc-page wc-right">${BODY[step]()}${acts(step)}</div>
       </div></div>`);
-  if (step === 'family') fillFamily();
+  ARMED = '';
+  if (step === 'family') { SNAP = JSON.stringify(whereArgs()); fillFamily(); }
+}
+
+/** Знімок форми «Рід» після малювання — щоб «Пропустити» знало, чи щось вписали. */
+let SNAP = '';
+/** Крок, на якому «Пропустити» вже попередило про втрату введеного. */
+let ARMED = '';
+
+function unsaved(step) {
+  if (step === 'project' && !PROJECT) {
+    return ['wc-title', 'wc-surname', 'wc-variants'].some((id) => String((el(id) || {}).value || '').trim());
+  }
+  if (step === 'family') return JSON.stringify(whereArgs()) !== SNAP;
+  return false;
+}
+
+/**
+ * «Пропустити» з уже вписаним — спершу попередження, і лише друге натискання
+ * пропускає. Доти введене мовчки зникало (холодний прохід 23.10.2026).
+ */
+function guardSkip(then) {
+  const step = stepOf();
+  if (ARMED !== step && unsaved(step)) {
+    ARMED = step;
+    const box = el('wc-box');
+    if (box) box.innerHTML = `<div class="warn">${esc(t('wc.skip.lose'))}</div>`;
+    return;
+  }
+  ARMED = '';
+  then();
 }
 
 /** Крок «Рід» показує вже записане — після «Назад» форма не порожня. */
@@ -167,6 +197,7 @@ async function fillFamily() {
     const box = el('wc-where');
     if (box && stepOf() === 'family' && ((d.places || []).length || (d.archives || []).length || d.years)) {
       box.innerHTML = whereFields(d);
+      SNAP = JSON.stringify(whereArgs());
     }
   }
   fillRepos();
@@ -227,8 +258,13 @@ Object.assign(ACTIONS, {
   'wc.project': async (ev) => { if (ev && ev.preventDefault) ev.preventDefault(); return saveProject(); },
   'wc.back': () => go(STEPS[Math.max(0, STEPS.indexOf(stepOf()) - 1)]),
   // Без проєкту крок «Рід» нема куди записати — пропуск проєкту веде одразу до справ.
-  'wc.skip': () => go(stepOf() === 'project' ? 'cases' : STEPS[STEPS.indexOf(stepOf()) + 1]),
-  'wc.out': () => leave('home'),
+  'wc.skip': () => guardSkip(() => go(stepOf() === 'project' ? 'cases' : STEPS[STEPS.indexOf(stepOf()) + 1])),
+  'wc.out': () => guardSkip(() => leave('home')),
+  // Назва-приклад іде за видом: «Рід Сидоруків» для замовлення звучить як помилка.
+  'wc.kind': (_ev, elm) => {
+    const inp = el('wc-title');
+    if (inp) inp.placeholder = t(elm.value === 'order' ? 'wc.p.title.ph.order' : 'wc.p.title.ph');
+  },
   'wc.door': async (_ev, elm) => {
     const d = elm.dataset.arg;
     if (d === 'sample') {

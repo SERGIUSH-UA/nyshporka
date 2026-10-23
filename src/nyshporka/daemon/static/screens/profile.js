@@ -156,10 +156,10 @@ function form(d) {
       <div class="row">
         <label class="lbl-mini">${t('prof.rootlist')}
           <input name="roots" value="${esc((d.roots || []).join(', '))}"
-            placeholder="лищинськ, ищинс"></label>
+            placeholder="${esc(t('prof.roots.ph'))}"></label>
         <label class="lbl-mini">${t('prof.subs')}
           <input name="substrings" value="${esc((d.substrings || []).join(', '))}"
-            placeholder="ищинс, szczyn"></label>
+            placeholder="${esc(t('prof.subs.ph'))}"></label>
       </div>
       <p class="muted">${t('prof.rootlist.why')}</p>
       <div class="row"><button type="submit">${
@@ -176,7 +176,7 @@ function form(d) {
  * лише лякає; тому, хто дописує конфузери за замірами, — єдине потрібне місце.
  */
 function sourceBlock(d) {
-  return `<details class="dash-sec"><summary>▸ ${t('prof.source')}</summary>
+  return `<details class="dash-sec"><summary>${t('prof.source')}</summary>
     <p class="muted">${t('prof.source.why')}</p>
     <p class="muted mono">${esc(d.path || '')}</p>
     <form data-act="prof.source">

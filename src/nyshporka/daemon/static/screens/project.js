@@ -1,7 +1,7 @@
 /** 📁 Проєкти Майстерні: новий проєкт (вікно), перехід у проєкт, картки на Огляді. */
 
 import { ic } from '/ui/icons.js';
-import { t } from '../core/strings.js';
+import { t, srv } from '../core/strings.js';
 import { PROJECT, callOp } from '../core/net.js';
 import { esc, el, setView, boxError, busyForm, fld, humanError, mini, emptyMini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
@@ -297,11 +297,11 @@ export async function fillProject(stillHere = () => true) {
       const rows = (hl.ok && (hl.data || {}).rows) || [];
       const last = rows[0];
       setKpi('ov-k-hist', last ? `<b>${esc(fmtDay(last.date))}</b>` : '—',
-        esc(last ? `${t('ov.hist.last')}: ${last.subject}` : (hl.ok ? t('hist.empty') : t('ov.hist.none'))));
+        esc(last ? `${t('ov.hist.last')}: ${srv(last.subject)}` : (hl.ok ? t('hist.empty') : t('ov.hist.none'))));
       const reps = ((rl.ok && (rl.data || {}).rows) || []).slice(0, 3);
       const items = [
         ...rows.map((r) => `<div class="ov-feed"><span class="muted">${esc(fmtDay(r.date))}</span><span>${
-          esc(r.subject)}</span></div>`),
+          esc(srv(r.subject))}</span></div>`),
         ...reps.map((r) => `<button class="ov-feed ov-link" data-act="rs.read" data-arg="${esc(r.path)}">
           <span class="muted">${ic('note', 'ic-o ic-sm')}</span><span>${esc(noEmoji(r.title))}</span></button>`)];
       box.innerHTML = items.length ? items.join('') : emptyMini('hodynnyk', t('ov.new.none'));

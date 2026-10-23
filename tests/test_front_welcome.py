@@ -22,6 +22,7 @@ pytestmark = pytest.mark.skipif(shutil.which("node") is None,
 
 PROBE = r"""
 import './_stub.js';
+localStorage._m['nysh.lang'] = '__LANG__';
 globalThis.location.pathname = '/';
 globalThis.location.search = '__SEARCH__';
 globalThis.location.href = '';
@@ -88,6 +89,18 @@ if ('__MODE__' === 'hub') {
   await ACTIONS['wc.next'](); await tick(40);
   out.projectNew = (asked.find((a) => a[0] === 'project.new') || [])[1] || null;
   out.projectHref = location.href;
+  ACTIONS['wc.kind'](null, { value: 'order' });
+  out.orderPh = document.getElementById('wc-title').placeholder;
+  ACTIONS['wc.skip'](); await tick(20);
+  out.skipWarn = document.getElementById('wc-box').innerHTML || ''; out.skipStay = location.search;
+  ACTIONS['wc.skip'](); await tick(20);
+  out.skipGone = location.search;
+} else if ('__MODE__' === 'en') {
+  const S = await import('./core/strings.js');
+  out.srv = [S.srv('реєстр ще не збирали'), S.srv('каталог справ змінено 23.10 14:00'),
+    S.srv('Проєкт «Рід Сидоруків» заведено'), S.srv('Рушії читання'), S.srv('щось зовсім нове')];
+  const V = await import('./core/view.js');
+  out.stale = V.renderWarnings({ stale: { is: true, reasons: ['реєстр ще не збирали'] }, warnings: [] });
 } else {
   out.step = location.search;
   location.search = '?p=rid-sydorukiv&step=project';
@@ -102,6 +115,15 @@ if ('__MODE__' === 'hub') {
   await ACTIONS['wc.next'](); await tick(40);
   out.badYears = document.getElementById('wc-box').innerHTML || '';
   out.badAsked = asked.filter((a) => a[0] === 'profile.where').length;
+  {
+    const inp0 = (k, v) => ({ dataset: { k }, value: v });
+    document.getElementById('wh-places').querySelectorAll = () => [
+      { querySelectorAll: () => [inp0('name', ''), inp0('also', 'Сидоровка'), inp0('uezd', '')] }];
+    val('wh-y1', '1790'); val('wh-y2', '1920');
+    await ACTIONS['wc.next'](); await tick(40);
+    out.noname = document.getElementById('wc-box').innerHTML || '';
+    out.nonameAsked = asked.filter((a) => a[0] === 'profile.where').length;
+  }
   const inp = (k, v) => ({ dataset: { k }, value: v });
   const rowOf = (...inputs) => ({ querySelectorAll: () => inputs });
   document.getElementById('wh-places').querySelectorAll = () => [
@@ -122,7 +144,7 @@ process.exit(0);
 """
 
 
-def _run(tmp_path_factory, mode: str, search: str, pid: str, rows: list) -> dict:
+def _run(tmp_path_factory, mode: str, search: str, pid: str, rows: list, lang: str = "uk") -> dict:
     root = tmp_path_factory.mktemp("front-welcome")
     shutil.copytree(FRONT_DIR, root, dirs_exist_ok=True)
     shutil.copytree(SHARED_DIR, root / "ui", dirs_exist_ok=True)
@@ -135,7 +157,8 @@ def _run(tmp_path_factory, mode: str, search: str, pid: str, rows: list) -> dict
             p.write_text(s2, encoding="utf-8")
     (root / "_stub.js").write_text(STUB, encoding="utf-8")
     probe = (PROBE.replace("__SEARCH__", search).replace("__PID__", pid)
-             .replace("__MODE__", mode).replace("__PROJ_ROWS__", json.dumps(rows, ensure_ascii=False)))
+             .replace("__MODE__", mode).replace("__LANG__", lang)
+             .replace("__PROJ_ROWS__", json.dumps(rows, ensure_ascii=False)))
     (root / "_probe.mjs").write_text(probe, encoding="utf-8")
     res = subprocess.run(["node", "--input-type=module", "-e",
                           f"await import({json.dumps((root / '_probe.mjs').as_uri())})"],
@@ -155,6 +178,30 @@ def hub(tmp_path_factory) -> dict:
 def fam(tmp_path_factory) -> dict:
     rows = [{"id": "rid-sydorukiv", "name": "Рід Сидоруків", "kind": "family"}]
     return _run(tmp_path_factory, "family", "?p=rid-sydorukiv&step=family", "rid-sydorukiv", rows)
+
+
+@pytest.fixture(scope="module")
+def en(tmp_path_factory) -> dict:
+    return _run(tmp_path_factory, "en", "", "", [], lang="en")
+
+
+def test_server_phrases_are_shown_in_the_window_language(en) -> None:
+    assert en["srv"] == ["the registry has not been built yet", "case catalogue changed 23.10 14:00",
+                         "Project “Рід Сидоруків” created", "Reading engines", "щось зовсім нове"]
+    assert "the registry has not been built yet" in en["stale"] and "реєстр" not in en["stale"]
+
+
+def test_skipping_typed_data_warns_first(hub) -> None:
+    assert "Вписане не збережеться" in hub["skipWarn"] and "step=project" in hub["skipStay"]
+    assert "step=cases" in hub["skipGone"], "друге натискання пропускає"
+
+
+def test_an_order_gets_an_order_example_name(hub) -> None:
+    assert hub["orderPh"] == "Замовлення Іваненка"
+
+
+def test_a_village_without_a_name_is_said_not_dropped(fam) -> None:
+    assert "бракує назви села" in fam["noname"] and fam["nonameAsked"] == 0
 
 
 def test_an_empty_workshop_opens_the_introduction_once(hub) -> None:
