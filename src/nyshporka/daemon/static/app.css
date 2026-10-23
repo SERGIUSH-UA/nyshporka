@@ -1193,3 +1193,26 @@ details.hist-files > summary { padding: 0; background: none; font-size: .8rem; f
 details.hist-files > summary:hover { color: var(--fg); }
 
 .nowrap { white-space: nowrap; }
+
+/* Новий проєкт: вид — двома картками з мініатюрою; знак — прев'ю наживо. */
+.np-kinds { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .7rem; }
+#view .np-kind, #dlg .np-kind { flex-direction: row; align-items: center; gap: .7rem; cursor: pointer; }
+.np-kind input { position: absolute; opacity: 0; pointer-events: none; }
+.np-kind span { display: grid; gap: .15rem; }
+.np-kind small { color: var(--fg-3); font-size: .82rem; }
+.np-kind:has(input:checked) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent);
+  background: color-mix(in srgb, var(--honey) 10%, var(--s-2)); }
+.np-kind:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.np-look { align-items: center; }
+details.np-folder { border: 0; background: none; margin: .2rem 0 .4rem; }
+details.np-folder > summary { padding: 0; background: none; font-size: .85rem; color: var(--fg-3); font-weight: 400; }
+
+/* «Скільки з скількох» смужкою під числом (`bits.ratioBar`). */
+.ratio-bar { display: block; height: 4px; margin-top: 4px; border-radius: 2px; background: var(--s-4); overflow: hidden; min-width: 3rem; }
+.ratio-bar > i { display: block; height: 100%; background: var(--fg-5); border-radius: 2px; }
+.ratio-bar.full > i { background: var(--honey); }
+
+/* Мої картки: підсумок із мініатюрою й пошук над переліком. */
+.cards-head { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: .8rem; }
+.cards-head > div { display: grid; gap: .1rem; }
+.cards-head input { margin-left: auto; flex: 0 1 18rem; }

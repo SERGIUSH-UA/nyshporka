@@ -37,27 +37,76 @@ function keepScreen(toHub) {
 }
 
 SCREENS.newproject = async () => {
+  // 🧭 Три кроки: що це → назва й прізвище → вигляд. Вид — картками з
+  // мініатюрою, а не випадним списком внизу; тека виводиться з назви латинкою
+  // сама (поправити — під «Тека проєкту»); знак видно одразу, яким він буде.
   // 🔴 Прізвище — у тій самій формі: без профілю пошук роду в новому проєкті
   // не знає, що шукати, і перший же «Шукати» відповідав би порожнечею.
+  const kind = (v, pic, on) => `<label class="np-kind card">
+      <input type="radio" name="kind" value="${v}"${on ? ' checked' : ''}>
+      ${mini(pic, 56)}<span><b>${t(`np.kind.${v}`)}</b><small>${t(`np.kind.${v}.why`)}</small></span></label>`;
+  const step = (n, key) => `<h3 class="rd-step"><span class="rd-n">${n}</span>${esc(t(key))}</h3>`;
   setView(`<p class="muted">${t('np.why')}</p>
     <form data-act="project.create" id="np-form">
+      ${step(1, 'np.step.kind')}
+      <div class="np-kinds">${kind('family', 'derevo', true)}${kind('order', 'pechatka', false)}</div>
+      ${step(2, 'np.step.name')}
       <div class="row">${fld(t('np.title'), `<input name="title" placeholder="${t('np.title.ph')}" autofocus>`)}</div>
-      <div class="row">${fld(t('np.name'), `<input name="name" placeholder="bondar" pattern="[a-z0-9][a-z0-9\\-]*" required>`)}</div>
-      <p class="muted fld-hint">${t('np.name.hint')}</p>
       <div class="row">${fld(t('np.surname'), `<input name="surname" placeholder="${t('np.surname.ph')}">`)}</div>
       <div class="row">${fld(t('np.variants'), `<input name="variants" placeholder="${t('np.variants.ph')}">`)}</div>
       <p class="muted fld-hint">${t('np.variants.hint')}</p>
-      <div class="row"><label class="chk"><input type="checkbox" name="usecolor" value="1"> ${t('np.usecolor')}</label>
+      <details class="np-folder"><summary>${t('np.folder')}: <b class="mono" id="np-slug">—</b></summary>
+        <div class="row">${fld(t('np.name'), `<input name="name" placeholder="bondar" pattern="[a-z0-9][a-z0-9\\-]*" required>`)}</div>
+        <p class="muted fld-hint">${t('np.name.hint')}</p></details>
+      ${step(3, 'np.step.look')}
+      <div class="row np-look"><span class="pj-badge" id="np-prev">?</span>
+        <label class="chk"><input type="checkbox" name="usecolor" value="1"> ${t('np.usecolor')}</label>
         ${fld(t('np.color'), `<input name="color" type="color" value="#4f6bd8">`)}
         ${fld(t('np.glyph'), `<input name="glyph" maxlength="2" size="3">`)}</div>
-      <div class="row">${fld(t('np.kind'), `<select name="kind">
-        <option value="family">${t('np.kind.family')}</option>
-        <option value="order">${t('np.kind.order')}</option></select>`)}</div>
       <div class="row dlg-acts"><button type="submit" class="primary">${t('np.create')}</button>
         <button type="button" class="ghost" data-act="modal.close">${t('modal.no')}</button></div>
       <div id="np-box"></div>
     </form>`);
+  npLive();
 };
+
+/** Латинська тека з назви: «Рід Бондарів» → `rid-bondariv`. */
+const LAT = { а: 'a', б: 'b', в: 'v', г: 'h', ґ: 'g', д: 'd', е: 'e', є: 'ie', ж: 'zh', з: 'z', и: 'y', і: 'i',
+  ї: 'i', й: 'i', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f',
+  х: 'kh', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'shch', ь: '', ю: 'iu', я: 'ia', ы: 'y', э: 'e', ъ: '', ё: 'io' };
+export function slugOf(title) {
+  return String(title || '').toLowerCase().split('').map((c) => (c in LAT ? LAT[c] : c)).join('')
+    .replace(/[’'ʼ`]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+}
+
+/** Тека й прев'ю знака стежать за полями, доки людина не взялась за теку сама. */
+function npLive() {
+  const form = el('np-form');
+  if (!form || !form.querySelector || !form.addEventListener) return;
+  const q = (n) => form.querySelector(`[name="${n}"]`);
+  let own = false;
+  const paint = () => {
+    const name = q('name');
+    const title = String((q('title') || {}).value || '');
+    if (name && !own) name.value = slugOf(title);
+    const slug = el('np-slug');
+    if (slug) slug.textContent = (name && name.value) || '—';
+    const prev = el('np-prev');
+    if (prev) {
+      const glyph = String((q('glyph') || {}).value || '').trim();
+      const word = title.replace(/^(рід|род)\s+/i, '').trim();
+      prev.textContent = glyph || (word ? word[0].toUpperCase() : '?');
+      const use = q('usecolor');
+      if (prev.style) prev.style.background = use && use.checked ? String((q('color') || {}).value || '') : '';
+    }
+  };
+  form.addEventListener('input', (ev) => {
+    if (ev.target && ev.target.name === 'name') own = true;
+    paint();
+  });
+  form.addEventListener('change', paint);
+  paint();
+}
 
 /**
  * Картки проєктів для Огляду Майстерні.

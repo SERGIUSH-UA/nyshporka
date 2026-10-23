@@ -1,6 +1,6 @@
 /** 🚦 Черга справ: що на якому етапі, чому стоїть і що з цим зробити. */
 
-import { toast } from '../core/bits.js';
+import { toast, ratioBar } from '../core/bits.js';
 import { t } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError,
@@ -81,7 +81,7 @@ function queueRow(row, pulse) {
        <span class="mono">${pulse.i}/${pulse.n} ${esc(pulse.what || '')}</span>`
     : '';
   const size = row.frames === undefined ? ''
-    : `<span class="mono">${row.pages || 0}/${row.frames || '—'}</span>`;
+    : `<span class="mono">${row.pages || 0}/${row.frames || '—'}</span>${ratioBar(row.pages, row.frames)}`;
   const why = row.why ? `<div class="warn-inline">${esc(row.why)}</div>` : '';
   const fix = row.fix && ['blocked', 'failed', 'retry'].includes(row.state)
     ? `<div class="muted">${t('queue.next')}: <span class="mono">${esc(row.fix)}</span></div>`

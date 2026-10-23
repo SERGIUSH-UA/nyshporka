@@ -106,10 +106,17 @@ export function unwiki(text) {
  */
 export function named(text, refs = {}) {
   const name = (rid) => (refs && refs[rid] ? `<span class="ref" title="${esc(rid)}">${esc(refs[rid])}</span>` : esc(rid));
+  // 🔴 Посилання — ОДНИМ проходом. Доти `[[I9036]]` спершу ставав
+  // `<span title="I9036">…</span>`, а наступна заміна голих id знаходила
+  // `I9036` уже в атрибуті й вкладала туди другий тег — і в назвах гіпотез
+  // проступав сирий HTML (`…"&gt;Никита…`, 65 разів на екрані, QA 23.10.2026).
   return esc(String(text ?? ''))
-    .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, (_m, _rid, label) => label)
-    .replace(/\[\[([^\]]+)\]\]/g, (_m, rid) => name(rid))
-    .replace(/\b(?:I|F|PL|H)\d{2,}\b|\bS_[A-Za-z0-9_]+\b/g, (rid) => (refs && refs[rid] ? name(rid) : rid))
+    .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]|\[\[([^\]]+)\]\]|\b(?:I|F|PL|H)\d{2,}\b|\bS_[A-Za-z0-9_]+\b/g,
+      (m, _rid, label, wiki) => {
+        if (label !== undefined) return label;
+        if (wiki !== undefined) return name(wiki);
+        return refs && refs[m] ? name(m) : m;
+      })
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
 }
@@ -150,7 +157,9 @@ export function modelName(file) {
     const base = part.trim().split(/[\\/]/).pop().replace(/\.(pt|mlmodel|safetensors|ckpt)$/i, '');
     const eng = base.split('_')[0].toLowerCase();
     const ver = (base.match(/_v(\d+)$/i) || [])[1];
-    if (!names[eng]) return base;
+    // Невідома модель — назва файлу без підкреслень («logofet ro · v9»), а не
+    // сире ім'я з розширенням.
+    if (!names[eng]) return base.replace(/_v(\d+)$/i, ' · v$1').replace(/_/g, ' ');
     const who = tOr(names[eng], eng);
     return ver ? `${who} v${ver}` : who;
   }).filter(Boolean).join(' + ');
@@ -269,4 +278,22 @@ export function caseItem(c) {
 const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F000}-\u{1F2FF}\u{FE0F}\u{200D}\u{20E3}]/gu;
 export function noEmoji(text) {
   return String(text || '').replace(EMOJI, '').replace(/\s{2,}/g, ' ').trim();
+}
+
+/**
+ * Тонка смужка «скільки з скількох» під числом: неповне видно оком, не
+ * вчитуючись у «104 / 994». Повне — медом, неповне — приглушено.
+ */
+export function ratioBar(n, total) {
+  const a = Number(n) || 0;
+  const b = Number(total) || 0;
+  if (!b) return '';
+  const pct = Math.max(0, Math.min(100, Math.round((a / b) * 100)));
+  return `<span class="ratio-bar${pct >= 100 ? ' full' : ''}" role="img" aria-label="${pct}%"><i style="width:${pct}%"></i></span>`;
+}
+
+/** Кінець шляху — дві останні теки: «…/f211_films/211-3-32», повний — у підказці. */
+export function pathTail(p, n = 2) {
+  const parts = String(p || '').split(/[\/]+/).filter(Boolean);
+  return parts.length > n ? `…/${parts.slice(-n).join('/')}` : parts.join('/');
 }

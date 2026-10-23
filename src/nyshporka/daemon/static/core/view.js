@@ -181,7 +181,8 @@ function renderCoverage(env) {
 /** Скільки разів малювали екран: перехід дивиться, чи новий екран уже щось показав. */
 let PAINTS = 0;
 export const paints = () => PAINTS;
-function setView(html) { PAINTS += 1; swapHtml(el(VIEW_ID), html, { keepScroll: false }); }
+/** `keep` — та сама сторінка, свіжіші дані: прокрутка лишається, де була. */
+function setView(html, keep = false) { PAINTS += 1; swapHtml(el(VIEW_ID), html, { keepScroll: !!keep }); }
 
 /**
  * Куди малює `setView`: екран (`view`) чи тіло вікна (`dlg-body`).

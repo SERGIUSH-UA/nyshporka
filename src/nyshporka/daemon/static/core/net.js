@@ -76,7 +76,7 @@ const SEQ = { search: 0, geog: 0, fond: 0, casecheck: 0 };
 /**
  * ⚡ «Спершу відоме, потім свіже» для повільних переліків.
  *
- * `paint(env, stale)` кличеться до двох разів: одразу — з останньою відповіддю
+ * `paint(env, stale, again)` кличеться до двох разів: одразу — з останньою відповіддю
  * цієї ж операції з тими самими аргументами (якщо вона є в цій вкладці), і
  * вдруге — зі свіжою, лише якщо та відрізняється. Поки на екрані старе, біля
  * заголовка стоїть «Оновлюю…». Доти «Віддати» щоразу показувало 6 с скелетона,
@@ -110,7 +110,8 @@ async function staleThenFresh(name, args, paint) {
   }
   const same = old && env.ok && JSON.stringify(old.data) === JSON.stringify(env.data)
     && JSON.stringify(old.warnings || []) === JSON.stringify(env.warnings || []);
-  if (!same) paint(env, false);
+  // Третій аргумент — «перемальовка поверх минулої»: прокрутку не скидати.
+  if (!same) paint(env, false, !!old);
   return env;
 }
 

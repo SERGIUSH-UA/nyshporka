@@ -10,10 +10,10 @@
 
 import { t, tOr } from '../core/strings.js';
 import { callOp, staleThenFresh } from '../core/net.js';
-import { esc, el, setView, busy, failure, boxError, busyForm, renderWarnings, curGen, alive, fld, emptyMini } from '../core/view.js';
+import { esc, el, setView, busy, failure, boxError, busyForm, renderWarnings, curGen, alive, fld, emptyMini, mini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { openModal, confirmAct, closeModal, modalSeq } from '../core/modal.js';
-import { kv, pill, toast } from '../core/bits.js';
+import { kv, pill, toast, ratioBar, fmtDay } from '../core/bits.js';
 
 /** Стан справи з `share.suggest` (рядок пакета) → ключ підпису. */
 const STATUS = { 'готова': 'ready', 'у пулі без рамок': 'noboxes', 'неповна': 'partial',
@@ -30,10 +30,10 @@ SCREENS.give = async () => {
   // Перелік рахується секундами, тож спершу — минула відповідь, потім свіжа
   // (`staleThenFresh`). Галочки, поставлені поки йшло оновлення, лишаються.
   let shown = false;
-  await staleThenFresh('share.suggest', {}, (env) => {
+  await staleThenFresh('share.suggest', {}, (env, _stale, again) => {
     if (!alive(gen)) return;
     const keep = shown ? new Set(picked().map((r) => r.case_key)) : null;
-    paintGive(env);
+    paintGive(env, again);
     if (keep) {
       document.querySelectorAll('[data-act="give.pick"]').forEach((b) => {
         const r = GIVE[Number(b.dataset.arg)];
@@ -45,14 +45,14 @@ SCREENS.give = async () => {
   });
 };
 
-function paintGive(env) {
+function paintGive(env, again = false) {
   if (!env.ok) return failure(env);
   GIVE = (env.data || {}).rows || [];
   const rows = GIVE.map((r, i) => `<tr>
       <td><input type="checkbox" data-act="give.pick" data-arg="${i}"${READY.includes(r.status) ? ' checked' : ''}
         aria-label="${esc(r.shifra || r.case_key)}"></td>
       <td class="mono">${shifraCell(r)}</td><td>${esc(r.title || '')}</td>
-      <td class="num">${esc(r.pages || 0)} / ${esc(r.frames || '?')}</td>
+      <td class="num">${esc(r.pages || 0)} / ${esc(r.frames || '?')}${ratioBar(r.pages, r.frames)}</td>
       <td>${pill(READY.includes(r.status) ? 'ok' : 'neutral', stLabel(r.status))}</td></tr>`).join('');
   setView(`
     <p class="muted">${t('give.why')}</p>
@@ -61,7 +61,7 @@ function paintGive(env) {
       <th>${t('give.name')}</th><th>${t('give.pages')}</th><th>${t('give.state')}</th></tr></thead><tbody>${rows}</tbody></table>
       <p class="row"><button class="primary" data-act="give.go" id="give-go"></button>
         <span class="muted">${t('give.go.why')}</span></p>
-      <div id="give-box"></div>` : emptyMini('zshyvok', t('give.none'))}</div>`);
+      <div id="give-box"></div>` : emptyMini('zshyvok', t('give.none'))}</div>`, again);
   countPicked();
 };
 
@@ -120,16 +120,52 @@ SCREENS.cards = async () => {
   const env = await callOp('share.list', { what: 'all' });
   if (!alive(gen)) return;
   if (!env.ok) return failure(env);
-  const rows = ((env.data || {}).rows || []).map((r) => `<div class="lrow">
-      <div><b class="mono">${esc(r.shifra || r.case_key || '')}</b>
-        <small class="muted">${pill(r.event === 'pack' ? 'ok' : 'info', tOr(`cards.ev.${r.event}`, r.event))}
-          ${esc(String(r.at || '').slice(0, 10))}${r.pages ? ` · ${esc(t('pull.pages').replace('{n}', r.pages))}` : ''}</small></div>
-      ${r.case_key || r.shifra ? `<button data-act="cards.open" data-arg="${esc(r.case_key || r.shifra)}">${t('cards.card')}</button>` : ''}
-    </div>`).join('');
+  // Журнал віддачі — подія на кожне пакування й заливку, тож одна справа
+  // стояла десятками рядків (понад 470 тис. знаків на сторінці, QA 23.10.2026).
+  // Тепер справа — один рядок з останньою подією, пошук і порції по 60.
+  const seen = new Map();
+  [...((env.data || {}).rows || [])]
+    .sort((x, y) => String(y.at || '').localeCompare(String(x.at || '')))
+    .forEach((r) => {
+      const k = r.case_key || r.shifra || '';
+      if (k && !seen.has(k)) seen.set(k, { ...r, events: 0 });
+      if (k) seen.get(k).events += 1;
+    });
+  CARDS = [...seen.values()];
+  CARDS_Q = '';
+  CARDS_LIMIT = 60;
+  const last = CARDS[0] ? fmtDay(String(CARDS[0].at || '').slice(0, 10)) : '';
   setView(`
     <p class="muted">${t('cards.why')}</p>
-    <div class="dash-box">${rows || `<p class="muted">${t('cards.none')}</p>`}</div>`);
+    ${CARDS.length ? `<div class="cards-head">${mini('zshyvok', 52)}<div>
+      <b>${esc(t('cards.sum').replace('{n}', CARDS.length))}</b>
+      ${last ? `<small class="muted">${esc(t('cards.last').replace('{d}', last))}</small>` : ''}</div>
+      <input id="cards-q" data-act="cards.find" data-live="1" placeholder="${esc(t('cards.find'))}"></div>` : ''}
+    <div class="dash-box" id="cards-list"></div>`);
+  drawCards();
 };
+
+let CARDS = [];
+let CARDS_Q = '';
+let CARDS_LIMIT = 60;
+
+function drawCards() {
+  const box = el('cards-list');
+  if (!box) return;
+  if (!CARDS.length) { box.innerHTML = emptyMini('zshyvok', t('cards.none')); return; }
+  const q = CARDS_Q.trim().toLowerCase();
+  const all = q ? CARDS.filter((r) => `${r.shifra || ''} ${r.case_key || ''} ${r.title || ''}`.toLowerCase().includes(q)) : CARDS;
+  const rows = all.slice(0, CARDS_LIMIT).map((r) => `<div class="lrow">
+      <div><b class="mono">${shifraCell(r)}</b>
+        <small class="muted">${pill(r.event === 'pack' ? 'ok' : 'info', tOr(`cards.ev.${r.event}`, r.event))}
+          ${esc(fmtDay(String(r.at || '').slice(0, 10)))}${r.pages ? ` · ${esc(t('pull.pages').replace('{n}', r.pages))}` : ''}</small></div>
+      ${r.case_key || r.shifra ? `<button data-act="cards.open" data-arg="${esc(r.case_key || r.shifra)}">${t('cards.card')}</button>` : ''}
+    </div>`).join('');
+  const more = all.length > CARDS_LIMIT
+    ? `<p class="row"><button class="ghost" data-act="cards.more">${esc(t('rs.more').replace('{n}', Math.min(60, all.length - CARDS_LIMIT)))}</button>
+        <span class="muted">${esc(t('rs.shown').replace('{n}', Math.min(CARDS_LIMIT, all.length)).replace('{all}', all.length))}</span></p>` : '';
+  box.innerHTML = rows ? rows + more : `<p class="muted">${t('rs.nomatch')}</p>`;
+}
 
 async function openCard(key) {
   openModal({ title: key, body: `<p class="muted">${t('common.loading')}</p>` });
@@ -223,6 +259,8 @@ Object.assign(ACTIONS, {
     }
   },
   'cards.open': (_ev, elm) => openCard(elm.dataset.arg),
+  'cards.find': () => { CARDS_Q = String((el('cards-q') || {}).value || ''); CARDS_LIMIT = 60; drawCards(); },
+  'cards.more': () => { CARDS_LIMIT += 60; drawCards(); },
   'sprofile.save': async (ev) => {
     ev.preventDefault();
     const fd = Object.fromEntries(new FormData(ev.target).entries());

@@ -9,6 +9,7 @@
  * Довгі дії (нарізка, голоси, завдання) ідуть роботами в черзі демона, і їхній
  * поступ малюється тут, поруч із формою, а не лише на екрані «Роботи».
  */
+import { modelName } from '../core/bits.js';
 import { skelRows } from '/ui/dom.js';
 import { t } from '../core/strings.js';
 import { callOp, staleThenFresh } from '../core/net.js';
@@ -130,7 +131,7 @@ function paintSets(env) {
       <td class="num">${crops}</td>
       <td class="num">${s.n_marked} <span class="muted">(ok ${st.ok || 0})</span></td>
       <td class="num">${merge}</td>
-      <td>${esc((s.voices || []).join(', ') || '—')}</td>
+      <td>${esc((s.voices || []).map(modelName).join(', ') || '—')}</td>
       <td><button data-act="sets.open" data-arg="${esc(s.name)}">${t('sets.open')}</button></td>
     </tr>`;
   }).join('');

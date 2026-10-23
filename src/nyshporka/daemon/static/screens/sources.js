@@ -1,5 +1,6 @@
 /** 🔎 Каталоги: де взагалі є документи — поза цим комп'ютером. */
 
+import { fmtDay } from '../core/bits.js';
 import { t } from '../core/strings.js';
 import { callOp, FINAL_STATES, apiFetch } from '../core/net.js';
 import { esc, safeHref, el, setView, busy, failure, boxError, busyForm,
@@ -251,7 +252,7 @@ function srcBasis(c) {
   const what = { workspace: t('sources.own'), live: t('sources.live') }[c.kind]
     || t('sources.bundled');
   const bits = [what];
-  if (c.taken) bits.push(`${t('sources.taken')} ${esc(c.taken)}`);
+  if (c.taken) bits.push(`${t('sources.taken')} ${esc(fmtDay(c.taken))}`);
   // Обхід спинили чи він обірвався — сказати це в самому рядку джерела, поруч
   // із кнопкою, що докінчує обхід.
   if (c.partial) {

@@ -32,13 +32,13 @@ SCREENS.cloud = async () => {
   await loadProjects();
   // Спершу минулий перелік (з позначкою «оновлюю»), потім свіжий: наглядачів
   // питають щоразу, і це секунда, коли закривати нічого.
-  await staleThenFresh('cloud.state', { limit: 20 }, (env) => {
+  await staleThenFresh('cloud.state', { limit: 20 }, (env, _stale, again) => {
     if (!alive(gen)) return;
-    paintCloud(env);
+    paintCloud(env, again);
   });
 };
 
-function paintCloud(env) {
+function paintCloud(env, again = false) {
   if (!env.ok) return failure(env);
   const d = env.data || {};
   RUNS = d.runs || [];
@@ -59,7 +59,7 @@ function paintCloud(env) {
     <div class="dash-box"><h3>${t('cloud.now')}</h3>
       ${live.length ? live.map(runRow).join('') : emptyMini('skrynia', t('cloud.none.live'))}</div>
     <div class="dash-box"><h3>${t('cloud.past')}</h3>
-      ${past.length ? past.map(runRow).join('') : `<p class="muted">${t('cloud.none.past')}</p>`}</div>`);
+      ${past.length ? past.map(runRow).join('') : `<p class="muted">${t('cloud.none.past')}</p>`}</div>`, again);
 }
 
 /**

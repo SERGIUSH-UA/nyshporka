@@ -19,7 +19,7 @@ import { t, LANG } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, renderWarnings,
   curGen, alive } from '../core/view.js';
-import { modelName, fmtDay } from '../core/bits.js';
+import { modelName, fmtDay, pathTail } from '../core/bits.js';
 import { SCREENS, ACTIONS, PAGERS } from '../core/registry.js';
 import { show, goto, onJob } from '../core/nav.js';
 import { ST } from '../core/state.js';
@@ -242,7 +242,8 @@ function runsGroupHtml(g) {
   const n = g.frames || 0;
   return `<section class="run-group" data-case="${esc(g.key)}">
     <h3>
-      <span class="shifra">${esc(g.shifra || g.key)}</span>
+      <span class="shifra" title="${esc(g.case_dir || g.key || '')}">${esc(g.shifra
+        || (String(g.key || '').startsWith('dir:') ? pathTail(g.case_dir || g.key.slice(4)) : g.key))}</span>
       <span class="name" title="${esc(g.title || '')}">${esc(g.title || '')}</span>
       ${n ? `<span class="frames dim">${esc(n)} ${t('common.frames')}</span>` : ''}
       ${g.key ? `<button class="ctl-sm" data-act="runs.lib" data-arg="${esc(g.key)}"
@@ -317,7 +318,7 @@ function runsOrphanHtml(g, gi = 0) {
     <table><tbody>${g.runs.map((r, i) => `<tr>
       <td class="mono">${esc(r.name)}</td>
       <td class="num">${esc(r.pages_done || 0)}</td>
-      <td class="mono dim">${esc(r.case_dir || '')}</td>
+      <td class="mono dim" title="${esc(r.case_dir || '')}">${esc(pathTail(r.case_dir))}</td>
       <td><input id="${uid(`key-${i}`)}" list="${uid('cases')}" size="22"
         placeholder="${esc(t('runs.bind.ph'))}"></td>
       <td><input id="${uid(`why-${i}`)}" size="18"

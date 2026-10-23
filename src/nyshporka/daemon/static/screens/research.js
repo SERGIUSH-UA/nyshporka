@@ -21,13 +21,13 @@ SCREENS.research = async () => {
   const gen = curGen();
   busy(6);
   // Перелік звітів — тисячі файлів; спершу минула відповідь, потім свіжа.
-  await staleThenFresh('reports.list', {}, (env) => {
+  await staleThenFresh('reports.list', {}, (env, _stale, again) => {
     if (!alive(gen)) return;
-    paintResearch(env);
+    paintResearch(env, again);
   });
 };
 
-function paintResearch(env) {
+function paintResearch(env, again = false) {
   if (!env.ok) return failure(env);
   ROWS = (env.data || {}).rows || [];
   // Найновіші зверху: «що ми робили останнім» — головне питання цього екрана.
@@ -46,7 +46,7 @@ function paintResearch(env) {
           ${kinds.map((k) => `<option value="${esc(k)}"${RS.kind === k ? ' selected' : ''}>${esc(kindLabel(k))} · ${count[k]}</option>`).join('')}
         </select></label>
     </div>
-    <div class="dash-box" id="rs-list"></div>`);
+    <div class="dash-box" id="rs-list"></div>`, again);
   drawList();
 }
 

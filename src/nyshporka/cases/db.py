@@ -624,11 +624,12 @@ def staleness(db_path: Path | None = None, *, quick: bool = False) -> dict[str, 
         except OSError:
             continue
         if mtime > built:
-            reasons.append(f"{label} змінено {mtime:%m-%d %H:%M}")
+            reasons.append(f"{label} змінено {mtime.astimezone():%d.%m %H:%M}")
     snap = _sources_snapshot()
     if snap["htr_newest"] and datetime.fromtimestamp(snap["htr_newest"], tz=UTC) > built:
+        # Місцевий час і день.місяць, як усюди в консолі (доти «10-23 00:27» у UTC).
         reasons.append(f"є прогін, оновлений "
-                       f"{datetime.fromtimestamp(snap['htr_newest'], tz=UTC):%m-%d %H:%M}")
+                       f"{datetime.fromtimestamp(snap['htr_newest'], tz=UTC).astimezone():%d.%m %H:%M}")
     # 🔴 Порівнюємо з числом тек, яке бачила САМА збірка, а не з кількістю
     # прив'язаних прогонів. Частину тек збірка свідомо не бере (порожні,
     # перервані, службові), і «на диску 15922, у реєстрі 15884» висіло навіть

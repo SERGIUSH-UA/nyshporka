@@ -111,6 +111,7 @@ out.labels = [td.dataset.l, own.dataset.l];
 const BT = await import('./core/bits.js');
 const refs = { I9001: 'Іван Сидорук', PL9001: 'Городківка' };
 out.named = BT.named('Чоловік I9001, [[PL9001]], [[I9002|Петро]], **важливо**, I9999', refs);
+out.namedTwice = BT.named('[[I9001]] — це I9001', refs);
 out.day = [BT.fmtDay('2026-07-23T00:00:00Z'), BT.fmtDay('1993-08-28'), BT.fmtDay('1850')];
 out.forms = BT.fieldValue('name_variants', [{ form: 'Городківка' }, { form: 'Городковка' }]);
 out.md = BT.mdLite(['Вступ', '', '| Справа | Сторінок |', '|---|---|', '| [[I9001]] | 12 |', '',
@@ -234,6 +235,10 @@ def test_canon_text_names_ids_and_renders_marks(hub) -> None:
     html = hub["named"]
     assert 'title="I9001">Іван Сидорук</span>' in html and "Городківка" in html and "Петро" in html
     assert "<b>важливо</b>" in html and "I9999" in html and "[[" not in html
+    # 🔴 Той самий id у `[[…]]` і голим: друга заміна не сміє лізти в атрибут
+    # першої (у назвах гіпотез проступав сирий HTML, QA 23.10.2026).
+    twice = hub["namedTwice"]
+    assert twice.count("<span") == 2 and "&gt;" not in twice and 'title="<' not in twice
     assert hub["day"] == ["23.07.2026", "28.08.1993", "1850"]
     assert hub["forms"] == "Городківка, Городковка", "варіанти назв, а не «записів: 2»"
 

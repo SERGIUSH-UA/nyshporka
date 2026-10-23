@@ -13,7 +13,7 @@
  * коли реєстру немає, і «—» лише тоді, коли перевірили й нічого немає.
  * Сплутати їх означає видати «зрізу не збирали» за «жодну справу не читали».
  */
-import { toast } from '../core/bits.js';
+import { toast, fmtDay } from '../core/bits.js';
 import { t } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, renderWarnings,
@@ -330,7 +330,7 @@ function libSearched(r) {
   const chips = projectChips(others);
   if (!mine) return chips || '<span class="dim">—</span>';
   const read = (r.htr_stage || 'none') !== 'none';
-  const day = String(by[mine] || '').slice(0, 10);
+  const day = fmtDay(String(by[mine] || '').slice(0, 10));
   const here = by[mine]
     ? `<span class="tag ok" title="${esc(day)}">${esc(t('lib.srch.yes'))}</span>`
     : (read ? `<span class="tag warn">${esc(t('lib.srch.no'))}</span>` : '<span class="dim">—</span>');

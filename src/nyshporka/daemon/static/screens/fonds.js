@@ -1,5 +1,6 @@
 /** 🏛 Реєстр опису фонду. */
 
+import { ratioBar } from '../core/bits.js';
 import { t } from '../core/strings.js';
 import { callOp, SEQ } from '../core/net.js';
 import { esc, safeHref, el, setView, busy, failure, busyForm,
@@ -458,7 +459,7 @@ function diskCell(r) {
   const name = r.on_disk ? 'check' : marks[r.state];
   const mark = name ? ic(name, 'ic-o ic-sm') : '<span class="muted">—</span>';
   const frames = r.frames_disk && r.frames_expected
-    ? ` <span class="muted mono">${esc(r.frames_disk)}/${esc(r.frames_expected)}</span>` : '';
+    ? ` <span class="muted mono">${esc(r.frames_disk)}/${esc(r.frames_expected)}</span>${ratioBar(r.frames_disk, r.frames_expected)}` : '';
   // 🔴 Розходження порядково: число у зведенні каже «17 справ», але не каже,
   // котрим саме не вірити.
   const bad = r.disk_mismatch

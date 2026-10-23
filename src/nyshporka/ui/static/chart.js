@@ -25,6 +25,12 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
  * Результат іде в розмітку, тож нечислове екранується (аудит 29.09.2026):
  * доти рядок із відповіді сервера повертався як є й ставав HTML.
  */
+
+/** `2026-07-22T…` → `22.07.2026`: дата в осях — як усюди в консолі. */
+const day = (iso) => {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}.${m[2]}.${m[1]}` : String(iso || '');
+};
 export function num(n) {
   if (n === null || n === undefined || n === '') return '—';
   const v = Number(n);
@@ -207,8 +213,8 @@ export function steps(series, opts = {}) {
   const first = pts[0];
   const last = pts[pts.length - 1];
   const unit = opts.unit ? ` ${opts.unit}` : '';
-  const label = `${first.at.slice(0, 10)}: ${num(first.v)}${unit} → `
-    + `${last.at.slice(0, 10)}: ${num(last.v)}${unit}`;
+  const label = `${day(first.at)}: ${num(first.v)}${unit} → `
+    + `${day(last.at)}: ${num(last.v)}${unit}`;
   // 🔴 Стеля підписана числом. Рівна лінія під самим верхом без нього
   // читається як «графік не намалювався»: за нею не видно ні того, що шкала
   // йде від нуля, ні того, на якому саме значенні вона стоїть.
@@ -219,9 +225,9 @@ export function steps(series, opts = {}) {
       vector-effect="non-scaling-stroke"/>
     ${line(dashed, true)}${line(solid, false)}
   </svg>
-  <div class="ch-axis"><span>${esc(first.at.slice(0, 10))}</span>
+  <div class="ch-axis"><span>${esc(day(first.at))}</span>
     <span class="ch-top">${num(hi)}${esc(unit)}</span>
-    <span>${esc(last.at.slice(0, 10))}</span></div>`;
+    <span>${esc(day(last.at))}</span></div>`;
 }
 
 /**

@@ -20,7 +20,7 @@ import { t, tOr, LANG } from '../core/strings.js';
 import { TOKEN, PROJECT, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, renderCoverage, curGen, alive, maskot, mini } from '../core/view.js';
-import { modelName } from '../core/bits.js';
+import { modelName, fmtDay, pathTail } from '../core/bits.js';
 import { SCREENS, ACTIONS, screenOfOp } from '../core/registry.js';
 import { SECTIONS, NAV_LABEL, show, renderNav, screenOn,
   refreshJobs } from '../core/nav.js';
@@ -128,7 +128,7 @@ SCREENS.home = async () => {
   hubCards(gen);
   // Без `await`: екран уже намальовано, і чекати на цей рядок нема чого.
   machineLater(gen);
-  if (env.data && env.data.refreshing) freshLater(gen, () => { paintHome(PULSE_ENV, gen); hubCards(gen); });
+  if (env.data && env.data.refreshing) freshLater(gen, () => { paintHome(PULSE_ENV, gen, true); hubCards(gen); });
 };
 
 /**
@@ -147,7 +147,7 @@ SCREENS.status = async () => {
   setView(dashboard(env, PULSE));
   machineLater(gen);
   if (env.data && env.data.refreshing) {
-    freshLater(gen, () => setView(dashboard(PULSE_ENV, PULSE)));
+    freshLater(gen, () => setView(dashboard(PULSE_ENV, PULSE), true));
   }
 };
 
@@ -214,10 +214,10 @@ async function hubCards(gen) {
   box.innerHTML = html;
 }
 
-function paintHome(env, gen = curGen()) {
+function paintHome(env, gen = curGen(), keep = false) {
   PULSE = env.data;
   PULSE_ENV = env;
-  const put = (html) => setView(html);
+  const put = (html) => setView(html, keep);
   const ws = PULSE.workspace || {};
   const reg = PULSE.registry || {};
 
@@ -406,7 +406,7 @@ function headline(d, ws) {
   bits.push(p.at
     ? `<span>${t('dash.pulse')}: ${esc(when(p.at))}${p.by ? ` · ${esc(p.by_label || p.by)}` : ''}</span>`
     : `<span>${t('dash.never')}</span>`);
-  bits.push(`<span class="mono">${esc(ws.root || '')}</span>`);
+  bits.push(`<span class="mono" title="${esc(ws.root || '')}">${esc(pathTail(ws.root || '', 1))}</span>`);
   return `<div class="dash-head">${bits.join('')}</div>`;
 }
 
@@ -612,7 +612,7 @@ function readingSection(d) {
         <span class="ch-bar-n">${num(e.n)}</span></div>`).join('')}</div>`);
   }
   if ((r.by_model || []).length) {
-    two.push(`<div><h4>${t('dash.reading.models')}</h4>${bars(r.by_model)}</div>`);
+    two.push(`<div><h4>${t('dash.reading.models')}</h4>${bars((r.by_model || []).map((x) => ({ ...x, label: modelName(x.label || x.code) })))}</div>`);
   }
   const lastRows = lastRuns(r);
   const last = lastRows ? `<div><h4>${t('dash.reading.last')}</h4>${lastRows}</div>` : '';
@@ -697,7 +697,7 @@ function timeBody(rows) {
   // сумніватись у тому, що вона бачить.
   const dashed = series.filter((p) => p.src === 'backfill').length >= 2;
   const foot = [
-    live.length ? `${t('dash.time.since')} ${esc(live[0].at.slice(0, 10))}` : '',
+    live.length ? `${t('dash.time.since')} ${esc(fmtDay(live[0].at.slice(0, 10)))}` : '',
     dashed ? t('dash.time.backfill') : '',
   ].filter(Boolean).join(' · ');
   // ⚠ Спільна «сегментована група» (`.seg` у base.css) тут не працює, і це не
