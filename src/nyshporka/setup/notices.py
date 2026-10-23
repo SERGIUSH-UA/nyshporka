@@ -222,6 +222,34 @@ def new_models() -> list[dict[str, Any]]:
         return []
 
 
+def last_update() -> dict[str, Any]:
+    """Чим скінчилось останнє оновлення одним натиском — якщо воно було за добу.
+
+    Пише його помічник (`setup/updater.py`), коли консоль уже закрита; нова
+    консоль показує людині: «оновлено до X» або журнал, чому ні.
+    """
+    import json
+
+    from nyshporka.core.workspace import _state_path
+
+    sp = _state_path()
+    if sp is None:
+        return {}
+    path = sp.parent / "update" / "result.json"
+    try:
+        got = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(got, dict) or time.time() - float(got.get("finished") or 0) > 86400:
+        return {}
+    if not got.get("ok"):
+        import contextlib
+
+        with contextlib.suppress(OSError):
+            got["tail"] = path.with_name("update.log").read_text(encoding="utf-8")[-1500:]
+    return got
+
+
 def snapshot() -> dict[str, Any]:
     """Що показати: стан із кешу (без мережі) і число на дзвіночку."""
     cache = _cache()
@@ -237,5 +265,6 @@ def snapshot() -> dict[str, Any]:
     return {"installed": __version__, "latest": latest, "newer": newer,
             "releases": releases, "models": models, "supriaha": sup or {},
             "logged_in": logged_in(), "settings": settings(), "badge": badge,
+            "last_update": last_update(),
             "checked_at": cache.get("releases_at"), "why": {
                 k: cache[k] for k in ("latest_why", "releases_why", "supriaha_why") if cache.get(k)}}

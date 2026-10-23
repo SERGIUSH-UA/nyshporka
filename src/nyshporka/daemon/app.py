@@ -429,6 +429,35 @@ WARM_OPS: tuple[tuple[str, dict[str, Any]], ...] = (
 )
 
 
+#: Як запущено цю консоль і чим її зупинити — для оновлення одним натиском
+#: (`update.apply`): помічник оновлення перезапускає її тими самими прапорцями.
+LAUNCH: dict[str, Any] = {}
+_SERVER: list[Any] = []
+#: Скільки робіт зараз іде (черга, читання) — оновлюватись посеред них не можна.
+_BUSY: list[Any] = []
+
+
+def running_jobs() -> int:
+    """Робіт, що зараз ідуть у цій консолі; поза консоллю — 0."""
+    try:
+        return int(_BUSY[0]()) if _BUSY else 0
+    except Exception:
+        return 0
+
+
+def request_exit(delay: float = 1.5) -> bool:
+    """Попросити сервер завершитись за `delay` с (відповідь устигає піти)."""
+    if not _SERVER:
+        return False
+    import threading
+
+    def stop() -> None:
+        _SERVER[0].should_exit = True
+
+    threading.Timer(delay, stop).start()
+    return True
+
+
 def _warm_up(space: Workspace) -> None:
     """Прогріти найдовші переліки у фоні, щойно демон стартував.
 
@@ -535,6 +564,7 @@ def create_app(ws: Workspace | None = None, *, token: str = "",
     app.add_middleware(_ProjectScope, spaces=spaces)
     app.state.token = tok
     app.state.bus = bus
+    _BUSY[:] = [lambda: sum(1 for j in bus.jobs() if not j.state.final)]
     # Код сполучення — одноразовий і короткий: посилання з ним лягає в
     # месенджер і в історію браузера, тож сталий ключ туди не йде.
     app.state.pair_code = secrets.token_urlsafe(18) if network else ""
@@ -896,9 +926,11 @@ def create_app(ws: Workspace | None = None, *, token: str = "",
     @app.get("/api/health")
     def health() -> dict[str, Any]:
         cur = _workspace()
+        from nyshporka import __version__
+
         return {"ok": True, "workspace": str(cur.root), "name": cur.name,
                 "hub": str(spaces.hub), "project": _P.current_id(cur),
-                "jobs": len(bus.jobs())}
+                "jobs": len(bus.jobs()), "version": __version__}
 
     @app.get("/api/projects")
     def projects() -> dict[str, Any]:
@@ -1533,6 +1565,7 @@ def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *,
                         held.beat()
 
             held.beat()
+            LAUNCH.update(argv=list(sys.argv), cwd=os.getcwd(), pid=os.getpid())
             hb = _threading.Thread(target=_pulse, name="nysh-lock-beat",
                                    daemon=True)
             hb.start()
@@ -1544,6 +1577,7 @@ def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *,
                     config = uvicorn.Config(app, log_level="warning", proxy_headers=False,
                                             ssl_certfile=tls_cert, ssl_keyfile=tls_key)
                     server = uvicorn.Server(config)
+                    _SERVER[:] = [server]
                     server.run(sockets=socks)
                     # З переданими сокетами uvicorn не перевіряє, чи піднявся
                     # (на відміну від `uvicorn.run`) — без цього збій старту
@@ -1551,7 +1585,14 @@ def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *,
                     if not server.started:
                         raise SystemExit("🔴 застосунок не піднявся — причина вище")
                 else:
-                    uvicorn.run(app, host=host, port=port, log_level="warning")
+                    # Сервер — об'єктом, а не `uvicorn.run`: оновлення одним
+                    # натиском просить його завершитись (`request_exit`).
+                    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port,
+                                                           log_level="warning"))
+                    _SERVER[:] = [server]
+                    server.run()
+                    if not server.started:  # те саме, що `uvicorn.run` робив сам
+                        raise SystemExit("🔴 застосунок не піднявся — причина вище")
             finally:
                 stop.set()
     except LockBusy as busy:

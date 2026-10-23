@@ -11,10 +11,10 @@
  */
 
 import { t, LANG } from '../core/strings.js';
-import { callOp, staleThenFresh } from '../core/net.js';
+import { callOp, staleThenFresh, apiFetch } from '../core/net.js';
 import { esc, el, setView, failure, curGen, alive, mini, emptyMini, maskot } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
-import { openModal } from '../core/modal.js';
+import { openModal, confirmAct } from '../core/modal.js';
 import { onJob, jobChip } from '../core/nav.js';
 import { toast, fmtDay, pill } from '../core/bits.js';
 import { bellLoad } from '../core/bell.js';
@@ -52,7 +52,11 @@ export function paintUpdate(env) {
     </article>`).join('');
   const models = (d.models || []).map((m) => `<li><b>${esc(m.label)}</b> <small class="muted">${esc(mb(m.size))}${
     m.reason === 'update' ? ` · ${esc(t('up.model.newer'))}` : ''}</small></li>`).join('');
-  setView(`
+  const lu = d.last_update || {};
+  const banner = !lu.to ? '' : lu.ok
+    ? `<div class="card ok-line up-ok">${esc(t('up.done').replace('{v}', lu.to))}</div>`
+    : `<div class="warn">${esc(t('up.failed').replace('{v}', lu.to))}${lu.tail ? `<pre class="mono up-log">${esc(lu.tail)}</pre>` : ''}</div>`;
+  setView(`${banner}
     <div class="card up-hero">${maskot(d.newer ? 'vyishlo' : d.latest ? 'onovleno' : 'chekaie', 150, 'up-maskot')}<div class="up-hero-t">${head}
       <p class="muted">${esc(checked)}</p></div>
       <div class="up-acts">${d.newer ? `<button class="primary" data-act="up.apply">${esc(t('up.apply'))}</button>` : ''}
@@ -107,12 +111,72 @@ Object.assign(ACTIONS, {
       });
     }
   },
-  /** Оновлення: поки — команда для термінала з поясненням (одним натиском — далі). */
+  /**
+   * ⬆️ Оновити одним натиском: план → підтвердження → помічник оновлює, поки
+   * консоль закрита, і відкриває її знову. Установка не тих видів (розробницька,
+   * pip) — команда для термінала з поясненням, а не кнопка, що не спрацює.
+   */
   'up.apply': async () => {
-    const env = await callOp('update.check', {});
-    const how = (env.ok && env.data && env.data.how) || '';
-    openModal({ title: t('up.apply'), body: `<p>${esc(t('ver.how'))}</p>
-      ${how ? `<pre class="mono">${esc(how)}</pre>` : ''}
-      <div class="row dlg-acts"><button class="ghost" data-act="modal.close">${esc(t('modal.close'))}</button></div>` });
+    const plan = await callOp('update.apply', { dry_run: true });
+    if (!plan.ok) { manual(plan.error); return; }
+    const d = plan.data || {};
+    if (d.latest) { toast(t('up.fresh'), { tone: 'ok' }); return; }
+    const p = d.plan || {};
+    const yes = await confirmAct({ title: t('up.confirm').replace('{v}', p.to), text: t('up.confirm.why'),
+      rows: [[t('up.from'), p.from], [t('up.to'), p.to]], okLabel: t('up.apply') });
+    if (!yes) return;
+    const env = await callOp('update.apply', {});
+    if (!env.ok) { toast(env.error || t('common.error'), { tone: 'err' }); return; }
+    if (env.data && env.data.latest) { toast(t('up.fresh'), { tone: 'ok' }); return; }
+    updating(env.data || {});
   },
 });
+
+/** Команда для термінала — там, де одним натиском не вийде. */
+async function manual(why) {
+  const env = await callOp('update.check', {});
+  const how = (env.ok && env.data && env.data.how) || '';
+  openModal({ title: t('up.apply'), body: `<p class="warn">${esc(why || '')}</p><p>${esc(t('ver.how'))}</p>
+    ${how ? `<pre class="mono">${esc(how)}</pre>` : ''}
+    <div class="row dlg-acts"><button class="ghost" data-act="modal.close">${esc(t('modal.close'))}</button></div>` });
+}
+
+/** Крок майстра: номер, підпис, стан (зроблено / зараз / попереду). */
+function wzStep(n, key, state) {
+  const mark = state === 'done' ? '✓' : String(n);
+  return `<li class="up-step ${state}"><span class="rd-n">${mark}</span>${esc(t(key))}</li>`;
+}
+
+/**
+ * Поки помічник оновлює: консоль закрита, тож питаємо `/api/health`, доки не
+ * відповість НОВА версія. Тоді — «оновлено» й перезавантаження сторінки.
+ */
+export function updating(d, { every = 2000, give_up_ms = 5 * 60 * 1000 } = {}) {
+  const draw = (phase) => setView(`<div class="card up-hero up-going">
+      ${maskot(phase === 'done' ? 'onovleno' : 'onovliuie', 150, 'up-maskot')}
+      <div class="up-hero-t"><h3>${esc(phase === 'done' ? t('up.done').replace('{v}', d.to) : t('up.going').replace('{a}', d.from).replace('{b}', d.to))}</h3>
+        <ol class="up-steps">${wzStep(1, 'up.step.check', 'done')}${wzStep(2, 'up.step.install', phase === 'done' ? 'done' : 'now')}
+          ${wzStep(3, 'up.step.restart', phase === 'done' ? 'done' : 'next')}</ol>
+        <p class="muted" id="up-going-note">${esc(phase === 'slow' ? t('up.slow').replace('{log}', d.log || '') : t('up.keep'))}</p></div></div>`);
+  draw('going');
+  const t0 = Date.now();
+  // Консоль перезапущено, коли відповіла нова версія — або коли сервер спершу
+  // зник, а тепер відповідає знову: старші збірки версії в `/api/health` не
+  // кажуть, і на них сторінка чекала б вічно (пісочниця 23.10.2026).
+  let sawDown = false;
+  const tick = async () => {
+    try {
+      const res = await apiFetch('/api/health');
+      const h = res && res.ok ? await res.json() : null;
+      if (!h) sawDown = true;
+      if (h && (h.version ? h.version !== d.from : sawDown)) {
+        draw('done');
+        setTimeout(() => { if (typeof location !== 'undefined' && location.reload) location.reload(); }, 1500);
+        return;
+      }
+    } catch { sawDown = true; /* консоль закрита — так і має бути, питаємо далі */ }
+    if (Date.now() - t0 > give_up_ms) { draw('slow'); return; }
+    setTimeout(tick, every);
+  };
+  setTimeout(tick, every);
+}

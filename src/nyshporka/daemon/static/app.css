@@ -1276,3 +1276,14 @@ details.np-folder > summary { padding: 0; background: none; font-size: .85rem; c
 .net-box .chk { display: flex; gap: .6rem; align-items: flex-start; }
 .net-box .chk span { display: grid; gap: .15rem; }
 @media (max-width: 520px) { .up-hero .maskot { width: 110px; height: auto; } .up-acts { flex-direction: row; } }
+/* Майстер «Оновити зараз»: три кроки, поточний пульсує стримано. */
+.up-steps { list-style: none; padding: 0; margin: .4rem 0 .6rem; display: grid; gap: .45rem; }
+.up-step { display: flex; align-items: center; gap: .55rem; color: var(--fg-3); }
+.up-step.now { color: var(--fg); font-weight: 600; }
+.up-step.done { color: var(--fg-2); }
+.up-step.done .rd-n { background: var(--honey); color: var(--bg); }
+.up-step.now .rd-n { animation: up-breathe 1.6s ease-in-out infinite; }
+@keyframes up-breathe { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--honey) 35%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .up-step.now .rd-n { animation: none; } }
+.up-log { max-height: 14rem; overflow: auto; white-space: pre-wrap; font-size: .78rem; margin: .5rem 0 0; }
+.up-ok { padding: .7rem 1rem; }
