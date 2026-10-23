@@ -17,7 +17,7 @@
  */
 
 import { toast } from '../core/bits.js';
-import { t, LANG } from '../core/strings.js';
+import { t, tOr, LANG } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, curGen, alive, maskot } from '../core/view.js';
@@ -120,8 +120,9 @@ function stemGaps(d) {
     ? `<p class="warn">${ic('alert', 'ic-sm')} ${t('prof.gaps.prereform')}</p>` : '';
   const rest = miss.filter((o) => o !== 'ru_prereform');
   const others = rest.length
-    ? `<p class="muted">${ic('alert', 'ic-sm')} ${t('prof.gaps')}: <span class="mono">${
-      rest.map(esc).join(' · ')}</span></p>` : '';
+    // Назвами з форми («рос.», «лат.»), а не кодами `ru_modern · pl`.
+    ? `<p class="muted">${ic('alert', 'ic-sm')} ${t('prof.gaps')}: ${
+      rest.map((o) => esc(tOr(`orth.${o}`, o))).join(' · ')}</p>` : '';
   return prereform + others;
 }
 
