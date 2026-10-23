@@ -198,7 +198,10 @@ async function preview() {
 }
 
 Object.assign(ACTIONS, {
-  'fb.preview': async () => {
+  'fb.preview': async (ev) => {
+    // 🔴 Без цього браузер відправляє форму сам (GET із текстом в адресі) і
+    // вікно закривається перезавантаженням — дія форми мусить це скасувати.
+    if (ev && ev.preventDefault) ev.preventDefault();
     keepText();
     await preview();
   },

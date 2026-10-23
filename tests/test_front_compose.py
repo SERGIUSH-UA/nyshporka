@@ -169,7 +169,8 @@ out.md = BT.mdLite(['Вступ', '', '| Справа | Сторінок |', '|-
   await import('./screens/feedback.js'); await SCREENS.feedback(); await tick(20);
   out.fbCompose = view();
   document.getElementById('fb-text').value = 'Гортач не відкривається';
-  await ACTIONS['fb.preview'](); await tick(20);
+  const sev = { prevented: false, preventDefault() { this.prevented = true; } };
+  await ACTIONS['fb.preview'](sev); await tick(20); out.fbPrevented = sev.prevented;
   out.fbPreview = view();
   await ACTIONS['fb.send'](); await tick(20);
   out.fbDone = view(); out.fbAsked = asked.slice(); globalThis.fetch = f0; }
@@ -451,6 +452,7 @@ def test_feedback_window_previews_before_sending(hub) -> None:
     assert first["confirm"] is False and first["text"] == "Гортач не відкривається"
     assert hub["fbAsked"][-1]["confirm"] is True
     assert "maskot-poshta" in hub["fbDone"] and "41" in hub["fbDone"]
+    assert hub["fbPrevented"], "форма не скасувала власну відправку — вікно закриється"
 
 
 def test_update_screen_shows_versions_notes_models_and_switches(hub) -> None:
