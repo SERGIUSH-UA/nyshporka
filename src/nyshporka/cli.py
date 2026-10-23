@@ -1157,6 +1157,8 @@ def feedback_cmd(
         for f in d.get("files") or []:
             console.print(f"   📎 {escape(f['name'])} · {f['size'] // 1024} КБ"
                           + (f" · {escape(f['note'])}" if f.get("note") else ""))
+            for line in f.get("excerpt") or []:
+                console.print(f"      [muted]{escape(line)}[/muted]")
     if not d.get("logged_in"):
         err_console.print("✗ щоб надіслати, потрібен вхід у Супрягу: nysh share login")
         raise typer.Exit(1)

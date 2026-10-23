@@ -11,8 +11,13 @@
 * **Знімки — перекодовано тут же** у WebP без метаданих (Pillow), ≤ 1600 px: так
   вони влазять у 1 МБ, і EXIF з координатами не їде. Портал перекодовує ще раз.
 * **Файли — лише з білого списку** (PNG/JPEG/WebP і .txt/.log/.json), до п'яти.
-  Інше не читається взагалі: агент, якого вмовили «приклади цей файл», не
-  відправить канон чи ключі під виглядом журналу з чужим розширенням.
+  Інше не читається взагалі. Текст із диска — лише з простору (крім `data/`,
+  де лежать дані родин) і з теки стану Нишпорки; `.json` — лише з теки стану;
+  посилання (symlink) — ні. Перегляд показує початок і кінець кожного журналу:
+  агент, якого вмовили «приклади цей файл», не відправить конфіг із ключами чи
+  дані замовника непомітно для людини (рецензія безпеки 23.10.2026).
+* **Ключ — лише на довірену адресу** (`catalog.may_send_key`), як і в
+  `share push`: підміна `NYSHPORKA_TOLOKA` не виманює обліковий запис.
 """
 from __future__ import annotations
 
@@ -42,6 +47,19 @@ MAX_READ = 25 * 1024 * 1024
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _SIGNED = re.compile(r"(https?://[^\s?\"']+)\?[^\s\"']*(?:X-Amz-|Signature=|sig=)[^\s\"']*",
                      re.IGNORECASE)
+#: Тека профілю будь-якого користувача: `<диск>:\Users\Ім'я Прізвище`, коротке `PETRYK~1`,
+#: `file:///<диск>:/Users/…`, UNC `\\ПК\c$\Users\…`, WSL `/mnt/c/Users/…`, `/home/…`,
+#: macOS `/Users/…`. Сегмент імені — до наступного розділювача.
+_PROFILE = re.compile(
+    r"(?:\\\\[^\\/\s]+\\[a-z]\$|[a-z]:|/mnt/[a-z])?[\\/]+(?:users|home)[\\/]+[^\\/\r\n\"'<>]+",
+    re.IGNORECASE)
+_EMAIL = re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")
+_BEARER = re.compile(r"(?i)\b(bearer)\s+[\w\-.~+/=]{8,}")
+_SECRET = re.compile(r"(?i)\b(token|api[_-]?key|secret|password|passwd|authorization)"
+                     r"(\s*[:=]\s*)(?!bearer\b)(?!<)[\"']?[^\s\"',;]{6,}")
+_IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+#: Межа після шляху: кінець, розділювач, пробіл чи розділовий знак — не літера.
+_EDGE = r"(?=$|[\\/\s\"',;:)\]])"
 
 
 class FeedbackError(ValueError):
@@ -60,7 +78,14 @@ class Attachment:
         return "image/webp" if self.kind == "image" else "text/plain; charset=utf-8"
 
     def as_json(self) -> dict[str, Any]:
-        return {"kind": self.kind, "name": self.name, "size": len(self.data), "note": self.note}
+        out: dict[str, Any] = {"kind": self.kind, "name": self.name, "size": len(self.data),
+                               "note": self.note}
+        if self.kind == "text":
+            # Людина бачить, ЩО в журналі, а не лише ім'я й розмір.
+            lines = self.data.decode("utf-8", errors="replace").splitlines()
+            out["excerpt"] = (lines if len(lines) <= 12
+                              else [*lines[:6], f"… ще {len(lines) - 12} рядків …", *lines[-6:]])
+        return out
 
 
 # ── очищення ─────────────────────────────────────────────────────────────────
@@ -90,13 +115,26 @@ def scrub(text: str) -> str:
     pairs += [(v, "~") for v in _variants(Path.home())]
     for old, new in pairs:
         # Заміна — без груп і зворотних скісних (`~`, `<простір>`), тож рядком.
-        out = re.sub(re.escape(old), new, out, flags=re.IGNORECASE)
+        out = re.sub(re.escape(old) + _EDGE, new, out, flags=re.IGNORECASE)
+    out = _PROFILE.sub("~", out)
+    out = _EMAIL.sub("<e-mail>", out)
+    out = _BEARER.sub(r"\1 <ключ>", out)
+    out = _SECRET.sub(r"\1\2<вирізано>", out)
+    out = _IPV4.sub("<ip>", out)
+    names = []
     try:
-        user = getpass.getuser()
+        names.append(getpass.getuser())
     except Exception:
-        user = ""
-    if len(user) >= 3:
-        out = re.sub(rf"(?<![\w]){re.escape(user)}(?![\w])", "<user>", out, flags=re.IGNORECASE)
+        pass
+    try:
+        names.append(platform.node())
+    except Exception:
+        pass
+    for name, label in zip(names, ("<user>", "<host>"), strict=False):
+        if len(name) >= 3:
+            # Підкреслення — теж межа: «petryk_screenshot» несе ім'я так само.
+            out = re.sub(rf"(?<![^\W_]){re.escape(name)}(?![^\W_])", label, out,
+                         flags=re.IGNORECASE)
     return out
 
 
@@ -137,6 +175,7 @@ def diag(lang: str = "") -> dict[str, str]:
 # ── вкладення ────────────────────────────────────────────────────────────────
 def _safe_name(name: str, ext: str) -> str:
     stem = re.split(r"[\\/]", str(name or ""))[-1].rsplit(".", 1)[0]
+    stem = scrub(stem)
     stem = re.sub(r"[^\w.\-]", "_", stem).strip("._") or "fail"
     return f"{stem[:60]}{ext}"
 
@@ -196,20 +235,48 @@ def log(raw: bytes | str, name: str = "zhurnal.txt") -> Attachment:
                       s.encode("utf-8"), note=note)
 
 
+def _state_dir() -> Path:
+    from platformdirs import user_state_dir
+
+    return Path(user_state_dir("Nyshporka", appauthor=False)).resolve()
+
+
+def _text_allowed(real: Path, ext: str) -> bool:
+    """Текст із диска — з простору (крім `data/`) чи з теки стану; `.json` — лише стан."""
+    state = _state_dir()
+    if real.is_relative_to(state):
+        return True
+    if ext == ".json":
+        return False
+    try:
+        from nyshporka.core.workspace import workspace
+
+        root = Path(workspace().root).resolve()
+    except Exception:
+        return False
+    return real.is_relative_to(root) and not real.is_relative_to(root / "data")
+
+
 def from_path(path: str) -> Attachment:
-    """Файл із диска — лише з білого списку розширень і з межею читання."""
+    """Файл із диска — лише з білого списку, без посилань і з межею читання."""
     p = Path(path).expanduser()
     ext = p.suffix.lower()
     if ext not in IMAGE_EXT | TEXT_EXT:
         raise FeedbackError(f"{p.name}: прикласти можна лише картинку (PNG, JPEG, WebP) "
                             "або текстовий журнал (.txt, .log, .json)")
+    if p.is_symlink():
+        raise FeedbackError(f"{p.name}: посилання на файл не прикладаються — лише сам файл")
     if not p.is_file():
         raise FeedbackError(f"{p.name}: файла немає")
+    real = p.resolve()
+    if ext in TEXT_EXT and not _text_allowed(real, ext):
+        raise FeedbackError(f"{p.name}: журнал прикладається лише з простору (крім data/) "
+                            "чи з теки стану Нишпорки; інший текст скопіюйте у відгук сам")
     if ext in IMAGE_EXT:
         if p.stat().st_size > MAX_READ:
             raise FeedbackError(f"{p.name}: завеликий файл (до {MAX_READ // (1 << 20)} МБ)")
-        return image(p.read_bytes(), p.name)
-    with p.open("rb") as fh:
+        return image(real.read_bytes(), p.name)
+    with real.open("rb") as fh:
         size = p.stat().st_size
         if size > 4 * MAX_LOG:
             fh.seek(size - 4 * MAX_LOG)
@@ -253,11 +320,12 @@ def preview(text: str, kind: str, attachments: list[Attachment],
     body = clean_text(text)
     if not body:
         raise FeedbackError("напишіть, що сталося чи що пропонуєте")
-    from nyshporka.share.catalog import base_url
+    from nyshporka.share.catalog import base_url, may_send_key
 
+    home = base_url()
     return {"kind": kind, "text": body, "diag": diag(lang) if with_diag else {},
             "files": [a.as_json() for a in attachments], "logged_in": logged_in(),
-            "to": base_url()}
+            "to": home, "trusted": may_send_key(home)}
 
 
 def _put(url: str, data: bytes, content_type: str, auth: str) -> None:
@@ -289,6 +357,10 @@ def send(text: str, kind: str, attachments: list[Attachment], with_diag: bool = 
         raise FeedbackError("потрібен вхід у Супрягу: nysh share login")
     p = preview(text, kind, attachments, with_diag, lang)
     home = catalog.base_url()
+    # 🔴 Ключ — лише на довірену адресу, як у `share push` (`upload._tok_i_dim`).
+    if not catalog.may_send_key(home):
+        raise FeedbackError(f"адреса {home} не довірена — ключ Супряги туди не їде "
+                            f"(свій сервер: {catalog.ENV_TRUST})")
     files = [{"kind": a.kind, "name": a.name, "size": len(a.data)} for a in attachments]
     url = f"{home}/feedback"
     try:

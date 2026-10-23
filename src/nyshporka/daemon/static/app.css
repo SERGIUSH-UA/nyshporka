@@ -1599,6 +1599,9 @@ th { font-family: var(--font-serif); letter-spacing: .1em; }
 .fb-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .fb-files .ghost.sm { margin-left: auto; padding: .15rem .3rem; }
 .fb-body { margin: .3rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fb-files li:has(.fb-excerpt) { flex-wrap: wrap; }
+.fb-excerpt { flex-basis: 100%; margin: .2rem 0 0; max-height: 9rem; overflow: auto; font-size: .78rem;
+  white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg-2); }
 .fb-diag { display: flex; gap: .5rem; align-items: center; }
 .fb-diag-list { margin: 0; padding-left: 1.2rem; color: var(--fg-2); font-size: .9rem; }
 .fb-done { display: grid; justify-items: center; text-align: center; gap: .5rem; padding: .5rem 0; }

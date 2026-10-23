@@ -26,6 +26,7 @@ const MAX_FILES = 5;
 const MAX_SIDE = 1600;
 const MAX_IMAGE_READ = 25 * 1024 * 1024;
 const MAX_LOG_READ = 2 * 1024 * 1024;
+const NL = String.fromCharCode(10);
 
 /** Чернетка живе, поки відкрите вікно: закрив — почав наново. */
 let FB = fresh();
@@ -172,8 +173,10 @@ function args(confirm) {
 
 function paintPreview(d) {
   const diag = Object.entries(d.diag || {}).map(([k, v]) => `<li><small class="muted">${esc(k)}</small> ${esc(v)}</li>`).join('');
+  // Журнал — разом із тим, що в ньому: людина підтверджує вміст, а не лише ім'я.
   const files = (d.files || []).map((f) => `<li>${ic(f.kind === 'image' ? 'image' : 'page', 'ic-sm')} ${esc(f.name)}
-      <small class="muted">${esc(kb(f.size))}${f.note ? ` · ${esc(f.note)}` : ''}</small></li>`).join('');
+      <small class="muted">${esc(kb(f.size))}${f.note ? ` · ${esc(f.note)}` : ''}</small>${
+  (f.excerpt || []).length ? `<pre class="mono fb-excerpt">${esc((f.excerpt || []).join(NL))}</pre>` : ''}</li>`).join('');
   const login = d.logged_in ? '' : `<div class="warn">${esc(t('fb.login'))} <code>nysh share login</code></div>`;
   setView(`<div class="fb-preview">
       <p class="muted">${esc(t('fb.preview.lead'))}</p>
