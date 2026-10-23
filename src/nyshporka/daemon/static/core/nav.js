@@ -41,7 +41,8 @@ const NAV_ORDER = ['home', 'search', 'canon', 'hyp', 'research', 'profile', 'sou
  * дії. Тепер опис відкривається з «Нових тек» («Описати»), з бібліотеки й з
  * «Огляду», а вкладка лишилась одна.
  */
-const STEP_OF = { newcase: 'cases', newproject: 'home', sprofile: 'give' };
+// `adopt` — перенос роду з кореня в проєкт: крок Огляду, звідки до нього плашка.
+const STEP_OF = { newcase: 'cases', newproject: 'home', sprofile: 'give', adopt: 'home' };
 
 /**
  * Екрани, що відкриваються вікном поверх поточного, а не сторінкою.
@@ -61,7 +62,7 @@ const NAV_LABEL = {
   newproject: 'nav.newproject', canon: 'nav.canon', hyp: 'nav.hyp', research: 'nav.research',
   history: 'nav.history', cloud: 'nav.cloud', give: 'nav.give', pull: 'nav.pull', cards: 'nav.cards',
   sprofile: 'nav.sprofile', settings: 'nav.settings', projects: 'nav.projects', status: 'nav.status',
-  update: 'nav.update',
+  update: 'nav.update', adopt: 'nav.adopt',
 };
 
 /** Чи ввімкнена секція цього екрана. Невідомий екран не блокуємо. */

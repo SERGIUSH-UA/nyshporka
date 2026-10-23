@@ -158,6 +158,8 @@ SCREENS: dict[str, str] = {
     "projects": "core",
     "status": "core",
     "update": "core",
+    # Перенос роду з кореня в проєкт (0.37) — крок Огляду, у меню не стоїть.
+    "adopt": "core",
     # 🔴 «Рід» у `core`, а не в «Дослідженні»: він вирішує, як працює пошук,
     # і замкнути його всередині секції, яку вимикають, означало б «увімкни
     # частину застосунку, щоб налаштувати те, від чого вона залежить».
@@ -278,7 +280,8 @@ LAYERS: dict[str, str] = {
     **dict.fromkeys(("projects", "status", "sources", "geog", "fonds", "cases", "newcase", "frames", "read",
                      "queue", "runs", "cloud", "view", "export", "give", "pull", "cards",
                      "sprofile"), "shared"),
-    **dict.fromkeys(("jobs", "sets", "label", "settings", "update", "newproject"), "service"),
+    **dict.fromkeys(("jobs", "sets", "label", "settings", "update", "newproject", "adopt"),
+                    "service"),
 }
 
 #: Дія сторінки — кнопкою в її заголовку.
@@ -323,6 +326,9 @@ OP_SCREEN: dict[str, str] = {
     "workspace.info": "home",
     # Проєкти Майстерні: новий — вікном, перелік — картками на Огляді.
     "project.new": "newproject",
+    "project.adopt": "adopt",
+    "project.adopt_state": "adopt",
+    "project.adopt_restart": "adopt",
     "project.list": "projects",
     "project.style": "home",
     # Огляд проєкту стоїть на «що вирішити».

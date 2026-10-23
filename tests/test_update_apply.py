@@ -148,3 +148,17 @@ def test_helper_records_a_failed_relaunch_and_keeps_logs_apart(tmp_path: Path) -
     assert res["ok"] is True and res.get("relaunch_failed"), "консоль не відкрилась — це записано"
     assert "консоль не відкрилась" in (tmp_path / "update.log").read_text(encoding="utf-8")
     assert not tp.exists(), "завдання не лишається в тимчасовій теці"
+
+
+def test_helper_runs_the_command_where_told_and_titles_the_log(tmp_path: Path) -> None:
+    """Перенос роду йде з кореня Майстерні (`cmd_cwd`), а журнал — зі своїм заголовком."""
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    task = _helper_task(tmp_path, [sys.executable, "-c",
+                                   "import os; open('here.txt', 'w').write(os.getcwd())"])
+    task.update(cmd_cwd=str(hub), title="перенос роду в проєкт «rid»",
+                done_text=["✅ рід перенесено", "❌ не перенесено"])
+    res = _run_helper(tmp_path, task)
+    assert res["ok"] is True and (hub / "here.txt").is_file()
+    log = (tmp_path / "update.log").read_text(encoding="utf-8")
+    assert log.startswith("перенос роду в проєкт «rid»") and "✅ рід перенесено" in log

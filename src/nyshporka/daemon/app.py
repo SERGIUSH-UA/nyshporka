@@ -838,10 +838,11 @@ def create_app(ws: Workspace | None = None, *, token: str = "",
         # `pick.ask` — довга операція і пішла б у чергу.
         # 🔴 Оновлення ставить пакети й перезапускає консоль НА СЕРВЕРІ — з
         # телефона, спареного ключем, цього робити не можна (рев'ю 23.10.2026).
-        if _NETWORK_CONN.get() and name == "update.apply":
+        # Те саме з переносом роду в проєкт: він теж закриває й відкриває консоль.
+        if _NETWORK_CONN.get() and name in ("update.apply", "project.adopt_restart"):
             return JSONResponse(
-                _envelope("оновлювати застосунок можна лише з комп'ютера, де він стоїть, "
-                          "а не з іншого пристрою в мережі"),
+                _envelope("оновлювати застосунок і переносити рід можна лише з комп'ютера, "
+                          "де він стоїть, а не з іншого пристрою в мережі"),
                 status_code=403)
         if _NETWORK_CONN.get() and (
                 name == "pick.ask"
@@ -935,9 +936,11 @@ def create_app(ws: Workspace | None = None, *, token: str = "",
         cur = _workspace()
         from nyshporka import __version__
 
+        # `pid` — щоб сторінка впізнала перезапущену консоль, навіть якщо не
+        # встигла побачити її закритою (повернення переносу — секунди).
         return {"ok": True, "workspace": str(cur.root), "name": cur.name,
                 "hub": str(spaces.hub), "project": _P.current_id(cur),
-                "jobs": len(bus.jobs()), "version": __version__}
+                "jobs": len(bus.jobs()), "version": __version__, "pid": os.getpid()}
 
     @app.get("/api/projects")
     def projects() -> dict[str, Any]:

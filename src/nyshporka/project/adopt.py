@@ -93,12 +93,16 @@ class Plan:
     problems: list[str] = field(default_factory=list)
     archive: str = ""
     archive_free: int = 0
+    #: Машинний код кожної перешкоди (`PROBLEM_CODES`), у тому ж порядку, що
+    #: `problems`: консоль показує за ним людський текст і кнопку дії.
+    codes: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {"pid": self.pid, "hub": self.hub,
                 "moves": [m.as_dict() for m in self.moves], "views": self.views,
                 "files": sum(m.files for m in self.moves),
                 "size": sum(m.size for m in self.moves), "problems": self.problems,
+                "codes": self.codes,
                 "archive": self.archive, "archive_free": self.archive_free}
 
 
@@ -324,6 +328,59 @@ def _space_problem(dest: Path, size: int) -> str:
             f"{free / 2**30:.1f} ГБ — вкажіть іншу теку: --archive <тека поза Майстернею>")
 
 
+#: Перешкоди плану: код → що це. Консоль (екран «Перенести рід у проєкт»)
+#: показує за кодом людський текст і дію, CLI — текст із `Plan.problems`.
+PROBLEM_CODES = {
+    "is_project": "простір — сам проєкт, а не корінь Майстерні",
+    "hub_only": "корінь уже чиста Майстерня",
+    "exists": "тека проєкту з таким ім'ям уже є",
+    "dirty": "незбережені правки в теках, що їдуть",
+    "refs_left": "картка посилається на те, що лишається в Майстерні",
+    "fresh": "у теках, що їдуть, пишуть просто зараз",
+    "cloud": "хмара тримає машину",
+    "memory": "пам'ять помічника для цього проєкту вже є",
+    "space": "для архіву не вистачає місця",
+}
+
+
+def _add(pl: Plan, code: str, text: str) -> None:
+    pl.problems.append(text)
+    pl.codes.append(code)
+
+
+def legacy(hub: Path) -> dict[str, Any]:
+    """Чи рід лежить у корені Майстерні (простір старого типу) і скільки в ньому осіб.
+
+    Та сама ознака, що в перевірці міграції (`migrate._legacy_root`): корінь не
+    проєкт і не чиста Майстерня, а в його каноні є особи.
+    """
+    cfg = W._read_marker(hub / W.MARKER)
+    if W.read_project_table(hub) is not None or cfg.get("hub_only"):
+        return {"legacy": False, "persons": 0}
+    persons = W.Workspace(root=hub).canonical / "persons"
+    n = sum(1 for _ in persons.glob("*.md")) if persons.is_dir() else 0
+    return {"legacy": n > 0, "persons": n,
+            "others": [p.id for p in P.list_projects(hub) if p.id != "."]}
+
+
+def last_result(hub: Path) -> dict[str, Any] | None:
+    """Останній переїзд за журналом: чи скінчився, упав, повернутий; архів; звідки."""
+    base = hub / ADOPT_DIR
+    homes = sorted(p for p in base.iterdir() if (p / "journal.json").is_file())         if base.is_dir() else []
+    if not homes:
+        return None
+    try:
+        j = json.loads((homes[-1] / "journal.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    state = ("rolled_back" if j.get("rolled_back") else "failed" if j.get("failed")
+             else "done" if j.get("done") else "unfinished")
+    return {"stamp": j.get("stamp") or homes[-1].name, "pid": j.get("pid", ""), "state": state,
+            "archive": j.get("archive", ""), "failed": j.get("failed", ""),
+            "via": j.get("via", ""), "title": j.get("title", ""),
+            "rolled_back": j.get("rolled_back", ""), "done": j.get("done")}
+
+
 # ── план ─────────────────────────────────────────────────────────────────────
 def plan(hub: Path, pid: str, *, archive: Path | None = None) -> Plan:
     from nyshporka import project as PR
@@ -333,11 +390,11 @@ def plan(hub: Path, pid: str, *, archive: Path | None = None) -> Plan:
     pl = Plan(pid=pid, hub=str(hub))
     cfg = W._read_marker(hub / W.MARKER)
     if W.read_project_table(hub) is not None:
-        pl.problems.append(f"{hub} — сам проєкт, а не корінь Майстерні")
+        _add(pl, "is_project", f"{hub} — сам проєкт, а не корінь Майстерні")
     if cfg.get("hub_only"):
-        pl.problems.append("корінь уже чиста Майстерня (hub_only) — переїжджати нічому")
+        _add(pl, "hub_only", "корінь уже чиста Майстерня (hub_only) — переїжджати нічому")
     if (P.projects_dir(hub) / pid).exists():
-        pl.problems.append(f"тека projects/{pid} уже є")
+        _add(pl, "exists", f"тека projects/{pid} уже є")
     repo = _is_repo(hub)
     moving = paths_to_move(hub)
     for rel in moving:
@@ -350,31 +407,31 @@ def plan(hub: Path, pid: str, *, archive: Path | None = None) -> Plan:
         dirty = [x for x in _git(hub, "status", "--porcelain", "-z", "--", *moving)
                  .split("\0") if x]
         if dirty:
-            pl.problems.append(f"незакомічене в шляхах переїзду ({len(dirty)}): "
+            _add(pl, "dirty", f"незакомічене в шляхах переїзду ({len(dirty)}): "
                                + ", ".join(d[3:] for d in dirty[:5])
                                + " — спершу закомітити")
     for ref in _refs_left_behind(hub, moving)[:20]:
-        pl.problems.append(f"картка посилається на {ref}, а він лишається в Майстерні "
+        _add(pl, "refs_left", f"картка посилається на {ref}, а він лишається в Майстерні "
                            f"([adopt] stay) — приберіть його звідти")
     fresh = _fresh(hub, moving)
     if fresh:
-        pl.problems.append(
+        _add(pl, "fresh",
             f"у шляхах переїзду пишуть просто зараз ({len(fresh)} файлів новіші за "
             f"{FRESH_SECONDS // 60} хв: {', '.join(fresh[:3])}) — інша сесія, "
             "завантажувач чи наглядач; дочекайтесь, поки закінчить")
     held = _held_machines(hub)
     if held:
-        pl.problems.append(f"хмарні заходи тримають машину ({', '.join(held[:3])}) — "
+        _add(pl, "cloud", f"хмарні заходи тримають машину ({', '.join(held[:3])}) — "
                            "спершу забрати результат і звільнити (`nysh cloud state`)")
     mem = PR.memory_dir(P.projects_dir(hub) / pid)
     if mem.is_dir() and any(mem.iterdir()):
-        pl.problems.append(f"пам'ять агента для projects/{pid} уже є ({mem}) — "
+        _add(pl, "memory", f"пам'ять агента для projects/{pid} уже є ({mem}) — "
                            "не затираю; перенесіть її вбік")
     dest = archive or default_archive(hub)
     pl.archive, pl.archive_free = str(dest), _free(dest)
     space = _space_problem(dest, sum(m.size for m in pl.moves))
     if space:
-        pl.problems.append(space)
+        _add(pl, "space", space)
     with W.using(W._build(hub, "explicit")):
         try:
             pl.views = SV.plan()
@@ -673,7 +730,8 @@ AFTER = (
 )
 
 
-def apply(hub: Path, pid: str, *, archive: Path | None = None) -> dict[str, Any]:
+def apply(hub: Path, pid: str, *, archive: Path | None = None, title: str = "",
+          via: str = "") -> dict[str, Any]:
     from nyshporka import project as PR
     from nyshporka.canon.check import manifest_path
     from nyshporka.cases.rekey import _refuse_busy
@@ -705,7 +763,7 @@ def apply(hub: Path, pid: str, *, archive: Path | None = None) -> dict[str, Any]
         shutil.copy2(man, home / "manifest.json")
     journal: dict[str, Any] = {"stamp": home.name, "pid": pid, "started": time.time(),
                                "steps": [], "moved": [], "repo": repo,
-                               "tracked_files": len(files)}
+                               "tracked_files": len(files), "via": via, "title": title}
     (home / TRACKED_LIST).write_bytes("\0".join(files).encode("utf-8"))
     _journal(home, journal)
 
@@ -722,6 +780,10 @@ def apply(hub: Path, pid: str, *, archive: Path | None = None) -> dict[str, Any]
             created = PR.create(hub, pid, kind="family")
         step("create", created=[str(created.root / f) for f in created.files])
         root = created.root
+        if title.strip():
+            # Назва людською мовою одразу: без неї консоль скрізь показувала б
+            # ім'я теки («ivanenko»), доки людина не знайде «Назва, колір і знак».
+            PR.set_style(root, title=title)
         with W.using(base):
             split = SV.apply(pid)
         step("split", split_stamp=split.get("stamp") or "")

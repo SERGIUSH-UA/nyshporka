@@ -25,6 +25,16 @@ function apiFetch(url, init = {}) {
   headers.set('X-Nysh-Project', ASKED);
   return fetch(url, { ...init, headers });
 }
+/**
+ * Пульс консолі: `/api/health` БЕЗ проєкту вкладки.
+ *
+ * Лише для одного: дочекатись, поки перезапущена консоль відповість. Після
+ * повернення переносу роду проєкту, у якому стоїть вкладка, уже немає, і запит
+ * із ним дістав би 404 — сторінка чекала б вічно. Нічого не читає й не пише.
+ */
+function pulse() {
+  return fetch('/api/health', { cache: 'no-store' });
+}
 /** Фінальні стани завдання — дзеркало `JobState.final` у `core/jobs.py`. */
 const FINAL_STATES = ['done', 'error', 'cancelled'];
 
@@ -115,4 +125,4 @@ async function staleThenFresh(name, args, paint) {
   return env;
 }
 
-export { TOKEN, PROJECT, FINAL_STATES, apiFetch, callOp, normErr, SEQ, staleThenFresh, staleBadge };
+export { TOKEN, PROJECT, FINAL_STATES, apiFetch, callOp, normErr, SEQ, staleThenFresh, staleBadge, pulse };

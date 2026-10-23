@@ -19,6 +19,7 @@ import time
 import zipfile
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -393,10 +394,12 @@ def test_hub_hooks_follow_into_the_project(tmp_path: Path) -> None:
     assert any("PreToolUse" in w for w in made.warnings)
 
 
-def test_legacy_root_check_asks_only_when_a_second_project_exists(legacy: Path) -> None:
+def test_legacy_root_check_asks_even_for_a_single_family(legacy: Path) -> None:
+    """Перенос обов'язковий і для одного роду (рішення дослідника 23.10.2026)."""
     from nyshporka import migrate as M
 
-    assert M.CHECKS["legacy_root"](legacy).state == "n/a"
+    one = M.CHECKS["legacy_root"](legacy)
+    assert one.state == "todo" and "project adopt" in one.detail and "Огляд" in one.detail
     (legacy / "projects" / "druzhyna").mkdir(parents=True)
     (legacy / "projects" / "druzhyna" / W.MARKER).write_text(
         '[project]\nname = "Рід дружини"\nkind = "family"\n', encoding="utf-8")
@@ -543,3 +546,146 @@ def test_workspace_without_git_moves_and_rolls_back(legacy: Path, tmp_path: Path
     W.reset()
     assert _tree(legacy) == before
     assert not (legacy / "projects").exists()
+
+
+# ── для консолі: коди перешкод, назва, звідки, останній результат ───────────
+def test_every_problem_has_a_code_for_the_console(legacy: Path) -> None:
+    (legacy / "data" / "canonical" / "persons" / "I9001.md").write_text("правка",
+                                                                         encoding="utf-8")
+    pl = A.plan(legacy, "rid")
+    assert len(pl.codes) == len(pl.problems) and "dirty" in pl.codes
+    assert set(pl.codes) <= set(A.PROBLEM_CODES)
+    assert pl.as_dict()["codes"] == pl.codes
+
+
+def test_legacy_and_last_result_follow_the_move(legacy: Path, tmp_path: Path) -> None:
+    got = A.legacy(legacy)
+    assert got["legacy"] is True and got["persons"] == 2
+    assert A.last_result(legacy) is None
+
+    A.apply(legacy, "rid", archive=tmp_path / "arch", title="Рід Сидоруків", via="console")
+    W.reset()
+    assert A.legacy(legacy)["legacy"] is False
+    last = A.last_result(legacy)
+    assert last is not None and last["state"] == "done" and last["via"] == "console"
+    assert P._from_dir(legacy / "projects" / "rid").name == "Рід Сидоруків", \
+        "проєкт одразу зветься людською назвою, а не ім'ям теки"
+
+    A.rollback(legacy)
+    W.reset()
+    assert A.last_result(legacy)["state"] == "rolled_back"
+    assert A.legacy(legacy)["legacy"] is True
+
+
+@pytest.fixture
+def console(legacy: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Консоль запущена над старим коренем; помічник і вихід консолі — підмінені."""
+    import subprocess
+    import sys
+    import types
+
+    from nyshporka.daemon import app as D
+    from nyshporka.daemon import restart as RS
+
+    monkeypatch.setattr(W, "_state_path", lambda: tmp_path / "state" / "state.json")
+    monkeypatch.setattr(D, "LAUNCH", {"argv": [sys.executable, "serve", "--port", "8799"],
+                                      "cwd": str(tmp_path), "pid": 4242})
+    monkeypatch.setattr(D, "_BUSY", [lambda: 0])
+    spawned: list[list[str]] = []
+    exits: list[float] = []
+    # Лише в модулі перезапуску: план переносу сам кличе git через subprocess.
+    fake = types.SimpleNamespace(Popen=lambda argv, **kw: spawned.append(list(argv)),
+                                 DEVNULL=subprocess.DEVNULL)
+    monkeypatch.setattr(RS, "subprocess", fake)
+    monkeypatch.setattr(D, "request_exit", lambda delay=1.5: exits.append(delay) or True)
+    return {"spawned": spawned, "exits": exits, "hub": legacy}
+
+
+def _task(console: dict[str, Any]) -> dict[str, Any]:
+    (argv,) = console["spawned"]
+    assert Path(argv[1]).name == "updater.py"
+    return json.loads(Path(argv[2]).read_text(encoding="utf-8"))
+
+
+def test_console_state_knows_the_legacy_root_and_the_surname(console: dict[str, Any]) -> None:
+    from nyshporka import ops as O
+
+    env = O.call("project.adopt_state", {})
+    assert env.ok, env.error
+    d = env.data
+    assert d["legacy"] is True and d["persons"] == 2 and d["refusal"] == ""
+    assert d["guide"].startswith("https://nyshporka.online/onovlennia/")
+    assert d["archive"].endswith("hub-adopt") and d["last"] is None
+
+
+def test_console_cannot_move_folders_from_under_itself(console: dict[str, Any]) -> None:
+    from nyshporka import ops as O
+
+    env = O.call("project.adopt", {"name": "rid", "apply": True})
+    assert not env.ok and "Перенести" in env.error
+    assert not (console["hub"] / "projects").exists()
+    assert O.call("project.adopt", {"name": "rid"}).ok, "план з консолі — можна"
+
+
+def test_console_move_closes_reruns_from_the_hub_and_reopens(console: dict[str, Any]) -> None:
+    from nyshporka import ops as O
+
+    env = O.call("project.adopt_restart", {"name": "rid", "title": "Рід Сидоруків"})
+    assert env.ok, env.error
+    assert console["exits"] == [1.5], "консоль просять завершитись: вона тримає Майстерню"
+    t = _task(console)
+    assert t["cmd"][-8:] == ["project", "adopt", "rid", "--apply", "--via", "console",
+                             "--title", "Рід Сидоруків"]
+    assert t["cmd_cwd"] == str(console["hub"]) and t["relaunch"][-1] == "--no-browser"
+    assert t["log"].endswith("adopt.log") and t["done_text"][0].startswith("✅")
+
+
+@pytest.mark.parametrize("why", ["busy", "outside", "problem"])
+def test_console_move_refuses_before_closing_anything(console: dict[str, Any],
+                                                      monkeypatch: pytest.MonkeyPatch,
+                                                      why: str) -> None:
+    from nyshporka import ops as O
+    from nyshporka.daemon import app as D
+
+    if why == "busy":
+        monkeypatch.setattr(D, "_BUSY", [lambda: 2])
+    elif why == "outside":
+        monkeypatch.setattr(D, "LAUNCH", {})
+    else:
+        (console["hub"] / "data" / "canonical" / "persons" / "I9001.md").write_text(
+            "правка", encoding="utf-8")
+    env = O.call("project.adopt_restart", {"name": "rid"})
+    assert not env.ok
+    if why == "problem":
+        assert "dirty" in env.data["codes"]
+    assert console["spawned"] == [] and console["exits"] == []
+
+
+def test_console_rollback_needs_a_finished_move(console: dict[str, Any], tmp_path: Path) -> None:
+    from nyshporka import ops as O
+
+    assert not O.call("project.adopt_restart", {"name": "rid", "rollback": True}).ok
+    A.apply(console["hub"], "rid", archive=tmp_path / "arch", via="console")
+    W.reset()
+    W.use(W._build(console["hub"], "test"))
+    env = O.call("project.adopt_restart", {"name": "rid", "rollback": True})
+    assert env.ok, env.error
+    t = _task(console)
+    assert t["cmd"][-6:-1] == ["project", "adopt", "rid", "--rollback", "--stamp"]
+
+
+def test_move_by_the_console_sends_the_assistant_back_to_migration(
+        legacy: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Після переносу кнопкою пам'ять помічника ще не розкладено: міграція 0.37
+    знову «не пройдена», і нагадування приведе його до кроку adopt-after."""
+    from nyshporka import migrate as M
+    from nyshporka import ops as O
+
+    monkeypatch.setattr(W, "_state_path", lambda: tmp_path / "state" / "state.json")
+    M.mark_done(legacy, ["0.36.0", "0.37.0"])
+    env = O.call("project.adopt", {"name": "rid", "apply": True, "via": "console",
+                                   "archive": str(tmp_path / "arch")})
+    assert env.ok, env.error
+    rec = M.record(legacy)
+    assert "0.37.0" not in rec["done"] and "0.36.0" in rec["done"]
+    assert rec["history"][-1]["how"] == "reopened"

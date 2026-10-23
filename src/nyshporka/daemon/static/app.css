@@ -1276,6 +1276,26 @@ details.np-folder > summary { padding: 0; background: none; font-size: .85rem; c
 .net-box .chk { display: flex; gap: .6rem; align-items: flex-start; }
 .net-box .chk span { display: grid; gap: .15rem; }
 @media (max-width: 520px) { .up-hero .maskot { width: 110px; height: auto; } .up-acts { flex-direction: row; } }
+/* Перенос роду в проєкт (0.37): порада доручити помічникові — медова, плашка на Огляді. */
+#view .adopt-warn, #view .adopt-banner { display: flex; flex-direction: row; gap: 1.1rem; align-items: flex-start;
+  flex-wrap: wrap; cursor: default;
+  border-left: 4px solid var(--honey); background: color-mix(in srgb, var(--honey) 9%, var(--s-2)); }
+/* Підсумок попередньої спроби (повернуто, упало) стоїть над порадою окремим
+ * блоком: без відступу дві картки злипались в одну (дослідник, 23.10.2026). */
+#view * + .adopt-warn { margin-top: 1rem; }
+.adopt-warn > div { flex: 1 1 20rem; min-width: 0; }
+.adopt-warn h3 { margin: 0 0 .4rem; font-size: 1.25rem; }
+.adopt-warn ul { margin: .3rem 0 .6rem; padding-left: 1.2rem; display: grid; gap: .3rem; }
+.adopt-warn .chk { display: flex; gap: .6rem; align-items: flex-start; margin-top: .4rem; }
+.adopt-warn .chk span { display: grid; gap: .15rem; }
+.adopt-ask { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.adopt-ask code { padding: .3rem .6rem; border-radius: var(--r-pill); background: var(--s-1); }
+#view .adopt-banner { align-items: center; margin: 0 0 1.2rem; }
+.adopt-banner > div:not(.up-acts) { flex: 1 1 18rem; display: grid; gap: .2rem; }
+.adopt-p { display: grid; gap: .15rem; margin: .35rem 0; }
+.adopt-p button { justify-self: start; margin-top: .2rem; }
+.adopt-after { display: grid; gap: .45rem; padding-left: 1.3rem; }
+
 /* Майстер «Оновити зараз»: три кроки, поточний пульсує стримано. */
 .up-steps { list-style: none; padding: 0; margin: .4rem 0 .6rem; display: grid; gap: .45rem; }
 .up-step { display: flex; align-items: center; gap: .55rem; color: var(--fg-3); }

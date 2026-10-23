@@ -32,6 +32,7 @@ import { attachCombobox } from '/ui/combobox.js';
 import { spark, bars as rawBars, meter, steps, histogram, num } from '/ui/chart.js';
 import { runState } from './runs.js';
 import { projectCards, projectShell, fillProject } from './project.js';
+import { adoptBanner } from './adopt.js';
 
 
 /**
@@ -227,7 +228,7 @@ function paintHome(env, gen = curGen(), keep = false) {
   if (empty) {
     // Порожній простір — перша зустріч, тож маскот вітає. Це стан ПРОЦЕСУ
     // («ще нічого не поклали»), а не висновок про архів.
-    put(`${SECTIONS.hub_only ? '<div id="hub-cards"></div>' : ''}<div class="vitannia">${maskot('vitaie', 140)}
+    put(`${SECTIONS.hub_only ? '<div id="hub-cards"></div>' : '<div id="adopt-banner"></div>'}<div class="vitannia">${maskot('vitaie', 140)}
         <div><h2>${t('home.title')}</h2><p>${t('home.hello')}</p></div></div>
       ${agentCard(PULSE)}
       ${renderWarnings(env)}
@@ -239,6 +240,8 @@ function paintHome(env, gen = curGen(), keep = false) {
     // без Майстерні) лишається з повним дашбордом.
     put(SECTIONS.hub_only ? hubOverview(env, PULSE) : dashboard(env, PULSE));
   }
+  // Рід у корені простору — перенос у проєкт обов'язковий (0.37): плашка зверху.
+  if (!SECTIONS.hub_only) adoptBanner();
 }
 
 /**
@@ -369,7 +372,7 @@ function dashboard(env, d) {
   // У проєкті канон — уже вгорі (показники роду), а двері першого запуску в
   // наповненій Майстерні з проєктами лише подовжують сторінку.
   const proj = inProject();
-  return `<div class="dash-top"><div>
+  return `<div id="adopt-banner"></div><div class="dash-top"><div>
     ${headline(d, ws)}</div>${proj ? '' : maskot('lupa', 92)}</div>
     ${renderWarnings(env)}
     ${stepsBox(d)}

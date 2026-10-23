@@ -210,10 +210,12 @@ class ProjectAdoptArgs(ProjectNameArgs):
                                                  "порожньо — тека-сусідка <хаб>-adopt")
     rollback: bool = Field(default=False, description="повернути останній переїзд")
     stamp: str = Field(default="", description="мітка переїзду для відкату")
+    title: str = Field(default="", description="назва проєкту людською мовою («Рід Іваненків»)")
+    via: str = Field(default="", description="хто запустив: console — кнопка консолі")
 
 
 @op("project.adopt", summary="Корінь старого типу → Майстерня + проєкт: план, переїзд, відкат",
-    args=ProjectAdoptArgs, mutates=True, gui=False, tier="rare",
+    args=ProjectAdoptArgs, mutates=True, tier="rare",
     when="перетворити простір, де рід лежить у корені, на Майстерню з проєктом роду")
 def project_adopt(a: ProjectAdoptArgs) -> Envelope:
     """🔴 Без `apply` нічого не змінює. Архів — поза Майстернею, з sha256 і
@@ -222,9 +224,15 @@ def project_adopt(a: ProjectAdoptArgs) -> Envelope:
     from pathlib import Path
 
     from nyshporka.core import workspace as W
+    from nyshporka.daemon import app as D
     from nyshporka.project import adopt as A
 
     hub = W.workspace().hub
+    if D.LAUNCH and (a.apply or a.rollback):
+        # 🔴 Консоль сама тримає Майстерню: переносити теки з-під живого сервера
+        # не можна. З консолі — `project.adopt_restart` (закрити, перенести, відкрити).
+        return fail("з консолі рід переносять кнопкою «Перенести» на екрані «Перенести рід "
+                    "у проєкт»: консоль закриється, перенесе й відкриється знову")
     try:
         if a.rollback:
             return ok(A.rollback(hub, a.stamp or None))
@@ -232,9 +240,127 @@ def project_adopt(a: ProjectAdoptArgs) -> Envelope:
         if not a.apply:
             pl = A.plan(hub, a.name, archive=archive)
             return ok({**pl.as_dict(), "report": A.report(pl)})
-        return ok(A.apply(hub, a.name, archive=archive))
+        got = A.apply(hub, a.name, archive=archive, title=a.title, via=a.via)
     except (A.AdoptError, W.WorkspaceError) as exc:
         return fail(str(exc))
+    if a.via == "console":
+        # Людина переносила сама: пам'ять і інструкції помічника ще не розкладено.
+        # Міграція 0.37 знову «не пройдена» — помічник дійде до кроку adopt-after.
+        from nyshporka import migrate as M
+
+        M.reopen(hub, "0.37.0", why="рід перенесено в проєкт кнопкою консолі")
+    return ok(got)
+
+
+#: Покрокова інструкція переносу на порталі — на неї ведуть консоль і помічник.
+ADOPT_GUIDE = "https://nyshporka.online/onovlennia/nyshporka-0-37-0-proiekty"
+
+
+def _adopt_home() -> Path:
+    """Тека журналу помічника переносу — поруч із журналом оновлення."""
+    import tempfile
+
+    from nyshporka.core.workspace import _state_path
+
+    return (_state_path() or Path(tempfile.gettempdir()) / "state.json").parent / "adopt"
+
+
+def _console_refusal() -> str:
+    """Чому з цієї консолі не можна перенести рід; «» — можна."""
+    from nyshporka.daemon import app as D
+
+    if not D.LAUNCH:
+        return "з консолі (nysh serve) — кнопкою; у терміналі — nysh project adopt <ім'я>"
+    busy = D.running_jobs()
+    if busy:
+        return (f"зараз іде робіт: {busy} — консоль закриється на час переносу, тож спершу "
+                "дочекайтесь їх або зупиніть")
+    return ""
+
+
+@op("project.adopt_state", summary="Чи рід лежить у корені і чим скінчився останній перенос",
+    private=True, tier="rare",
+    when="екран консолі «Перенести рід у проєкт»: що показати, що підставити")
+def project_adopt_state(_: NoArgs) -> Envelope:
+    """Для екрана переносу: чи є що переносити, підказка імені, останній результат."""
+    from nyshporka.core import profile as PF
+    from nyshporka.core import workspace as W
+    from nyshporka.daemon import restart as RS
+    from nyshporka.project import adopt as A
+
+    hub = W.workspace().hub
+    leg = A.legacy(hub)
+    surname = ""
+    if leg["legacy"]:
+        try:
+            surname = PF.active().display
+        except Exception:
+            surname = ""
+    return ok({**leg, "surname": surname, "hub": str(hub),
+               "archive": str(A.default_archive(hub)), "guide": ADOPT_GUIDE,
+               "last": A.last_result(hub), "helper": RS.last_result(_adopt_home()),
+               "refusal": _console_refusal()})
+
+
+class ProjectAdoptRestartArgs(ProjectNameArgs):
+    title: str = Field(default="", description="назва проєкту людською мовою")
+    archive: str = Field(default="", description="тека для архіву; порожньо — сусідка <хаб>-adopt")
+    rollback: bool = Field(default=False, description="повернути останній переїзд")
+
+
+@op("project.adopt_restart", summary="Перенести рід у проєкт з консолі (консоль перезапуститься)",
+    args=ProjectAdoptRestartArgs, mutates=True, tier="rare",
+    when="людина переносить рід у проєкт сама, кнопкою консолі")
+def project_adopt_restart(a: ProjectAdoptRestartArgs) -> Envelope:
+    """🧳 Перенос із консолі: помічник чекає, доки консоль закриється, переносить
+    (`nysh project adopt … --apply`) і відкриває її знову.
+
+    🔴 Консоль сама тримає Майстерню (`adopt.apply` відмовляє, поки вона жива),
+    тож напряму звідси переносити не можна — так само, як оновлюватись
+    (`update.apply`). Перешкоди плану перевіряються ДО закриття консолі: інакше
+    людина дивилась би на перезапуск, щоб дізнатись те, що можна було сказати
+    одразу.
+    """
+    from nyshporka.core import projects as P
+    from nyshporka.core import workspace as W
+    from nyshporka.daemon import app as D
+    from nyshporka.daemon import restart as RS
+    from nyshporka.project import adopt as A
+
+    why = _console_refusal()
+    if why:
+        return fail(why)
+    hub = W.workspace().hub
+    tail = ["project", "adopt", a.name]
+    if a.rollback:
+        last = A.last_result(hub)
+        if not last or last["state"] != "done":
+            return fail("повертати нічого: останнього завершеного переносу немає")
+        tail += ["--rollback", "--stamp", str(last["stamp"])]
+        title, done = (f"повернення переносу «{a.name}»",
+                       ["✅ перенос повернуто", "❌ перенос не повернуто"])
+    else:
+        try:
+            pl = A.plan(hub, a.name, archive=Path(a.archive) if a.archive else None)
+        except (A.AdoptError, W.WorkspaceError, P.ProjectError) as exc:
+            return fail(str(exc))
+        if pl.problems:
+            env = fail("перенос не починаю: " + "; ".join(pl.problems))
+            env.data = {"codes": pl.codes}
+            return env
+        tail += ["--apply", "--via", "console"]
+        if a.title.strip():
+            tail += ["--title", a.title.strip()]
+        if a.archive:
+            tail += ["--archive", a.archive]
+        title, done = (f"перенос роду в проєкт «{a.name}»",
+                       ["✅ рід перенесено в проєкт", "❌ рід не перенесено — усе повернуто"])
+    cmd = RS.launcher(list(D.LAUNCH.get("argv") or [])) + tail
+    task = RS.task_for(cmd, _adopt_home(), cwd=str(hub), title=title,
+                       extra={"done_text": done, "project": a.name, "rollback": a.rollback})
+    RS.run_after_exit(task)
+    return ok({"restarting": True, "project": a.name, "rollback": a.rollback,
+               "log": task["log"]})
 
 
 class ProjectOpenArgs(ProjectNameArgs):

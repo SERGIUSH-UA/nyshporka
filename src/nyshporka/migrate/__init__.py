@@ -152,6 +152,31 @@ def mark_done(root: Path, versions: Iterable[str], *, how: str = "agent") -> lis
     return added
 
 
+def reopen(root: Path, version: str, *, why: str) -> bool:
+    """Зняти позначку «пройдено» з міграції — помічник пройде її ще раз.
+
+    Для того, що людина зробила без помічника, хоча після цього лишається крок
+    саме для нього: рід перенесено в проєкт кнопкою консолі, а пам'ять і
+    інструкції помічника ще не розкладено (крок `adopt-after` міграції 0.37).
+    `True` — позначку знято; не було її — `False`.
+    """
+    from nyshporka.core.workspace import state_all, state_set
+
+    data = record(root)
+    left = [v for v in data.get("done") or [] if version_key(v) != version_key(version)]
+    if len(left) == len(data.get("done") or []):
+        return False
+    data["done"] = left
+    data.setdefault("history", []).append(
+        {"version": version, "at": datetime.now(UTC).isoformat(timespec="seconds"),
+         "how": "reopened", "why": why})
+    all_ = state_all().get(STATE_KEY)
+    all_ = dict(all_) if isinstance(all_, dict) else {}
+    all_[_key(root)] = data
+    state_set(**{STATE_KEY: all_})
+    return True
+
+
 def pending(root: Path, current: str) -> list[Migration]:
     """Міграції не новіші за пакет, яких цей простір ще не пройшов."""
     done = {version_key(v) for v in record(root).get("done") or []}
@@ -276,8 +301,10 @@ def _legacy_root(root: Path) -> CheckResult:
     if others:
         return CheckResult("todo", f"рід у корені, а поруч уже проєкти ({', '.join(others)}): "
                                    "nysh project adopt <ім'я> — план людині, тоді --apply")
-    return CheckResult("n/a", "один рід у корені — переїзд лише на прохання людини "
-                              "завести другий (nysh project adopt <ім'я>)")
+    # Перенос обов'язковий і для одного роду (рішення дослідника 23.10.2026).
+    return CheckResult("todo", "рід у корені — перенести в проєкт: nysh project adopt <ім'я> "
+                               "(план людині, тоді --apply) або людина сама — Огляд → "
+                               "«Перенести рід у проєкт»")
 
 
 def _git_ready(root: Path) -> CheckResult:

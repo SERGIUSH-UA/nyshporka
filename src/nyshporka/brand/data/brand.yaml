@@ -530,6 +530,7 @@ screen_glyphs:
   cases: "📥"
   newcase: "➕"
   newproject: "📁"
+  adopt: "🧳"
   read: "🖋"
   runs: "📜"
   queue: "🚦"
@@ -588,6 +589,7 @@ screen_icons:
   cases: folder-open
   newcase: plus
   newproject: plus
+  adopt: tree
   read: inkwell
   runs: ledger
   queue: tray

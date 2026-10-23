@@ -131,65 +131,10 @@ class UpdateApplyArgs(BaseModel):
 
 
 def _relaunch_argv(argv: list[str]) -> list[str]:
-    """Той самий `nysh serve` з тими самими прапорцями — і без другої вкладки."""
-    import shutil
-    import sys
-    from pathlib import Path
+    """Перенесено в `daemon/restart.py` (спільне з переносом роду в проєкт)."""
+    from nyshporka.daemon.restart import relaunch_argv
 
-    head = argv[0] if argv else ""
-    if head.lower().endswith(".py"):
-        # `python -m nyshporka serve`: argv[0] — `__main__.py`, сам він не стартує.
-        exe = [sys.executable, "-m", "nyshporka"]
-    elif head and Path(head).is_file():
-        exe = [head]
-    elif head and Path(head + ".exe").is_file():
-        exe = [head + ".exe"]
-    elif shutil.which("nysh"):
-        exe = [str(shutil.which("nysh"))]
-    else:
-        exe = [sys.executable, "-m", "nyshporka"]
-    rest = list(argv[1:]) or ["serve"]
-    if "serve" in rest and "--no-browser" not in rest:
-        rest.append("--no-browser")
-    return exe + rest
-
-
-def _launch_chain(pid: int, argv0: str) -> list[int]:
-    """Сервер і предки, що належать цій установці: обгортка `nysh.exe`, Python середовища.
-
-    🔴 На Windows `nysh.exe` від uv запускає Python середовища, а той — базовий
-    Python, який і слухає порт. Поки живі обгортка й Python середовища, їхні файли
-    заблоковані, і `uv tool install --force` їх не замінить. Тож помічник чекає
-    весь ланцюг, а не лише процес сервера.
-    """
-    import contextlib
-    import sys
-    from pathlib import Path
-
-    out = [pid]
-    try:
-        import psutil
-    except ImportError:
-        return out
-    roots = [Path(sys.prefix).resolve()]
-    if argv0:
-        roots.append(Path(argv0).resolve().parent)
-
-    def ours(p: psutil.Process) -> bool:
-        with contextlib.suppress(Exception):
-            parts = [p.exe(), *p.cmdline()[:2]]
-            for x in parts:
-                rx = Path(x).resolve()
-                if any(rx == r or r in rx.parents for r in roots):
-                    return True
-        return False
-
-    with contextlib.suppress(Exception):
-        cur = psutil.Process(pid).parent()
-        while cur is not None and ours(cur) and len(out) < 6:
-            out.append(cur.pid)
-            cur = cur.parent()
-    return out
+    return relaunch_argv(argv)
 
 
 @op("update.apply", summary="Оновити застосунок одним натиском (консоль перезапуститься)",
@@ -207,15 +152,12 @@ def update_apply(a: UpdateApplyArgs) -> Envelope:
     Поза консоллю (агент, термінал) — `nysh update`: та сама перевірка й
     команда, лише при закритій консолі.
     """
-    import contextlib
-    import json
-    import shutil
-    import subprocess
     import sys
     import tempfile
     from pathlib import Path
 
     from nyshporka.daemon import app as D
+    from nyshporka.daemon import restart as RS
     from nyshporka.setup import update as U
 
     if not U.tool_env():
@@ -236,8 +178,7 @@ def update_apply(a: UpdateApplyArgs) -> Envelope:
     from nyshporka.core.workspace import _state_path
 
     home = (_state_path() or Path(tempfile.gettempdir()) / "state.json").parent / "update"
-    home.mkdir(parents=True, exist_ok=True)
-    relaunch = _relaunch_argv(list(D.LAUNCH.get("argv") or []))
+    relaunch = RS.relaunch_argv(list(D.LAUNCH.get("argv") or []))
     after: list[list[str]] = []
     try:
         from nyshporka.htr.env import venv_python
@@ -248,27 +189,10 @@ def update_apply(a: UpdateApplyArgs) -> Envelope:
                          else [sys.executable, "-m", "nyshporka", "htr", "install"])
     except Exception:
         pass
-    argv = list(D.LAUNCH.get("argv") or [])
-    pid = int(D.LAUNCH.get("pid") or 0)
-    task = {"pid": pid, "pids": _launch_chain(pid, argv[0] if argv else ""),
-            "cmd": U.command(), "env": U.uv_python_env(),
-            "after": after, "relaunch": relaunch, "cwd": D.LAUNCH.get("cwd") or "",
-            "from": rel.installed, "to": rel.latest, "wait": 90,
-            "log": str(home / "update.log"), "result": str(home / "result.json"),
-            "console_log": str(home / "console.log")}
+    task = RS.task_for(U.command(), home, env=U.uv_python_env(), after=after,
+                       title=f"оновлення {rel.installed} → {rel.latest}",
+                       extra={"from": rel.installed, "to": rel.latest})
     if a.dry_run:
         return ok({"plan": {k: task[k] for k in ("cmd", "relaunch", "after", "from", "to", "log")}})
-    tmp = Path(tempfile.mkdtemp(prefix="nysh-update-"))
-    helper = tmp / "updater.py"
-    shutil.copyfile(Path(__file__).parent / "setup" / "updater.py", helper)
-    task_path = tmp / "task.json"
-    task_path.write_text(json.dumps(task, ensure_ascii=False), encoding="utf-8")
-    with contextlib.suppress(OSError):
-        (home / "result.json").unlink()
-    base_py = getattr(sys, "_base_executable", "") or sys.executable
-    flags = 0x00000008 | 0x00000200 if sys.platform == "win32" else 0  # DETACHED | NEW_GROUP
-    subprocess.Popen([base_py, str(helper), str(task_path)], cwd=str(tmp), close_fds=True,
-                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                     creationflags=flags, start_new_session=sys.platform != "win32")
-    D.request_exit(1.5)
+    RS.run_after_exit(task)
     return ok({"restarting": True, "from": rel.installed, "to": rel.latest, "log": task["log"]})

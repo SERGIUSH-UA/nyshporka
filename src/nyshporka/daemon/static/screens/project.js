@@ -46,7 +46,7 @@ SCREENS.newproject = async () => {
       <input type="radio" name="kind" value="${v}"${on ? ' checked' : ''}>
       ${mini(pic, 56)}<span><b>${t(`np.kind.${v}`)}</b><small>${t(`np.kind.${v}.why`)}</small></span></label>`;
   const step = (n, key) => `<h3 class="rd-step"><span class="rd-n">${n}</span>${esc(t(key))}</h3>`;
-  setView(`<p class="muted">${t('np.why')}</p>
+  setView(`<div id="np-adopt"></div><p class="muted">${t('np.why')}</p>
     <form data-act="project.create" id="np-form">
       ${step(1, 'np.step.kind')}
       <div class="np-kinds">${kind('family', 'derevo', true)}${kind('order', 'pechatka', false)}</div>
@@ -68,7 +68,20 @@ SCREENS.newproject = async () => {
       <div id="np-box"></div>
     </form>`);
   npLive();
+  npAdopt();
 };
+
+/**
+ * Рід ще лежить у корені простору — спершу перенести його в проєкт (0.37),
+ * а вже тоді заводити другий: інакше перший лишиться змішаним із Майстернею.
+ */
+async function npAdopt() {
+  const env = await callOp('project.adopt_state', {});
+  const box = el('np-adopt');
+  if (!box || !env.ok || !(env.data || {}).legacy) return;
+  box.innerHTML = `<div class="warn"><b>${esc(t('adopt.np'))}</b> ${esc(t('adopt.np.why'))}
+    <p><button type="button" data-act="nav" data-arg="adopt">${esc(t('adopt.banner.go'))}</button></p></div>`;
+}
 
 /** Латинська тека з назви: «Рід Бондарів» → `rid-bondariv`. */
 const LAT = { а: 'a', б: 'b', в: 'v', г: 'h', ґ: 'g', д: 'd', е: 'e', є: 'ie', ж: 'zh', з: 'z', и: 'y', і: 'i',

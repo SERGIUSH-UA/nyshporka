@@ -4219,6 +4219,10 @@ def project_adopt_cmd(name: str = typer.Argument(..., help="ім'я майбут
                       rollback: bool = typer.Option(False, "--rollback",
                                                     help="повернути останній переїзд"),
                       stamp: str = typer.Option("", "--stamp", help="мітка переїзду для відкату"),
+                      title: str = typer.Option("", "--title",
+                                                help="назва проєкту людською мовою («Рід Іваненків»)"),
+                      via: str = typer.Option("", "--via", hidden=True,
+                                              help="хто запустив (console — кнопка консолі)"),
                       ) -> None:
     """Перетворити корінь старого типу на Майстерню з проєктом роду.
 
@@ -4227,7 +4231,8 @@ def project_adopt_cmd(name: str = typer.Argument(..., help="ім'я майбут
     from nyshporka import ops as O
 
     env = O.call("project.adopt", {"name": name, "apply": apply, "archive": archive,
-                                   "rollback": rollback, "stamp": stamp})
+                                   "rollback": rollback, "stamp": stamp, "title": title,
+                                   "via": via})
     _answer(env)
     d = env.data
     if "report" in d:

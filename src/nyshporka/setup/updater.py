@@ -13,6 +13,10 @@
 записати результат у файл, який нова консоль покаже людині. Оновлення впало —
 консоль усе одно перезапускається, і людина бачить журнал, а не порожнечу.
 
+Той самий помічник переносить рід у проєкт (`project.adopt_restart`): команда
+інша (`nysh project adopt … --apply`), іде з кореня Майстерні (`cmd_cwd`), а
+журнал має свій заголовок і підсумок (`title`, `done_text`).
+
     python updater.py <завдання.json>
 """
 from __future__ import annotations
@@ -48,11 +52,12 @@ def _wait_gone(pid: int, timeout: float = 60.0) -> bool:
     return False
 
 
-def _run(cmd: list[str], env: dict[str, str], log) -> int:  # type: ignore[no-untyped-def]
+def _run(cmd: list[str], env: dict[str, str], log, cwd: str = "") -> int:  # type: ignore[no-untyped-def]
     log.write(f"\n$ {' '.join(cmd)}\n")
     log.flush()
     try:
-        return subprocess.call(cmd, env=env, stdout=log, stderr=subprocess.STDOUT)
+        return subprocess.call(cmd, env=env, stdout=log, stderr=subprocess.STDOUT,
+                               cwd=cwd or None)
     except OSError as exc:
         log.write(f"не запустилось: {exc}\n")
         return 127
@@ -87,21 +92,22 @@ def main(task_path: str) -> int:
     result = {"ok": False, "from": task.get("from", ""), "to": task.get("to", ""),
               "log": task["log"], "started": time.time()}
     with open(task["log"], "w", encoding="utf-8") as log:
-        log.write(f"оновлення {result['from']} → {result['to']}\n")
+        log.write((task.get("title") or f"оновлення {result['from']} → {result['to']}") + "\n")
         # Весь ланцюг запуску (обгортка, Python середовища, сервер): поки живий
         # хоч один, його файли заблоковані й оновлення їх не замінить.
         pids = [int(x) for x in (task.get("pids") or [task["pid"]])]
         gone = all(_wait_gone(p, float(task.get("wait", 60))) for p in pids)
         time.sleep(1.0)  # Windows відпускає файли щойно завершених процесів не миттєво
         log.write(f"консоль {'завершилась' if gone else 'не завершилась за відведений час'}\n")
-        rc = _run(task["cmd"], env, log) if gone else 1
+        rc = _run(task["cmd"], env, log, task.get("cmd_cwd") or "") if gone else 1
         result["ok"] = rc == 0
         result["rc"] = rc
         if rc == 0 and task.get("after"):
             for step in task["after"]:
                 if _run(step, env, log) != 0:
                     result["after_failed"] = " ".join(step)
-        log.write(f"\n{'✅ оновлено' if rc == 0 else '❌ не оновилось'} · перезапуск консолі\n")
+        done = task.get("done_text") or ["✅ оновлено", "❌ не оновилось"]
+        log.write(f"\n{done[0] if rc == 0 else done[1]} · перезапуск консолі\n")
     if task.get("relaunch"):
         why = _relaunch(task["relaunch"], task.get("cwd", ""), env,
                         task.get("console_log") or task["log"])
