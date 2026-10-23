@@ -151,7 +151,11 @@ def _request(method: str, url: str, *, body: Any = None, auth: str = "",
     # КОЖЕН запит, і клієнт мусить бути в ній відрізнимий від людини у
     # вкладці. Ключ — лише на довірену адресу, 429 («денна норма») — без
     # повторів: шість спроб на відповідь «завтра» лише тримали б людину.
-    strok = {k: v for k, v in (("timeout", timeout), ("attempts", attempts)) if v is not None}
+    strok: dict[str, Any] = {}
+    if timeout is not None:
+        strok["timeout"] = timeout
+    if attempts is not None:
+        strok["attempts"] = attempts
     try:
         fetcher = catalog._fetcher(url, auth=auth, accept_json=True, **strok)
         if method == "POST":

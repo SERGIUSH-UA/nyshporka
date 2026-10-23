@@ -655,7 +655,7 @@ def test_konflikt_complete_a_vnesok_pryiniato(monkeypatch: pytest.MonkeyPatch,
     у каталозі.
     """
     def _konflikt() -> None:
-        raise upload.UploadError("HTTP %d" % status, status=status)
+        raise upload.UploadError(f"HTTP {status}", status=status)
 
     paket, zvity = _pidhotuvaty(monkeypatch, tmp_path, complete=_konflikt)
     monkeypatch.setattr(upload, "_put", lambda url, blob: None)
