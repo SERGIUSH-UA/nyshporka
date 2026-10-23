@@ -48,7 +48,9 @@ Schritt 3).
        und starten.
     2. Wenn Windows meldet **„Der Computer wurde durch Windows geschützt“** —
        „Weitere Informationen“ → „Trotzdem ausführen“. So begrüßt Windows
-       jedes Programm, das bisher nur wenige heruntergeladen haben.
+       jedes Programm, das bisher nur wenige heruntergeladen haben. Nennt ein
+       Virenschutz das Installationsprogramm dagegen einen Trojaner und entfernt
+       die Datei, siehe [„Der Virenschutz hält das Installationsprogramm für einen Trojaner“](#defender).
     3. Wählen Sie auf der Seite «Де жити Нишпорці» (Wo Nyshporka wohnen wird)
        einen Ordner auf einem Laufwerk mit viel Platz (etwa 10 GB nötig),
        zum Beispiel `D:\Genealogy\Nyshporka`. In diesem einen Ordner liegt
@@ -159,6 +161,42 @@ Skills), darunter OpenClaw. So legen Sie sie in seinen Ordner:
 | Der Assistent sieht den Ordner mit den Scans nicht | Der Ordner liegt außerhalb des Arbeitsordners; der Assistent muss um Erlaubnis bitten, ihn in die Buchführung aufzunehmen (`nysh roots add`). Dateien werden nirgendwohin verschoben |
 | Das Installationsprogramm endete mit „Code 1“ | Sehen Sie sich die letzten Zeilen der Ausgabe an. Meist ist es ein abgebrochener Download, zu wenig Platz oder ein Virenschutz |
 | Etwas anderes | [Dem Autor schreiben](https://github.com/SERGIUSH-UA/nyshporka/issues) und wörtlich anfügen, was der Assistent geschrieben hat |
+
+### Der Virenschutz hält das Installationsprogramm für einen Trojaner { #defender }
+
+Microsoft Defender markiert `nyshporka-setup.exe` manchmal als Trojaner, meist
+mit einem Namen wie `Trojan:Win32/Bearfoos.B!ml`. Die Endung `!ml` bedeutet,
+dass ein automatisches Modell das Programm anhand allgemeiner Merkmale
+verdächtigt hat; ein bekannter Virus wurde darin nicht gefunden. Das passiert
+bei Programmen ohne digitale Signatur, die bisher nur wenige heruntergeladen
+haben.
+
+Bevor Sie die Datei zulassen, vergewissern Sie sich, dass sie echt ist:
+
+1. Das Installationsprogramm muss mit der Schaltfläche auf dieser Seite oder
+   von der [Release-Seite](https://github.com/SERGIUSH-UA/nyshporka/releases) auf GitHub heruntergeladen sein. Eine auf
+   anderem Weg erhaltene Datei (Messenger, Filehoster, fremde Website) löschen
+   Sie und laden sie neu herunter.
+2. Stellen Sie die Datei aus der Quarantäne wieder her: „Windows-Sicherheit“ →
+   „Viren- & Bedrohungsschutz“ → „Schutzverlauf“ → Eintrag zur Datei →
+   „Aktionen“ → „Wiederherstellen“. Noch nicht ausführen.
+3. Öffnen Sie PowerShell (Start → `PowerShell` eintippen) und fügen Sie drei
+   Zeilen ein. Liegt die Datei nicht unter „Downloads“, ändern Sie den Pfad in
+   der ersten Zeile:
+
+    ```powershell
+    $f = "$env:USERPROFILE\Downloads\nyshporka-setup.exe"
+    $r = Invoke-RestMethod https://api.github.com/repos/SERGIUSH-UA/nyshporka/releases/latest
+    ($r.assets | Where-Object name -eq 'nyshporka-setup.exe').digest -eq ('sha256:' + (Get-FileHash $f).Hash.ToLower())
+    ```
+
+- **`True`**: Die Datei stimmt mit dem neuesten Release auf GitHub überein, der
+  Fund ist falsch. Starten Sie das Installationsprogramm. Entfernt Defender es
+  erneut, wählen Sie im „Schutzverlauf“ „Auf Gerät zulassen“.
+- **`False`**: Es ist nicht die richtige Datei, oder seitdem ist ein neues
+  Release erschienen. Nicht ausführen: löschen und mit der Schaltfläche aus
+  Schritt 2 neu herunterladen. Ergibt auch die neue Datei `False`,
+  [schreiben Sie dem Autor](https://github.com/SERGIUSH-UA/nyshporka/issues).
 
 ## Ohne Assistenten oder mit Python
 

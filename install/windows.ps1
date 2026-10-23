@@ -126,6 +126,7 @@ $Msg = @{
         'preflight' = 'Передперевірка: програми з профілю користувача ({0}) на цій машині НЕ ЗАПУСКАЮТЬСЯ — схоже на політику AppLocker/SRP або правило ASR. Нишпорка ставиться в профіль без прав адміністратора, тож тут вона не працюватиме. Варіанти: запустити інсталятор правою кнопкою миші → «Запустити від імені адміністратора» (тоді все стане в профіль адміністратора), або попросити ІТ дозволити запуск із {0} і {1}.'
         'uv.have' = '✓ uv уже є: {0}'
         'err.uv' = 'uv не встановився у {0}'
+        'err.uvsum' = 'uv {0}: контрольна сума архіву не збіглася — завантаження пошкоджене або підмінене'
         'err.python' = 'не вдалося встановити Python 3.12 (uv повернув {0})'
         'app.get' = '⬇ Нишпорка ({0})…'
         'err.app' = 'не вдалося встановити {0} (uv повернув {1})'
@@ -218,6 +219,7 @@ $Msg = @{
         'preflight' = 'Pre-check: programs from the user profile ({0}) CANNOT RUN on this machine — it looks like an AppLocker/SRP policy or an ASR rule. Nyshporka installs into the profile without administrator rights, so it will not work here. Options: start the installer with a right click → “Run as administrator” (everything then goes into the administrator''s profile), or ask IT to allow running from {0} and {1}.'
         'uv.have' = '✓ uv already installed: {0}'
         'err.uv' = 'uv did not install into {0}'
+        'err.uvsum' = 'uv {0}: archive checksum mismatch — the download is damaged or tampered with'
         'err.python' = 'could not install Python 3.12 (uv returned {0})'
         'app.get' = '⬇ Nyshporka ({0})…'
         'err.app' = 'could not install {0} (uv returned {1})'
@@ -310,6 +312,7 @@ $Msg = @{
         'preflight' = 'Kontrola wstępna: programy z profilu użytkownika ({0}) NIE URUCHAMIAJĄ SIĘ na tym komputerze — wygląda to na zasadę AppLocker/SRP lub regułę ASR. Nyshporka instaluje się w profilu bez uprawnień administratora, więc tu nie zadziała. Do wyboru: uruchom instalator prawym przyciskiem myszy → „Uruchom jako administrator” (wtedy wszystko trafi do profilu administratora) albo poproś dział IT o zezwolenie na uruchamianie z {0} i {1}.'
         'uv.have' = '✓ uv już jest: {0}'
         'err.uv' = 'uv nie zainstalował się w {0}'
+        'err.uvsum' = 'uv {0}: suma kontrolna archiwum się nie zgadza — pobranie jest uszkodzone lub podmienione'
         'err.python' = 'nie udało się zainstalować Python 3.12 (uv zwrócił {0})'
         'app.get' = '⬇ Nyshporka ({0})…'
         'err.app' = 'nie udało się zainstalować {0} (uv zwrócił {1})'
@@ -402,6 +405,7 @@ $Msg = @{
         'preflight' = 'Verificare preliminară: programele din profilul utilizatorului ({0}) NU POT RULA pe acest calculator — pare o politică AppLocker/SRP sau o regulă ASR. Nyshporka se instalează în profil fără drepturi de administrator, deci aici nu va funcționa. Variante: porniți programul de instalare cu clic dreapta → „Executare ca administrator” (atunci totul va merge în profilul administratorului) sau cereți departamentului IT să permită rularea din {0} și {1}.'
         'uv.have' = '✓ uv există deja: {0}'
         'err.uv' = 'uv nu s-a instalat în {0}'
+        'err.uvsum' = 'uv {0}: suma de control a arhivei nu corespunde — descărcarea este deteriorată sau înlocuită'
         'err.python' = 'nu s-a putut instala Python 3.12 (uv a returnat {0})'
         'app.get' = '⬇ Nyshporka ({0})…'
         'err.app' = 'nu s-a putut instala {0} (uv a returnat {1})'
@@ -494,6 +498,7 @@ $Msg = @{
         'preflight' = 'Contrôle préalable : les programmes du profil utilisateur ({0}) NE S''EXÉCUTENT PAS sur cette machine — on dirait une stratégie AppLocker/SRP ou une règle ASR. Nyshporka s''installe dans le profil sans droits d''administrateur, elle ne fonctionnera donc pas ici. Options : lancer l''installeur par clic droit → « Exécuter en tant qu''administrateur » (tout ira alors dans le profil de l''administrateur), ou demander au service informatique d''autoriser l''exécution depuis {0} et {1}.'
         'uv.have' = '✓ uv déjà présent : {0}'
         'err.uv' = 'uv ne s''est pas installé dans {0}'
+        'err.uvsum' = 'uv {0} : la somme de contrôle de l''archive ne correspond pas — téléchargement endommagé ou falsifié'
         'err.python' = 'impossible d''installer Python 3.12 (uv a renvoyé {0})'
         'app.get' = '⬇ Nyshporka ({0})…'
         'err.app' = 'impossible d''installer {0} (uv a renvoyé {1})'
@@ -586,6 +591,7 @@ $Msg = @{
         'preflight' = 'Vorabprüfung: Programme aus dem Benutzerprofil ({0}) LASSEN SICH auf diesem Rechner NICHT STARTEN — vermutlich eine AppLocker/SRP-Richtlinie oder eine ASR-Regel. Nyshporka wird ohne Administratorrechte ins Profil installiert und würde hier nicht laufen. Möglichkeiten: den Installer per Rechtsklick → „Als Administrator ausführen“ starten (dann landet alles im Profil des Administrators) oder die IT bitten, das Ausführen aus {0} und {1} zu erlauben.'
         'uv.have' = '✓ uv schon vorhanden: {0}'
         'err.uv' = 'uv wurde nicht nach {0} installiert'
+        'err.uvsum' = 'uv {0}: Prüfsumme des Archivs stimmt nicht — der Download ist beschädigt oder manipuliert'
         'err.python' = 'Python 3.12 konnte nicht installiert werden (uv gab {0} zurück)'
         'app.get' = '⬇ Nyshporka ({0})…'
         'err.app' = '{0} konnte nicht installiert werden (uv gab {1} zurück)'
@@ -678,6 +684,7 @@ $Msg = @{
         'preflight' = 'Предпроверка: программы из профиля пользователя ({0}) на этом компьютере НЕ ЗАПУСКАЮТСЯ — похоже на политику AppLocker/SRP или правило ASR. Нышпорка ставится в профиль без прав администратора, поэтому здесь она работать не будет. Варианты: запустить установщик правой кнопкой мыши → «Запуск от имени администратора» (тогда всё встанет в профиль администратора) или попросить ИТ разрешить запуск из {0} и {1}.'
         'uv.have' = '✓ uv уже есть: {0}'
         'err.uv' = 'uv не установился в {0}'
+        'err.uvsum' = 'uv {0}: контрольная сумма архива не совпала — загрузка повреждена или подменена'
         'err.python' = 'не удалось установить Python 3.12 (uv вернул {0})'
         'app.get' = '⬇ Нышпорка ({0})…'
         'err.app' = 'не удалось установить {0} (uv вернул {1})'
@@ -1071,21 +1078,40 @@ if (-not (Test-Path $uv)) {
     } else {
         Say "⬇ uv…" DarkGray
         New-Item -ItemType Directory -Force -Path $uvDir | Out-Null
-        $env:UV_INSTALL_DIR = $uvDir
-        # 🔴 PATH користувача інсталятор uv не чіпає. Тека `$uvDir` наша, ми
-        # кличемо uv повним шляхом, і запис у `HKCU\Environment` тут не дає
-        # нічого, крім зайвої зміни в чужому середовищі. Та сама причина,
-        # що й у `install/unix.sh`, де без цієї змінної інсталятор uv правив
-        # шість файлів профілю одразу (скарга розробника 07.09.2026).
-        $env:UV_NO_MODIFY_PATH = '1'
-        # Офіційний інсталятор uv; ставить у вказану теку, без адміністратора.
-        Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression
-        # 🔴 І одразу прибираємо. Ця змінна слухається не лише інсталятором uv,
-        # а й `uv tool update-shell` нижче — тобто, лишена в середовищі
-        # процесу, вона мовчки скасовує ЄДИНИЙ допис у PATH, який нам потрібен.
-        # Знайдено прогоном `install/unix.sh` у контейнері: установлення
-        # проходило «успішно», а в новій оболонці команда не знаходилась.
-        Remove-Item Env:UV_NO_MODIFY_PATH -ErrorAction SilentlyContinue
+        # 🔴 Архів фіксованої версії з релізу GitHub, звірений за SHA256, а не
+        # `irm https://astral.sh/uv/install.ps1 | iex`. Конвеєр «завантажити й
+        # одразу виконати» — шаблон дропера: Defender через нього позначав
+        # `nyshporka-setup.exe` трояном (`Bearfoos.B!ml`, 23.10.2026). До того ж
+        # чужий скрипт виконувався неперевіреним. Інсталятор uv нам і не
+        # потрібен: у PATH і профілі ми нічого не пишемо, uv кличемо повним
+        # шляхом із `$uvDir`. Збірка x86_64 і на ARM64 — так само, як і сам
+        # `.exe` (`ArchitecturesAllowed=x64compatible`).
+        # Оновити: `gh api repos/astral-sh/uv/releases/tags/<версія> --jq
+        # '.assets[]|select(.name=="uv-x86_64-pc-windows-msvc.zip")|.digest'`.
+        $uvVersion = '0.13.5'
+        $uvSha256  = 'a38b8d1902b7cfbc76b423ba1bb456f623f42064cdc72628b6075b89afd1019a'
+        $uvZip = Join-Path $Home_ '_uv.zip'
+        try {
+            Invoke-WebRequest -UseBasicParsing -TimeoutSec 300 -OutFile $uvZip `
+                -Uri "https://github.com/astral-sh/uv/releases/download/$uvVersion/uv-x86_64-pc-windows-msvc.zip"
+            # ⚠ .NET, а не `Get-FileHash` і `Expand-Archive`: див. пак довідників нижче.
+            $sha = [Security.Cryptography.SHA256]::Create()
+            $stream = [IO.File]::OpenRead($uvZip)
+            try     { $got = [BitConverter]::ToString($sha.ComputeHash($stream)) -replace '-', '' }
+            finally { $stream.Dispose(); $sha.Dispose() }
+            if ($got -ne $uvSha256) { throw (M 'err.uvsum' $uvVersion) }
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $zip = [IO.Compression.ZipFile]::OpenRead($uvZip)
+            try {
+                foreach ($e in $zip.Entries) {
+                    if (-not $e.Name) { continue }   # запис теки
+                    [IO.Compression.ZipFileExtensions]::ExtractToFile(
+                        $e, (Join-Path $uvDir $e.Name), $true)
+                }
+            } finally { $zip.Dispose() }
+        } finally {
+            Remove-Item -LiteralPath $uvZip -Force -ErrorAction SilentlyContinue
+        }
         if (-not (Test-Path $uv)) { throw (M 'err.uv' $uvDir) }
         Trace 'dir' $uvDir
         Say "✓ uv" Green

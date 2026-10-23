@@ -47,7 +47,8 @@ citire a manuscriselor. Asistentul — ultimul (de ce — la pasul 3).
        și porniți-l.
     2. Dacă Windows afișează **„Windows v-a protejat PC-ul”** — „Mai multe
        informații” → „Executare oricum”. Așa întâmpină Windows orice program
-       pe care încă puțini l-au descărcat.
+       pe care încă puțini l-au descărcat. Dacă însă antivirusul numește
+       programul de instalare troian și șterge fișierul, vedeți [„Antivirusul a numit programul de instalare troian”](#defender).
     3. Pe pagina «Де жити Нишпорці» (Unde va locui Nyshporka) alegeți un director
        pe un disc cu mult spațiu (sunt necesari circa 10 GB), de exemplu
        `D:\Genealogy\Nyshporka`. În acest singur director va sta tot: programul,
@@ -156,6 +157,39 @@ claude
 | asistentul nu vede directorul cu scanări | Directorul se află în afara directorului de lucru; asistentul trebuie să ceară permisiunea de a-l lua în evidență (`nysh roots add`). Fișierele nu se mută nicăieri |
 | programul de instalare s-a încheiat cu „cod 1” | Uitați-vă la ultimele rânduri ale ieșirii. Cel mai des — o descărcare întreruptă, lipsă de spațiu sau un antivirus |
 | altceva | [Scrieți autorului](https://github.com/SERGIUSH-UA/nyshporka/issues), adăugând cuvânt cu cuvânt ce a scris asistentul |
+
+### Antivirusul a numit programul de instalare troian { #defender }
+
+Microsoft Defender marchează uneori `nyshporka-setup.exe` drept troian, cel mai
+des cu un nume de felul `Trojan:Win32/Bearfoos.B!ml`. Terminația `!ml`
+înseamnă că programul a fost suspectat de un model automat după trăsături
+generale, nu că s-a găsit în el un virus cunoscut. Așa se întâmplă cu
+programele fără semnătură digitală, pe care încă puțini le-au descărcat.
+
+Înainte de a permite fișierul, verificați că este autentic:
+
+1. Programul de instalare trebuie descărcat cu butonul de pe această pagină sau
+   de pe [pagina versiunilor](https://github.com/SERGIUSH-UA/nyshporka/releases) de pe GitHub. Un fișier primit pe altă
+   cale (mesagerie, site de partajare, site străin) ștergeți-l și descărcați-l
+   din nou.
+2. Restaurați fișierul din carantină: „Securitate Windows” → „Protecție
+   împotriva virușilor și amenințărilor” → „Istoric protecție” → intrarea
+   despre fișier → „Acțiuni” → „Restaurare”. Deocamdată nu-l rulați.
+3. Deschideți PowerShell (Start → tastați `PowerShell`) și lipiți trei rânduri.
+   Dacă fișierul nu este în „Descărcări”, schimbați calea din primul rând:
+
+    ```powershell
+    $f = "$env:USERPROFILE\Downloads\nyshporka-setup.exe"
+    $r = Invoke-RestMethod https://api.github.com/repos/SERGIUSH-UA/nyshporka/releases/latest
+    ($r.assets | Where-Object name -eq 'nyshporka-setup.exe').digest -eq ('sha256:' + (Get-FileHash $f).Hash.ToLower())
+    ```
+
+- **`True`**: fișierul coincide cu ultima versiune de pe GitHub, detectarea
+  este falsă. Rulați programul de instalare. Dacă Defender îl șterge din nou,
+  în „Istoric protecție” alegeți „Se permite pe dispozitiv”.
+- **`False`**: fișierul nu este cel corect sau între timp a apărut o versiune
+  nouă. Nu-l rulați: ștergeți-l și descărcați-l din nou cu butonul de la
+  pasul 2. Dacă și noul fișier dă `False`, [scrieți autorului](https://github.com/SERGIUSH-UA/nyshporka/issues).
 
 ## Fără asistent sau cu Python
 

@@ -46,7 +46,9 @@ manuscrits ne s'installe pas. L'assistant en dernier (pourquoi — à l'étape 3
        et lancez-le.
     2. Si Windows affiche **« Windows a protégé votre ordinateur »** —
        « Informations complémentaires » → « Exécuter quand même ». C'est ainsi
-       que Windows accueille tout programme encore peu téléchargé.
+       que Windows accueille tout programme encore peu téléchargé. Si en
+       revanche un antivirus qualifie l'installateur de cheval de Troie et
+       supprime le fichier, voir [« L'antivirus a qualifié l'installateur de cheval de Troie »](#defender).
     3. Sur la page « Де жити Нишпорці » (Où vivra Nyshporka), choisissez un
        répertoire sur un disque avec beaucoup de place (environ 10 Go
        nécessaires), par exemple `D:\Genealogy\Nyshporka`. Ce seul répertoire
@@ -156,6 +158,42 @@ claude
 | l'assistant ne voit pas le répertoire des scans | Le répertoire se trouve hors du répertoire de travail ; l'assistant doit demander la permission de le prendre en compte (`nysh roots add`). Les fichiers ne sont déplacés nulle part |
 | l'installateur s'est terminé avec « code 1 » | Regardez les dernières lignes de la sortie. Le plus souvent : un téléchargement interrompu, un manque de place ou un antivirus |
 | autre chose | [Écrire à l'auteur](https://github.com/SERGIUSH-UA/nyshporka/issues), en ajoutant mot pour mot ce qu'a écrit l'assistant |
+
+### L'antivirus a qualifié l'installateur de cheval de Troie { #defender }
+
+Microsoft Defender signale parfois `nyshporka-setup.exe` comme cheval de Troie,
+le plus souvent sous un nom comme `Trojan:Win32/Bearfoos.B!ml`. Le suffixe
+`!ml` signifie qu'un modèle automatique a soupçonné le programme d'après des
+traits généraux ; aucun virus connu n'y a été trouvé. Cela arrive aux
+programmes sans signature numérique encore peu téléchargés.
+
+Avant d'autoriser le fichier, vérifiez qu'il est authentique :
+
+1. L'installateur doit avoir été téléchargé avec le bouton de cette page ou
+   depuis la [page des versions](https://github.com/SERGIUSH-UA/nyshporka/releases) sur GitHub. Un fichier obtenu
+   autrement (messagerie, site de partage, site tiers) : supprimez-le et
+   téléchargez-le à nouveau.
+2. Restaurez le fichier depuis la quarantaine : « Sécurité Windows » →
+   « Protection contre les virus et menaces » → « Historique de protection » →
+   l'entrée du fichier → « Actions » → « Restaurer ». Ne le lancez pas encore.
+3. Ouvrez PowerShell (Démarrer → tapez `PowerShell`) et collez trois lignes.
+   Si le fichier n'est pas dans « Téléchargements », changez le chemin dans la
+   première ligne :
+
+    ```powershell
+    $f = "$env:USERPROFILE\Downloads\nyshporka-setup.exe"
+    $r = Invoke-RestMethod https://api.github.com/repos/SERGIUSH-UA/nyshporka/releases/latest
+    ($r.assets | Where-Object name -eq 'nyshporka-setup.exe').digest -eq ('sha256:' + (Get-FileHash $f).Hash.ToLower())
+    ```
+
+- **`True`** : le fichier correspond à la dernière version sur GitHub, la
+  détection est fausse. Lancez l'installateur. Si Defender le supprime de
+  nouveau, choisissez « Autoriser sur l'appareil » dans l'« Historique de
+  protection ».
+- **`False`** : ce n'est pas le bon fichier, ou une nouvelle version est sortie
+  depuis. Ne le lancez pas : supprimez-le et téléchargez-le à nouveau avec le
+  bouton de l'étape 2. Si le nouveau fichier donne aussi `False`,
+  [écrivez à l'auteur](https://github.com/SERGIUSH-UA/nyshporka/issues).
 
 ## Sans assistant ou avec Python
 

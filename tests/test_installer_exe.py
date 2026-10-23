@@ -210,7 +210,7 @@ def test_a_failed_install_leaves_its_reason_for_the_wizard() -> None:
     assert ps1.rstrip().endswith("exit 0") and "Stop-Transcript" in ps1
     # Передперевірка запуску з профілю стоїть ДО першого завантаження, а
     # порада «від імені адміністратора» в майстрі — лише без підвищення.
-    assert ps1.index("_probe.exe") < ps1.index("astral.sh/uv/install.ps1")
+    assert ps1.index("_probe.exe") < ps1.index("uv-x86_64-pc-windows-msvc.zip")
     assert "if not IsAdmin then" in iss
 
 

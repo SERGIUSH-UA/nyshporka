@@ -84,25 +84,34 @@ def test_the_uv_installer_variables_never_leak_past_it() -> None:
         "unix.sh: змінна експортована далі за інсталятор uv — вона скасує "
         "`uv tool update-shell`, і команда не знайдеться в новій оболонці:\n  "
         + "\n  ".join(guilty))
-    # 🪟 На Windows `$env:` живе до кінця процесу, тож там та сама вада
-    # лікується явним прибиранням змінної одразу після інсталятора uv.
-    assert _uncommented(ps1_text(), "Remove-Item Env:UV_NO_MODIFY_PATH"), (
-        "windows.ps1: змінна лишається в середовищі процесу — `uv tool "
-        "update-shell` нижче нічого не зробить")
+    # 🪟 На Windows інсталятора uv немає зовсім (див. тест нижче), тож і
+    # змінна там не виставляється — `uv tool update-shell` нічого не скасує.
+    assert not _uncommented(ps1_text(), "UV_NO_MODIFY_PATH"), (
+        "windows.ps1: змінна повернулась — `$env:` живе до кінця процесу й "
+        "скасує `uv tool update-shell` нижче")
 
 
-def test_windows_installer_never_lets_uv_edit_the_user_path() -> None:
-    """🔴 Та сама половина скарги на Windows — запис у `HKCU\\Environment`.
+def test_windows_installer_takes_uv_as_a_verified_archive() -> None:
+    """🔴 Ні `irm … | iex`, ні офіційного інсталятора uv.
 
-    Тека uv там наша (`UV_INSTALL_DIR` стояв і раніше), ми кличемо uv повним
-    шляхом, і допис у змінні середовища користувача не дає нічого, крім зайвої
-    зміни в чужому середовищі.
+    Конвеєр «завантажити й одразу виконати» — шаблон дропера: Defender через
+    нього позначав `nyshporka-setup.exe` трояном (`Bearfoos.B!ml`, 23.10.2026),
+    а чужий скрипт виконувався неперевіреним. Архів uv фіксованої версії
+    звіряється за SHA256 ДО розпакування й лягає в нашу теку — тож і запису в
+    `HKCU\\Environment`, на який скаржився розробник, бути не може.
     """
     text = ps1_text()
-    assert _uncommented(text, "UV_NO_MODIFY_PATH"), (
-        "windows.ps1: інсталятор uv дописує свою теку в PATH користувача")
-    assert _uncommented(text, "UV_INSTALL_DIR"), (
-        "windows.ps1: uv ставиться в типову теку, а не в теку застосунку")
+    for bad in ("Invoke-Expression", "astral.sh/uv/install"):
+        assert not _uncommented(text, bad), f"windows.ps1: знову `{bad}`"
+    # `| iex` згадано в шапці `<# … #>`, якої `_uncommented` не розпізнає, тож
+    # шукаємо сам виклик: конвеєр, що закінчується на `iex`.
+    assert not re.search(r"\|\s*iex\s*$", text, re.M), "windows.ps1: знову `| iex`"
+    assert re.search(r"^\s*\$uvVersion\s*=\s*'\d+\.\d+\.\d+'", text, re.M)
+    assert re.search(r"^\s*\$uvSha256\s*=\s*'[0-9a-f]{64}'", text, re.M), (
+        "windows.ps1: хеш архіву uv не вшитий — звіряти нема з чим")
+    assert "releases/download/$uvVersion/uv-x86_64-pc-windows-msvc.zip" in text
+    assert text.index("$got -ne $uvSha256") < text.index("ExtractToFile"), (
+        "windows.ps1: архів uv розпаковується до звірки хешу")
 
 
 @pytest.mark.parametrize("name", ["unix.sh", "windows.ps1"])

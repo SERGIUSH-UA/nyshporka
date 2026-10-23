@@ -45,7 +45,8 @@ install. The assistant goes last (step 3 explains why).
        and run it.
     2. If Windows says **“Windows protected your PC”** — “More info” →
        “Run anyway”. This is how Windows greets every program that few people
-       have downloaded yet.
+       have downloaded yet. If an antivirus calls the installer a trojan and
+       removes the file, see [“The antivirus called the installer a trojan”](#defender).
     3. On the page «Де жити Нишпорці» (Where Nyshporka will live) choose a folder
        on a drive with plenty of space (about 10 GB needed), for example
        `D:\Genealogy\Nyshporka`. This one folder will hold everything: the
@@ -153,6 +154,38 @@ claude
 | the assistant cannot see the folder with the scans | The folder is outside the working folder; the assistant should ask permission to take it into its records (`nysh roots add`). No files are moved anywhere |
 | the installer finished with “code 1” | Look at the last lines of the output. Most often it is an interrupted download, lack of space or an antivirus |
 | something else | [Write to the author](https://github.com/SERGIUSH-UA/nyshporka/issues), adding word for word what the assistant wrote |
+
+### The antivirus called the installer a trojan { #defender }
+
+Microsoft Defender sometimes flags `nyshporka-setup.exe` as a trojan, most often
+with a name like `Trojan:Win32/Bearfoos.B!ml`. The `!ml` ending means an
+automatic model suspected the program by general traits; it did not find a known
+virus in it. This happens to programs without a digital signature that few
+people have downloaded yet.
+
+Before allowing the file, make sure it is genuine:
+
+1. The installer must be downloaded with the button on this page or from the
+   [releases page](https://github.com/SERGIUSH-UA/nyshporka/releases) on GitHub. A file obtained any other way (messenger,
+   file-sharing site, someone else's website) — delete it and download again.
+2. Restore the file from quarantine: “Windows Security” → “Virus & threat
+   protection” → “Protection history” → the entry for the file → “Actions” →
+   “Restore”. Do not run it yet.
+3. Open PowerShell (Start → type `PowerShell`) and paste three lines. If the
+   file is not in “Downloads”, change the path in the first line:
+
+    ```powershell
+    $f = "$env:USERPROFILE\Downloads\nyshporka-setup.exe"
+    $r = Invoke-RestMethod https://api.github.com/repos/SERGIUSH-UA/nyshporka/releases/latest
+    ($r.assets | Where-Object name -eq 'nyshporka-setup.exe').digest -eq ('sha256:' + (Get-FileHash $f).Hash.ToLower())
+    ```
+
+- **`True`**: the file matches the latest release on GitHub; the detection is
+  false. Run the installer. If Defender removes it again, choose “Allow on
+  device” in “Protection history”.
+- **`False`**: the file is not the right one, or a new release has come out
+  since. Do not run it: delete it and download again with the button from
+  step 2. If the new file also gives `False`, [write to the author](https://github.com/SERGIUSH-UA/nyshporka/issues).
 
 ## Without an assistant, or with Python
 

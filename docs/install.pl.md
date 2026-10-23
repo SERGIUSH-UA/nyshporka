@@ -44,7 +44,8 @@ program odczytu rękopisów. Asystenta — na końcu (dlaczego — w kroku 3).
        i uruchom go.
     2. Jeśli Windows pisze **„System Windows ochronił ten komputer”** —
        „Więcej informacji” → „Uruchom mimo to”. Tak Windows wita każdy program,
-       który pobrało jeszcze niewiele osób.
+       który pobrało jeszcze niewiele osób. Jeśli zaś antywirus nazywa
+       instalator trojanem i usuwa plik, zobacz [„Antywirus nazwał instalator trojanem”](#defender).
     3. Na stronie «Де жити Нишпорці» (Gdzie będzie mieszkać Nyshporka) wybierz
        folder na dysku z dużą ilością miejsca (potrzeba około 10 GB), na
        przykład `D:\Genealogy\Nyshporka`. W tym jednym folderze będzie
@@ -150,6 +151,38 @@ claude
 | asystent nie widzi folderu ze skanami | Folder leży poza folderem roboczym; asystent powinien zapytać o zgodę na wzięcie go do ewidencji (`nysh roots add`). Pliki nigdzie nie są przenoszone |
 | instalator zakończył się „kod 1” | Zobacz ostatnie wiersze wyniku. Najczęściej — przerwane pobieranie, brak miejsca albo antywirus |
 | coś innego | [Napisz do autora](https://github.com/SERGIUSH-UA/nyshporka/issues), dodając dosłownie, co napisał asystent |
+
+### Antywirus nazwał instalator trojanem { #defender }
+
+Microsoft Defender czasem oznacza `nyshporka-setup.exe` jako trojana, najczęściej
+z nazwą w rodzaju `Trojan:Win32/Bearfoos.B!ml`. Końcówka `!ml` oznacza, że
+program wzbudził podejrzenia automatycznego modelu na podstawie ogólnych cech,
+a nie że znaleziono w nim znanego wirusa. Tak bywa z programami bez podpisu
+cyfrowego, które pobrało jeszcze niewiele osób.
+
+Zanim zezwolisz na plik, upewnij się, że jest prawdziwy:
+
+1. Instalator musi być pobrany przyciskiem z tej strony albo ze
+   [strony wydań](https://github.com/SERGIUSH-UA/nyshporka/releases) na GitHubie. Plik zdobyty inną drogą (komunikator,
+   serwis z plikami, obca strona) usuń i pobierz ponownie.
+2. Przywróć plik z kwarantanny: „Zabezpieczenia Windows” → „Ochrona przed
+   wirusami i zagrożeniami” → „Historia ochrony” → wpis o pliku → „Akcje” →
+   „Przywróć”. Na razie go nie uruchamiaj.
+3. Otwórz PowerShell (Start → wpisz `PowerShell`) i wklej trzy wiersze. Jeśli
+   plik nie leży w „Pobranych”, zmień ścieżkę w pierwszym wierszu:
+
+    ```powershell
+    $f = "$env:USERPROFILE\Downloads\nyshporka-setup.exe"
+    $r = Invoke-RestMethod https://api.github.com/repos/SERGIUSH-UA/nyshporka/releases/latest
+    ($r.assets | Where-Object name -eq 'nyshporka-setup.exe').digest -eq ('sha256:' + (Get-FileHash $f).Hash.ToLower())
+    ```
+
+- **`True`**: plik zgadza się z najnowszym wydaniem na GitHubie, wykrycie jest
+  fałszywe. Uruchom instalator. Jeśli Defender znów go usunie, w „Historii
+  ochrony” wybierz „Zezwalaj na urządzeniu”.
+- **`False`**: to nie ten plik albo od tego czasu wyszło nowe wydanie. Nie
+  uruchamiaj go: usuń i pobierz ponownie przyciskiem z kroku 2. Jeśli i nowy
+  plik daje `False`, [napisz do autora](https://github.com/SERGIUSH-UA/nyshporka/issues).
 
 ## Bez asystenta lub z Pythonem
 
