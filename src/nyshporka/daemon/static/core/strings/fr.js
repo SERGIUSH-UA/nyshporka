@@ -1593,6 +1593,7 @@ export default {
     'dash.cases.unfiled': 'nouveaux dossiers : {n}',
     'dash.cases.bundles': 'recueils : {n}',
     'view.recent': 'Lus récemment',
+    'runs.orphan.all': 'Tous les passages sans dossier — groupes : {n}',
     'load.count': 'Calcul…',
     'load.card': 'Lecture de la fiche du dossier…',
     'load.plan': 'Préparation du plan de lecture…',

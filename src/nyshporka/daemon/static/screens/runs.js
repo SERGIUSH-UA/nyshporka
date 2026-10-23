@@ -42,26 +42,21 @@ const RUNS_PAGE = 25;
 let RUNS_PAGES = 1;
 
 let _runsSeq = 0;
-/**
- * Остання відповідь `runs.list`. Сторінки й фільтр рахуються з неї на місці:
- * доти кожна літера в пошуку перепитувала весь перелік (15 тис. прогонів).
- * Свіжий запит — при вході на екран і після прив'язки справ.
- */
-let RUNS_ENV = null;
 
 SCREENS.runs = async () => {
   const gen = curGen();
   busy();
   // Прогони спільні: з кількома проєктами — чип того, хто замовив.
   await loadProjects();
-  // Перелік — 15 тис. прогонів одним шматком (1–3 с): повторне відкриття
-  // малює минулий одразу, свіжий підміняє його сам (`staleThenFresh`).
-  await staleThenFresh('runs.list', {}, (env) => {
-    if (!alive(gen)) return undefined;
-    RUNS_ENV = env;
-    return runsLoad(true, false);
-  });
+  if (!alive(gen)) return;
+  await runsLoad(true);
 };
+
+/** Що питати в сервера: сторінку груп за справою під поточним фільтром. */
+function runsArgs() {
+  return { grouped: true, page: RUNS.page, page_size: RUNS_PAGE,
+    q: RUNS.q, engine: RUNS.engine, state: RUNS.state };
+}
 
 /**
  * @param {boolean} full  перемалювати весь екран чи лише перелік.
@@ -70,54 +65,66 @@ SCREENS.runs = async () => {
  * перемальовка знищує поле пошуку разом із фокусом, і набране після паузи
  * йде в нікуди.
  */
-async function runsLoad(full = false, fresh = full) {
+async function runsLoad(full = false) {
   const seq = ++_runsSeq;
   const gen = curGen();
-  const env = !fresh && RUNS_ENV ? RUNS_ENV : await callOp('runs.list', {});
-  if (seq !== _runsSeq || !alive(gen)) return;
-  if (!env.ok) return failure(env);
-  RUNS_ENV = env;
+  const live = () => seq === _runsSeq && alive(gen);
+  // 🔴 Групи й сторінки рахує сервер (`runs.list --grouped`): доти екран тягнув
+  // усі прогони (~16 тис., ~10 МБ) і групував у браузері, а нічиї блоки
+  // малював усі — 3 с на відкриття (замір 23.10.2026). Вхід — з минулої
+  // відповіді одразу (`staleThenFresh`); фільтр і сторінки — легкі запити.
+  if (full) {
+    await staleThenFresh('runs.list', runsArgs(), (env) => (live() ? runsPaint(env, true, live) : undefined));
+    return;
+  }
+  const env = await callOp('runs.list', runsArgs());
+  if (live()) await runsPaint(env, false, live);
+}
 
-  const runs = (env.data || {}).runs || [];
-  const groups = runsGroup(runs.filter(runsMatch));
-  const orphans = groups.filter((g) => !g.key);
-  // Справи для вибору тягнемо ЛИШЕ якщо нічиї є: на просторі, де все
+async function runsPaint(env, full, live) {
+  if (!env.ok) return failure(env);
+  const d = env.data || {};
+  const groups = d.groups || [];
+  const extra = d.orphan_groups || [];
+  // Справи для вибору тягнемо ЛИШЕ якщо нічиї на екрані є: на просторі, де все
   // прив'язане, цей запит нічого не дає й тільки сповільнює екран.
-  if (orphans.length && BIND_CASES === null) {
+  if ((extra.length || groups.some((g) => !g.key)) && BIND_CASES === null) {
     // 🔴 200 — це стеля СХЕМИ (`ops_library.LibraryArgs.page_size`, le=200).
     // З 300 операція відмовляла цілком, `BIND_CASES` ставав `[]`, і
     // `<datalist>` виходив порожній ЗАВЖДИ — тобто вибір справи, заради якого
     // цей блок і зроблено, не працював у жодного користувача, і мовчки: жодна
     // гілка не дивилась на `lib.ok`.
     const lib = await callOp('library.list', { page_size: 200 });
-    if (seq !== _runsSeq || !alive(gen)) return;
+    if (!live()) return undefined;
     // ⚠ Невдачу НЕ кешуємо: `null` означає «не питали», і наступний показ
     // екрана спробує ще раз. Порожній масив у цій змінній назавжди пришив би
     // одну випадкову відмову до всієї сесії.
     if (lib.ok) BIND_CASES = (lib.data || {}).cases || [];
   }
-  const known = groups.filter((g) => g.key);
-  RUNS_PAGES = Math.max(1, Math.ceil(known.length / RUNS_PAGE));
-  if (RUNS.page >= RUNS_PAGES) RUNS.page = 0;
-  const from = RUNS.page * RUNS_PAGE;
-  const shown = known.slice(from, from + RUNS_PAGE);
+  RUNS_PAGES = Math.max(1, d.pages || 1);
+  RUNS.page = d.page || 0;
   const bar = pager({ page: RUNS.page, pages: RUNS_PAGES,
-    page_size: RUNS_PAGE, total: known.length });
-  // 🔴 Нічиї прогони — під сторінкою й без сторінок: їх мало, і саме з ними
-  // треба щось зробити. Сховати їх на четвертій сторінці означало б лишити
-  // невидимим текст, який і так невидимий з кожної картки справи.
-  const body = bar + shown.map(runsGroupHtml).join('') + bar
-    + orphans.map((g, gi) => runsOrphanHtml(g, gi)).join('');
+    page_size: RUNS_PAGE, total: d.groups_total || 0 });
+  // Нічиї блоки нумеруються наскрізно: ідентифікатори полів прив'язки несуть
+  // номер блока, і два блоки з тим самим номером читали б одне поле.
+  let ob = 0;
+  const one = (g) => (g.key ? runsGroupHtml(g) : runsOrphanHtml(g, ob++));
+  // 🔴 Нічиї прогони — під сторінкою: саме з ними треба щось зробити. Їх
+  // буває сотні груп, тож тут перші кілька й кнопка «усі без справи», яка
+  // гортає їх сторінками, а не 249 блоків з вибором справи в кожному.
+  const more = (d.orphan_groups_total || 0) > extra.length && RUNS.state !== 'orphan'
+    ? `<p><button class="ghost" data-act="runs.orphans">${esc(t('runs.orphan.all')
+      .replace('{n}', d.orphan_groups_total))}</button></p>` : '';
+  const body = groups.length || extra.length
+    ? bar + groups.map(one).join('') + bar + extra.map(one).join('') + more : '';
 
   if (!full) {
     const box = el('runs-body');
-    if (box) swapHtml(box, body || runsEmptyHtml(env, runs.length));
-    return;
+    if (box) swapHtml(box, body || runsEmptyHtml(env, d.everything || 0));
+    return undefined;
   }
 
-  const engines = [...new Set(runs.flatMap((r) =>
-    (r.engine_ids && r.engine_ids.length ? r.engine_ids
-      : [r.engine_id])).filter(Boolean))];
+  const engines = d.engines || [];
   const opt = (v, label, cur) =>
     `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(label)}</option>`;
 
@@ -139,52 +146,17 @@ async function runsLoad(full = false, fresh = full) {
     </div>
     ${renderWarnings(env)}
     <p class="muted" id="runs-count">${esc(t('runs.count')
-      .replace('{n}', runs.length)
-      .replace('{c}', new Set(runs.map((r) => r.case_key || r.case_dir)).size))}</p>
-    <div id="runs-body">${body || runsEmptyHtml(env, runs.length)}</div>`);
+      .replace('{n}', d.everything || 0)
+      .replace('{c}', d.all_cases || 0))}</p>
+    <div id="runs-body">${body || runsEmptyHtml(env, d.everything || 0)}</div>`);
   runsFocus();
+  return undefined;
 }
 
 PAGERS.runs = (delta) => {
   RUNS.page = step(RUNS.page, delta, RUNS_PAGES);
   return runsLoad(false);
 };
-
-function runsMatch(r) {
-  const ids = r.engine_ids && r.engine_ids.length
-    ? r.engine_ids : [r.engine_id].filter(Boolean);
-  if (RUNS.engine && !ids.includes(RUNS.engine)) return false;
-  if (RUNS.state === 'done' && !runDone(r)) return false;
-  if (RUNS.state === 'going' && runDone(r)) return false;
-  if (RUNS.state === 'orphan' && r.case_key) return false;
-  if (RUNS.q) {
-    const hay = [r.name, r.shifra, r.title, r.model, r.case_dir]
-      .map((x) => String(x || '')).join(' ').toLowerCase();
-    if (!hay.includes(RUNS.q.toLowerCase())) return false;
-  }
-  return true;
-}
-
-/** Прогони → групи за справою. Порядок груп — за свіжістю найновішого. */
-function runsGroup(runs) {
-  const by = new Map();
-  for (const r of runs) {
-    const key = r.case_key || '';
-    const id = key || `dir:${r.case_dir || r.name}`;
-    if (!by.has(id)) {
-      by.set(id, { key, id, shifra: r.shifra || key, title: r.title || '',
-                   case_dir: r.case_dir || '', frames: 0, runs: [],
-                   updated: '' });
-    }
-    const g = by.get(id);
-    g.runs.push(r);
-    if ((r.updated || '') > g.updated) g.updated = r.updated || '';
-    if (!g.shifra && r.shifra) g.shifra = r.shifra;
-    if (!g.title && r.title) g.title = r.title;
-    if (!g.frames && r.frames) g.frames = r.frames;
-  }
-  return [...by.values()].sort((a, b) => (b.updated || '').localeCompare(a.updated || ''));
-}
 
 /**
  * Прогін дочитано — за ДИСКОМ: текст є для всіх кадрів справи.
@@ -374,6 +346,12 @@ function runsFocus() {
 }
 
 Object.assign(ACTIONS, {
+  // Усі нічиї групи — сторінками: той самий фільтр «без справи».
+  'runs.orphans': () => {
+    RUNS = { ...RUNS, state: 'orphan', page: 0 };
+    return runsLoad(true);
+  },
+
   'runs.filter': () => {
     RUNS = {
       q: (el('runs-q') || {}).value || '',
@@ -428,8 +406,8 @@ Object.assign(ACTIONS, {
     const built = await callOp('cases.build', { rescan: false });
     const jid = built.ok ? (built.data || {}).job_id : null;
     BIND_CASES = null;
-    if (!jid) return runsLoad(false, true);
-    onJob(jid, (j) => { if (j.state === 'done') runsLoad(false, true); });
+    if (!jid) return runsLoad(false);
+    onJob(jid, (j) => { if (j.state === 'done') runsLoad(false); });
     return undefined;
   },
 

@@ -1593,6 +1593,7 @@ export default {
     'dash.cases.unfiled': 'dosare noi: {n}',
     'dash.cases.bundles': 'colecții: {n}',
     'view.recent': 'Citite recent',
+    'runs.orphan.all': 'Toate rulările fără dosar — grupuri: {n}',
     'load.count': 'Număr…',
     'load.card': 'Citesc fișa dosarului…',
     'load.plan': 'Alcătuiesc planul de citire…',

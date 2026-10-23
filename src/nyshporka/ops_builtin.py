@@ -2824,6 +2824,14 @@ class RunsArgs(BaseModel):
     page: int = Field(default=0, ge=0, le=10_000)
     page_size: int = Field(default=0, ge=0, le=200,
                            description="розмір сторінки; 0 — усі прогони")
+    grouped: bool = Field(default=False,
+                          description="групи за справою (для екрана «Прогони»): сторінка — "
+                                      "це групи, нічиї окремо; пошук `q` — ще й модель і тека")
+    state: str = Field(default="", description="з `grouped`: done | going | orphan")
+
+
+#: Скільки нічиїх груп показати під сторінкою справ; решта — фільтром «без справи».
+RUNS_ORPHANS_SHOWN = 3
 
 
 @op("runs.list", summary="Прогони читання: що вже прочитано і чим",
@@ -2843,6 +2851,8 @@ def runs_list(a: RunsArgs) -> Envelope:
         runs = htr_store.list_cases()
     except Exception as exc:
         return fail(f"перелік прогонів недоступний ({type(exc).__name__}: {exc})")
+    if a.grouped:
+        return _runs_grouped(runs, a)
     everything = len(runs)
     orphans = sum(1 for r in runs if not r.get("case_key"))
     if a.orphan:
@@ -2890,6 +2900,70 @@ def runs_list(a: RunsArgs) -> Envelope:
                  f"{orphans} прогонів без справи — їхнього тексту не видно "
                  f"з жодної картки")
         env.suggest("cases.bind", "прив'язати нічийний прогін до справи")
+    return env
+
+
+def _runs_grouped(runs: list[dict[str, Any]], a: RunsArgs) -> Envelope:
+    """Групи прогонів за справою — сторінкою, а не 16 тис. рядків одним шматком.
+
+    Доти екран «Прогони» тягнув увесь перелік (~10 МБ) і групував у браузері,
+    а нічиї групи малював усі (249 блоків, кожен із вибором справи) — 3 с на
+    відкриття (замір 23.10.2026). Порядок груп — за свіжістю найновішого
+    прогону; нічиї — окремо: перші `RUNS_ORPHANS_SHOWN` під сторінкою справ,
+    усі — сторінками з `state=orphan`.
+    """
+    from nyshporka import htr_store
+
+    everything = len(runs)
+    engines = sorted({e for r in runs for e in (r.get("engine_ids") or [r.get("engine_id")]) if e})
+    all_cases = len({r.get("case_key") or r.get("case_dir") for r in runs})
+    rows = [dict(r) for r in runs]
+    if a.engine:
+        rows = [r for r in rows if a.engine in (r.get("engine_ids") or [r.get("engine_id")])]
+    if a.mine:
+        from nyshporka.core import projects as P
+
+        rows = [r for r in rows if P.is_mine(r.get("project"))]
+    if a.q:
+        needle = a.q.casefold()
+        rows = [r for r in rows if needle in " ".join(
+            str(r.get(k) or "") for k in ("name", "shifra", "title", "model", "case_dir", "case_key")
+        ).casefold()]
+    htr_store.mark_run_states(rows)
+    done = htr_store.RUN_DONE
+    if a.state == "done":
+        rows = [r for r in rows if r.get("state") == done]
+    elif a.state == "going":
+        rows = [r for r in rows if r.get("state") != done]
+    elif a.state == "orphan":
+        rows = [r for r in rows if not r.get("case_key")]
+
+    by: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        key = str(r.get("case_key") or "")
+        gid = key or f"dir:{r.get('case_dir') or r.get('name')}"
+        g = by.setdefault(gid, {"key": key, "id": gid, "shifra": r.get("shifra") or key,
+                                "title": r.get("title") or "", "case_dir": r.get("case_dir") or "",
+                                "frames": 0, "runs": [], "updated": ""})
+        g["runs"].append(r)
+        g["updated"] = max(g["updated"], str(r.get("updated") or ""))
+        g["shifra"] = g["shifra"] or r.get("shifra") or ""
+        g["title"] = g["title"] or r.get("title") or ""
+        g["frames"] = g["frames"] or int(r.get("frames") or 0)
+    groups = sorted(by.values(), key=lambda g: g["updated"], reverse=True)
+    orphan_groups = [g for g in groups if not g["key"]]
+    paged = orphan_groups if a.state == "orphan" else [g for g in groups if g["key"]]
+    size = a.page_size or 25
+    pages = max(1, (len(paged) + size - 1) // size)
+    page = a.page if a.page < pages else 0
+    env = ok({"groups": paged[page * size:(page + 1) * size],
+              "orphan_groups": [] if a.state == "orphan" else orphan_groups[:RUNS_ORPHANS_SHOWN],
+              "orphan_groups_total": len(orphan_groups), "groups_total": len(paged),
+              "runs_total": len(rows), "page": page, "page_size": size, "pages": pages,
+              "engines": engines, "everything": everything, "all_cases": all_cases})
+    if not everything:
+        env.warn("nothing_read_yet", "жодної справи ще не прочитано — гортати нема чого")
+        env.suggest("read.plan", "порахувати, чим і скільки читати")
     return env
 
 

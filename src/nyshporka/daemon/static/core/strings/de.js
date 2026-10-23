@@ -1593,6 +1593,7 @@ export default {
     'dash.cases.unfiled': 'neue Ordner: {n}',
     'dash.cases.bundles': 'Sammlungen: {n}',
     'view.recent': 'Zuletzt gelesen',
+    'runs.orphan.all': 'Alle Läufe ohne Akte — Gruppen: {n}',
     'load.count': 'Zähle…',
     'load.card': 'Lese die Aktenkarte…',
     'load.plan': 'Erstelle den Leseplan…',

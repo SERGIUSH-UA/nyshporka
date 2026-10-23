@@ -1529,6 +1529,7 @@ export default {
     'dash.cases.unfiled': 'нових тек: {n}',
     'dash.cases.bundles': 'збірок: {n}',
     'view.recent': 'Нещодавно прочитане',
+    'runs.orphan.all': 'Усі прогони без справи — груп: {n}',
     'load.count': 'Рахую…',
     'load.card': 'Читаю картку справи…',
     'load.plan': 'Складаю план читання…',

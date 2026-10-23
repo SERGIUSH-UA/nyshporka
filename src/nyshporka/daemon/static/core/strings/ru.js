@@ -1593,6 +1593,7 @@ export default {
     'dash.cases.unfiled': 'новых папок: {n}',
     'dash.cases.bundles': 'сборников: {n}',
     'view.recent': 'Недавно прочитанное',
+    'runs.orphan.all': 'Все прогоны без дела — групп: {n}',
     'load.count': 'Считаю…',
     'load.card': 'Читаю карточку дела…',
     'load.plan': 'Составляю план чтения…',

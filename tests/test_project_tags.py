@@ -244,3 +244,26 @@ def test_library_opens_from_a_pure_hub_without_verdicts(tmp_path: Path) -> None:
     W.reset()
     W.use(W._build(hub / W.PROJECTS_DIR / "alpha", "test"))
     assert LY.fingerprint()[1].endswith("case_verdicts.json")
+
+
+def test_runs_grouped_pages_cases_and_keeps_orphans_apart(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """`runs.list --grouped`: сторінка груп за справою, свіжіші зверху, нічиї окремо."""
+    from nyshporka import htr_store
+    from nyshporka import ops as O
+
+    def run(name, key, upd, model="pysar_cyr_v28.pt"):  # type: ignore[no-untyped-def]
+        return {"name": name, "case_key": key, "case_dir": f"d/{name}", "updated": upd, "model": model,
+                "engine_ids": ["pysar"], "frames": 2, "pages_done": 2, "done": True}
+
+    runs = [run("a1", "TEST/1/1/1", "2026-10-01"), run("a2", "TEST/1/1/1", "2026-10-05"),
+            run("b1", "TEST/1/1/2", "2026-10-03", model="diak_v10"), run("o1", "", "2026-10-04"),
+            run("o2", "", "2026-10-02"), run("o3", "", "2026-10-01"), run("o4", "", "2026-09-01")]
+    monkeypatch.setattr(htr_store, "list_cases", lambda: runs)
+    d = O.call("runs.list", {"grouped": True, "page_size": 1}).data
+    assert [g["key"] for g in d["groups"]] == ["TEST/1/1/1"] and len(d["groups"][0]["runs"]) == 2
+    assert d["groups_total"] == 2 and d["pages"] == 2 and d["everything"] == 7
+    assert len(d["orphan_groups"]) == 3 and d["orphan_groups_total"] == 4
+    d = O.call("runs.list", {"grouped": True, "page_size": 25, "state": "orphan"}).data
+    assert d["groups_total"] == 4 and all(not g["key"] for g in d["groups"]) and d["orphan_groups"] == []
+    d = O.call("runs.list", {"grouped": True, "q": "diak"}).data
+    assert [g["key"] for g in d["groups"]] == ["TEST/1/1/2"], "пошук іде й по моделі"

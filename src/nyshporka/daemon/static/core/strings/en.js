@@ -1523,6 +1523,7 @@ export default {
     'dash.cases.unfiled': 'new folders: {n}',
     'dash.cases.bundles': 'collections: {n}',
     'view.recent': 'Recently read',
+    'runs.orphan.all': 'All runs without a case — groups: {n}',
     'load.count': 'Counting…',
     'load.card': 'Reading the case card…',
     'load.plan': 'Drawing up the reading plan…',

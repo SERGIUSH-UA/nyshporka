@@ -126,7 +126,7 @@ out.md = BT.mdLite(['Вступ', '', '| Справа | Сторінок |', '|-
   out.viewEmpty = (document.getElementById('view-recent') || {}).innerHTML || ''; out.runsAsked = asked.slice();
   asked.length = 0; await import('./screens/runs.js'); await SCREENS.runs(); await tick(40);
   await ACTIONS['runs.filter'](); await ACTIONS['runs.filter'](); await tick(40);
-  out.runsCalls = asked.length; globalThis.fetch = f0; }
+  out.runsAskedScreen = asked.slice(); globalThis.fetch = f0; }
 const SH = await import('./screens/share.js');
 { const t0 = Date.now(); await SCREENS.give(); out.giveMs = Date.now() - t0; }
 out.card = SH.cardRows({ title: 'Сповідка', years: [1801, 1803], places: ['Городківка', 'Липівка'],
@@ -325,9 +325,10 @@ def test_name_before_an_id_is_not_repeated(hub) -> None:
     assert r.count(">Леонтійович Сидорук</span>") == 2, "і в `[[ID]]` так само"
 
 
-def test_runs_filter_does_not_refetch_and_no_full_lists_for_hints(hub) -> None:
-    """Фільтр і сторінки Прогонів — з уже отриманого; підказки прогону — порцією."""
-    assert hub["runsCalls"] == 1, hub["runsCalls"]
+def test_runs_screen_asks_for_a_page_of_groups_and_hints_in_portions(hub) -> None:
+    """Прогони — сторінка груп із сервера (не 16 тис. рядків); підказки прогону — порцією."""
+    asked = hub["runsAskedScreen"]
+    assert len(asked) == 3 and all(a.get("grouped") and a.get("page_size") for a in asked), asked
     for rel in ("screens/sets.js", "screens/view.js"):
         assert "callOp('runs.list', {})" not in (FRONT_DIR / rel).read_text(encoding="utf-8"), rel
 
@@ -336,4 +337,6 @@ def test_runs_screen_paints_the_last_list_first() -> None:
     """Прогони — 15 тис. рядків; повторне відкриття малює минулий перелік одразу."""
     src = (FRONT_DIR / "screens/runs.js").read_text(encoding="utf-8")
     body = src[src.index("SCREENS.runs = async"):src.index("async function runsLoad(")]
-    assert "staleThenFresh('runs.list', {}" in body
+    assert "await runsLoad(true)" in body
+    load = src[src.index("async function runsLoad("):src.index("async function runsPaint(")]
+    assert "staleThenFresh('runs.list', runsArgs()" in load
