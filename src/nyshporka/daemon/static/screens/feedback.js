@@ -70,7 +70,7 @@ function paintCompose(msg = '') {
 function filesList() {
   const row = (x, i, kind) => `<li>${ic(kind === 'image' ? 'image' : 'page', 'ic-sm')}
       <span class="fb-name">${esc(x.name)}</span> <small class="muted">${esc(kb(x.size))}</small>
-      <button type="button" class="ghost ic-btn" data-act="fb.unattach" data-arg="${kind}:${i}"
+      <button type="button" class="ghost sm" data-act="fb.unattach" data-arg="${kind}:${i}"
         aria-label="${esc(t('fb.remove'))}">${ic('x', 'ic-sm')}</button></li>`;
   return FB.images.map((x, i) => row(x, i, 'image')).join('') + FB.logs.map((x, i) => row(x, i, 'log')).join('');
 }
