@@ -911,7 +911,10 @@ function Invoke-Logged {
 function Resolve-ExtractedPython([string] $Tail, [string] $Dir, [string] $Version) {
     if ($Tail -notmatch 'Failed to create Python minor version link directory|Missing expected target directory for Python minor version link') { return $null }
     if (-not (Test-Path -LiteralPath $Dir -PathType Container)) { return $null }
-    $pat = '^cpython-' + [regex]::Escape($Version) + '\.(\d+)-windows-[^-]+-none$'
+    # Лише x64 ($PyReq): на ARM-ноутбуці 23.10.2026 поруч лишився ARM64 3.12.15
+    # тієї самої версії, і обхід узяв би його знову — а під нього пакети
+    # (cryptography) збираються з сирців.
+    $pat = '^cpython-' + [regex]::Escape($Version) + '\.(\d+)-windows-x86_64-none$'
     $best = Get-ChildItem -LiteralPath $Dir -Directory -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -match $pat -and (Test-Path -LiteralPath (Join-Path $_.FullName 'python.exe')) } |
         Sort-Object { [int]([regex]::Match($_.Name, $pat).Groups[1].Value) } -Descending |

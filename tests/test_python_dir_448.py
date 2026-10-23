@@ -359,6 +359,12 @@ def test_installer_hands_the_extracted_interpreter_to_tool_install() -> None:
     text = _ps1()
     assert "function Resolve-ExtractedPython" in text
     assert "$PyReq = 'cpython-3.12-windows-x86_64-none'" in text
+    # Обхід 448 бере лише x64: ARM64 тієї самої версії лишається в теці після
+    # невдалої спроби (журнал людини 23.10.2026: cpython-3.12.15-windows-aarch64-none).
+    fn = re.search(r"^function Resolve-ExtractedPython.*?^}\r?$", text, re.S | re.M)
+    assert fn, "функція в windows.ps1"
+    pick = fn.group(0).split("Delete")[0]
+    assert r"-windows-x86_64-none$'" in pick and r"-windows-[^-]+-none$'" not in pick
     assert "$env:UV_PYTHON_PREFERENCE = 'only-managed'" in text
     at = text.index("Invoke-Logged $uv python install $PyReq")
     assert text.index("Resolve-ExtractedPython $tail $PythonDir '3.12'", at) > at
