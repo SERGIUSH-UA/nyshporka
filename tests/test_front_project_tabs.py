@@ -28,8 +28,8 @@ const DATA = {
   'canon.check': { loaded: { persons: 2, families: 1, places: 1, sources: 1 }, errors: 1, warnings: 0,
     issues: [{ severity: 'ERROR', code: 'x', where: 'I9001', text: 'мати без джерела' }] },
   'canon.next': { open: 1, awaiting: 0, closed: 0,
-    next: [{ id: 'H9001', claim: 'Іван — син Петра', status: 'open', decides: 'сповідка 1838',
-             weight: 3, facts: [], hits: [], versus: [] }] },
+    next: [{ id: 'H9001', claim: 'Іван — син Петра I9002', status: 'open', decides: 'сповідка 1838',
+             weight: 3, facts: [], hits: [], versus: [] }], refs: { I9002: 'Петро Сидорук' } },
   'canon.cards': { counts: {}, found: 1, rows: [{ id: 'I9001', kind: 'persons', title: 'Іван Сидорук',
     private: false, facts: 1, citations: 1, file: 'data/canonical/persons/I9001.md' }] },
   'canon.card': { id: 'I9001', kind: 'persons', title: 'Іван Сидорук', private: false,
@@ -284,6 +284,7 @@ def test_canon_shows_check_cards_and_decisions(probe) -> None:
     assert "Іван Сидорук" in c and "I9001" in c
     assert "1 помилка" in c and "мати без джерела" in c
     assert 'data-act="canon.hyp" data-arg="H9001"' in c
+    assert 'title="I9002">Петро Сидорук</span>' in c, "ID у «що вирішити» — ім'ям"
 
 
 def test_canon_card_window_has_facts_evidence_and_hypotheses(probe) -> None:

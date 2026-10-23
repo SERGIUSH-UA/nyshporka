@@ -152,7 +152,12 @@ def canon_next(a: NextArgs) -> Envelope:
     from nyshporka.canon.next import next_decisions
 
     root = _root()
-    got = next_decisions(root, a.limit, canon=memo.canon(root))
+    canon = memo.canon(root)
+    got = next_decisions(root, a.limit, canon=canon)
+    # Імена до ID у твердженнях — консоль показує «син I9036» як ім'я, а не
+    # як номер картки (той самий `refs`, що в `canon.hyps`).
+    if canon is not None:
+        got["refs"] = _refs(canon, got.get("next") or [])
     env = ok(got)
     if _no_canon(env):
         pass

@@ -122,7 +122,7 @@ function nextBox(env) {
   const of = total > next.length
     ? `<span class="aside">${esc(t('canon.next.of').replace('{n}', next.length).replace('{m}', total))}</span>` : '';
   return `<div class="bx-head"><h3>${t('canon.next')}</h3>${of}</div>
-    ${next.map((x) => decRow(x)).join('') || `<p class="muted">${t('canon.next.none')}</p>`}`;
+    ${next.map((x) => decRow(x, d.refs || {})).join('') || `<p class="muted">${t('canon.next.none')}</p>`}`;
 }
 
 let LIST_SEQ = 0;

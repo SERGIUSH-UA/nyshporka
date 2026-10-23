@@ -136,12 +136,12 @@ export const HYP_TONE = { open: 'info', awaiting: 'warn', closed: 'ok' };
  * 22.10.2026, варіант C). Дія — `canon.hyp` з екрана Канону: екрани
  * вантажаться всі, тож друга, однакова дія Огляду була б дублем.
  */
-export function decRow(x) {
+export function decRow(x, refs = {}) {
   return `<button class="dec" data-act="canon.hyp" data-arg="${esc(x.id)}">
     <span class="dec-meta"><span class="tag ${HYP_TONE[x.status] || ''}">${esc(x.id)}</span>
-      <span class="dec-why">${esc(unwiki(x.decides || ''))}</span>
+      <span class="dec-why">${named(x.decides || '', refs)}</span>
       <span class="dec-go">${esc(t('canon.open'))} →</span></span>
-    <span class="dec-claim">${esc(unwiki(x.claim))}</span></button>`;
+    <span class="dec-claim">${named(x.claim || '', refs)}</span></button>`;
 }
 
 /**

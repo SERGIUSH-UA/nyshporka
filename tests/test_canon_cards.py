@@ -155,3 +155,11 @@ def test_freshly_edited_canon_is_not_cached(family: Path, monkeypatch) -> None: 
     O.call("canon.cards", {})
     O.call("canon.cards", {})
     assert len(loads) == 2
+
+
+def test_next_names_the_ids_in_claims(family: Path) -> None:  # noqa: F811
+    """«Що вирішити» несе `refs`: консоль показує ім'я, а не «I9004»."""
+    _canon(family)
+    _write(family, "hypotheses", _hyp("H9005", claim="Олекса — син I9004", about=["I9004"]))
+    d = O.call("canon.next", {"limit": 5}).data
+    assert d["refs"].get("I9004") == "Олекса Сидорук"

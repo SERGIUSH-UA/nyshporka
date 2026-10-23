@@ -231,7 +231,7 @@ export async function fillProject(stillHere = () => true) {
       if (!nx.ok) { box.innerHTML = `<p class="muted">${humanError(nx.error)}</p>`; return; }
       const d = nx.data || {};
       const more = (d.open || 0) + (d.awaiting || 0) - (d.next || []).length;
-      box.innerHTML = (d.next || []).length ? (d.next || []).map((x) => decRow(x)).join('')
+      box.innerHTML = (d.next || []).length ? (d.next || []).map((x) => decRow(x, d.refs || {})).join('')
         + (more > 0 ? `<p><button class="ghost ctl-sm" data-act="nav" data-arg="hyp">${
           esc(t('ov.more').replace('{n}', more))}</button></p>` : '')
         : emptyMini('pero', t('canon.next.none'));
