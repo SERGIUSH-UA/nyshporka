@@ -1333,14 +1333,16 @@ details.np-folder > summary { padding: 0; background: none; font-size: .85rem; c
    Кольори лише токенами: макет світлий, але консоль за замовчуванням темна, і
    речі на темному папері стоять стриманіше (`--art-op`, `--tree-op`). */
 /* Власні змінні оформлення — не токени бренду, тож скрізь із запасним значенням. */
-:root { --art-op: .88; --tree-op: .06; --rim: color-mix(in srgb, var(--honey) 38%, var(--line-2)); }
-:root[data-theme="light"] { --art-op: 1; --tree-op: .22; }
+:root { --art-op: .88; --rim: color-mix(in srgb, var(--honey) 38%, var(--line-2)); }
+:root[data-theme="light"] { --art-op: 1; }
 
-/* Тло робочої частини: гравюра дерева в правому верхньому куті, під вмістом. */
-#shell > main { position: relative; isolation: isolate; }
-#shell > main::before { content: ""; position: absolute; top: -.5rem; right: -1.5rem; z-index: -1;
-  width: min(28rem, 42%); aspect-ratio: 676 / 900; pointer-events: none;
-  background: url("/ui/img/art-derevo.webp") no-repeat right top / contain; opacity: var(--tree-op, .06); }
+/* Тло робочої частини — на всю її ширину (`#shell`), а не на стовпці вмісту:
+   на вузьких екранах `main` обмежений 62rem, і фон обрізався разом із ним, а
+   по боках лишалось голе тло (дослідник, 23.10.2026). Темна тема — гравюра
+   дерева праворуч угорі під вуаллю тла; світла — папір із дубом (нижче). */
+#shell { background:
+  linear-gradient(color-mix(in srgb, var(--bg) 94%, transparent), color-mix(in srgb, var(--bg) 94%, transparent)),
+  url("/ui/img/art-derevo.webp") right 1.5rem top .5rem / min(28rem, 34%) auto no-repeat, var(--bg); }
 
 /* Шапка зливається з полотном: лого стоїть над бічним меню його ж тлом, а
    перемикач проєкту — над робочою частиною. */
@@ -1434,7 +1436,6 @@ details.np-folder > summary { padding: 0; background: none; font-size: .85rem; c
   .ov-art { max-width: 34%; height: 68%; }
   .ov-kpi-t { max-width: 64%; }
   .ov-sec-art { max-width: 46%; opacity: calc(var(--art-op, .88) * .7); }
-  #shell > main::before { width: 60%; }
 }
 
 /* ══ Той самий вигляд на всю консоль (дослідник: «Розширюй», 23.10.2026) ══════
@@ -1443,10 +1444,9 @@ details.np-folder > summary { padding: 0; background: none; font-size: .85rem; c
    розділи, таблиці й інструменти — засічкою, з медовою облямівкою, як картки
    Огляду роду. Темна тема — без паперу: на темному він читався б як пляма. */
 /* Легка вуаль над папером: текст, що стоїть просто на сторінці, не сперечається з печатками й листям. */
-:root[data-theme="light"] #shell > main {
+:root[data-theme="light"] #shell {
   background: linear-gradient(color-mix(in srgb, var(--bg) 32%, transparent), color-mix(in srgb, var(--bg) 32%, transparent)) fixed,
-    url("/ui/img/bg-papir.webp") center / cover no-repeat fixed; }
-:root[data-theme="light"] #shell > main::before { display: none; }
+    url("/ui/img/bg-papir.webp") center / cover no-repeat fixed, var(--bg); }
 
 /* ── картина на огляді ── */
 #view .ov-hero { position: relative; isolation: isolate; overflow: hidden; display: flex; align-items: flex-end;
