@@ -1642,15 +1642,26 @@ def verdicts_import(path: str | Path, scope: str, *, q: str = "", agent: str = "
     а без запису наступна сесія передивиться той самий аркуш. Статус аркуша —
     `partial`: вердикт по рядку не є повним переліком прізвищ сторінки.
     """
-    from nyshporka.pagestore import store as PS
-    from nyshporka.pagestore.models import PageNote
-
     try:
         rows = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         return {"error": f"файл вердиктів не читається: {exc}"}
     if not isinstance(rows, list):
         return {"error": "очікувався JSON-масив вердиктів"}
+    return verdicts_apply(rows, scope, q=q, agent=agent)
+
+
+#: Звідки вердикт про прізвище приймається: кнопка гортача й кнопка Розбору
+#: в консолі — тобто рука людини.
+HUMAN_SOURCES = ("sheet", "console")
+
+
+def verdicts_apply(rows: list[Any], scope: str, *, q: str = "",
+                   agent: str = "text.verdicts") -> dict[str, Any]:
+    """Ядро `verdicts_import`: вердикти рядків — у сховище сторінок і журнал."""
+    from nyshporka.pagestore import store as PS
+    from nyshporka.pagestore.models import PageNote
+
     sc = scope_runs(scope)
     key = str(sc.get("key") or "")
     if not key:
@@ -1676,7 +1687,8 @@ def verdicts_import(path: str | Path, scope: str, *, q: str = "", agent: str = "
         # приймається лише з гортача, тобто від людини (`source: sheet`, який
         # ставить кнопка). Агент, зібравши JSON руками, може закрити хіба
         # «не прізвище» й «не читається» — те, що йому й дозволено.
-        if v in ("hit", "known", "other-surname") and str(r.get("source") or "") != "sheet":
+        if (v in ("hit", "known", "other-surname")
+                and str(r.get("source") or "") not in HUMAN_SOURCES):
             bad.append(f"{r.get('run')}|{page}|{r.get('line_no')}: «{VERDICT_LABEL[v]}» "
                        f"без походження з гортача — вердикт про прізвище виносить людина")
             continue

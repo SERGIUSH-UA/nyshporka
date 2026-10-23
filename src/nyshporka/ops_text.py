@@ -12,7 +12,7 @@ index`), а сам пошук прізвища йде через `search.run`, �
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -504,6 +504,43 @@ def _index_case(case: str) -> bool:
     for _ in ST.ensure_all(runs, optimize=False):
         pass
     return True
+
+
+class TextVerdictArgs(BaseModel):
+    case: str = Field(description="справа, шифра або прогін")
+    run: str = Field(description="прогін, у якому знайдено рядок")
+    page: str = Field(description="скан")
+    line_no: int = Field(ge=1, description="номер рядка, з 1")
+    verdict: Literal["other-surname", "noise", "unreadable"] = Field(
+        description="інше прізвище · не прізвище · не читається")
+    q: str = Field(default="", description="що шукали")
+    note: str = Field(default="")
+    source: str = Field(default="", description="`console` ставить кнопка Розбору")
+
+
+# 🔴 Розбір кандидатів умів лише «Наш → у канон»: відкинути кандидата людина не
+# могла, і сотня знахідок гортались без сліду (прохід новачка 23.10.2026).
+# Вердикт про прізвище — лише з кнопки людини (`source: console`), як і з
+# гортача (`source: sheet`): агент закриває хіба «не прізвище» й «не читається».
+@op("text.verdict", summary="Вердикт людини на одного кандидата Розбору",
+    args=TextVerdictArgs, mutates=True, section=SECTION, scope="project",
+    skill="find-surname", when="відкинути кандидата: інше прізвище, не прізвище, не читається")
+def text_verdict(a: TextVerdictArgs) -> Envelope:
+    from nyshporka.search import textops as T
+
+    res = T.verdicts_apply([{"run": a.run, "page": a.page, "line_no": a.line_no,
+                             "verdict": a.verdict, "note": a.note, "source": a.source}],
+                           a.case, q=a.q, agent="console" if a.source == "console" else "op")
+    if res.get("error"):
+        env = fail(str(res["error"]))
+        for b in res.get("bad") or []:
+            env.warn("bad_row", str(b))
+        return env
+    from nyshporka.core import vcs as V
+
+    env = ok(res)
+    V.autosave_env(env, f"Вердикт Розбору: {res.get('shifra') or a.case}")
+    return env
 
 
 class TextVoicesArgs(BaseModel):

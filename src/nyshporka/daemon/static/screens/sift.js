@@ -71,7 +71,7 @@ function siftDraw() {
         ST.sift.i + 1 < ST.sift.hits.length ? '' : ' disabled'}>${t('sift.next')}</button>
     </div>
     <div class="warn empty-mini">${mini('syto', 48)}<div>${t('sift.rule')}</div></div>
-    <p class="mono">${esc(h.name || '')} · ${t('common.page')} ${esc(h.page || '')}
+    <p class="mono">${esc(h.shifra || h.case_key || h.name || '')} · ${t('common.page')} ${esc(h.page || '')}
        · ${badge} · ${t('sift.score')} ${esc(h.score || '')}</p>
     <div id="sift-crop"><p class="muted">${t('sift.crop.load')}…</p></div>
     <p class="mono">${lit}</p>
@@ -83,6 +83,11 @@ function siftDraw() {
       <button data-act="sift.view">${ic('eye', 'ic-sm')} ${t('sift.view')}</button>
       <button data-act="sift.note">${ic('pencil-line', 'ic-sm')} ${t('sift.note')}</button>
       <button data-act="sift.canon" title="${esc(t('sift.canon.why'))}">${t('sift.canon')}</button>
+    </div>
+    <div class="row" id="sift-verdict">
+      ${['other-surname', 'noise', 'unreadable'].map((v) => `<button class="ghost"
+        data-act="sift.verdict" data-arg="${v}">${t(`sift.v.${v}`)}</button>`).join('')}
+      ${h.verdict ? `<span class="muted">${esc(t('sift.v.done').replace('{v}', t(`sift.v.${h.verdict}`)))}</span>` : ''}
     </div>
     <p class="dim">${t('sift.keys')}</p>`);
 }
@@ -198,6 +203,29 @@ Object.assign(ACTIONS, {
       line: Number.isInteger(h.line_index) ? h.line_index + 1 : '', text: h.line || '' });
   },
 
+  /**
+   * ✋ Відкинути кандидата — вердикт людини в облік сторінок, і далі.
+   *
+   * 🔴 Доти Розбір умів лише «Наш → у канон», і сотня знахідок гортались без
+   * сліду: наступна сесія розбирала б їх наново (прохід новачка 23.10.2026).
+   */
+  'sift.verdict': async (_ev, elm) => {
+    const h = ST.sift.hits[ST.sift.i] || {};
+    if (!h.name || !Number.isInteger(h.line_index)) return undefined;
+    const v = elm.dataset.arg;
+    const env = await callOp('text.verdict', { case: h.case_key || h.shifra || h.name,
+      run: h.name, page: h.page, line_no: h.line_index + 1, verdict: v,
+      q: ST.sift.q || '', source: 'console' });
+    if (!env.ok) { boxError('sift-verdict', env); return undefined; }
+    h.verdict = v;
+    if (ST.sift.i + 1 < ST.sift.hits.length) {
+      ST.sift.i += 1;
+      siftDraw();
+      await siftLoadCrop();
+    } else siftDraw();
+    return undefined;
+  },
+
   /** В облік — зі справою й сканом уже підставленими. */
   'sift.note': () => {
     const h = ST.sift.hits[ST.sift.i] || {};
@@ -221,5 +249,6 @@ Object.assign(KEYS, {
     e: () => ACTIONS['sift.view'](),
     f: () => ACTIONS['sift.full'](),
     n: () => ACTIONS['sift.note'](),
+    x: () => ACTIONS['sift.verdict'](null, { dataset: { arg: 'noise' } }),
   },
 });

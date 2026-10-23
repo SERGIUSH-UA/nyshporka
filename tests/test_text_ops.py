@@ -1340,3 +1340,24 @@ def test_crop_without_a_text_store_indexes_just_that_case(space: Path) -> None:
                                "out": str(space / "c.png")})
     assert env.ok, env.error
     assert ST.exists()
+
+
+def test_one_candidate_is_rejected_from_the_console(case_space: Path) -> None:
+    """🔴 Розбір умів лише «Наш → у канон»: відкинути кандидата було нічим.
+
+    `text.verdict` кладе один вердикт у сховище сторінок; «інше прізвище» —
+    вердикт про прізвище, тож лише з кнопки людини (`source: console`).
+    """
+    from nyshporka import ops as O
+    from nyshporka.pagestore import store as PS
+
+    agent = O.call("text.verdict", {"case": "проба", "run": "проба", "page": "0004.jpg",
+                                    "line_no": 1, "verdict": "other-surname"})
+    assert not agent.ok, "вердикт про прізвище без кнопки людини прийнято"
+    env = O.call("text.verdict", {"case": "проба", "run": "проба", "page": "0004.jpg",
+                                  "line_no": 3, "verdict": "noise", "q": "Коваль",
+                                  "source": "console"})
+    assert env.ok, env.error
+    assert env.data["by_verdict"] == {"noise": 1}
+    page = PS.load_case(PS.resolve_case(env.data["case_key"])).pages["0004.jpg"]
+    assert "не прізвище" in page.comment and page.status == "partial"
