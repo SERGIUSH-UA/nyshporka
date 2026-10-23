@@ -159,12 +159,18 @@ export function decRow(x, refs = {}) {
  * Рушії мають імена (Писар, Дяк, Скриба), і в консолі ними вже названо блок
  * «Рушії»; файл ваг поруч із ними на тому самому екрані змішував мови. Файл
  * невідомого рушія лишається іменем без розширення.
+ *
+ * Спеціалісти — теж іменами: Логофет (румунська кирилиця), Регент (XVI–XVII
+ * ст.), Писар XVIII (`pysar_x18_*`, тому перевіряється раніше за Писаря).
+ * Рішення дослідника 23.10.2026: імена спеціалістів показувати в консолі.
  */
 export function modelName(file) {
-  const names = { pysar: 'read.engine.pysar', diak: 'read.engine.diak', skryba: 'read.engine.skryba' };
+  const names = { pysar: 'read.engine.pysar', diak: 'read.engine.diak', skryba: 'read.engine.skryba',
+    pysar_x18: 'read.engine.pysar18', logofet: 'read.engine.logofet', regent: 'read.engine.regent' };
   return String(file || '').split('+').map((part) => {
     const base = part.trim().split(/[\\/]/).pop().replace(/\.(pt|mlmodel|safetensors|ckpt)$/i, '');
-    const eng = base.split('_')[0].toLowerCase();
+    const low = base.toLowerCase();
+    const eng = low.startsWith('pysar_x18') ? 'pysar_x18' : low.split('_')[0];
     const ver = (base.match(/_v(\d+)$/i) || [])[1];
     // Невідома модель — назва файлу без підкреслень («logofet ro · v9»), а не
     // сире ім'я з розширенням.

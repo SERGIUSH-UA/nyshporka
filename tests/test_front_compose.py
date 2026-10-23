@@ -118,6 +118,7 @@ out.namedTwice = BT.named('[[I9001]] — це I9001', refs);
 out.namedRest = BT.named('дочка Никити I9036, а свідок I9001, син Никити [[I9036]]', { I9036: 'Никита Леонтійович Сидорук', I9001: 'Іван Сидорук' });
 out.day = [BT.fmtDay('2026-07-23T00:00:00Z'), BT.fmtDay('1993-08-28'), BT.fmtDay('1850')];
 out.forms = BT.fieldValue('name_variants', [{ form: 'Городківка' }, { form: 'Городковка' }]);
+out.models = ['logofet_ro_v9.safetensors', 'regent_v2.safetensors', 'pysar_x18_v1.pt', 'pysar_cyr_v28.pt+diak_v10.mlmodel', 'other_thing_v3.pt'].map((m) => BT.modelName(m));
 out.md = BT.mdLite(['Вступ', '', '| Справа | Сторінок |', '|---|---|', '| [[I9001]] | 12 |', '',
   'Кінець'].join(String.fromCharCode(10)), refs);
 { const asked = []; const f0 = globalThis.fetch;
@@ -347,3 +348,8 @@ def test_runs_screen_does_not_wait_for_the_case_list() -> None:
     src = (FRONT_DIR / "screens/runs.js").read_text(encoding="utf-8")
     paint = src[src.index("async function runsPaint("):src.index("function bindOptions(")]
     assert "await callOp('library.list'" not in paint and "bindCasesLater(live)" in paint
+
+
+def test_specialists_are_named_in_the_console(hub) -> None:
+    """Спеціалісти — іменами (рішення дослідника 23.10.2026); Писар XVIII — не просто «Писар»."""
+    assert hub["models"] == ["Логофет v9", "Регент v2", "Писар XVIII v1", "Писар v28 + Дяк v10", "other thing · v3"]
