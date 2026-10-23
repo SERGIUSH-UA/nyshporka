@@ -1,5 +1,6 @@
 /** 🗺 Газетир. */
 
+import { fmtDay } from '../core/bits.js';
 import { t, LANG } from '../core/strings.js';
 import { TOKEN, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
@@ -58,13 +59,28 @@ SCREENS.geog = async () => {
     </form>
     <div id="churchhits"></div>
     <h3>${t('catalog.title')}</h3>
-    <table><tbody>${ok.map((x) => `<tr>
-      <td>${x.archive_label ? `<b>${esc(x.archive_label)}</b> ` : ''}<span class="mono muted">${esc(x.pack_id)}</span></td>
-      <td>${x.taken ? `зріз ${esc(x.taken)}` : ''}</td>
+    <table class="tbl-cards"><tbody>${ok.map((x) => `<tr>
+      <td title="${esc(x.pack_id)}"><b>${esc(packName(x))}</b></td>
+      <td class="nowrap">${x.taken ? `${t('catalog.taken')} ${esc(fmtDay(x.taken))}` : ''}</td>
       <td class="muted">${esc(x.note || '')}</td>
     </tr>`).join('')}</tbody></table>
     ${renderWarnings(packs)}`);
 };
+
+/**
+ * Людська назва довідника: архів і що це (опис фонду, газетир, церкви…), а не
+ * id пакета `opys-cdiak-f224` — той лишається в підказці.
+ */
+function packName(x) {
+  const id = String(x.pack_id || '');
+  const fond = (id.match(/-f(\d+)/) || [])[1];
+  const kind = id.startsWith('opys-') ? t('catalog.kind.opys') + (fond ? ` ф.${fond}` : '')
+    : id.startsWith('geog-') ? t('catalog.kind.geog')
+      : id.startsWith('churches-') ? t('catalog.kind.churches')
+        : id.startsWith('places-') ? t('catalog.kind.places')
+          : id.startsWith('courtbooks-') ? t('catalog.kind.courts') : '';
+  return [x.archive_label, kind].filter(Boolean).join(' · ') || id;
+}
 
 /** 🗺 Поселення газетира, зшиті з церквою: назва, повіт, справ, оцінка. */
 function renderPlaces(places) {

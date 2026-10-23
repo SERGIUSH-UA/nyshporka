@@ -26,6 +26,7 @@
 """
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -61,6 +62,15 @@ CONFS = ("high", "med", "low")
 #: `line_007.png`, `line_0123.png` — ширина індексу не фіксується: нарізка
 #: різних років писала по-різному, а індекс один і той самий.
 _CROP_RE = re.compile(r"^line_(\d+)\.png$")
+@functools.lru_cache(maxsize=8192)
+def _resolved(path: str) -> Path:
+    """`Path.resolve()` раз на шлях: на Windows це системний виклик, і екран
+    «Набори» платив за нього 1708 разів на відкриття (0,9 с, 23.10.2026)."""
+    return Path(path).resolve()
+
+
+#: Лічба кропів за текою сторінки: корінь → {сторінка: (mtime_ns теки, кропів)}.
+_CROP_MEMO: dict[str, dict[str, tuple[int, int]]] = {}
 
 _LOCK = threading.Lock()
 
@@ -213,8 +223,8 @@ class Registry:
 
     def crops_of(self, spec: SetSpec) -> Path:
         if spec.crops:
-            return (self.set_dir(spec.name) / spec.crops).resolve()
-        return (self.crops_dir / spec.name).resolve()
+            return _resolved(str(self.set_dir(spec.name) / spec.crops))
+        return _resolved(str(self.crops_dir / spec.name))
 
     def draft_dir(self, spec: SetSpec, draft: Draft) -> Path | None:
         """Тека, з якої читати текст голосу. `None` — голос живе у прогоні."""
@@ -298,15 +308,29 @@ class Registry:
             return {}
         # `os.scandir`, а не `Path.iterdir`: на 824 наборах це 210 тис. імен, і
         # об'єкт шляху на кожне коштував екрану «Набори» секунди (22.10.2026).
+        #
+        # Лічба теки сторінки — за її mtime: кроп додали чи прибрали — mtime
+        # теки змінився, і лише її перелічуємо наново. Доти кожне відкриття
+        # Наборів перелічувало всі 207 тис. кропів (1–1,6 с, замір 23.10.2026).
         out: dict[str, int] = {}
+        memo = _CROP_MEMO.setdefault(str(root), {})
+        seen: set[str] = set()
         with os.scandir(root) as it:
-            pages = sorted((e.name, e.path) for e in it
+            pages = sorted((e.name, e.path, e.stat().st_mtime_ns) for e in it
                            if not e.name.startswith("_") and e.is_dir())
-        for name, path in pages:
-            with os.scandir(path) as files:
-                n = sum(1 for f in files if _CROP_RE.match(f.name))
+        for name, path, mtime in pages:
+            seen.add(name)
+            hit = memo.get(name)
+            if hit is not None and hit[0] == mtime:
+                n = hit[1]
+            else:
+                with os.scandir(path) as files:
+                    n = sum(1 for f in files if _CROP_RE.match(f.name))
+                memo[name] = (mtime, n)
             if n:
                 out[name] = n
+        for gone in set(memo) - seen:
+            memo.pop(gone, None)
         return out
 
     def crop_path(self, spec: SetSpec, page: str, idx: int) -> Path | None:

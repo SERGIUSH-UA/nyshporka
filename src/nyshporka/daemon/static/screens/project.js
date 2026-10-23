@@ -7,7 +7,7 @@ import { esc, el, setView, boxError, busyForm, fld, humanError, mini } from '../
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { goto, jobDone, jobChip, currentScreen, SECTIONS } from '../core/nav.js';
 import { openModal, closeModal } from '../core/modal.js';
-import { decRow, noEmoji } from '../core/bits.js';
+import { decRow, noEmoji, fmtDay } from '../core/bits.js';
 import { projectBadge as badge, projectColor, projectsNow, currentPid } from '../core/projects.js';
 
 /**
@@ -193,11 +193,11 @@ export async function fillProject(stillHere = () => true) {
       if (!stillHere() || !box) return;
       const rows = (hl.ok && (hl.data || {}).rows) || [];
       const last = rows[0];
-      setKpi('ov-k-hist', last ? `<b>${esc(last.date)}</b>` : '—',
+      setKpi('ov-k-hist', last ? `<b>${esc(fmtDay(last.date))}</b>` : '—',
         esc(last ? `${t('ov.hist.last')}: ${last.subject}` : (hl.ok ? t('hist.empty') : t('ov.hist.none'))));
       const reps = ((rl.ok && (rl.data || {}).rows) || []).slice(0, 3);
       const items = [
-        ...rows.map((r) => `<div class="ov-feed"><span class="muted mono">${esc(r.date)}</span><span>${
+        ...rows.map((r) => `<div class="ov-feed"><span class="muted">${esc(fmtDay(r.date))}</span><span>${
           esc(r.subject)}</span></div>`),
         ...reps.map((r) => `<button class="ov-feed ov-link" data-act="rs.read" data-arg="${esc(r.path)}">
           <span class="muted">${ic('note', 'ic-o ic-sm')}</span><span>${esc(noEmoji(r.title))}</span></button>`)];

@@ -195,12 +195,18 @@ function srcCount(d) {
     .replace('{all}', d.shown ?? 0));
 }
 
+/** Людські назви джерел за їхнім id — для видачі й фондів, де приходить лише id. */
+const SRC_LABEL = {};
+const srcName = (id) => SRC_LABEL[id] || id;
+
 function srcTable(rows) {
+  rows.forEach((s) => { if (s.id) SRC_LABEL[s.id] = s.label || s.id; });
+  // Службовий id джерела (`archium`, `fsfilm`) людині нічого не каже — лише в
+  // підказці, для того, хто пише агентові чи в командний рядок.
   return `<table class="tbl-cards"><tbody>${rows.map((s) => {
     const c = s.catalog || {};
     return `<tr>
-      <td><b>${esc(s.label)}</b><br>
-        <span class="muted mono">${esc(s.id)}</span></td>
+      <td><b title="${esc(s.id)}">${esc(s.label)}</b></td>
       <td>${srcCaps(s.caps || [])}</td>
       <td>${srcBasis(c)}</td>
       <td class="acts">${(s.caps || []).includes('browse')
@@ -253,7 +259,14 @@ function srcBasis(c) {
       <br><span class="warn-inline">${t('sources.partial')}</span>`;
   }
   if (c.rows) bits.push(`${esc(c.rows)} ${t('sources.rows')}`);
-  if (c.scope) bits.push(esc(c.scope));
+  // Охоплення буває переліком із десятків ідентифікаторів регіонів — тоді
+  // кількість, а сам перелік під згорткою.
+  if (c.scope) {
+    const parts = String(c.scope).split(/,\s*/);
+    bits.push(parts.length > 6
+      ? `<details class="hist-files"><summary>${esc(t('sources.scope.n').replace('{n}', parts.length))}</summary>${esc(c.scope)}</details>`
+      : esc(c.scope));
+  }
   return `<span class="muted">${bits.join(' · ')}</span>`;
 }
 
@@ -349,7 +362,7 @@ function fondsBlock(fonds) {
         <span class="muted">${esc(f.sample || '')}</span></td>
       <td class="num">${esc(f.hits)} ${t('sources.fond.hits')}</td>
       <td class="mono">${f.year_from ? `${esc(f.year_from)}–${esc(f.year_to)}` : ''}</td>
-      <td class="mono muted">${esc((f.sources || []).join(', '))}</td>
+      <td class="muted">${esc((f.sources || []).map(srcName).join(', '))}</td>
       <td><button data-act="sources.fond" data-repo="${esc(f.repo || f.archive || '')}"
         data-fond="${esc(f.fond)}"
         title="${esc(t('sources.fond.why'))}">${t('sources.fond')}</button></td>
@@ -397,7 +410,7 @@ function renderFind(env) {
     ${fondsBlock(fonds)}
     <div id="fondcard"></div>
     <table><tbody>${hits.map((h) => `<tr>
-      <td class="mono">${esc(h.source)}</td>
+      <td>${esc(srcName(h.source))}</td>
       <td>${esc(h.title)}<br><span class="muted">${esc(h.shifra || '')} ${esc(h.years || '')}
         ${esc(h.note || '')}</span>${hitCrop(h)}</td>
       <td class="num">${h.frames ? `${h.frames} ${t('common.frames')}` : ''}</td>

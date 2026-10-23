@@ -1191,3 +1191,5 @@ details.hist-files { border: 0; background: none; margin: .15rem 0 0; overflow: 
 details.hist-files > summary { padding: 0; background: none; font-size: .8rem; font-weight: 400;
   color: var(--fg-3); border: 0; }
 details.hist-files > summary:hover { color: var(--fg); }
+
+.nowrap { white-space: nowrap; }

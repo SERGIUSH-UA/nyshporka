@@ -419,7 +419,8 @@ def test_project_overview_kpis_and_feed(probe) -> None:
     assert "1" in k["hyp"][0]
     # Матеріал: «не прошукано з N прочитаних», а не голий нуль.
     assert "3" in k["mat"][0] and "прочитаних" in k["mat"][1]
-    assert "2026-10-20" in k["hist"][0]
+    # Дата — у форматі всієї консолі (дд.мм.рррр), не ISO з журналу.
+    assert "20.10.2026" in k["hist"][0]
     assert "Іван — син Петра" in probe["decide"]
     assert "Канон перевірено" in probe["feed"] and "Двори роду" in probe["feed"]
     sent = [json.loads(b) for b in probe["headCases"]]

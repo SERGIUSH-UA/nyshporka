@@ -15,7 +15,7 @@ import { esc, el, setView, busy, failure, boxError, curGen, alive, emptyMini } f
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { openModal, confirmAct, modalSeq } from '../core/modal.js';
 import { ST } from '../core/state.js';
-import { pill, toast, fieldLabel, fieldValue, noEmoji } from '../core/bits.js';
+import { pill, toast, fieldLabel, fieldValue, noEmoji, fmtDay } from '../core/bits.js';
 
 /** Файл, журнал якого показано (з картки канону), — або весь проєкт. */
 let PATH = '';
@@ -86,7 +86,7 @@ async function drawLog() {
     const files = r.files || (PATH ? [PATH] : []);
     return `<div class="lrow">
       <div><b>${esc(noEmoji(r.subject))}</b>
-        <small class="muted" title="${esc(r.rev)}">${esc(r.date)}${files.length ? ` · ${areasLine(files, r.more)}` : ''}</small>
+        <small class="muted" title="${esc(r.rev)}">${esc(fmtDay(r.date))}${files.length ? ` · ${areasLine(files, r.more)}` : ''}</small>
         ${files.length ? `<details class="hist-files"><summary>${t('hist.files')}</summary>
           <small class="muted mono">${esc(files.join(', '))}</small></details>` : ''}</div>
       ${files.length ? `<button data-act="hist.diff" data-arg="${i}">${t('hist.diff')}</button>` : ''}</div>`;
@@ -99,7 +99,7 @@ async function openDiff(i, file = '') {
   if (!r) return;
   const files = r.files || (PATH ? [PATH] : []);
   const path = file || files[0];
-  openModal({ title: `${r.rev} · ${r.date}`, body: `<p class="muted">${t('load.diff')}</p>` });
+  openModal({ title: fmtDay(r.date), body: `<p class="muted">${t('load.diff')}</p>` });
   const seq = modalSeq();
   const env = await callOp('history.diff', { path, rev: r.rev });
   if (seq !== modalSeq()) return;
