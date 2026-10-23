@@ -317,15 +317,19 @@ export async function fillProject(stillHere = () => true) {
  * людина не знала, з чого почати (дослідник, 23.10.2026). План стоїть, доки
  * хоч один крок не зроблено, і зникає, коли зроблено всі. Перший незроблений —
  * головною кнопкою: решта не забороняється, але порядок видно.
+ * Рід, у каноні якого вже є особи, план не бачить: це давній проєкт, і «з чого
+ * почати» над сотнями карток — шум.
  */
 async function fillPlan(stillHere = () => true) {
-  const [pr, any, read, here] = await Promise.all([
+  const [st, pr, any, read, here] = await Promise.all([
+    callOp('project.status', {}),
     callOp('profile.show', {}),
     callOp('cases.list', { limit: 1 }),
     callOp('cases.list', { htr: 'read', limit: 1 }),
     callOp('cases.list', { searched: 'here', limit: 1 })]);
   const box = el('ov-plan');
   if (!stillHere() || !box) return;
+  if (st.ok && Number((st.data || {}).persons || 0) > 0) { box.hidden = true; return; }
   const total = (e) => (e.ok ? Number((e.data || {}).total || 0) : 0);
   const p = pr.ok ? (pr.data || {}) : {};
   const all = [

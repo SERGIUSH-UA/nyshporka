@@ -594,6 +594,32 @@ def _untracked(hub: Path, root: Path) -> list[str]:
     return [x[3:] for x in out.split("\0") if x.startswith("?? ")]
 
 
+def _stage_made(hub: Path, home: Path, created: list[str]) -> list[str]:
+    """Додати в індекс файли, які переїзд створив сам: інструкції й налаштування агентів.
+
+    Без цього вони стояли в `git status` невідстеженими, і переїзд закінчувався
+    попередженням «у теці проєкту невідстежених файлів: 8 (.claude/settings.json,
+    .codex/…)» — шум рівно в мить, коли людина перевіряє, чи все гаразд
+    (проба 23.10.2026). Ігноровані шаблонами `.gitignore` не додаються.
+    """
+    mine = set()
+    for x in created:
+        p = Path(x)
+        if p.is_file() and p.resolve().is_relative_to(hub.resolve()):
+            mine.add(p.resolve().relative_to(hub.resolve()).as_posix())
+    if not mine:
+        return []
+    loose = _git(hub, "ls-files", "--others", "--exclude-standard", "-z").split("\0")
+    add = sorted(x for x in loose if x in mine)
+    if add:
+        lst = home / "pathspec.txt"
+        lst.write_bytes("\0".join(add).encode("utf-8"))
+        _git(hub, "--literal-pathspecs", "add", "-f", f"--pathspec-from-file={lst}",
+             "--pathspec-file-nul")
+        lst.unlink()
+    return add
+
+
 IGNORE_HEAD = ("# Перенесено з .gitignore Майстерні (`nysh project adopt`): шаблон зі «/»\n"
                "# git прив'язує до теки свого .gitignore, тож у проєкті він мусить бути тут.\n")
 
@@ -807,6 +833,7 @@ def apply(hub: Path, pid: str, *, archive: Path | None = None, title: str = "",
             if ignores and (root / ".gitignore").is_file():
                 journal.setdefault("created", []).append(str(root / ".gitignore"))
             step("ignores", ignores=ignores)
+            step("staged", staged=_stage_made(hub, home, list(journal.get("created") or [])))
         step("moved", untracked=_untracked(hub, root) if repo else [])
         step("cited_by", cited_by=_rewrite_cited_by(hub, pid))
         step("memory", memory=_copy_memory(hub, root))
@@ -868,6 +895,12 @@ def rollback(hub: Path, stamp: str | None = None) -> dict[str, Any]:
     if journal.get("repo") and moved and (home / TRACKED_LIST).is_file():
         files = [x for x in (home / TRACKED_LIST).read_text(encoding="utf-8").split("\0") if x]
         _restage(hub, home, files, root.relative_to(hub).as_posix(), "")
+    if journal.get("repo") and journal.get("staged"):
+        lst = home / "pathspec.txt"
+        lst.write_bytes("\0".join(journal["staged"]).encode("utf-8"))
+        _git(hub, "--literal-pathspecs", "rm", "-q", "--cached", "--ignore-unmatch",
+             f"--pathspec-from-file={lst}", "--pathspec-file-nul")
+        lst.unlink()
     if "split" in steps and journal.get("split_stamp"):
         with W.using(W._build(hub, "explicit")):
             SV.rollback(journal["split_stamp"], force=True)

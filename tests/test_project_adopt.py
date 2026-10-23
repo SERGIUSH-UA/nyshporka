@@ -526,7 +526,9 @@ def test_carried_ignores_keep_their_exceptions_and_spare_the_template(legacy: Pa
     assert "reports/htr/scratch/" not in gi, "htr лишається в Майстерні"
     assert _git(legacy, "check-ignore", "-q", "projects/rid/reports/research/a.png") == ""
     status = _git(legacy, "status", "--porcelain", "--untracked-files=all", "--", "projects/rid")
-    assert "projects/rid/.claude/settings.json" in status
+    # Налаштування агентів, створені переїздом, — у індексі, а не «невідстежені».
+    assert "A  projects/rid/.claude/settings.json" in status
+    assert "?? projects/rid/.claude/settings.json" not in status
 
 
 def test_workspace_without_git_moves_and_rolls_back(legacy: Path, tmp_path: Path) -> None:

@@ -190,6 +190,22 @@ def pytest_unconfigure(config: pytest.Config) -> None:
     stack = getattr(config, "_nysh_pack_lock", None)
     if stack is not None:
         stack.close()
+    _drop_boot()
+
+
+def _drop_boot() -> None:
+    """Тека збирання — на один прогін, і після нього її не лишається.
+
+    🔴 Доти кожен прогін лишав свою: за два місяці в TEMP — 14 тис. тек, а шість
+    прогонів 23.10.2026, де тест поставив у неї рушії, заповнили диск до нуля
+    (4,4 ГБ кожна). Середовище рушіїв у ній — вада тесту, і прогін про неї каже.
+    """
+    import shutil
+
+    if (_BOOT / ".venv_htr").exists():
+        sys.stderr.write(f"\n⚠ тест поставив рушії в теку збирання {_BOOT} — у тесті "
+                         "установка мусить бути підмінена (htr.env.setup)\n")
+    shutil.rmtree(_BOOT, ignore_errors=True)
 
 
 #: Скільки чекати чужий пак, перш ніж здатися (секунд); `NYSH_PACK_WAIT` перебиває.

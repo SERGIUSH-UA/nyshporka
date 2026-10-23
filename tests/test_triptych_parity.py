@@ -219,14 +219,30 @@ def test_ops_that_need_the_queue_name_the_path_without_it():
 
 
 # ── конверт ──────────────────────────────────────────────────────────────────
-def test_every_answer_is_wrapped_the_same_way():
+def test_every_answer_is_wrapped_the_same_way(monkeypatch: pytest.MonkeyPatch):
     """🔴 Операція завжди повертає конверт — навіть коли всередині впало.
 
     Знайдено цим тестом: операція чесно ловила свою помилку, але з-під неї
     пролітала помилка робочого простору, і виклик падав винятком замість
     «ok: false». Для агента це різниця між «прочитав причину й виправився» і
     «tool failed» без пояснення.
+
+    🔴 Мережу й установки тут підмінено відмовою. Операції без аргументів
+    кличуться по-справжньому, і `htr.install` ставив torch (4,4 ГБ) у теку
+    збирання на кожному прогоні паку, а `models.get` качав ваги — шість
+    прогонів 23.10.2026 заповнили диск до нуля.
     """
+    from nyshporka.htr import env as E
+    from nyshporka.setup import packs
+
+    def no_install(*a, **k):
+        raise E.ToolMissing("у тесті рушії не ставляться")
+
+    def no_fetch(*a, **k):
+        raise RuntimeError("у тесті ваги не качаються")
+
+    monkeypatch.setattr(E, "setup", no_install)
+    monkeypatch.setattr(packs, "fetch", no_fetch)
     for op in O.all_ops():
         env = O.call(op.name, {})          # не має кинути жодна
         d = env.as_dict()
