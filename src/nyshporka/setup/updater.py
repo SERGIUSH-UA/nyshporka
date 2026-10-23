@@ -35,7 +35,7 @@ def _wait_gone(pid: int, timeout: float = 60.0) -> bool:
         if not h:
             return True
         try:
-            return ctypes.windll.kernel32.WaitForSingleObject(h, int(timeout * 1000)) == 0
+            return bool(ctypes.windll.kernel32.WaitForSingleObject(h, int(timeout * 1000)) == 0)
         finally:
             ctypes.windll.kernel32.CloseHandle(h)
     end = time.time() + timeout

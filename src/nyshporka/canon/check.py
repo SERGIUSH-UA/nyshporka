@@ -399,8 +399,10 @@ def _chronology(c: Canon, r: Report) -> None:
         my = min(married) if married else None
         if my:
             for role, who in (("husband", f.husband), ("wife", f.wife)):
-                by = births.get(who) if who else None
-                dy = deaths.get(who) if who else None
+                if not who:
+                    continue
+                by = births.get(who)
+                dy = deaths.get(who)
                 if by and my < by:
                     r.add("ERROR", "chronology", fid,
                           f"шлюб {my} раніше за народження {role} {who} ({by})",
@@ -421,8 +423,10 @@ def _chronology(c: Canon, r: Report) -> None:
                 continue
             for role, who, top in (("батько", f.husband, MAX_FATHER_AGE),
                                    ("мати", f.wife, MAX_MOTHER_AGE)):
-                by = births.get(who) if who else None
-                dy = deaths.get(who) if who else None
+                if not who:
+                    continue
+                by = births.get(who)
+                dy = deaths.get(who)
                 if by:
                     age = cy - by
                     # Дитина в реченні — іменем у називному: ID підміняє консоль.
