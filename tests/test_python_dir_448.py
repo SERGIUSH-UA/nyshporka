@@ -46,7 +46,7 @@ def test_installer_sets_the_folder_before_the_first_python_install() -> None:
     assert "[string]$PythonDir" in text
     assert "if (-not $PythonDir) { $PythonDir = Join-Path $Home_ 'python' }" in text
     set_at = text.index("$env:UV_PYTHON_INSTALL_DIR = $PythonDir")
-    assert set_at < text.index("Invoke-Logged $uv python install 3.12")
+    assert set_at < text.index("Invoke-Logged $uv python install $PyReq")
     assert set_at < text.index("Invoke-Logged $uv tool install"), \
         "і `uv tool install`, і `nysh htr install` далі успадковують змінну процесу"
     assert "SetEnvironmentVariable('UV_PYTHON" not in text, \
@@ -295,7 +295,28 @@ def test_ensure_python_falls_back_to_the_extracted_interpreter(monkeypatch, tmp_
 
 def test_ensure_python_keeps_the_version_when_uv_succeeds(monkeypatch, tmp_path) -> None:
     _fake_uv(monkeypatch, 0, "")
+    monkeypatch.setattr(U.sys, "platform", "linux")
     assert U.ensure_python("uv", "3.11", {"UV_PYTHON_INSTALL_DIR": str(tmp_path)}) == "3.11"
+
+
+def test_windows_asks_uv_for_x64_cpython_only(monkeypatch, tmp_path) -> None:
+    """🔴 Голе `3.12` брало й 32-бітний чи ARM64 Python — і `cryptography`
+    збиралась із сирців Rust-ом (23.10.2026)."""
+    asked: list[list[str]] = []
+
+    def run(cmd, **kw):
+        asked.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(U.sys, "platform", "win32")
+    got = U.ensure_python("uv", "3.11", {"UV_PYTHON_INSTALL_DIR": str(tmp_path)})
+    assert got == "cpython-3.11-windows-x86_64-none"
+    assert asked[0][1:] == ["python", "install", "cpython-3.11-windows-x86_64-none"]
+    # ARM64 поруч не підхоплюється й тоді, коли uv упав на junction.
+    _patch_dir(tmp_path, "cpython-3.12.15-windows-aarch64-none")
+    assert U.extracted_python(tmp_path, "3.12") is None
+    assert U.uv_python_env()["UV_PYTHON_PREFERENCE"] == "only-managed"
 
 
 def test_ensure_python_refuses_an_interpreter_that_does_not_run(monkeypatch, tmp_path) -> None:
@@ -337,7 +358,9 @@ def test_engine_venv_is_built_on_the_interpreter_ensure_python_gave(info, monkey
 def test_installer_hands_the_extracted_interpreter_to_tool_install() -> None:
     text = _ps1()
     assert "function Resolve-ExtractedPython" in text
-    at = text.index("Invoke-Logged $uv python install 3.12")
+    assert "$PyReq = 'cpython-3.12-windows-x86_64-none'" in text
+    assert "$env:UV_PYTHON_PREFERENCE = 'only-managed'" in text
+    at = text.index("Invoke-Logged $uv python install $PyReq")
     assert text.index("Resolve-ExtractedPython $tail $PythonDir '3.12'", at) > at
     assert "Invoke-Logged $uv tool install --python $PythonArg --force $Source" in text
     for phrase in U.LINK_STEP_FAILURES:

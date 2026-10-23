@@ -1141,6 +1141,14 @@ $env:UV_PYTHON_INSTALL_REGISTRY = '0'
 # ⚠ Гілка «uv уже є» могла взяти чужий uv будь-якої версії; змінна старша за
 # junction мінорної версії, який і дає 448, тож uv, що його робить, її знає.
 $env:UV_PYTHON_INSTALL_DIR = $PythonDir
+# 🔴 Саме x64 CPython і лише керований uv (23.10.2026). Голе `3.12` брало й
+# системний Python людини — 32-бітний чи ARM64, — і старший uv на ARM-машині
+# теж ставив ARM64. Під такий інтерпретатор у `cryptography` (через
+# pdfplumber) коліс немає, uv збирав її з сирців Rust-ом і падав на cargo.
+# x64 працює й на Windows ARM (емуляція), і під нього є колеса всього стека.
+# Те саме просить і `nysh update` (`setup.update.python_request`).
+$PyReq = 'cpython-3.12-windows-x86_64-none'
+$env:UV_PYTHON_PREFERENCE = 'only-managed'
 # 🔴 Розкладка «одна тека»: середовище застосунку, його команда й кеш uv (torch —
 # гігабайти) — під обраною текою, а не в профілі. Так само змінні процесу, і з
 # тієї самої причини; після встановлення Нишпорка бере їх з `install-info.ini`
@@ -1152,9 +1160,9 @@ if ($OneFolder) {
     $env:NYSHPORKA_DATA_DIR = $DataDir
 }
 $script:NativeTail.Clear()
-$rc = Invoke-Logged $uv python install 3.12
-# Що передавати в `--python` далі: версію, або — після збою junction — шлях.
-$PythonArg = '3.12'
+$rc = Invoke-Logged $uv python install $PyReq
+# Що передавати в `--python` далі: запит, або — після збою junction — шлях.
+$PythonArg = $PyReq
 if ($rc -ne 0) {
     $tail = $script:NativeTail -join "`n"
     $exe = Resolve-ExtractedPython $tail $PythonDir '3.12'

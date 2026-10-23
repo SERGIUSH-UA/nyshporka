@@ -216,15 +216,29 @@ def link_step_failed(output: str) -> bool:
     return any(s in (output or "") for s in LINK_STEP_FAILURES)
 
 
+def python_request(version: str) -> str:
+    """Що просити в uv для `version`: на Windows — саме x64 CPython.
+
+    🔴 23.10.2026: у людини встановлення падало на `cryptography` 50.0.2 —
+    uv збирав її з сирців (Rust, maturin) і ламався на cargo. На Windows у
+    `cryptography` колеса лише `win_amd64`, а голе `--python 3.12` бере й
+    системний 32-бітний чи ARM64 Python, і uv, старший за той, що віддає
+    перевагу x64 на ARM-машині. x64 працює й на Windows ARM (емуляція), і під
+    нього є колеса всього стека: torch, kraken, cryptography.
+    """
+    return f"cpython-{version}-windows-x86_64-none" if sys.platform == "win32" else version
+
+
 def extracted_python(folder: Path, version: str) -> Path | None:
     """`python.exe` найвищого патча `version` (`3.12`) у теці інтерпретаторів uv.
 
-    Лише справжня тека точної версії: ім'я без патча — це і є той junction
-    (або його недоробок), а `+freethreaded` — інший інтерпретатор.
+    Лише справжня тека точної версії x64 (`python_request`): ім'я без патча —
+    це і є той junction (або його недоробок), `+freethreaded` — інший
+    інтерпретатор, а 32-бітний чи ARM64 Python збирав би пакети з сирців.
     """
     import re
 
-    pat = re.compile(rf"^cpython-{re.escape(version)}\.(\d+)-windows-[^-]+-none$")
+    pat = re.compile(rf"^cpython-{re.escape(version)}\.(\d+)-windows-x86_64-none$")
     best: tuple[int, Path] | None = None
     for d in folder.iterdir() if folder.is_dir() else ():
         m = pat.match(d.name)
@@ -253,21 +267,23 @@ class PythonInstallFailed(RuntimeError):
 def ensure_python(uv: str, version: str, env: dict[str, str]) -> str:
     """Поставити керований Python `version` і повернути значення для `--python`.
 
-    Зазвичай це сама версія (`3.11`). Якщо uv упав на junction мінорної версії
-    (448 на Windows), а інтерпретатор уже розпакований і запускається, —
-    повний шлях до його `python.exe`: так `uv venv` / `uv tool install` не
+    Зазвичай це запит `python_request` (`3.11`, на Windows —
+    `cpython-3.11-windows-x86_64-none`). Якщо uv упав на junction мінорної
+    версії (448 на Windows), а інтерпретатор уже розпакований і запускається,
+    — повний шлях до його `python.exe`: так `uv venv` / `uv tool install` не
     качають його вдруге й не повторюють той самий junction.
     """
     import subprocess
 
-    r = subprocess.run([uv, "python", "install", version], env=env,
+    req = python_request(version)
+    r = subprocess.run([uv, "python", "install", req], env=env,
                        capture_output=True, text=True, encoding="utf-8",
                        errors="replace", check=False)
     out = (r.stdout or "") + (r.stderr or "")
     if out.strip():
         sys.stderr.write(out if out.endswith("\n") else out + "\n")
     if r.returncode == 0:
-        return version
+        return req
     if sys.platform == "win32" and link_step_failed(out):
         folder = env.get("UV_PYTHON_INSTALL_DIR", "").strip()
         if not folder:
@@ -318,7 +334,11 @@ def uv_python_env() -> dict[str, str]:
     інсталятор клав усе на обраний диск, а перше ж `nysh update` чи
     `nysh htr install` (кеш torch — гігабайти) знову пішло б у профіль на C:.
     """
-    env = {"UV_PYTHON_INSTALL_BIN": "0", "UV_PYTHON_INSTALL_REGISTRY": "0"}
+    # `only-managed`: лише інтерпретатори, які uv поставив сам. Системний
+    # Python людини (32-бітний, ARM64, Store) під `--python 3.12` давав збірку
+    # пакетів із сирців — див. `python_request`.
+    env = {"UV_PYTHON_INSTALL_BIN": "0", "UV_PYTHON_INSTALL_REGISTRY": "0",
+           "UV_PYTHON_PREFERENCE": "only-managed"}
     info = install_info()
     for key, var in UV_DIR_KEYS.items():
         folder = info.get(key, "").strip()
@@ -529,7 +549,7 @@ def command(preset: str = "", add: tuple[str, ...] = ()) -> list[str]:
     if not tool_env():
         return [sys.executable, "-m", "pip", "install", "--upgrade", spec]
     uv = info.get("uv") or "uv"
-    return [uv, "tool", "install", "--python", "3.12", "--force", spec]
+    return [uv, "tool", "install", "--python", python_request("3.12"), "--force", spec]
 
 
 def command_env() -> dict[str, str]:

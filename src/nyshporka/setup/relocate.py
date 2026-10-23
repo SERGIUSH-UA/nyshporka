@@ -244,7 +244,7 @@ def uv_env(home: Path) -> dict[str, str]:
 
     lay = layout(home)
     env = {**os.environ, "UV_PYTHON_INSTALL_BIN": "0", "UV_PYTHON_INSTALL_REGISTRY": "0",
-           "NYSHPORKA_DATA_DIR": lay["data_dir"]}
+           "UV_PYTHON_PREFERENCE": "only-managed", "NYSHPORKA_DATA_DIR": lay["data_dir"]}
     env.update({var: lay[key] for key, var in UV_DIR_KEYS.items()})
     return env
 
@@ -366,12 +366,13 @@ def run(p: Plan, *, preset: str = "", runner: Runner = _run,
     new_uv = home / "uv" / Path(uv).name
     shutil.copy2(uv, new_uv)
     env = uv_env(home)
-    if runner([str(new_uv), "python", "install", "3.12"], env) != 0:
+    py = U.python_request("3.12")              # на Windows — x64, див. там
+    if runner([str(new_uv), "python", "install", py], env) != 0:
         raise RelocateError("uv не поставив Python 3.12 у нову теку")
     spec = U.command(preset)[-1]
     if "==" not in spec:
         spec = f"{spec}=={__version__}"
-    if runner([str(new_uv), "tool", "install", "--python", "3.12", "--force", spec], env) != 0:
+    if runner([str(new_uv), "tool", "install", "--python", py, "--force", spec], env) != 0:
         raise RelocateError(f"uv не поставив {spec} у нову теку")
     runner([str(new_uv), "tool", "update-shell"], env)
     lay = layout(home)
