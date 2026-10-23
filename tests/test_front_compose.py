@@ -381,4 +381,4 @@ def test_every_miniature_named_in_code_has_its_file() -> None:
     block = src[src.index("const MINI = ["):src.index("];", src.index("const MINI = ["))]
     names = set(re.findall(r"'([a-z]+)'", block))
     files = {p.stem.removeprefix("mini-") for p in (SHARED_DIR / "img").glob("mini-*.webp")}
-    assert names == files and len(names) == 22, (names ^ files, len(names))
+    assert names == files and len(names) == 23, (names ^ files, len(names))

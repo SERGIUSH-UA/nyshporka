@@ -50,7 +50,7 @@ async function exportPicks(gen) {
   box.innerHTML = `<h3 class="sub-h">${t('export.picks')}</h3><div class="read-picks">${cases.map((c) => {
     const it = caseItem(c);
     return `<button class="card" data-act="export.pick" data-arg="${esc(c.shifra || c.key)}">
-      ${mini('sviy', 40)}<span><b>${esc(c.shifra || c.key || '')}</b>
+      ${mini('lysty', 40)}<span><b>${esc(c.shifra || c.key || '')}</b>
       <small>${esc(c.title || '')}</small><small class="muted">${esc(it.hint)}</small></span></button>`;
   }).join('')}</div>`;
 }
