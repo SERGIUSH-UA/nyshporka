@@ -153,7 +153,7 @@ def test_one_listing_walks_the_runs_root_once(monkeypatch) -> None:
 
     # Справжній `list_cases` спершу дивиться на знімок, тож підміняємо лише
     # дорогу частину — сам обхід — через кеш-штамп.
-    monkeypatch.setattr(S, "_runs_stamp", lambda: calls.append(1) or (1, 1, 1, ""))
+    monkeypatch.setattr(S, "_scan", lambda: calls.append(1) or ((1, 1, 1, ""), []))
     monkeypatch.setattr(S, "_RUNS_CACHE", ((1, 1, 1, ""), rows))
     with S.one_listing():
         for _ in range(30):

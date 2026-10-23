@@ -615,25 +615,48 @@ def _runs_stamp() -> tuple[int, int, int, str]:
     перезапуску (рецензія 08.09, третій раунд). Бібліотека — бо шифра й кадри
     в рядку переліку беруться з неї.
     """
-    if not htr_root().is_dir():
-        return (0, 0, 0, "")
+    return _scan()[0]
+
+
+def _scan() -> tuple[tuple[int, int, int, str], list[tuple[str, os.stat_result]]]:
+    """Один обхід кореня прогонів: штамп переліку й `stat` мети кожного прогону.
+
+    ⚡ Доти штамп (`_runs_stamp`) і перелік мет (`_meta_stats`) обходили ~16 тис.
+    тек кожен сам — 33 тис. `stat` і 0,75 с на кожен перелік прогонів, навіть
+    коли кеш влучав (замір 23.10.2026). У межах одного запиту (`read_scope`)
+    обхід — один на всіх.
+    """
+    from nyshporka.core.scope import once
+
+    return once("htr.scan", _scan_now)
+
+
+def _scan_now() -> tuple[tuple[int, int, int, str], list[tuple[str, os.stat_result]]]:
+    root = htr_root()
+    if not root.is_dir():
+        return (0, 0, 0, ""), []
     n = 0
     newest = 0
     newest_meta = 0
-    with os.scandir(htr_root()) as it:
+    metas: list[tuple[str, os.stat_result]] = []
+    with os.scandir(root) as it:
         for e in it:
             if not e.is_dir():
                 continue
             n += 1
             try:
                 newest = max(newest, e.stat().st_mtime_ns)
-                newest_meta = max(newest_meta,
-                                  os.stat(os.path.join(e.path, "_htr_meta.json")).st_mtime_ns)
+                ms = os.stat(os.path.join(e.path, "_htr_meta.json"))
             except OSError:
                 continue
+            newest_meta = max(newest_meta, ms.st_mtime_ns)
+            metas.append((e.name, ms))
+    # Порядок — як у `sorted(Path)`, що на Windows порівнює без регістру: від
+    # нього залежить порядок прогонів з однаковим `updated` у видачі.
+    metas.sort(key=lambda x: os.path.normcase(x[0]))
     # Бібліотека й реєстр колізій опису: від них залежать шифра й канонічний
     # ключ рядка (`case_canon`), який кеш тримає на диску.
-    return (n, newest, newest_meta, "|".join(_canon_stamp()))
+    return (n, newest, newest_meta, "|".join(_canon_stamp())), metas
 
 
 def _library_stamp() -> str:
@@ -765,7 +788,7 @@ def _list_cases() -> list[dict[str, Any]]:
     snap = _LISTING.get()
     if snap is not None:
         return snap
-    stamp = _runs_stamp()
+    stamp, metas = _scan()
     if _RUNS_CACHE is not None and _RUNS_CACHE[0] == stamp:
         return _RUNS_CACHE[1]
     # 🔴 Кеш на диску ПО ПРОГОНАХ, за штампом мети кожного (mtime+розмір —
@@ -784,7 +807,7 @@ def _list_cases() -> list[dict[str, Any]]:
         def describe_case(_p: str) -> dict[str, Any] | None:  # type: ignore[misc]
             return None
     seen: set[str] = set()
-    for name, ms in _meta_stats():
+    for name, ms in metas:
         seen.add(name)
         mstamp = f"{ms.st_mtime_ns:x}-{ms.st_size:x}"
         hit = entries.get(name)
@@ -877,21 +900,10 @@ def _meta_stats() -> list[tuple[str, os.stat_result]]:
     ⚡ Не `glob("*/_htr_meta.json")`: `pathlib` для такого шаблону читає ВЕСЬ
     вміст кожної теки прогону — тисячі `.txt` у кожній з ~19 тис. тек, — і
     перелік у новому процесі стояв 6–7 с у `glob` (профіль `text find`
-    21.10.2026: 7.6 с із 21). Тут — один обхід кореня й один `stat` на теку,
-    як у `_runs_stamp`.
+    21.10.2026: 7.6 с із 21). Тут — той самий один обхід кореня, що й для
+    штампа (`_scan`).
     """
-    out: list[tuple[str, os.stat_result]] = []
-    root = htr_root()
-    # Порядок — як у `sorted(Path)`, що на Windows порівнює без регістру: від
-    # нього залежить порядок прогонів з однаковим `updated` у видачі.
-    with os.scandir(root) as it:
-        dirs = sorted((e.name for e in it if e.is_dir()), key=os.path.normcase)
-    for name in dirs:
-        try:
-            out.append((name, os.stat(os.path.join(root, name, "_htr_meta.json"))))
-        except OSError:
-            continue
-    return out
+    return _scan()[1]
 
 
 def _decorate(row: dict[str, Any], describe_case: Any) -> dict[str, Any]:
