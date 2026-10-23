@@ -353,3 +353,11 @@ def test_runs_screen_does_not_wait_for_the_case_list() -> None:
 def test_specialists_are_named_in_the_console(hub) -> None:
     """Спеціалісти — іменами (рішення дослідника 23.10.2026); Писар XVIII — не просто «Писар»."""
     assert hub["models"] == ["Логофет v9", "Регент v2", "Писар XVIII v1", "Писар v28 + Дяк v10", "other thing · v3"]
+
+
+def test_progress_is_drawn_not_only_counted() -> None:
+    """Покриття прогону й кадри хмари — смужкою; інциденти хмари — без сирого JSON."""
+    runs = (FRONT_DIR / "screens/runs.js").read_text(encoding="utf-8")
+    cloud = (FRONT_DIR / "screens/cloud.js").read_text(encoding="utf-8")
+    assert "ratioBar(r.pages_done || 0, n)" in runs
+    assert "ratioBar(r.pages_done || 0, r.frames_total)" in cloud and "JSON.stringify(x)" not in cloud

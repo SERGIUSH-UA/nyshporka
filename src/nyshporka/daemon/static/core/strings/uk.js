@@ -1533,6 +1533,7 @@ export default {
     'read.engine.pysar18': 'Писар XVIII',
     'read.engine.logofet': 'Логофет',
     'read.engine.regent': 'Регент',
+    'cloud.incident.unknown': 'подія без опису',
     'load.count': 'Рахую…',
     'load.card': 'Читаю картку справи…',
     'load.plan': 'Складаю план читання…',

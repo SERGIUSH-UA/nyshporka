@@ -1597,6 +1597,7 @@ export default {
     'read.engine.pysar18': 'Pysar XVIII',
     'read.engine.logofet': 'Logofet',
     'read.engine.regent': 'Regent',
+    'cloud.incident.unknown': 'eveniment fără descriere',
     'load.count': 'Număr…',
     'load.card': 'Citesc fișa dosarului…',
     'load.plan': 'Alcătuiesc planul de citire…',

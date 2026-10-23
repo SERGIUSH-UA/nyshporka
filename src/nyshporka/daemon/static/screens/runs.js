@@ -19,7 +19,7 @@ import { t, LANG } from '../core/strings.js';
 import { callOp, staleThenFresh } from '../core/net.js';
 import { esc, el, setView, busy, failure, renderWarnings,
   curGen, alive } from '../core/view.js';
-import { modelName, fmtDay, pathTail } from '../core/bits.js';
+import { modelName, fmtDay, pathTail, ratioBar } from '../core/bits.js';
 import { SCREENS, ACTIONS, PAGERS } from '../core/registry.js';
 import { show, goto, onJob } from '../core/nav.js';
 import { ST } from '../core/state.js';
@@ -226,7 +226,7 @@ function runsRow(r) {
   // знаменник ненадійний: «315 / 1 · 31500%» нічого не означало (22.10.2026).
   const n = Number(r.frames || 0) >= Number(r.pages_done || 0) ? Number(r.frames || 0) : 0;
   const cov = n
-    ? `<td class="num">${Math.round(100 * (r.pages_done || 0) / n)}%</td>`
+    ? `<td class="num cov-cell">${ratioBar(r.pages_done || 0, n)} ${Math.round(100 * (r.pages_done || 0) / n)}%</td>`
     : `<td class="num dim" title="${esc(t('runs.nodenom'))}">—</td>`;
   const fail = r.failed
     ? `<span class="warn-inline" title="${esc(t('runs.failed'))}">✗${r.failed}</span>`

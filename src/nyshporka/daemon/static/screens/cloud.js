@@ -17,7 +17,7 @@ import { esc, el, setView, busy, failure, boxError, renderWarnings, curGen, aliv
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { show, jobDone, jobChip } from '../core/nav.js';
 import { openModal, confirmAct, modalSeq } from '../core/modal.js';
-import { kv, pill, dayOf, toast } from '../core/bits.js';
+import { kv, pill, dayOf, toast, ratioBar } from '../core/bits.js';
 import { loadProjects, projectCount, projectChip, currentName, projectInfo } from '../core/projects.js';
 
 const FINAL = ['done', 'failed'];
@@ -86,6 +86,7 @@ function runRow(r) {
     <div><b class="mono" title="${esc(r.case_key || '')}">${esc(r.shifra || r.case_key || r.run_id)}</b>
       <small class="muted">${esc(r.phase_human || r.phase)}${frames} · ${money(r.spent_usd)}
         · ${esc(dayOf(r.started))}</small>
+      ${r.frames_total ? ratioBar(r.pages_done || 0, r.frames_total) : ''}
       ${projectCount() > 1 ? projectChip(r.project || '', { hubLabel: t('pj.hub') }) : ''}
       ${r.needs_release ? pill('err', t('cloud.release')) : ''}</div>
     <button class="ctl-sm" data-act="cloud.more" data-arg="${esc(r.run_id)}">${t('cloud.more')}</button>
@@ -101,10 +102,12 @@ async function runMore(id) {
   if (seq !== modalSeq()) return;
   if (!env.ok) { boxError('dlg-body', env); return; }
   const r = ((env.data || {}).runs || [])[0] || {};
-  const inc = (r.incidents || []).map((x) => `<li>${esc(x.text || x.kind || JSON.stringify(x))}</li>`).join('');
+  // Інцидент — словами й часом; сирий JSON тут нічого не каже людині.
+  const inc = (r.incidents || []).map((x) => `<li>${esc([dayOf(x.at || x.ts || ''), x.text || x.kind || '']
+    .filter(Boolean).join(' · ') || t('cloud.incident.unknown'))}</li>`).join('');
   el('dlg-body').innerHTML = `${kv([[t('cloud.case'), esc(r.case_key || '')],
     [t('cloud.phase'), esc(r.phase_human || r.phase || '')], [t('cloud.backend'), esc(r.backend || '')],
-    [t('cloud.frames'), esc(`${r.pages_done || 0} / ${r.frames_total || 0}`)],
+    [t('cloud.frames'), `${esc(`${r.pages_done || 0} / ${r.frames_total || 0}`)}${ratioBar(r.pages_done || 0, r.frames_total)}`],
     [t('cloud.spent'), money(r.spent_usd)], [t('cloud.hours'), esc(r.rent_hours || 0)],
     [t('cloud.why.stop'), esc(r.why || '')]])}
     ${inc ? `<h4>${t('cloud.incidents')}</h4><ul>${inc}</ul>` : ''}

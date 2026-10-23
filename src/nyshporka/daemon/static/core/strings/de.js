@@ -1597,6 +1597,7 @@ export default {
     'read.engine.pysar18': 'Pysar XVIII',
     'read.engine.logofet': 'Logofet',
     'read.engine.regent': 'Regent',
+    'cloud.incident.unknown': 'Ereignis ohne Beschreibung',
     'load.count': 'Zähle…',
     'load.card': 'Lese die Aktenkarte…',
     'load.plan': 'Erstelle den Leseplan…',

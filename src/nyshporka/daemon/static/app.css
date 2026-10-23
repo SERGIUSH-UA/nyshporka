@@ -1216,3 +1216,7 @@ details.np-folder > summary { padding: 0; background: none; font-size: .85rem; c
 .cards-head { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: .8rem; }
 .cards-head > div { display: grid; gap: .1rem; }
 .cards-head input { margin-left: auto; flex: 0 1 18rem; }
+
+/* Прогони: покриття смужкою поруч із відсотком — видно, що недочитане, без читання чисел. */
+.cov-cell { white-space: nowrap; }
+.cov-cell .ratio-bar { display: inline-block; width: 3.2rem; vertical-align: middle; margin: 0 .3rem 0 0; }
