@@ -1528,3 +1528,50 @@ th { font-family: var(--font-serif); letter-spacing: .1em; }
   background: color-mix(in srgb, var(--s-2) 58%, transparent); border-radius: var(--r-l);
   padding: 1rem 1.2rem; box-shadow: 0 0 2.2rem 1.1rem color-mix(in srgb, var(--s-2) 50%, transparent); }
 :root[data-theme="light"] main.on-sheet > #view:empty { display: none; }
+
+/* ── 📋 Спільний перелік (`core/listview.js`, 23.10.2026): плитки-фільтри з
+   числами, пошук і перемикачі, групи зі згортанням і «позначити групу», показ
+   частинами, липка смуга дії внизу. ── */
+.lv { display: grid; gap: .75rem; }
+.lv-chips { display: flex; flex-wrap: wrap; gap: .5rem; }
+#view .lv-chip { display: grid; justify-items: start; gap: .05rem; min-width: 7.5rem; padding: .5rem .8rem;
+  border: 1px solid var(--rim, var(--line-2)); border-left: 4px solid var(--line-3); border-radius: var(--r-m);
+  background: var(--s-2); color: var(--fg-2); cursor: pointer; text-align: left; }
+#view .lv-chip b { font: 600 1.35rem/1.1 var(--font-serif); color: var(--fg); }
+#view .lv-chip span { font-size: .82rem; }
+#view .lv-chip.lv-ok { border-left-color: var(--ok); }
+#view .lv-chip.on { border-color: var(--honey); border-left-color: var(--honey);
+  background: color-mix(in srgb, var(--honey) 14%, var(--s-2)); color: var(--fg); }
+#view .lv-chip:disabled { opacity: .45; cursor: default; }
+.lv-tools { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; }
+.lv-tools .lv-q { flex: 1 1 18rem; max-width: 32rem; }
+.lv-tools .lv-tg { margin: 0; }
+.lv-body { display: grid; gap: .55rem; }
+#view .lv-g { border: 1px solid var(--rim, var(--line-2)); border-radius: var(--r-m); background: var(--s-2); }
+.lv-gh { display: flex; align-items: center; gap: .6rem; padding: .45rem .75rem; }
+.lv-g.open > .lv-gh { border-bottom: 1px solid var(--line); }
+.lv-gl { font: 600 1.02rem/1.25 var(--font-serif); }
+.lv-gs { font-size: .85rem; }
+#view .lv-fold { background: none; border: 0; padding: .2rem .35rem; cursor: pointer; color: var(--fg-3); }
+.chev-s { display: inline-block; width: .45rem; height: .45rem; border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform var(--dur-1) var(--ease); }
+.lv-fold[aria-expanded="true"] .chev-s { transform: rotate(45deg); }
+.lv-t { width: 100%; margin: 0; }
+.lv-t td.lv-ck, .lv-t th.lv-ck { width: 2rem; padding-right: 0; }
+.lv-t tr.lv-on { background: color-mix(in srgb, var(--honey) 9%, transparent); }
+.lv-t td.lv-nw { white-space: nowrap; }
+.lv-more { display: flex; align-items: center; gap: .7rem; margin: 0; padding: .45rem .75rem .6rem; }
+.lv-none { padding: .6rem .2rem; }
+/* Смуга дії тримається внизу видимої частини: пачку видно, хоч би де людина гортала. */
+.lv-bar { position: sticky; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center;
+  justify-content: space-between; gap: .5rem 1rem; padding: .6rem .9rem; border: 1px solid var(--rim, var(--line-2));
+  border-radius: var(--r-m); background: color-mix(in srgb, var(--s-2) 96%, transparent); box-shadow: var(--sh-2); }
+.lv-bar.on { border-color: var(--honey); }
+.lv-sel { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.lv-busy .lv-body, .lv-busy .lv-bar { opacity: .55; pointer-events: none; }
+/* Хід віддачі над переліком. */
+#view .give-run { gap: .5rem; margin: 0 0 .75rem; border-left: 4px solid var(--honey); cursor: default; }
+#view .give-run p { margin: 0; }
+#view .give-run.give-run-ok { border-left-color: var(--ok); }
+#view .give-run.give-run-bad { border-left-color: var(--warn); }
+.give-fails ul { margin: .4rem 0 0; padding-left: 1.2rem; display: grid; gap: .25rem; }

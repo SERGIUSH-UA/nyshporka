@@ -68,6 +68,7 @@ const DATA = {
     persons: 2, hypotheses: { open: 1, awaiting: 0, closed: 0 }, color: '#aa3300', glyph: 'С' },
   'cases.list': { cases: [], shown: 0, total: 3, registry: true },
   'share.push': { rows: [{ case: 'TEST/1/1/1', ok: true }], failed: [], summary: {}, total: 1 },
+  'share.give': { job_id: 'sg1', state: 'queued' },
   'history.save': { rev: null, saved: false },
 };
 let JOB = null;
@@ -230,15 +231,20 @@ out.formVals = SF.schemaValues(schema, (k) => vals[k] ?? '', (k) => k === 'force
 out.formEmpty = SF.schemaValues(schema, () => '', () => false);
 
 await SCREENS.give();
-out.give = view();
-const qsa = document.querySelectorAll;
-document.querySelectorAll = (sel) => (String(sel).includes('give.pick') ? [{ checked: true, dataset: { arg: '0' } }] : []);
+await tick();
+const part = (id) => document.getElementById(id).innerHTML || '';
+out.give = view() + part('give-lv') + part('give-chips') + part('give-body') + part('give-bar');
+out.giveRows = part('give-body');
 globalThis.__OPS = [];
+out.goBefore = ACTIONS['give.go']();
+await out.goBefore;
+out.sentBeforePick = sent('share.give').length;
+ACTIONS['lv.pick'](null, { checked: true, dataset: { lv: 'give', arg: 'TEST/1/1/1' } });
+out.giveBar = part('give-bar');
 p = ACTIONS['give.go']();
 await tick(); ACTIONS['modal.ok'](); await p;
-document.querySelectorAll = qsa;
-out.pushSent = sent('share.push');
-out.giveBox = document.getElementById('give-box').innerHTML || '';
+out.pushSent = sent('share.give');
+out.giveRun = part('give-run');
 
 const PJ = await import('./screens/project.js');
 globalThis.__OPS = [];
@@ -382,6 +388,14 @@ def test_schema_form_builds_fields_and_typed_values(probe) -> None:
 def test_give_lists_unshared_cases(probe) -> None:
     g = probe["give"]
     assert "TEST 1-1-1" in g and "готова" in g and 'id="give-go"' in g
+    assert 'data-act="lv.chip"' in g and 'data-act="lv.toggle"' in g, "плитки й перемикач"
+
+
+def test_give_selects_nothing_by_itself(probe) -> None:
+    """🔴 Раніше всі «готові» стояли позначеними, і одна кнопка віддавала 589 справ."""
+    assert 'data-act="lv.pick"' in probe["giveRows"] and "checked" not in probe["giveRows"]
+    assert probe["sentBeforePick"] == 0, "без позначеного віддавати нічого"
+    assert "Позначено: 1" in probe["giveBar"] and "Віддати: 1" in probe["giveBar"]
 
 
 def test_stale_registry_is_a_quiet_line_with_a_button(probe) -> None:
@@ -396,10 +410,11 @@ def test_long_action_from_the_form_asks_first(probe) -> None:
     assert "test.long" not in probe["longAfterNo"], "довга дія пішла без підтвердження"
 
 
-def test_give_reads_the_answer_without_a_job(probe) -> None:
-    """🔴 `share.push` відповідає одразу — екран показує результат, а не чекає роботу."""
+def test_give_runs_as_a_job_with_progress_and_stop(probe) -> None:
+    """🔴 Пачка на сотні справ — робота з поступом і «Зупинити», а не один запит,
+    що півгодини показує «Віддаю…» (дослідник, 23.10.2026)."""
     assert [json.loads(b) for b in probe["pushSent"]] == [{"cases": ["TEST/1/1/1"]}]
-    assert "Віддано: 1" in probe["giveBox"]
+    assert 'data-act="give.stop"' in probe["giveRun"] and "Віддаю 0 з 1" in probe["giveRun"]
 
 
 def test_hypothesis_without_a_run_explains_instead_of_silence(probe) -> None:

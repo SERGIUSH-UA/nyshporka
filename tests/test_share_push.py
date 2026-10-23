@@ -467,3 +467,51 @@ def test_bez_replace_own_zalyvka_bez_zaminy(pul: Pul, monkeypatch: pytest.Monkey
                         lambda path, **kw: kw_zalyvky.append(kw) or staryi(path, **kw))
     assert _push(cases=["A/1/1"]).ok
     assert kw_zalyvky and not kw_zalyvky[0].get("replace_own")
+
+
+# ── віддача з консолі: поступ і зупинка (`share.give`, 23.10.2026) ──────────
+def test_pachka_zvituie_postup_sprava_za_spravoiu(pul: Pul) -> None:
+    """Консоль показує «справа i з n»: пачка звітує після кожної справи."""
+    from nyshporka.core import progress
+
+    seen: list[tuple[int, int, str]] = []
+    with progress.sink(lambda i, n, note: seen.append((i, n, note))):
+        got = B.viddaty([{"case": f"A/1/{i}"} for i in range(1, 4)], jobs=1)
+    assert [(i, n) for i, n, _ in seen] == [(1, 3), (2, 3), (3, 3)]
+    assert [note for _, _, note in seen] == ["A/1/1", "A/1/2", "A/1/3"]
+    assert got["stopped"] is False
+
+
+@pytest.mark.parametrize("jobs", [1, 3])
+def test_zupynyty_dovodyt_pochate_i_lyshaie_reshtu(pul: Pul, jobs: int) -> None:
+    """«Зупинити»: розпочаті справи доходять до кінця, решта — у not_started."""
+    import threading as th
+
+    from nyshporka.core import progress
+
+    stop = th.Event()
+    items = [{"case": f"A/1/{i}"} for i in range(1, 30)]
+
+    def _tick(i: int, n: int, note: str) -> None:
+        if i == 2:
+            stop.set()
+
+    with progress.sink(_tick), progress.stop_scope(stop):
+        got = B.viddaty(items, jobs=jobs, pool=lambda n: ThreadPoolExecutor(max_workers=n))
+    assert got["stopped"] is True
+    assert got["not_started"], "після «Зупинити» решта справ не починається"
+    assert len(got["rows"]) + len(got["not_started"]) == len(items)
+    assert all(r["ok"] for r in got["rows"]), "розпочате дійшло до кінця"
+    assert len(pul.sent) == len(got["rows"])
+
+
+def test_give_dlia_konsoli_to_samoe_shcho_push_i_robota(pul: Pul) -> None:
+    """`share.give` — та сама віддача, але робота в черзі, що вміє спинитись."""
+    from nyshporka.daemon.workers import STOPPABLE_OPS
+
+    op = O.get("share.give")
+    assert op is not None and op.long and op.mutates and op.private
+    assert "share.give" in STOPPABLE_OPS
+    env = O.call("share.give", {"jobs": 1, "cases": ["A/1/1", "A/1/2"]})
+    assert env.ok, env.error
+    assert env.data["summary"]["viddano"] == 2 and env.data["stopped"] is False

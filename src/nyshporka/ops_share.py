@@ -900,6 +900,28 @@ def share_push(a: SharePushArgs) -> Envelope:
     🔴 Перелік перевіряється цілим ДО першої заливки: хибне поле в сотому
     рядку файла, знайдене посеред пачки, лишило б її наполовину відданою.
     """
+    from nyshporka.share import batch as B
+
+    return _push(a, say=B.stderr)
+
+
+@op("share.give", summary="Віддати позначені справи з консолі — роботою з поступом і зупинкою",
+    args=SharePushArgs, mutates=True, section=SECTION, private=True, long=True,
+    tier="rare", skill="share-case",
+    when="екран консолі «Віддати»: пачка справ роботою в черзі")
+def share_give(a: SharePushArgs) -> Envelope:
+    """Те саме, що `share.push`, але роботою в черзі консолі.
+
+    🔴 Пачка на сотні справ — це десятки хвилин. Одним запитом консоль весь цей
+    час показувала «Віддаю…» без жодного числа, без «зупинити» й без того, що
+    вже віддано (дослідник, 23.10.2026). Робота звітує «справа i з n» після
+    кожної справи (`batch.viddaty` → `progress.report`), а «Зупинити» доводить
+    розпочаті справи до кінця й решту лишає в `not_started`.
+    """
+    return _push(a, say=None)
+
+
+def _push(a: SharePushArgs, *, say: Any) -> Envelope:
     from pydantic import ValidationError
 
     from nyshporka.core.envelope import ALERT
@@ -983,9 +1005,9 @@ def share_push(a: SharePushArgs) -> Envelope:
                     f"ключ у {ENV_NAME} (видається в кабінеті на nyshporka.online)")
 
     if a.wait:
-        got = B.viddaty_dochekuiuchys(cherha, jobs=a.jobs, notes=a.notes, say=B.stderr)
+        got = B.viddaty_dochekuiuchys(cherha, jobs=a.jobs, notes=a.notes, say=say)
     else:
-        got = B.viddaty(cherha, jobs=a.jobs, notes=a.notes, say=B.stderr)
+        got = B.viddaty(cherha, jobs=a.jobs, notes=a.notes, say=say)
     env = ok(got)
     if skipped:
         env.warn("private", f"пропущено готові справи з позначкою private: "

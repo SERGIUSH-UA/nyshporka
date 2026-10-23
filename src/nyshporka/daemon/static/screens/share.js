@@ -9,7 +9,9 @@
  */
 
 import { t, tOr } from '../core/strings.js';
-import { callOp, staleThenFresh, staleBadge } from '../core/net.js';
+import { callOp, staleThenFresh, staleBadge, apiFetch, TOKEN } from '../core/net.js';
+import { listView } from '../core/listview.js';
+import { onJob } from '../core/nav.js';
 import { esc, el, setView, busy, failure, boxError, busyForm, renderWarnings, curGen, alive, fld, emptyMini, mini, safeHref } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { openModal, confirmAct, closeModal, modalSeq } from '../core/modal.js';
@@ -23,27 +25,30 @@ const READY = ['готова', 'у пулі без рамок'];
 const stLabel = (s) => (STATUS[s] ? t(`give.st.${STATUS[s]}`) : s || '');
 
 // ── Віддати ──────────────────────────────────────────────────────────────────
+/**
+ * Справи групами за архівом, плитки за станом, пошук; нічого не позначено
+ * саме; липка смуга «Позначено N · сторінок · Віддати N». Віддача — робота
+ * `share.give`: «справа i з n», «Зупинити», «Повторити невдалі» (дослідник,
+ * 23.10.2026: 659 справ одним полотном і 589 галочок, що стояли самі).
+ */
 let GIVE = [];
+let GIVE_LV = null;
+
+/** Архів справи — перше слово шифри; невизначений — окремою групою. */
+function giveRepo(r) {
+  const s = String(r.shifra || r.case_key || '');
+  const head = s.startsWith('? ') ? '' : (s.split(/[\s/]/)[0] || '');
+  return head ? { id: head, label: head } : { id: '?', label: t('give.norepo') };
+}
+
+const pagesOf = (rows) => rows.reduce((a, r) => a + Number(r.pages || 0), 0);
 
 SCREENS.give = async () => {
   const gen = curGen();
   busy(6);
   // Перелік рахується секундами, тож спершу — минула відповідь, потім свіжа
-  // (`staleThenFresh`). Галочки, поставлені поки йшло оновлення, лишаються.
-  let shown = false;
-  const paint = (env, again) => {
-    if (!alive(gen)) return;
-    const keep = shown ? new Set(picked().map((r) => r.case_key)) : null;
-    paintGive(env, again);
-    if (keep) {
-      document.querySelectorAll('[data-act="give.pick"]').forEach((b) => {
-        const r = GIVE[Number(b.dataset.arg)];
-        b.checked = !!r && keep.has(r.case_key);
-      });
-      countPicked();
-    }
-    shown = true;
-  };
+  // (`staleThenFresh`). Позначене, поки йшло оновлення, тримає сам перелік.
+  const paint = (env, again) => { if (alive(gen)) paintGive(env, again); };
   const env = await staleThenFresh('share.suggest', { fast: true }, (e, _stale, again) => paint(e, again));
   // Сервер віддав МИНУЛИЙ перелік (дані змінились, свіжий рахується у фоні) —
   // перепитуємо, доки не прийде свіжий; «Оновлюю…» стоїть увесь цей час.
@@ -51,6 +56,8 @@ SCREENS.give = async () => {
   // доки завершиться функція поточного, — з очікуванням опитування консоль
   // «не пускала» з «Віддати» до 15 с (замір 23.10.2026).
   giveLate(env, gen, paint);
+  // Віддача, запущена раніше, ще йде — показати її хід, а не чисту сторінку.
+  giveResume(gen);
 };
 
 /** Дотягнути свіжий перелік після `refreshing: true`; вихід з екрана — стоп. */
@@ -71,29 +78,54 @@ export async function giveLate(first, gen, paint, wait = 2500) {
 function paintGive(env, again = false) {
   if (!env.ok) return failure(env);
   GIVE = (env.data || {}).rows || [];
-  const rows = GIVE.map((r, i) => `<tr>
-      <td><input type="checkbox" data-act="give.pick" data-arg="${i}"${READY.includes(r.status) ? ' checked' : ''}
-        aria-label="${esc(r.shifra || r.case_key)}"></td>
-      <td class="mono">${shifraCell(r)}</td><td>${esc(r.title || '')}</td>
-      <td class="num">${esc(r.pages || 0)} / ${esc(r.frames || '?')}${ratioBar(r.pages, r.frames)}</td>
-      <td>${pill(READY.includes(r.status) ? 'ok' : 'neutral', stLabel(r.status))}</td></tr>`).join('');
-  setView(`
-    <p class="muted">${t('give.why')}</p>
+  setView(`<p class="muted">${t('give.why')}</p>
     ${renderWarnings(env)}
-    <div class="dash-box">${GIVE.length ? `<table class="tbl-wide tbl-cards"><thead><tr><th></th><th>${t('give.case')}</th>
-      <th>${t('give.name')}</th><th>${t('give.pages')}</th><th>${t('give.state')}</th></tr></thead><tbody>${rows}</tbody></table>
-      <p class="row"><button class="primary" data-act="give.go" id="give-go"></button>
-        <span class="muted">${t('give.go.why')}</span></p>
-      <div id="give-box"></div>` : emptyMini('zshyvok', t('give.none'))}</div>`, again);
-  countPicked();
-};
+    <div id="give-run"></div>
+    ${GIVE.length ? '<div id="give-lv"></div>' : `<div class="dash-box">${emptyMini('zshyvok', t('give.none'))}</div>`}`, again);
+  if (!GIVE.length) return undefined;
+  const statuses = [...new Set(GIVE.map((r) => r.status))];
+  const order = ['готова', 'неповна', 'без кадрів', 'у пулі без рамок', 'збірна'];
+  statuses.sort((a, b) => (order.indexOf(a) + 99) % 99 - (order.indexOf(b) + 99) % 99);
+  GIVE_LV = listView(el('give-lv'), {
+    id: 'give',
+    rows: GIVE,
+    key: (r) => r.case_key,
+    text: (r) => `${r.shifra || ''} ${r.case_key || ''} ${r.title || ''}`,
+    placeholder: t('give.ph'),
+    chips: statuses.map((s) => ({ id: s, label: stLabel(s), test: (r) => r.status === s,
+      tone: READY.includes(s) ? 'ok' : '' })),
+    toggles: [{ id: 'notpool', label: t('give.notpool'), test: (r) => !Number(r.pool_n || 0) }],
+    group: giveRepo,
+    groupSummary: (rows) => esc(t('give.group.sum')
+      .replace('{n}', rows.length)
+      .replace('{r}', rows.filter((r) => READY.includes(r.status)).length)
+      .replace('{p}', pagesOf(rows).toLocaleString('uk'))),
+    // «Позначити групу» бере лише готові: неповне й без кадрів людина
+    // позначає сама, по одній, знаючи, що йде.
+    groupPick: (r) => READY.includes(r.status),
+    head: `<th>${t('give.case')}</th><th>${t('give.name')}</th><th>${t('give.pages')}</th><th>${t('give.state')}</th>`,
+    cells: (r) => `<td class="mono lv-nw">${shifraCell(r, true)}</td><td>${esc(r.title || '')}</td>
+      <td class="num">${esc(r.pages || 0)} / ${esc(r.frames || '?')}${ratioBar(r.pages, r.frames)}</td>
+      <td>${pill(READY.includes(r.status) ? 'ok' : 'neutral', stLabel(r.status))}${Number(r.pool_n || 0)
+    ? ` <small class="muted">${esc(t('give.inpool').replace('{n}', r.pool_n))}</small>` : ''}</td>`,
+    select: true,
+    selHint: t('give.sel.hint'),
+    selSummary: (sel) => t('give.pages.n').replace('{n}', pagesOf(sel).toLocaleString('uk')),
+    actions: (sel) => `<button type="button" class="primary" data-act="give.go" id="give-go"${sel.length ? '' : ' disabled'}>${
+      esc(t('give.go').replace('{n}', sel.length))}</button>`,
+  });
+  return undefined;
+}
 
 /**
  * Шифра з невизначеним архівом приходить як «? 605-1-59». Знак питання людині
  * нічого не пояснював — тепер це мітка «архів не визначено» поруч із номером.
  */
-function shifraCell(r) {
+function shifraCell(r, inGroup = false) {
   const s = String(r.shifra || r.case_key || '');
+  // У групі архіву назва архіву вже стоїть у заголовку — у рядку лише номер.
+  const repo = giveRepo(r).id;
+  if (inGroup && repo !== '?' && s.startsWith(`${repo} `) && !s.includes('@')) return esc(s.slice(repo.length + 1));
   // Збірка (`ARCH/0/@slug`) шифри не має — архів і слово «збірка», ключ у підказці.
   if (!r.shifra && s.includes('/@')) {
     return `<span title="${esc(s)}">${esc(s.split('/')[0])} · ${esc(t('give.bundle'))}</span>`;
@@ -105,17 +137,92 @@ function shifraCell(r) {
   return `${esc(s.slice(2))} <span class="tag warn">${esc(t('give.norepo'))}</span>`;
 }
 
-function picked() {
-  return [...document.querySelectorAll('[data-act="give.pick"]')]
-    .filter((b) => b.checked).map((b) => GIVE[Number(b.dataset.arg)]).filter(Boolean);
+// ── хід віддачі ──
+/** Робота віддачі, за якою стежить екран, і що віддавали (для «Повторити»). */
+let GIVE_JOB = null;
+
+/** Знайти віддачу, що ще йде, і стежити за нею — після переходу з екрана й назад. */
+async function giveResume(gen) {
+  try {
+    const res = await apiFetch('/api/jobs');
+    if (!res.ok || !alive(gen)) return;
+    const j = ((await res.json()).jobs || []).find((x) => x.kind === 'share.give'
+      && (x.state === 'queued' || x.state === 'running'));
+    if (j) giveWatch(j.id, j);
+  } catch { /* перелік робіт — підказка, не умова */ }
 }
 
-function countPicked() {
-  const b = el('give-go');
-  if (!b) return;
-  const n = picked().length;
-  b.textContent = t('give.go').replace('{n}', n);
-  b.disabled = !n;
+function giveWatch(jid, first = null) {
+  GIVE_JOB = jid;
+  if (GIVE_LV) GIVE_LV.setBusy(true);
+  const draw = (j) => {
+    const box = el('give-run');
+    if (!box || GIVE_JOB !== jid) return;
+    box.innerHTML = giveRunBox(j);
+    if (['done', 'error', 'cancelled'].includes(j.state)) {
+      GIVE_JOB = null;
+      if (GIVE_LV) GIVE_LV.setBusy(false);
+      if (j.state === 'done') {
+        const d = j.result || {};
+        const ok = (d.rows || []).filter((r) => r.ok).length;
+        toast(t('give.done').replace('{n}', ok).replace('{f}', (d.failed || []).length),
+          { tone: (d.failed || []).length ? 'warn' : 'ok' });
+        // Віддане з переліку зникає: перелік — те, що ще не віддано.
+        refreshGive();
+      }
+    }
+  };
+  if (first) draw(first);
+  onJob(jid, draw);
+}
+
+async function refreshGive() {
+  const env = await callOp('share.suggest', { fast: true });
+  if (env.ok && el('give-lv')) {
+    const run = (el('give-run') || {}).innerHTML || '';
+    paintGive(env, true);
+    const box = el('give-run');
+    if (box) box.innerHTML = run;
+  }
+}
+
+function giveRunBox(j) {
+  const p = j.progress || {};
+  const n = Number(p.n || 0);
+  const i = Number(p.i || 0);
+  if (j.state === 'queued' || j.state === 'running') {
+    return `<div class="card give-run">
+      <p><b>${esc(n ? t('give.run.going').replace('{i}', i).replace('{n}', n) : t('give.going'))}</b>${
+  p.basis && n ? ` <span class="muted mono">${esc(p.basis)}</span>` : ''}</p>
+      ${ratioBar(i, n)}
+      <p class="row"><button type="button" class="ghost" data-act="give.stop" data-job="${esc(j.id)}">${esc(t('give.run.stop'))}</button>
+        <span class="muted">${esc(t('give.run.stop.why'))}</span></p></div>`;
+  }
+  if (j.state === 'error') {
+    return `<div class="warn"><b>${esc(t('give.run.error'))}</b> ${esc(j.error || '')}</div>`;
+  }
+  const d = j.result || {};
+  const rows = d.rows || [];
+  const ok = rows.filter((r) => r.ok).length;
+  const bad = rows.filter((r) => !r.ok);
+  const ns = (d.not_started || []).length;
+  const fails = bad.length ? `<details class="give-fails"><summary>${esc(t('give.run.failed').replace('{n}', bad.length))}</summary>
+      <ul>${bad.map((r) => `<li><b class="mono">${esc(r.shifra || r.case)}</b> — ${esc(String(r.error || '').split('\n')[0])}</li>`).join('')}</ul></details>` : '';
+  const again = bad.length || ns ? `<button type="button" data-act="give.retry"
+      data-cases="${esc(JSON.stringify([...bad.map((r) => r.case), ...(d.not_started || [])]))}">${
+  esc(t('give.run.retry').replace('{n}', bad.length + ns))}</button>` : '';
+  return `<div class="card give-run ${bad.length ? 'give-run-bad' : 'give-run-ok'}">
+    <p><b>${esc(d.stopped ? t('give.run.stopped') : t('give.run.finished'))}</b>
+      ${esc(t('give.run.sum').replace('{ok}', ok).replace('{f}', bad.length).replace('{ns}', ns))}</p>
+    ${fails}<p class="row">${again}</p></div>`;
+}
+
+async function giveStart(cases) {
+  const env = await callOp('share.give', { cases });
+  if (!env.ok) { boxError('give-run', env); return; }
+  const jid = (env.data || {}).job_id;
+  if (GIVE_LV) GIVE_LV.clear();
+  if (jid) giveWatch(jid, { id: jid, state: 'queued', progress: { i: 0, n: cases.length } });
 }
 
 // ── Взяти ────────────────────────────────────────────────────────────────────
@@ -280,31 +387,32 @@ SCREENS.sprofile = async () => {
 };
 
 Object.assign(ACTIONS, {
-  'give.pick': () => countPicked(),
   'give.go': async () => {
-    const rows = picked();
+    const rows = GIVE_LV ? GIVE_LV.selected() : [];
     if (!rows.length) return;
+    if (GIVE_JOB) { toast(t('give.run.busy'), { tone: 'warn' }); return; }
+    const names = rows.map((r) => r.shifra || r.case_key);
     const yes = await confirmAct({ title: t('give.confirm').replace('{n}', rows.length), text: t('give.confirm.why'),
-      rows: [[t('give.case'), rows.map((r) => r.shifra || r.case_key).join(', ')]], okLabel: t('give.do') });
+      rows: [[t('give.case'), names.slice(0, 12).join(', ') + (names.length > 12 ? ` … +${names.length - 12}` : '')],
+        [t('give.pages'), t('give.pages.n').replace('{n}', pagesOf(rows).toLocaleString('uk'))]],
+      okLabel: t('give.do') });
     if (!yes) return;
-    // 🔴 `share.push` — не робота в черзі: відповідь приходить, коли пачка
-    // залита. Тому кнопка заблокована на весь час (повторний клік залив би
-    // ту саму пачку вдруге), а результат читається з самої відповіді.
-    const btn = el('give-go');
-    if (btn) btn.disabled = true;
-    const box0 = el('give-box');
-    if (box0) box0.innerHTML = `<p class="muted">${t('give.going')}</p>`;
-    const env = await callOp('share.push', { cases: rows.map((r) => r.case_key) });
-    if (btn) btn.disabled = false;
-    if (!env.ok) { boxError('give-box', env); return; }
-    const d = env.data || {};
-    const failed = d.failed || [];
-    const given = (d.rows || []).filter((r) => r.ok).length;
-    const box = el('give-box');
-    if (!box) return;
-    box.innerHTML = `<p class="${failed.length ? 'warn-inline' : 'ok-line'}">${esc(t('give.done')
-      .replace('{n}', given).replace('{f}', failed.length))}</p>${renderWarnings(env)}`;
-    toast(t('give.done').replace('{n}', given).replace('{f}', failed.length));
+    await giveStart(rows.map((r) => r.case_key));
+  },
+  /** «Зупинити»: розпочаті справи доходять до кінця, решта лишається не початою. */
+  'give.stop': async (_ev, elm) => {
+    const res = await apiFetch(`/api/jobs/${encodeURIComponent(elm.dataset.job)}/cancel`,
+      { method: 'POST', headers: { 'X-Nysh-Token': TOKEN } });
+    if (!res.ok) { toast(`${t('common.error')}: HTTP ${res.status}`, { tone: 'err' }); return; }
+    toast(t('give.run.stopping'), { tone: 'info' });
+  },
+  /** Повторити те, що не вдалось або не почалось, — тим самим шляхом. */
+  'give.retry': async (_ev, elm) => {
+    let cases = [];
+    try { cases = JSON.parse(elm.dataset.cases || '[]'); } catch { cases = []; }
+    if (!cases.length) return;
+    if (GIVE_JOB) { toast(t('give.run.busy'), { tone: 'warn' }); return; }
+    await giveStart(cases);
   },
   'pull.find': async (ev) => {
     ev.preventDefault();

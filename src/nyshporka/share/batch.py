@@ -268,27 +268,40 @@ def viddaty(items: list[Item], *, jobs: int = JOBS, notes: bool = False,
     справ однаково отримала б ту саму відмову, і кожна — ще й пакування, яке
     нікуди не поїде. Справи, які вже йдуть, доходять до кінця; ще не початі
     лишаються в `not_started`.
+
+    Поступ — `core.progress.report` після кожної справи (у консолі це смуга
+    «справа i з n»; поза роботою в черзі — нічого). Прохання спинитись
+    (`progress.stopped`, кнопка «Зупинити» консолі) зупиняє пачку так само, як
+    стеля пулу: розпочаті справи доходять до кінця, решта — у `not_started`,
+    і відповідь каже `stopped`.
     """
+    from nyshporka.core import progress
+
     global _SLOTY
     jobs = jobs_in_range(jobs)
     total = len(items)
     pochatok = time.monotonic()
     rows: list[Row | None] = [None] * total
     stop: Row | None = None
+    spyneno = False
     gotovo = 0
 
     def _pryiniaty(i: int, row: Row) -> None:
-        nonlocal stop, gotovo
+        nonlocal stop, gotovo, spyneno
         rows[i] = row
         gotovo += 1
         if say is not None:
             say(riadok(row, gotovo, total))
+        progress.report(gotovo, total, str(row.get("case") or ""))
         if row.get("rate_limited") and stop is None:
             stop = row
+        if progress.stopped():
+            spyneno = True
 
     if jobs == 1 or total <= 1:
         for i, item in enumerate(items):
-            if stop is not None:
+            if stop is not None or spyneno or progress.stopped():
+                spyneno = spyneno or progress.stopped()
                 break
             _pryiniaty(i, odna(item, notes))
     else:
@@ -314,7 +327,7 @@ def viddaty(items: list[Item], *, jobs: int = JOBS, notes: bool = False,
                            "stage": WORKER, "warnings": [],
                            "error": f"{type(exc).__name__}: {exc}"}
                 _pryiniaty(i, row)
-                if stop is not None:
+                if stop is not None or spyneno:
                     for g in futs:
                         g.cancel()
         finally:
@@ -332,6 +345,7 @@ def viddaty(items: list[Item], *, jobs: int = JOBS, notes: bool = False,
         "summary": pidsumok(done),
         "failed": [r["case"] for r in done if not r.get("ok")],
         "not_started": not_started,
+        "stopped": spyneno,
         "rate_limited": ({k: stop.get(k) for k in ("error", "retry_after", "next_attempt_at")}
                          if stop is not None else None),
         "sec": sec,
@@ -361,6 +375,8 @@ def viddaty_dochekuiuchys(items: list[Item], *, jobs: int = JOBS, notes: bool = 
     po_spravi: dict[str, Row] = {r["case"]: r for r in got["rows"]}
     chekano = 0.0
     while True:
+        if got.get("stopped"):
+            break                       # людина спинила — не чекаємо стелі й не тягнемо далі
         stop = got.get("rate_limited") or {}
         prosyt = stop.get("retry_after")
         if not isinstance(prosyt, (int, float)) or prosyt > CHEKATY_NAIDOVSHE:

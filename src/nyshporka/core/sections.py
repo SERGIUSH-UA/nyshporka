@@ -354,6 +354,7 @@ OP_SCREEN: dict[str, str] = {
     "cloud.fetch": "cloud",
     "share.suggest": "give",
     "share.push": "give",
+    "share.give": "give",
     "share.pack": "give",
     "share.pull": "pull",
     "share.import": "pull",
