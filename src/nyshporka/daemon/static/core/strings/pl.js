@@ -1801,4 +1801,12 @@ export default {
     'give.run.sum': "Oddano {ok} · nie udało się {f} · nie rozpoczęto {ns}",
     'give.run.busy': "Oddawanie już trwa — poczekaj lub je zatrzymaj",
     'give.run.stopping': "Zatrzymuję: rozpoczęte jednostki dojdą do końca",
+    'canon.lv.cited': "z dowodami",
+    'canon.lv.uncited': "bez dowodów",
+    'canon.lv.gsum': "{n} kart · z dowodami {c}",
+    'canon.lv.card': "Karta",
+    'canon.lv.cites': "Dowody",
+    'hyp.lv.claim': "Hipoteza",
+    'hyp.lv.state': "Stan",
+    'hyp.ph': "Twierdzenie, ID lub dokument, który to rozstrzygnie…",
 };

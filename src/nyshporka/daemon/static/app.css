@@ -1540,6 +1540,8 @@ th { font-family: var(--font-serif); letter-spacing: .1em; }
 #view .lv-chip b { font: 600 1.35rem/1.1 var(--font-serif); color: var(--fg); }
 #view .lv-chip span { font-size: .82rem; }
 #view .lv-chip.lv-ok { border-left-color: var(--ok); }
+#view .lv-chip.lv-warn { border-left-color: var(--warn); }
+#view .lv-chip.lv-info { border-left-color: var(--info-2); }
 #view .lv-chip.on { border-color: var(--honey); border-left-color: var(--honey);
   background: color-mix(in srgb, var(--honey) 14%, var(--s-2)); color: var(--fg); }
 #view .lv-chip:disabled { opacity: .45; cursor: default; }

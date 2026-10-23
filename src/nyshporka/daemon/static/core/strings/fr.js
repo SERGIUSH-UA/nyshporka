@@ -1801,4 +1801,12 @@ export default {
     'give.run.sum': "Donnés {ok} · échecs {f} · non commencés {ns}",
     'give.run.busy': "Un don est déjà en cours — attendez-le ou arrêtez-le",
     'give.run.stopping': "Arrêt : les dossiers commencés se terminent",
+    'canon.lv.cited': "avec preuves",
+    'canon.lv.uncited': "sans preuves",
+    'canon.lv.gsum': "{n} fiches · {c} avec preuves",
+    'canon.lv.card': "Fiche",
+    'canon.lv.cites': "Preuves",
+    'hyp.lv.claim': "Hypothèse",
+    'hyp.lv.state': "État",
+    'hyp.ph': "Affirmation, ID ou document qui la tranchera…",
 };

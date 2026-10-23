@@ -39,6 +39,11 @@ def test_cards_list_all_kinds_and_find_by_a_variant(family: Path) -> None:  # no
     assert hit[0]["file"] == "data/canonical/persons/I9004.md"
     only = O.call("canon.cards", {"kind": "places"}).data["rows"]
     assert [r["id"] for r in only] == ["PL9001"]
+    # Консоль бере канон цілим і шукає в браузері — тим самим текстом, що й тут.
+    assert "hay" not in d["rows"][0], "текст для пошуку — лише на прохання"
+    rows = O.call("canon.cards", {"limit": 5000, "text": True}).data["rows"]
+    v = next(r for r in rows if r["id"] == "I9004")
+    assert "алексѣй" in v["hay"] and "i9004" in v["hay"]
 
 
 def test_card_carries_its_own_issues_and_hypotheses(family: Path) -> None:  # noqa: F811

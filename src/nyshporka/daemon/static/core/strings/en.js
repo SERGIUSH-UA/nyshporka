@@ -1731,4 +1731,12 @@ export default {
     'give.run.sum': "Given {ok} · failed {f} · not started {ns}",
     'give.run.busy': "Giving is already running — wait for it or stop it",
     'give.run.stopping': "Stopping: files already started will finish",
+    'canon.lv.cited': "with evidence",
+    'canon.lv.uncited': "without evidence",
+    'canon.lv.gsum': "{n} cards · {c} with evidence",
+    'canon.lv.card': "Card",
+    'canon.lv.cites': "Evidence",
+    'hyp.lv.claim': "Hypothesis",
+    'hyp.lv.state': "Status",
+    'hyp.ph': "Claim, ID or the document that will settle it…",
 };

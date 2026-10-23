@@ -1737,4 +1737,12 @@ export default {
     'give.run.sum': "Віддано {ok} · не вдалось {f} · не почато {ns}",
     'give.run.busy': "Віддача вже йде — дочекайтесь її або зупиніть",
     'give.run.stopping': "Зупиняю: розпочаті справи дійдуть до кінця",
+    'canon.lv.cited': "з доказами",
+    'canon.lv.uncited': "без доказів",
+    'canon.lv.gsum': "{n} карток · з доказами {c}",
+    'canon.lv.card': "Картка",
+    'canon.lv.cites': "Докази",
+    'hyp.lv.claim': "Гіпотеза",
+    'hyp.lv.state': "Стан",
+    'hyp.ph': "Твердження, ID чи документ, що розв’яже…",
 };

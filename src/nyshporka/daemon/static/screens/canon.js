@@ -17,11 +17,7 @@ import { goto } from '../core/nav.js';
 import { openModal, modalSeq, modalTitle } from '../core/modal.js';
 import { kv, pill, toast, unwiki, fieldLabel, fieldValue, named, fmtDay, HYP_TONE, decRow } from '../core/bits.js';
 import { openEvidence } from './evidence.js';
-
-const KINDS = ['persons', 'families', 'places', 'sources', 'hypotheses'];
-
-/** Пошук і кошик живуть між перемальовками екрана. */
-const CN = { q: '', kind: '' };
+import { listView } from '../core/listview.js';
 
 SCREENS.canon = async () => {
   const gen = curGen();
@@ -37,20 +33,7 @@ SCREENS.canon = async () => {
       <div class="dash-box" id="cn-check">${skel}</div>
       <div class="dash-box" id="cn-next">${skel}</div>
     </div>
-    <div class="dash-box">
-      <div class="row">
-        <label class="fld"><span class="fld-l">${t('canon.find')}</span>
-          <input id="cn-q" data-act="canon.find" data-live="1" value="${esc(CN.q)}"
-            placeholder="${esc(t('canon.find.ph'))}"></label>
-        <label class="fld"><span class="fld-l">${t('canon.kind')}</span>
-          <select id="cn-kind" data-act="canon.find">
-            <option value="">${t('canon.kind.all')}</option>
-            ${KINDS.map((k) => `<option value="${k}"${CN.kind === k ? ' selected' : ''}>${
-    esc(t(`canon.kind.${k}`))}</option>`).join('')}
-          </select></label>
-      </div>
-      <div id="cn-list"><p class="muted">${t('load.cards')}</p></div>
-    </div>`);
+    <div id="cn-list"><p class="muted">${t('load.cards')}</p></div>`);
   // Прийшли з позначки «уже в каноні» іншого проєкту (`?card=`): одразу
   // картка. Параметр знімається — інакше вона відкривалась би на кожному вході.
   const q = new URLSearchParams(location.search);
@@ -125,23 +108,40 @@ function nextBox(env) {
     ${next.map((x) => decRow(x, d.refs || {})).join('') || `<p class="muted">${t('canon.next.none')}</p>`}`;
 }
 
-let LIST_SEQ = 0;
-
+/**
+ * Усі картки канону — спільним переліком: пошук по іменах і варіантах,
+ * плитки «з доказами / без доказів / приватні», групи за видом, по 50.
+ *
+ * 🔴 Доти сервер віддавав перші 200 із 896, і решту видно було лише пошуком
+ * (дослідник, 23.10.2026: «з пагінацією, фільтрами й групуванням проблема
+ * всюди — канон, гіпотези»).
+ */
 async function cardsList() {
-  const seq = ++LIST_SEQ;
-  const env = await callOp('canon.cards', { kind: CN.kind, q: CN.q, limit: 200 });
-  if (seq !== LIST_SEQ || !el('cn-list')) return;
+  const env = await callOp('canon.cards', { limit: 5000, text: true });
+  if (!el('cn-list')) return;
   if (!env.ok) { boxError('cn-list', env); return; }
-  const d = env.data || {};
-  const rows = (d.rows || []).map((r) => `<div class="lrow">
-      <div><b>${esc(unwiki(r.title))}</b>
-        <small class="muted"><span class="mono">${esc(r.id)}</span> · ${esc(t(`canon.kind.${r.kind}`))}
-        ${r.private ? ` · ${esc(t('canon.private'))}` : ''}</small></div>
-      ${pill(r.citations ? 'ok' : 'neutral', t('canon.cites').replace('{n}', r.citations))}
-      <button data-act="canon.card" data-arg="${esc(r.id)}">${t('canon.open')}</button></div>`).join('');
-  const more = d.found > (d.rows || []).length
-    ? `<p class="muted">${esc(t('canon.more').replace('{n}', d.found))}</p>` : '';
-  el('cn-list').innerHTML = rows ? rows + more : emptyMini('kartky', t('canon.none'));
+  const rows = (env.data || {}).rows || [];
+  if (!rows.length) { el('cn-list').innerHTML = `<div class="dash-box">${emptyMini('kartky', t('canon.none'))}</div>`; return; }
+  listView(el('cn-list'), {
+    id: 'canon',
+    rows,
+    key: (r) => r.id,
+    text: (r) => r.hay || `${r.id} ${r.title}`,
+    placeholder: t('canon.find.ph'),
+    chips: [
+      { id: 'cited', label: t('canon.lv.cited'), test: (r) => r.citations > 0, tone: 'ok' },
+      { id: 'uncited', label: t('canon.lv.uncited'), test: (r) => !r.citations, tone: 'warn' },
+      { id: 'private', label: t('canon.private'), test: (r) => !!r.private },
+    ],
+    group: (r) => ({ id: r.kind, label: t(`canon.kind.${r.kind}`) }),
+    groupSummary: (g) => esc(t('canon.lv.gsum').replace('{n}', g.length)
+      .replace('{c}', g.filter((r) => r.citations > 0).length)),
+    head: `<th>${t('canon.lv.card')}</th><th>${t('canon.lv.cites')}</th><th></th>`,
+    cells: (r) => `<td><b>${esc(unwiki(r.title))}</b><br><small class="muted"><span class="mono">${esc(r.id)}</span>${
+      r.private ? ` · ${esc(t('canon.private'))}` : ''}</small></td>
+      <td>${pill(r.citations ? 'ok' : 'neutral', t('canon.cites').replace('{n}', r.citations))}</td>
+      <td class="lv-nw"><button data-act="canon.card" data-arg="${esc(r.id)}">${t('canon.open')}</button></td>`,
+  });
 }
 
 /** Значення поля картки як текст: дата-об'єкт, перелік, рядок. */
@@ -204,11 +204,6 @@ async function openCard(id) {
 }
 
 Object.assign(ACTIONS, {
-  'canon.find': () => {
-    CN.q = String((el('cn-q') || {}).value || '').trim();
-    CN.kind = String((el('cn-kind') || {}).value || '');
-    return cardsList();
-  },
   'canon.recheck': async () => {
     const box = el('cn-check');
     if (box) box.innerHTML = `<p class="muted">${t('load.open')}</p>`;

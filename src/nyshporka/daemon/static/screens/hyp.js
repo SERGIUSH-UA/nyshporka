@@ -12,6 +12,7 @@
 import { t } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, curGen, alive, humanError, emptyMini } from '../core/view.js';
+import { listView } from '../core/listview.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { show } from '../core/nav.js';
 import { openModal, modalSeq } from '../core/modal.js';
@@ -31,22 +32,31 @@ SCREENS.hyp = async () => {
   if (!alive(gen)) return;
   if (!env.ok) return failure(env);
   const d = env.data || {};
-  const c = d.counts || {};
-  const tone = { open: 'ov-info', awaiting: 'ov-warn', closed: 'ov-ok' };
-  const tile = (k) => `<div class="ov-kpi${c[k] ? ` ${tone[k]}` : ''}"><span class="ov-kpi-l">${t(`hyp.st.${k}`)}</span>
-    <span class="ov-kpi-v"><b class="num">${esc(c[k] || 0)}</b></span></div>`;
   const refs = d.refs || {};
-  const rows = (d.rows || []).map((h) => `<div class="lrow">
-      <div><b>${named(h.claim, refs)}</b>
-        <small class="muted"><span class="mono">${esc(h.id)}</span>${
-  h.decides ? ` · ${esc(t('hyp.decides'))}: ${named(h.decides, refs)}` : ''}</small>
-        <span>${pill(TONE[h.status] || 'neutral', t(`hyp.st.${h.status}`))}${
-  h.hits ? ` ${pill(h.strong ? 'warn' : 'neutral', t('hyp.hits').replace('{n}', h.hits))}` : ''}</span></div>
-      <button data-act="hyp.open" data-arg="${esc(h.id)}">${t('canon.open')}</button></div>`).join('');
-  setView(`
-    <p class="muted">${t('hyp.why')}</p>
-    <div class="ov-kpis k3">${tile('open')}${tile('awaiting')}${tile('closed')}</div>
-    <div class="dash-box">${rows || emptyMini('lupa', t('hyp.none'))}</div>`);
+  const rows = d.rows || [];
+  // Спільний перелік: плитки за станом із числами, пошук по твердженню й
+  // документу, що розв'яже (дослідник, 23.10.2026: «канон, гіпотези — всюди»).
+  setView(`<p class="muted">${t('hyp.why')}</p><div id="hyp-lv"></div>`);
+  if (!rows.length) {
+    el('hyp-lv').innerHTML = `<div class="dash-box">${emptyMini('lupa', t('hyp.none'))}</div>`;
+  } else {
+    const chipTone = { open: 'info', awaiting: 'warn', closed: 'ok' };
+    listView(el('hyp-lv'), {
+      id: 'hyp',
+      rows,
+      key: (h) => h.id,
+      text: (h) => `${h.id} ${h.claim || ''} ${h.decides || ''}`,
+      placeholder: t('hyp.ph'),
+      chips: ['awaiting', 'open', 'closed'].map((k) => ({ id: k, label: t(`hyp.st.${k}`),
+        test: (h) => h.status === k, tone: chipTone[k] })),
+      head: `<th>${t('hyp.lv.claim')}</th><th>${t('hyp.lv.state')}</th><th></th>`,
+      cells: (h) => `<td><b>${named(h.claim, refs)}</b><br><small class="muted"><span class="mono">${esc(h.id)}</span>${
+        h.decides ? ` · ${esc(t('hyp.decides'))}: ${named(h.decides, refs)}` : ''}</small></td>
+        <td>${pill(TONE[h.status] || 'neutral', t(`hyp.st.${h.status}`))}${
+  h.hits ? ` ${pill(h.strong ? 'warn' : 'neutral', t('hyp.hits').replace('{n}', h.hits))}` : ''}</td>
+        <td class="lv-nw"><button data-act="hyp.open" data-arg="${esc(h.id)}">${t('canon.open')}</button></td>`,
+    });
+  }
   const seed = ST.hyp;
   ST.hyp = null;
   if (seed && seed.id) await openHyp(seed.id);

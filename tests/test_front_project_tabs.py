@@ -111,14 +111,16 @@ await import('./app.js');
 await tick(150);
 const out = {};
 
+globalThis.__OPS = [];
 await SCREENS.canon();
 await tick();
-out.canon = view() + (document.getElementById('cn-list').innerHTML || '') + (document.getElementById('cn-check').innerHTML || '') + (document.getElementById('cn-next').innerHTML || '');
+out.canonSent = sent('canon.cards');
+out.canon = view() + (document.getElementById('cn-list').innerHTML || '') + (document.getElementById('canon-body').innerHTML || '') + (document.getElementById('canon-chips').innerHTML || '') + (document.getElementById('cn-check').innerHTML || '') + (document.getElementById('cn-next').innerHTML || '');
 await ACTIONS['canon.card'](null, el('I9001'));
 out.card = dlg();
 
 await SCREENS.hyp();
-out.hyp = view();
+out.hyp = view() + (document.getElementById('hyp-body').innerHTML || '') + (document.getElementById('hyp-chips').innerHTML || '');
 await ACTIONS['hyp.open'](null, el('H9001'));
 await tick();
 out.hypDlg = dlg();
@@ -291,6 +293,10 @@ def test_canon_shows_check_cards_and_decisions(probe) -> None:
     assert "1 помилка" in c and "мати без джерела" in c
     assert 'data-act="canon.hyp" data-arg="H9001"' in c
     assert 'title="Петро Сидорук · I9002">Сидорук</span>' in c, "ID у «що вирішити» — ім'ям"
+    # Спільний перелік: усі картки, плитки й пошук (не перші 200 і не лише за запитом).
+    assert 'data-act="lv.chip"' in c and 'data-lv="canon"' in c
+    assert any(json.loads(x).get("limit") == 5000 and json.loads(x).get("text") is True
+               for x in probe["canonSent"]), "канон береться цілим, із текстом для пошуку"
 
 
 def test_canon_card_window_has_facts_evidence_and_hypotheses(probe) -> None:
@@ -304,6 +310,7 @@ def test_canon_card_window_has_facts_evidence_and_hypotheses(probe) -> None:
 
 def test_hypothesis_crops_and_goes_to_sift_with_the_run(probe) -> None:
     assert "Іван — син Петра" in probe["hyp"]
+    assert 'data-act="lv.chip"' in probe["hyp"] and 'data-act="hyp.open"' in probe["hyp"]
     assert "сповідка 1838" in probe["hypDlg"]
     assert "<img" in probe["hypCrop"], "кроп кандидата не намалювався"
     hits = probe["siftHits"]

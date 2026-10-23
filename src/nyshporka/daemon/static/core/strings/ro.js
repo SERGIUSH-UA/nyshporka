@@ -1801,4 +1801,12 @@ export default {
     'give.run.sum': "Date {ok} · nereușite {f} · neîncepute {ns}",
     'give.run.busy': "Darea rulează deja — așteptați sau opriți-o",
     'give.run.stopping': "Opresc: dosarele începute se termină",
+    'canon.lv.cited': "cu dovezi",
+    'canon.lv.uncited': "fără dovezi",
+    'canon.lv.gsum': "{n} fișe · cu dovezi {c}",
+    'canon.lv.card': "Fișă",
+    'canon.lv.cites': "Dovezi",
+    'hyp.lv.claim': "Ipoteză",
+    'hyp.lv.state': "Stare",
+    'hyp.ph': "Afirmația, ID-ul sau documentul care o va lămuri…",
 };

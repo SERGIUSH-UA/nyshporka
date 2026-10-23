@@ -257,6 +257,8 @@ class CardsArgs(BaseModel):
         default="", description="вид карток; порожньо — усі")
     q: str = Field(default="", description="підрядок ID, імені, назви чи варіанта")
     limit: int = Field(default=200, ge=1, le=5000, description="скільки рядків")
+    text: bool = Field(default=False, description="додати до рядка `hay` — ім'я, варіанти, "
+                                                  "ID, — щоб шукати в браузері без запиту")
 
 
 @op("canon.cards", summary="Картки канону списком: особи, родини, місця, джерела, гіпотези",
@@ -271,11 +273,16 @@ def canon_cards(a: CardsArgs) -> Envelope:
             title = _title(canon, kind, ent)
             if q and q not in _haystack(kind, ent, title):
                 continue
-            rows.append({"id": eid, "kind": kind, "title": title,
-                         "private": bool(getattr(ent, "private", False)),
-                         "facts": len(getattr(ent, "facts", None) or []),
-                         "citations": _citations(ent),
-                         "file": canon.files[eid].relative_to(root).as_posix()})
+            row = {"id": eid, "kind": kind, "title": title,
+                   "private": bool(getattr(ent, "private", False)),
+                   "facts": len(getattr(ent, "facts", None) or []),
+                   "citations": _citations(ent),
+                   "file": canon.files[eid].relative_to(root).as_posix()}
+            if a.text:
+                # Консоль шукає по всьому канону в браузері (спільний перелік):
+                # той самий текст, що й тут, — імена, варіанти, ID.
+                row["hay"] = _haystack(kind, ent, title)
+            rows.append(row)
     env = ok({"counts": canon.counts(), "found": len(rows), "rows": rows[:a.limit]})
     _no_canon(env)
     return env

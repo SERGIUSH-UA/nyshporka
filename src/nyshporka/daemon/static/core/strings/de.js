@@ -1801,4 +1801,12 @@ export default {
     'give.run.sum': "Gegeben {ok} · fehlgeschlagen {f} · nicht begonnen {ns}",
     'give.run.busy': "Es läuft bereits ein Geben — abwarten oder anhalten",
     'give.run.stopping': "Halte an: begonnene Akten laufen zu Ende",
+    'canon.lv.cited': "mit Belegen",
+    'canon.lv.uncited': "ohne Belege",
+    'canon.lv.gsum': "{n} Karten · {c} mit Belegen",
+    'canon.lv.card': "Karte",
+    'canon.lv.cites': "Belege",
+    'hyp.lv.claim': "Hypothese",
+    'hyp.lv.state': "Stand",
+    'hyp.ph': "Aussage, ID oder Dokument, das sie klärt…",
 };
