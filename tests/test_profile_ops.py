@@ -473,6 +473,8 @@ def test_first_clan_names_a_placeholder_workspace_and_spares_a_chosen_name(tmp_p
     from nyshporka.core import workspace as W
     from nyshporka.setup import wizard
 
+    hub = wizard.create(tmp_path / "hub" / W.DEFAULT_DIRNAME, hub=True)
+    assert W._read_marker(hub / W.MARKER)["name"] == "Майстерня"
     root = wizard.create(tmp_path / W.DEFAULT_DIRNAME)
     assert W._read_marker(root / W.MARKER)["name"] == W.DEFAULT_NAME
     W.use(W._build(root, "test"))

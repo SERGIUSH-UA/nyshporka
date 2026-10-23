@@ -103,11 +103,16 @@ def origin_phrase(origin: str) -> str:
     return origin
 
 
-def _default_name(target: Path) -> str:
-    """Назва нового простору без явного `name`: ім'я теки, а в типовій — не «Нишпорка»."""
+def _default_name(target: Path, *, hub: bool = False) -> str:
+    """Назва нового простору без явного `name`: ім'я теки, а в типовій — не «Нишпорка».
+
+    Майстерня (`hub`) — «Майстерня»: роди в ній — проєкти зі своїми назвами.
+    """
     from nyshporka.core.workspace import DEFAULT_DIRNAME, DEFAULT_NAME
 
-    return DEFAULT_NAME if target.name == DEFAULT_DIRNAME else target.name
+    if target.name != DEFAULT_DIRNAME:
+        return target.name
+    return "Майстерня" if hub else DEFAULT_NAME
 
 
 def create(root: str | Path | None = None, *, name: str = "",
@@ -154,7 +159,7 @@ def create(root: str | Path | None = None, *, name: str = "",
             "schema = 1\n"
             "# Версія ключів справ: 2 — опис у ключі (`nysh cases rekey`).\n"
             "keys = 2\n"
-            f'name = "{name or _default_name(target)}"\n'
+            f'name = "{name or _default_name(target, hub=hub)}"\n'
             + ("# Майстерня без власного проєкту: роди — у projects/ (`nysh project new`).\n"
                "hub_only = true\n" if hub else "")
             + f"{chosen}"
