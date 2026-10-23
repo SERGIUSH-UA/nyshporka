@@ -417,7 +417,12 @@ class ArchiumSource:
         self.id = self.site.source_id or f"archium-{self.repo.lower()}"
         self.label = f"ARCHIUM ({self._repo_label()})"
         self._fetcher = fetcher
-        self.http = fetcher or Fetcher(base=self.base)
+        # 🔴 `Referer` — перелік фондів, а не корінь сайту, який `Fetcher` ставить
+        # сам. ЦДІАК віддає 403 на сторінку переглядача рівно з `Referer: <корінь>/`
+        # (без заголовка, з `/fonds/` чи з самою сторінкою — 200; заміряно
+        # 23.10.2026), тож «Завантажити» з ЦДІАК падало в кожного.
+        self.http = fetcher or Fetcher(base=self.base,
+                                       headers={"Referer": f"{self.base}/fonds/"})
 
     def _default_site(self) -> Site:
         """Майданчик із паку, а якщо його там немає — зашитий ДАХмО.

@@ -385,7 +385,12 @@ async def _start_acquire(bus: JobBus, ws: Workspace,
     # 🔴 Маніфест береться до постановки в чергу: питання «скільки це» мусить
     # мати відповідь до початку, а не після. Заразом це перевірка, що адреса
     # взагалі жива — інакше в черзі висіло б завдання, приречене впасти.
-    man = await asyncio.to_thread(src.manifest, ref)
+    from nyshporka.sources.http import HttpError, explain
+
+    try:
+        man = await asyncio.to_thread(src.manifest, ref)
+    except HttpError as exc:
+        raise ValueError(explain(exc)) from exc
     total = man.frames if frames is None else (frames[1] - frames[0] + 1)
 
     job, created = await bus.enqueue(
@@ -426,8 +431,11 @@ async def _run_acquire(bus: JobBus, src: Any, job: JobRecord, dest: Path,
         res = await asyncio.to_thread(src.fetch, ref, dest, frames=frames,
                                       on_progress=on_progress)
     except Exception as exc:
+        from nyshporka.sources.http import HttpError, explain
+
         await bus.update(job.id, state=JobState.ERROR,
-                         error=f"{type(exc).__name__}: {exc}")
+                         error=(explain(exc) if isinstance(exc, HttpError)
+                                else f"{type(exc).__name__}: {exc}"))
         return
     # 🔴 Той самий приймач, що в `nysh get` (аудит 29.09.2026): доти DONE
     # ставилось усьому, крім «самі збої й жодного кадру», — нуль кадрів без

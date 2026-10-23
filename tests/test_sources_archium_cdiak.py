@@ -134,3 +134,27 @@ def test_the_refusal_says_which_of_the_two_states_it_is() -> None:
     with pytest.raises(SourceError) as exc:
         src.manifest("file:52170")
     assert "200" in str(exc.value) and "404" in str(exc.value)
+
+
+def test_viewer_is_not_asked_with_the_bare_site_root_as_referer() -> None:
+    """🔴 ЦДІАК віддає 403 на `/file-viewer/<id>` рівно з `Referer: <корінь>/`.
+
+    Типовий `Referer` `Fetcher` — саме корінь, і «Завантажити» з ЦДІАК падало в
+    кожного (прохід новачка 23.10.2026). Без заголовка, з `/fonds/` чи з самою
+    сторінкою сайт відповідає 200.
+    """
+    for src in (A.ArchiumSource(), _cdiak()):
+        ref = src.http._headers.get("Referer", "")
+        assert ref.rstrip("/") != src.base.rstrip("/"), ref
+        assert ref.startswith(src.base)
+
+
+@pytest.mark.parametrize(("code", "word"), [(403, "не пустив"), (404, "немає"),
+                                            (429, "пригальмувати"), (503, "не відповідає")])
+def test_site_refusal_is_explained_not_bare(code: int, word: str) -> None:
+    """Відмова сайту — словами й з адресою, а не голе «HTTP 403»."""
+    from nyshporka.sources.http import HttpError, explain
+
+    msg = explain(HttpError(f"https://archium.example/file-viewer/1: HTTP {code}", status=code))
+    assert word in msg and "https://archium.example/file-viewer/1" in msg
+    assert f"HTTP {code}" in msg

@@ -194,6 +194,30 @@ class HttpError(RuntimeError):
         self.retry_after = retry_after
 
 
+def explain(exc: HttpError) -> str:
+    """Відмова чужого сайту — словами людини, з адресою в кінці.
+
+    🔴 На екран ішло голе `…/file-viewer/51871: HTTP 403`, а в `nysh get` —
+    трасування на пів екрана: що сталося і що з цим робити, не казало ніщо
+    (прохід новачка 23.10.2026).
+    """
+    where = str(exc).rsplit(": HTTP", 1)[0]
+    code = exc.status or 0
+    if code in (401, 403):
+        why = ("сайт архіву не пустив програму (HTTP {c}). Так буває, коли сайт "
+               "змінив правила доступу; у браузері сторінка може відкриватись. "
+               "Повторюється — напишіть у «Відгук»: це лагодиться в застосунку")
+    elif code == 404:
+        why = "такої сторінки на сайті архіву немає (HTTP {c}) — адреса застаріла або справу прибрали"
+    elif code == 429:
+        why = "сайт архіву просить пригальмувати (HTTP {c}) — спробуйте за кілька хвилин"
+    elif code >= 500:
+        why = "сайт архіву зараз не відповідає як слід (HTTP {c}) — спробуйте пізніше"
+    else:
+        return str(exc)
+    return f"{why.format(c=code)}. Адреса: {where}"
+
+
 def retry_after_of(r: Any) -> float | None:
     """`Retry-After` у секундах: число або HTTP-дата. Нечитне — `None`."""
     raw = str(getattr(r, "headers", {}).get("Retry-After") or "").strip()

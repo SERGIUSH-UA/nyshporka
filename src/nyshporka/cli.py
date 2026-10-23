@@ -533,7 +533,10 @@ def get(source: str = typer.Argument(..., help="id джерела"),
     Доти команда лишала на диску самі пікселі — тобто теку невідомого
     походження, у якій наступна сесія не знала ні звідки вона, ні чи повна.
     """
+    from rich.markup import escape
+
     from nyshporka.sources.base import SourceError
+    from nyshporka.sources.http import HttpError, explain
 
     _need("material")
     ref = ref.strip()       # адреса з файла CRLF несе `\r` — див. `provenance`
@@ -570,6 +573,9 @@ def get(source: str = typer.Argument(..., help="id джерела"),
     except SourceError as exc:
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=1) from None
+    except HttpError as exc:
+        console.print(f"[err]{escape(explain(exc))}[/err]")
+        raise typer.Exit(code=1) from None
     console.print(f"[bold]{man.title or ref}[/bold] — кадрів "
                   + (str(man.frames) if man.frames is not None else "невідомо")
                   + (f", беремо {rng[0]}-{rng[1]}" if rng else ""))
@@ -591,6 +597,9 @@ def get(source: str = typer.Argument(..., help="id джерела"),
         if from_zip is not None:
             kw["from_zip"] = from_zip
         res = src.fetch(ref, out, frames=rng, on_progress=progress, **kw)
+    except HttpError as exc:
+        console.print(f"\n[err]{escape(explain(exc))}[/err]")
+        raise typer.Exit(code=1) from None
     except SourceError as exc:
         # Та сама відмова, що й на маніфесті: джерело може відмовити й посеред
         # завантаження (мережа, обрізаний перелік файлів), і це текст, а не
