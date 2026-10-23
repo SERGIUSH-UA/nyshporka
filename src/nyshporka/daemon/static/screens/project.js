@@ -8,7 +8,7 @@ import { SCREENS, ACTIONS } from '../core/registry.js';
 import { goto, jobDone, jobChip, currentScreen, SECTIONS } from '../core/nav.js';
 import { openModal, closeModal } from '../core/modal.js';
 import { decRow, noEmoji, fmtDay } from '../core/bits.js';
-import { projectBadge as badge, projectColor, projectsNow, currentPid } from '../core/projects.js';
+import { projectBadge as badge, projectColor, projectsNow, currentPid, iconPicker, iconSrc } from '../core/projects.js';
 
 /**
  * Перейти в проєкт: нова адреса вкладки (`?p=`), а не стан сторінки — інакше
@@ -63,6 +63,8 @@ SCREENS.newproject = async () => {
         <label class="chk"><input type="checkbox" name="usecolor" value="1"> ${t('np.usecolor')}</label>
         ${fld(t('np.color'), `<input name="color" type="color" value="#4f6bd8">`)}
         ${fld(t('np.glyph'), `<input name="glyph" maxlength="2" size="3">`)}</div>
+      ${iconPicker('')}
+      <p class="muted fld-hint">${t('np.icon.hint')}</p>
       <div class="row dlg-acts"><button type="submit" class="primary">${t('np.create')}</button>
         <button type="button" class="ghost" data-act="modal.close">${t('modal.no')}</button></div>
       <div id="np-box"></div>
@@ -108,9 +110,17 @@ function npLive() {
     if (prev) {
       const glyph = String((q('glyph') || {}).value || '').trim();
       const word = title.replace(/^(рід|род)\s+/i, '').trim();
-      prev.textContent = glyph || (word ? word[0].toUpperCase() : '?');
       const use = q('usecolor');
-      if (prev.style) prev.style.background = use && use.checked ? String((q('color') || {}).value || '') : '';
+      const color = use && use.checked ? String((q('color') || {}).value || '') : '';
+      const icon = String((form.querySelector('[name="icon"]:checked') || {}).value || '');
+      // Значок — замість літери, колір — його обідком; так само, як у перемикачі.
+      if (icon) prev.innerHTML = `<img src="${iconSrc(icon)}" alt="">`;
+      else prev.textContent = glyph || (word ? word[0].toUpperCase() : '?');
+      prev.className = icon ? `pj-badge pj-ico${color ? ' pj-ring' : ''}` : 'pj-badge';
+      if (prev.style) {
+        prev.style.background = icon ? '' : color;
+        if (prev.style.setProperty) prev.style.setProperty('--pj', color);
+      }
     }
   };
   form.addEventListener('input', (ev) => {
@@ -334,6 +344,8 @@ function styleForm() {
         value="${esc(/^#[0-9a-fA-F]{6}$/.test(d.color || '') ? d.color : '#4f6bd8')}">`)}
         ${fld(t('np.glyph'), `<input name="glyph" maxlength="2" size="3" value="${esc(d.glyph || '')}">`)}</div>
       ${d.color ? `<label class="chk"><input type="checkbox" name="nocolor" value="1"> ${t('ov.nocolor')}</label>` : ''}
+      ${iconPicker(d.icon || '')}
+      <p class="muted fld-hint">${t('np.icon.hint')}</p>
       <div class="row dlg-acts"><button type="submit" class="primary">${t('sp.save')}</button>
         <button type="button" class="ghost" data-act="modal.close">${t('modal.no')}</button></div>
       <div id="ps-box"></div></form>` });
@@ -349,7 +361,7 @@ Object.assign(ACTIONS, {
     // не мала б мовчки дістати колір, що стояв у полі за замовчуванням.
     const color = fd.get('nocolor') ? '' : String(fd.get('color') || '');
     const args = { name: was.project || PROJECT, glyph: String(fd.get('glyph') || '').trim(),
-      title: String(fd.get('title') || '').trim() };
+      title: String(fd.get('title') || '').trim(), icon: String(fd.get('icon') || '') };
     if (color !== (was.color || '') && (was.color || fd.get('touched') || fd.get('nocolor'))) args.color = color;
     const env = await callOp('project.style', args);
     if (!env.ok) { boxError('ps-box', env); return; }
@@ -395,6 +407,7 @@ Object.assign(ACTIONS, {
       // значення, і без галочки кожен проєкт мовчки діставав би той самий.
       color: fd.usecolor ? String(fd.color || '') : '',
       glyph: String(fd.glyph || '').trim(),
+      icon: String(fd.icon || ''),
       kind: fd.kind === 'order' ? 'order' : 'family',
     });
     done();

@@ -898,6 +898,26 @@ details.raw pre { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--f
 .pj-badge { display: inline-grid; place-items: center; flex: none;
   width: 2.3rem; height: 2.3rem; border-radius: 50%; background: var(--pj); color: var(--white);
   font-weight: 700; font-size: 1.05rem; }
+/* Мальований значок проєкту (`[project] icon`) — замість літери; колір
+   проєкту лишається обідком, щоб два проєкти з одним значком не злились. */
+.pj-badge.pj-ico { background: none; overflow: hidden; }
+.pj-badge.pj-ico img { display: block; width: 100%; height: 100%; }
+.pj-badge.pj-ico.pj-ring { box-shadow: 0 0 0 2px var(--pj); }
+/* Вибір значка: «Літера» і 27 кружків сіткою; позначений — медовим обідком. */
+/* Без max-width у сітки: з нею auto-fill рахує стовпчики від 34rem, і у
+   вузькому вікні «Назва, колір і знак» сітка вилазила за край. Нижній відступ
+   — під `.fld-hint`, що підтягується вгору від'ємним полем. */
+.pj-picker { display: grid; gap: .35rem; margin: .4rem 0 1.1rem; }
+.pj-picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(2.9rem, 1fr)); gap: .4rem; width: 100%; }
+.pj-pick { position: relative; display: grid; place-items: center; cursor: pointer; }
+.pj-pick input { position: absolute; opacity: 0; pointer-events: none; }
+.pj-pick img, .pj-pick .pj-letter { width: 2.5rem; height: 2.5rem; border-radius: 50%;
+  transition: transform var(--dur-1) var(--ease), box-shadow var(--dur-1) var(--ease); }
+.pj-pick .pj-letter { display: grid; place-items: center; background: var(--s-3); color: var(--fg-2);
+  border: 1px solid var(--line-2); font: 600 1rem/1 var(--font-serif); }
+.pj-pick:hover img { transform: scale(1.07); }
+.pj-pick input:checked + * { box-shadow: 0 0 0 3px var(--honey); }
+.pj-pick input:focus-visible + * { outline: 2px solid var(--accent); outline-offset: 3px; }
 .pj-stats { display: flex; gap: 1.2rem; color: var(--fg-3); font-size: .9rem; }
 .pj-stats b { color: var(--fg); font-size: 1.15rem; margin-right: .15rem; }
 .pj-stats .pj-warn b { color: var(--warn-fg); }

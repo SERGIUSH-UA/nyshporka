@@ -36,6 +36,13 @@ KINDS = ("family", "order")
 _COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 #: Знак проєкту (`[project] glyph`): буква чи емодзі, не слово.
 GLYPH_MAX = 2
+#: Значок проєкту (`[project] icon`): мальований кружок консолі,
+#: `ui/static/img/pj-<ключ>.webp` (аркуш дослідника, 23.10.2026). Стоїть замість
+#: знака; колір проєкту лишається обідком. Порядок — як у виборі значка.
+ICONS = ("derevo", "zamok", "sobor", "tserkva", "mlyn", "mist", "hory", "maietok", "knyha",
+         "suvii", "korabel", "hodynnyk", "kolossia", "kovadlo", "korona", "herb", "mapa",
+         "koleso", "hlechyk", "vynohrad", "soniashnyk", "berezy", "snihy", "maiak",
+         "uzberezhzhia", "ostriv", "zemlia")
 
 
 class ProjectError(W.WorkspaceError):
@@ -56,6 +63,7 @@ class Project:
     archived: bool = False
     color: str = ""
     glyph: str = ""
+    icon: str = ""
 
 
 def check_color(color: str) -> str:
@@ -68,6 +76,12 @@ def check_glyph(glyph: str) -> str:
     if len(glyph.strip()) > GLYPH_MAX or glyph != glyph.strip():
         raise ProjectError(f"знак «{glyph}» — одна буква чи емодзі, до {GLYPH_MAX} символів")
     return glyph
+
+
+def check_icon(icon: str) -> str:
+    if icon and icon not in ICONS:
+        raise ProjectError(f"значка «{icon}» немає; є: {', '.join(ICONS)}")
+    return icon
 
 
 def check_name(name: str) -> str:
@@ -97,8 +111,12 @@ def _from_dir(path: Path) -> Project | None:
         check_glyph(glyph)
     except ProjectError:
         glyph = ""
+    icon = str(tab.get("icon") or "")
+    if icon not in ICONS:
+        icon = ""
     return Project(id=path.name, root=path, name=str(tab.get("name") or path.name),
-                   kind=kind, archived=bool(tab.get("archived")), color=color, glyph=glyph)
+                   kind=kind, archived=bool(tab.get("archived")), color=color, glyph=glyph,
+                   icon=icon)
 
 
 def list_projects(hub: Path, *, archived: bool = False) -> list[Project]:

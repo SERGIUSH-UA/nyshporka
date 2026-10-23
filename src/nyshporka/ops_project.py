@@ -40,6 +40,9 @@ class ProjectNewArgs(BaseModel):
                                             "як куски, за якими воно впізнається")
     color: str = Field(default="", description="колір проєкту в консолі: #rrggbb")
     glyph: str = Field(default="", description="знак проєкту: буква чи емодзі")
+    icon: str = Field(default="", description="значок проєкту — мальований кружок "
+                                              "(derevo, zamok, tserkva…; повний перелік — "
+                                              "у відмові на невідомий)")
 
 
 @op("project.new", summary="Завести проєкт у Майстерні (рід чи замовлення) з шаблону",
@@ -54,11 +57,12 @@ def project_new(a: ProjectNewArgs) -> Envelope:
     try:
         P.check_color(a.color)
         P.check_glyph(a.glyph)
+        P.check_icon(a.icon)
         made = T.create(hub, a.name, kind=a.kind, title=a.title)
     except P.ProjectError as exc:
         return fail(str(exc))
-    if a.color or a.glyph:
-        T.set_style(made.root, color=a.color, glyph=a.glyph)
+    if a.color or a.glyph or a.icon:
+        T.set_style(made.root, color=a.color, glyph=a.glyph, icon=a.icon)
     data: dict[str, Any] = {"root": str(made.root), "files": made.files, "profile": None}
     env = ok(data)
     if a.surname:
@@ -107,7 +111,7 @@ def project_list(_: NoArgs) -> Envelope:
     for pr in P.list_projects(ws.hub, archived=True):
         rows.append({"id": pr.id, "name": pr.name, "kind": pr.kind,
                      "archived": pr.archived, "here": pr.id == here,
-                     "color": pr.color, "glyph": pr.glyph,
+                     "color": pr.color, "glyph": pr.glyph, "icon": pr.icon,
                      "persons": _count_persons(pr.root),
                      "hypotheses": _count_hypotheses(pr.root), "root": str(pr.root)})
     return ok({"hub": str(ws.hub), "here": here, "projects": rows})
@@ -177,6 +181,8 @@ class ProjectStyleArgs(ProjectNameArgs):
     title: str | None = Field(default=None, description="назва для людини («Рід Сидоруків»)")
     color: str | None = Field(default=None, description="#rrggbb; порожньо — зняти")
     glyph: str | None = Field(default=None, description="буква чи емодзі; порожньо — зняти")
+    icon: str | None = Field(default=None, description="значок-кружок (derevo, zamok…); "
+                                                       "порожньо — зняти")
 
 
 @op("project.style", summary="Назва, колір і знак проєкту в консолі",
@@ -194,14 +200,15 @@ def project_style(a: ProjectStyleArgs) -> Envelope:
         root = P.project_dir(hub, a.name)
         P.check_color(a.color or "")
         P.check_glyph(a.glyph or "")
+        P.check_icon(a.icon or "")
     except P.ProjectError as exc:
         return fail(str(exc))
     # 🔴 Назва — для людини: перенесення роду в проєкт (`project adopt`) лишало
     # в ній id, і консоль скрізь показувала id проєкту (22.10.2026).
-    T.set_style(root, color=a.color, glyph=a.glyph, title=a.title)
+    T.set_style(root, color=a.color, glyph=a.glyph, title=a.title, icon=a.icon)
     pr = P._from_dir(root)
     return ok({"name": a.name, "title": pr.name if pr else "", "color": pr.color if pr else "",
-               "glyph": pr.glyph if pr else ""})
+               "glyph": pr.glyph if pr else "", "icon": pr.icon if pr else ""})
 
 
 class ProjectAdoptArgs(ProjectNameArgs):
@@ -544,6 +551,8 @@ def _state(ws: Any) -> dict[str, Any]:
     out["kind"] = str(tab.get("kind") or "family")
     out["color"] = str(tab.get("color") or "")
     out["glyph"] = str(tab.get("glyph") or "")
+    icon = str(tab.get("icon") or "")
+    out["icon"] = icon if icon in P.ICONS else ""
     out["persons"] = _count_persons(ws.root)
     try:
         from nyshporka.core import profile as PROF

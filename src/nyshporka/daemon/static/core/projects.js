@@ -9,6 +9,7 @@
  */
 import { apiFetch } from './net.js';
 import { esc } from './view.js';
+import { t } from './strings.js';
 
 /** Відповідь `/api/projects` або `null`, поки не прийшла чи не вдалась. */
 let DATA = null;
@@ -61,11 +62,38 @@ export function projectColor(p) {
   return p && /^#[0-9a-fA-F]{6}$/.test(p.color || '') ? p.color : '';
 }
 
-/** Кружок проєкту: знак (або перша літера) на кольорі проєкту. */
+/**
+ * Мальовані значки проєктів (`[project] icon`, аркуш дослідника 23.10.2026),
+ * той самий перелік і порядок, що `core/projects.py::ICONS`.
+ */
+export const ICONS = ['derevo', 'zamok', 'sobor', 'tserkva', 'mlyn', 'mist', 'hory', 'maietok', 'knyha',
+  'suvii', 'korabel', 'hodynnyk', 'kolossia', 'kovadlo', 'korona', 'herb', 'mapa', 'koleso', 'hlechyk',
+  'vynohrad', 'soniashnyk', 'berezy', 'snihy', 'maiak', 'uzberezhzhia', 'ostriv', 'zemlia'];
+export const iconSrc = (icon) => `/ui/img/pj-${icon}.webp`;
+
+/**
+ * Кружок проєкту. Мальований значок стоїть замість літери, а колір проєкту
+ * стає його обідком; без значка — знак (або перша літера) на кольорі.
+ */
 export function projectBadge(p) {
   const color = projectColor(p);
+  const style = color ? ` style="--pj:${esc(color)}"` : '';
+  if (ICONS.includes(p.icon)) {
+    return `<span class="pj-badge pj-ico${color ? ' pj-ring' : ''}"${style}><img src="${iconSrc(p.icon)}" alt=""></span>`;
+  }
   const mark = p.glyph || String(p.name || p.id || '?').trim().charAt(0).toUpperCase();
-  return `<span class="pj-badge"${color ? ` style="--pj:${esc(color)}"` : ''}>${esc(mark)}</span>`;
+  return `<span class="pj-badge"${style}>${esc(mark)}</span>`;
+}
+
+/** Вибір значка у формі: «Літера» і мальовані кружки — радіо `icon`. */
+export function iconPicker(current = '') {
+  const cur = ICONS.includes(current) ? current : '';
+  const one = (v, inner, label) => `<label class="pj-pick" title="${esc(label)}">
+      <input type="radio" name="icon" value="${v}"${cur === v ? ' checked' : ''} aria-label="${esc(label)}">${inner}</label>`;
+  return `<div class="fld pj-picker"><span class="fld-l">${esc(t('np.icon'))}</span>
+    <div class="pj-picks" role="radiogroup" aria-label="${esc(t('np.icon'))}">${
+  one('', `<span class="pj-letter">${esc(t('np.icon.abc'))}</span>`, t('np.icon.letter'))}${
+  ICONS.map((k) => one(k, `<img src="${iconSrc(k)}" alt="">`, t(`pj.icon.${k}`))).join('')}</div></div>`;
 }
 
 /**
