@@ -416,24 +416,42 @@ def _conn_is_loopback(scope: dict[str, Any]) -> bool:
     return is_loopback_host(_conn_server(scope)[0])
 
 
+#: Що прогріває `_warm_up`, у порядку, в якому людина найімовірніше відкриє.
+#: Аргументи — ті самі, з якими питає екран: кеш операцій ключований ними.
+WARM_OPS: tuple[tuple[str, dict[str, Any]], ...] = (
+    ("share.suggest", {}),
+    ("runs.list", {"q": "", "page_size": 30}),
+    ("fond.list", {}),
+    ("cloud.state", {"limit": 20}),
+    ("train.sets", {"all": True}),
+    ("search.state", {}),
+    ("library.list", {}),
+)
+
+
 def _warm_up(space: Workspace) -> None:
     """Прогріти найдовші переліки у фоні, щойно демон стартував.
 
     «Віддати» на холодному старті рахується секундами, і саме його людина
     відкриває першим після перезапуску. Потік фоновий і тихий: невдача тут
     нічого не ламає, просто перше відкриття порахує саме.
+
+    Решта — операції, якими відкриваються найповільніші екрани (замір
+    23.10.2026, перше відкриття після старту: Описи фондів 1,8 с — 100 тис.
+    рядків реєстрів, Хмара 1,8, Набори 1,4–1,8, Гортач 1,2–2). Лише ті, що
+    читають: прогрів не сміє бити пульс і оголошувати дані зміненими.
     """
+    import contextlib
     import threading
 
     def run() -> None:
-        try:
-            from nyshporka import ops as O
-            from nyshporka.core import workspace as W
+        from nyshporka import ops as O
+        from nyshporka.core import workspace as W
 
-            with W.using(space):
-                O.call("share.suggest", {})
-        except Exception:
-            pass
+        with W.using(space):
+            for name, args in WARM_OPS:
+                with contextlib.suppress(Exception):
+                    O.call(name, args)
 
     threading.Thread(target=run, name="nysh-warm-up", daemon=True).start()
 
