@@ -259,7 +259,12 @@ def canon_pages(q: str, ref: Any, thresh: int = 80) -> set[str]:
         from nyshporka.utils.translit import normalize_archival
     except Exception:
         return set()
-    root = workspace().canonical
+    from nyshporka.core.workspace import NoProjectError
+
+    try:
+        root = workspace().canonical
+    except NoProjectError:
+        return set()  # Майстерня без проєкту: канону роду тут немає
     if not (root / "persons").is_dir():
         return set()
     want = normalize_archival(q)

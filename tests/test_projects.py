@@ -226,6 +226,30 @@ def test_project_journals_live_in_the_project(tmp_path: Path) -> None:
     assert textops._verdicts_path() == alpha / "data/derived/verdicts.json"
 
 
+def test_search_from_the_bare_hub_has_no_trace_and_no_canon(tmp_path: Path) -> None:
+    """🔴 Пошук із кореня Майстерні (консоль «без проєкту») падав відмовою
+    «вкажіть проєкт»: читав слід «прошукано» й канон роду, яких у Майстерні
+    немає (23.10.2026). Слово, село, чуже прізвище шукаються й без роду — сліду
+    тоді немає взагалі: ні читається, ні пишеться."""
+    from nyshporka.pagestore.store import CaseRef
+    from nyshporka.search import selfcheck, trace
+
+    hub = _hub(tmp_path, hub_only=True)
+    _project(hub, "alpha")
+    W.use(W._build(hub, "test"))
+    with pytest.raises(W.NoProjectError):
+        trace.path()
+    assert trace.of("DAVO/904/24/1") == [] and trace.searched() == {}
+    trace.note("DAVO/904/24/1", q="Сидорук", thresh=78, hits=1, pages=1,
+               models=["m"], channels=["surname"])
+    with trace.batch():
+        trace.note("DAVO/904/24/2", q="Сидорук", thresh=78, hits=1, pages=1,
+                   models=["m"], channels=["surname"])
+    assert not list(hub.rglob("search_log.json")), "у Майстерні слід не пишеться"
+    ref = CaseRef(key="DAVO/904/24/1", repo="DAVO", fond="904", spr="1", opys="24")
+    assert selfcheck.canon_pages("Сидорук", ref, 78) == set()
+
+
 def test_text_grep_in_project_sees_own_canon_and_only_counts_others(tmp_path: Path) -> None:
     from nyshporka import ops as O
 

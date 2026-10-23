@@ -86,7 +86,9 @@ def _apply(data: dict[str, Any], key: str, row: dict[str, Any]) -> None:
 def _flush(pending: list[tuple[str, dict[str, Any]]]) -> None:
     from nyshporka.pagestore.store import _lock
 
-    p = path()
+    p = _own_path()
+    if p is None:
+        return
     try:
         with _lock(p):
             data = _read_for_write(p)
@@ -115,13 +117,32 @@ def path(ws: Any = None) -> Path:
     return (ws or workspace()).project_derived / FILE
 
 
+def _own_path(ws: Any = None) -> Path | None:
+    """Файл сліду — або `None` у Майстерні без проєкту.
+
+    🔴 «Прошукано» — властивість роду: слід лежить у проєкті й каже, чим саме
+    цей рід уже шукали. Пошук із кореня Майстерні не шукає жодного роду (слово,
+    село, чуже прізвище), тож і сліду в нього немає — ні читати, ні писати.
+    Доти такий пошук падав відмовою «вкажіть проєкт» (консоль, 23.10.2026).
+    """
+    from nyshporka.core.workspace import NoProjectError
+
+    try:
+        return path(ws)
+    except NoProjectError:
+        return None
+
+
 def _read(ws: Any = None) -> dict[str, Any]:
     """Для ПОКАЗУ: побитий чи зайнятий файл — порожньо, пошук не падає.
 
     ⚠ Писати поверх цього не можна: див. `_read_for_write`.
     """
+    p = _own_path(ws)
+    if p is None:
+        return {}
     try:
-        got = json.loads(path(ws).read_text(encoding="utf-8"))
+        got = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     return got if isinstance(got, dict) else {}
@@ -191,7 +212,9 @@ def note(key: str, *, q: str, thresh: int, hits: int, pages: int,
         return
     from nyshporka.pagestore.store import _lock
 
-    p = path()
+    p = _own_path()
+    if p is None:
+        return
     # Лок на все «прочитати → дописати → замінити» (аудит 29.09.2026): два
     # паралельні свіпи інакше читали той самий стан, і другий затирав запис
     # першого. Лок — той самий, що береже сховище сторінок.
