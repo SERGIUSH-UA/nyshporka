@@ -177,8 +177,13 @@ def build(root: Path, *, public: bool = False, out: Path | None = None,
     if not (root / "data" / "canonical").is_dir():
         raise SiteError("канону в просторі немає — сайт збирати нема з чого (keep-canon)")
     if html and not mkdocs_available():
-        raise SiteError("для HTML потрібен MkDocs: pip install nyshporka[site] "
-                        "(або --no-html, щоб лише згенерувати сирці)")
+        from nyshporka.setup.update import how_to_update
+
+        # Команда цієї установки, а не `pip install`: у середовище майстра чи
+        # `uv tool` чужий pip пакета не донесе.
+        raise SiteError("для HTML потрібен MkDocs (набір site) — поставити: "
+                        + how_to_update(add=("site",))
+                        + " (або --no-html, щоб лише згенерувати сирці)")
     checked = C.check(root)
     if not checked.ok:
         raise SiteError(f"у каноні {checked.count('ERROR')} помилок — сайт брехав би. "

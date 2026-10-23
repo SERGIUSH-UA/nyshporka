@@ -821,8 +821,9 @@ trap {
 # ⚠ Перелік дублює `core.sections.EXTRAS` — інакше інсталятор мусив би спершу
 # поставити пакет, щоб спитати в нього, що ставити. Розбіжність ловить
 # `test_installer_extras_match_the_sections`.
-$ExtrasByPreset = @{ catalog = 'nyshporka[app,archives]'
-                     lab     = 'nyshporka[app,archives,htr,train]' }
+$ExtrasByPreset = @{ catalog    = 'nyshporka[app,archives]'
+                     researcher = 'nyshporka[app,archives,htr,site]'
+                     lab        = 'nyshporka[app,archives,htr,site,train]' }
 if (-not $Source) {
     $Source = if ($ExtrasByPreset[$Preset]) { $ExtrasByPreset[$Preset] }
               else { 'nyshporka[app,archives,htr]' }

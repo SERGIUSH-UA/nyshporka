@@ -121,7 +121,9 @@ EXTRAS: dict[str, tuple[str, ...]] = {
     "core": ("app",),
     "material": ("archives",),
     "htr": ("htr",),
-    "research": (),
+    # Екран «Сайт роду» — у цій секції, а MkDocs без набору `site` не ставився
+    # ніким: ні майстром, ні `nysh update`, ні в Docker — HTML сайту не збирався.
+    "research": ("site",),
     "lab": ("train",),
 }
 

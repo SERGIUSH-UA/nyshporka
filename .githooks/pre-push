@@ -40,6 +40,11 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       echo "ruff і mypy перед пушем main…"
       "$venv" -m ruff check . --quiet || rc=1
       "$venv" -m mypy --no-error-summary || rc=1
+      # На Windows mypy не бачить гілок під Linux (`ctypes.windll` поза
+      # `sys.platform == "win32"` — червоний CI 23.10.2026), тож і так.
+      case "$venv" in
+        *.exe) "$venv" -m mypy --platform linux --no-error-summary || rc=1 ;;
+      esac
       ;;
     refs/tags/v*)
       [ "$local_sha" = "$zero" ] && continue   # тег видаляють — перевіряти нічого

@@ -147,7 +147,7 @@ def test_without_mkdocs_the_refusal_names_the_extra(space: Path,
                                                     monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(B, "mkdocs_available", lambda: False)
     env = O.call("site.build", {})
-    assert not env.ok and "nyshporka[site]" in env.error
+    assert not env.ok and "набір site" in env.error and "pip install nyshporka[site]" not in env.error
 
 
 @pytest.mark.skipif(not B.mkdocs_available(), reason="MkDocs не встановлено (extra site)")

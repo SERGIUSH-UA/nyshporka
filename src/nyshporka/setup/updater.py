@@ -27,7 +27,7 @@ import time
 
 def _wait_gone(pid: int, timeout: float = 60.0) -> bool:
     """Дочекатись, доки процес зникне. `True` — зник."""
-    if os.name == "nt":
+    if sys.platform == "win32":
         import ctypes
 
         synchronize = 0x00100000

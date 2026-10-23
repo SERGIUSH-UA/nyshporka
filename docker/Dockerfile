@@ -81,10 +81,13 @@ RUN [ -z "$TORCH_SPEC" ] || ( uv venv "$NYSHPORKA_HTR_VENV" --python 3.11 \
 ARG NYSH_VERSION
 RUN test -n "$NYSH_VERSION" || (echo "потрібен --build-arg NYSH_VERSION" && exit 1) \
  && for i in 1 2 3 4 5 6 7 8 9 10; do \
-      uv pip install "nyshporka[app,archives]==${NYSH_VERSION}" && break; \
+      uv pip install "nyshporka[app,archives,site]==${NYSH_VERSION}" && break; \
       [ "$i" = 10 ] && exit 1; \
       echo "колеса ${NYSH_VERSION} цей вузол PyPI ще не бачить — повтор за 30 с"; sleep 30; \
     done
+# Сайт роду (`nysh site build`, розділ «Сайт роду») — MkDocs з набору `site`;
+# без нього HTML у контейнері не збирався.
+RUN python -c "from nyshporka.site.build import mkdocs_available as m; assert m(), 'MkDocs не став'"
 # ⚠ Повтор не зайвий: на 0.21.3 перевірка в workflow уже бачила колесо в
 # простому індексі, а `uv` у збірці за секунду дістав інший вузол CDN без нього.
 

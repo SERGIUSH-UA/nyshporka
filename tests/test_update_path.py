@@ -71,7 +71,7 @@ def test_the_update_command_keeps_the_set_of_parts_it_was_installed_with(monkeyp
     """
     monkeypatch.setattr(U, "tool_env", lambda: True)
     assert "nyshporka[app,archives]" in U.command("catalog")
-    assert "nyshporka[app,archives,htr]" in U.command("researcher")
+    assert "nyshporka[app,archives,htr,site]" in U.command("researcher")
     assert "--force" in U.command("catalog"), "оновлення мусить переставляти"
 
 
@@ -187,7 +187,7 @@ def test_the_set_of_parts_follows_the_state_not_a_stale_note(monkeypatch):
     """
     monkeypatch.setattr(U, "has_htr", lambda: True)
     assert U.preset_now("catalog") == "researcher"
-    assert "nyshporka[app,archives,htr]" in U.command()
+    assert "nyshporka[app,archives,htr,site]" in U.command()
 
     # А чого немає — того й не додаємо: запис лишається джерелом для другого боку.
     monkeypatch.setattr(U, "has_htr", lambda: False)
@@ -198,7 +198,7 @@ def test_the_set_of_parts_follows_the_state_not_a_stale_note(monkeypatch):
 def test_an_explicit_preset_still_wins():
     """Людина, яка сказала набір руками, головніша за будь-яке визначення."""
     assert "nyshporka[app,archives]" in U.command("catalog")
-    assert "nyshporka[app,archives,htr]" in U.command("researcher")
+    assert "nyshporka[app,archives,htr,site]" in U.command("researcher")
 
 
 def test_never_asked_is_its_own_answer(tmp_path, monkeypatch):
@@ -284,7 +284,7 @@ def test_the_lab_set_keeps_its_training_extra(monkeypatch):
     assert U.preset_now("lab") == "lab"
     assert U.preset_now("amateur") == "amateur"
     assert U.preset_now("catalog") == "researcher", "доставлені рушії лишаються"
-    assert "nyshporka[app,archives,htr,train]" in U.command("lab")
+    assert "nyshporka[app,archives,htr,site,train]" in U.command("lab")
 
 
 def test_windows_never_tries_to_replace_the_running_command(monkeypatch):
@@ -394,7 +394,7 @@ def test_the_rent_plugin_survives_an_update(monkeypatch):
     monkeypatch.setattr(U, "tool_env", lambda: True)
     monkeypatch.setattr(U, "has_rent", lambda: True)
     assert U.command("researcher")[-1].endswith(",rent]")
-    assert U.command("lab")[-1] == "nyshporka[app,archives,htr,train,rent]"
+    assert U.command("lab")[-1] == "nyshporka[app,archives,htr,site,train,rent]"
 
 
 def test_the_fast_index_survives_an_update_and_is_added_by_name(monkeypatch):
@@ -409,4 +409,4 @@ def test_the_fast_index_survives_an_update_and_is_added_by_name(monkeypatch):
     assert U.command("researcher")[-1] == want
     assert U.command("researcher", add=("fast",))[-1] == want, "без повтору"
     monkeypatch.setattr(U, "has_rent", lambda: True)
-    assert U.command("lab")[-1] == "nyshporka[app,archives,htr,train,rent,fast]"
+    assert U.command("lab")[-1] == "nyshporka[app,archives,htr,site,train,rent,fast]"
