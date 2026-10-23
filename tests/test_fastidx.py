@@ -466,3 +466,56 @@ def test_answer_pairs_are_sorted_within_each_run(space: Path) -> None:
     FX._ANSWERS.clear()
     got = FX.by_run([S._norm("Вербищинскій"), S._norm("Шевчук")])
     assert got and all(pairs == sorted(pairs) for pairs in got.values())
+
+
+def test_a_meta_only_change_does_not_rebuild_the_fast_index(space: Path) -> None:
+    """Стор оновлює штамп, коли змінилась лише мета; індекс — не перебудовує.
+
+    🔴 Правка мет 9 361 прогону (23.10.2026) змушувала індекс перебудовувати їх
+    усі — години й гігабайти пам'яті, — хоч текст той самий.
+    """
+    import os
+    import time
+
+    from nyshporka import htr_store as S
+    from nyshporka.search import fastidx as FX
+    from nyshporka.search import store as ST
+
+    old = time.time() - 3600
+    for f in (space / "reports" / "htr").rglob("*"):
+        if f.is_file():
+            os.utime(f, (old, old))
+    _build()
+    d = space / "reports" / "htr" / "чужий"
+    meta = json.loads((d / "_htr_meta.json").read_text(encoding="utf-8"))
+    meta["project"] = ""
+    (d / "_htr_meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    S._CACHE.clear()
+    S._RUNS_CACHE = None
+    got = _build()
+    assert got["added"] == 0, "лише мета — індекс не перебудовано"
+    conn = ST.connect()
+    try:
+        ids = [r for (r,) in conn.execute("select id from runs")]
+        assert sorted(FX.covered(conn, ids)) == sorted(ids)
+    finally:
+        conn.close()
+
+
+def test_entries_written_with_stamps_move_to_the_text_mark_without_a_rebuild(space: Path) -> None:
+    """Індекс, зібраний до 0.37, ключував прогони штампом; збіг — той самий текст."""
+    from nyshporka.search import fastidx as FX
+    from nyshporka.search import store as ST
+
+    _build()
+    conn = ST.connect()
+    try:
+        legacy = {int(r[0]): f"{r[1]}|{r[2] or ''}"
+                  for r in conn.execute("select id, stamp, rules from runs")}
+        FX._save_state(legacy)
+        assert sorted(FX.covered(conn, list(legacy))) == sorted(legacy), "давні записи — охоплені"
+        got = FX.sync(conn)
+        assert got["added"] == 0
+        assert all(v.startswith("at:") for v in FX.state().values())
+    finally:
+        conn.close()

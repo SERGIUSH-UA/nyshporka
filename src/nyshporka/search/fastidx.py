@@ -114,7 +114,7 @@ def _read_state() -> dict[str, Any]:
 
 
 def state() -> dict[int, str]:
-    """run_id → штамп стору, під яким прогін лежить в індексі. Інша схема — порожньо."""
+    """run_id → позначка тексту стору, з якою прогін лежить в індексі. Інша схема — порожньо."""
     raw = _read_state()
     if raw.get("schema") != SCHEMA:
         return {}
@@ -156,26 +156,31 @@ def _docs(pid: int, run_id: int, cands: bytes, raw: bytes | None) -> Iterator[An
                                x=" ".join(t[::-1] for t in toks), y=_suffixes(src))
 
 
-def _store_stamps(conn: sqlite3.Connection) -> dict[int, str]:
-    """run_id → штамп стору РАЗОМ із відбитком правил склейки.
+def _store_marks(conn: sqlite3.Connection) -> dict[int, tuple[str, str]]:
+    """run_id → (позначка тексту, давня позначка штампом).
 
-    🔴 Стор перебудовує прогін і за зміною правил (`rules`), не міняючи штампа
-    мети; без правил у ключі індекс лишав би під «свіжим» штампом старих
-    кандидатів (рецензія 20.10.2026).
+    Позначка тексту — коли стор зібрав прогін і яким правилом склейки
+    (`at:<indexed_at>|<rules>`). 🔴 Не штамп мети: штамп стор оновлює й тоді, коли
+    змінилась лише мета (позначка проєкту, тека справи), а текст той самий. Доти
+    така правка 9 361 прогону змушувала індекс перебудовувати їх усі — години й
+    гігабайти пам'яті (23.10.2026).
+
+    Давня позначка (`<штамп>|<правила>`) — те, що індекс писав до цього: запис,
+    що з нею збігається, той самий текст, і переводиться без перебудови.
     """
-    return {int(r[0]): f"{r[1]}|{r[2] or ''}"
-            for r in conn.execute("select id, stamp, rules from runs")}
+    return {int(r[0]): (f"at:{r[3] or ''}|{r[2] or ''}", f"{r[1]}|{r[2] or ''}")
+            for r in conn.execute("select id, stamp, rules, indexed_at from runs")}
 
 
 def covered(conn: sqlite3.Connection, run_ids: list[int]) -> list[int]:
-    """Прогони, які індекс несе під тим самим штампом, що й стор."""
+    """Прогони, які індекс несе з тим самим текстом, що й стор."""
     if not available():
         return []
     st = state()
     if not st:
         return []
-    now = _store_stamps(conn)
-    return [rid for rid in run_ids if rid in st and st[rid] == now.get(rid)]
+    now = _store_marks(conn)
+    return [rid for rid in run_ids if rid in st and st[rid] in now.get(rid, ())]
 
 
 def sync(conn: sqlite3.Connection, *,
@@ -194,10 +199,22 @@ def sync(conn: sqlite3.Connection, *,
         shutil.rmtree(path())
     index = _open(create=True)
     st = state()
-    now = _store_stamps(conn)
+    now = _store_marks(conn)
     gone = [rid for rid in st if rid not in now]
-    todo = [rid for rid, stamp in now.items() if st.get(rid) != stamp]
+    todo: list[int] = []
+    moved = False
+    for rid, (mark, legacy) in now.items():
+        have = st.get(rid)
+        if have == mark:
+            continue
+        if have == legacy:             # давній запис, текст той самий — лише нова позначка
+            st[rid] = mark
+            moved = True
+            continue
+        todo.append(rid)
     if not gone and not todo:
+        if moved:
+            _save_state(st)
         return {"added": 0, "removed": 0, "lines": 0, "busy": False}
     try:
         w = index.writer(WRITER_HEAP, WRITER_THREADS)
@@ -217,7 +234,7 @@ def sync(conn: sqlite3.Connection, *,
                     w.add_document(doc)
                     lines += 1
                     since += 1
-            st[rid] = now[rid]
+            st[rid] = now[rid][0]
             if since >= COMMIT_EVERY:
                 w.commit()
                 _save_state(st)

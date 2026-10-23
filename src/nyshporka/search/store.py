@@ -80,6 +80,7 @@ from bisect import bisect_right
 from collections.abc import Callable, Iterable, Iterator
 from contextvars import ContextVar
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -691,7 +692,8 @@ def _text_unchanged(d: Path, pages: int, indexed_at: str) -> bool:
     приходить із часом машини, що його читала.
     """
     try:
-        since = time.mktime(time.strptime(indexed_at, "%Y-%m-%dT%H:%M:%S"))
+        # Мікросекунди (з 0.37) відкидаються: секунда вниз — помилка в обережний бік.
+        since = time.mktime(time.strptime(indexed_at[:19], "%Y-%m-%dT%H:%M:%S"))
     except (ValueError, OverflowError):
         return False
     n = 0
@@ -764,7 +766,11 @@ def _index(conn: sqlite3.Connection, run: str, *, only_stale: bool, wait: float,
         "indexed_at, rules, shared) values(?,?,?,?,?,?,?,?,?,?)",
         (run, stamp, _run_key(run, meta), meta.get("case_dir") or "",
          meta.get("model") or "", meta.get("script") or "",
-         json.dumps(S.run_engine_ids(meta)), time.strftime("%Y-%m-%dT%H:%M:%S"),
+         # 🔴 З мікросекундами: позначка тексту швидкого індексу (`fastidx`) —
+         # саме вона, і перечитаний у ту саму секунду прогін (SQLite міг видати
+         # той самий id) інакше лишився б «тим самим».
+         json.dumps(S.run_engine_ids(meta)),
+         datetime.now().isoformat(timespec="microseconds"),
          rules_hash(), S.shared_of(meta)))
     run_id = int(conn.execute("select id from runs where run=?", (run,)).fetchone()[0])
     n_pages = n_lines = n_geo = 0
