@@ -18,7 +18,7 @@
 import { t, LANG } from '../core/strings.js';
 import { callOp, staleThenFresh } from '../core/net.js';
 import { esc, el, setView, busy, failure, renderWarnings,
-  curGen, alive } from '../core/view.js';
+  curGen, alive, mini } from '../core/view.js';
 import { modelName, fmtDay, pathTail, ratioBar } from '../core/bits.js';
 import { SCREENS, ACTIONS, PAGERS } from '../core/registry.js';
 import { show, goto, onJob } from '../core/nav.js';
@@ -348,8 +348,8 @@ function runsEmptyHtml(env, total) {
   if (total) {
     return `<div class="warn">${t('runs.empty.filter').replace('{n}', total)}</div>`;
   }
-  return `<div class="warn">${t('runs.empty.none')}
-    <button data-act="nav" data-arg="read">${t('nav.read')}</button></div>`;
+  return `<div class="warn empty-mini">${mini('knyha', 72)}<div>${t('runs.empty.none')}
+    <button data-act="nav" data-arg="read">${t('nav.read')}</button></div></div>`;
 }
 
 /**

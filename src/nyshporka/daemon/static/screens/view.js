@@ -125,7 +125,7 @@ function viewRecent(runs) {
   if (!box) return;
   const done = runs.filter((r) => r.pages_done > 0 && r.name).slice(0, 8);
   box.innerHTML = done.length ? `<h3 class="sub-h">${t('view.recent')}</h3><div class="read-picks">${done.map((r) =>
-    `<button class="card" data-act="view.pick" data-arg="${esc(r.name)}">${mini('pero', 40)}
+    `<button class="card" data-act="view.pick" data-arg="${esc(r.name)}">${mini('knyha', 40)}
       <span><b>${esc(r.shifra || r.name)}</b><small>${esc(modelName(r.model) || r.name)}</small>
       <small class="muted">${esc(runHint(r))}</small></span></button>`).join('')}</div>` : '';
 }

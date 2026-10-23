@@ -1598,6 +1598,7 @@ export default {
     'read.engine.logofet': 'Logofet',
     'read.engine.regent': 'Regent',
     'cloud.incident.unknown': 'eveniment fără descriere',
+    'export.rows': 'rânduri: {n}',
     'load.count': 'Număr…',
     'load.card': 'Citesc fișa dosarului…',
     'load.plan': 'Alcătuiesc planul de citire…',

@@ -50,7 +50,7 @@ async function exportPicks(gen) {
   box.innerHTML = `<h3 class="sub-h">${t('export.picks')}</h3><div class="read-picks">${cases.map((c) => {
     const it = caseItem(c);
     return `<button class="card" data-act="export.pick" data-arg="${esc(c.shifra || c.key)}">
-      ${mini('viazka', 40)}<span><b>${esc(c.shifra || c.key || '')}</b>
+      ${mini('sviy', 40)}<span><b>${esc(c.shifra || c.key || '')}</b>
       <small>${esc(c.title || '')}</small><small class="muted">${esc(it.hint)}</small></span></button>`;
   }).join('')}</div>`;
 }
@@ -81,7 +81,7 @@ Object.assign(ACTIONS, {
       <tbody>${rows.slice(0, 200).map((r) => `<tr>${columns.map(
         (c) => `<td>${esc(String(r[c] ?? '').slice(0, 80))}</td>`).join('')}</tr>`).join('')}
       </tbody></table>
-      <p class="muted">${rows.length} рядків</p>`;
+      <p class="muted">${esc(t('export.rows').replace('{n}', rows.length))}</p>`;
   },
 
   // 🔴 CSV збирається на клієнті й зберігається діалогом браузера. Писати файл

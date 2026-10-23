@@ -1220,3 +1220,11 @@ details.np-folder > summary { padding: 0; background: none; font-size: .85rem; c
 /* Прогони: покриття смужкою поруч із відсотком — видно, що недочитане, без читання чисел. */
 .cov-cell { white-space: nowrap; }
 .cov-cell .ratio-bar { display: inline-block; width: 3.2rem; vertical-align: middle; margin: 0 .3rem 0 0; }
+
+/* 🎒 Вступ екрана з мініатюрою (`view.leadMini`) і «сайту ще немає» з хатою. */
+.lead-mini { display: flex; align-items: center; gap: .8rem; margin: 0 0 .6rem; }
+.lead-mini p { margin: 0; }
+.lead-mini .mini, .site-none .mini { flex: none; filter: drop-shadow(0 2px 3px rgb(0 0 0 / .18)); }
+.site-none { display: inline-flex; align-items: center; gap: .6rem; }
+.warn.empty-mini { padding: .6rem .8rem; }
+@media (max-width: 520px) { .lead-mini .mini { display: none; } }

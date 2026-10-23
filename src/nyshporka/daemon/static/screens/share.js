@@ -144,7 +144,7 @@ async function pullStats(gen) {
   const from = (loc.from || []).map((x) => ({ label: x.publisher, n: x.cases }));
   if (!imp.cases) return;
   box.innerHTML = `<div class="dash-box pull-stats">
-    <div class="cards-head">${mini('zshyvok', 52)}<div>
+    <div class="cards-head">${mini('kartky', 52)}<div>
       <b>${esc(t('pull.sum').replace('{n}', imp.cases).replace('{p}', from.length))}</b>
       <small class="muted">${esc(t('pull.sum.pages').replace('{n}', Number(imp.pages || 0).toLocaleString('uk')))}</small></div></div>
     ${from.length ? `<h4>${t('pull.from')}</h4>${chartBars(from, { rows: 8, restLabel: t('dash.rest') })}` : ''}</div>`;
@@ -188,7 +188,7 @@ SCREENS.cards = async () => {
   const last = CARDS[0] ? fmtDay(String(CARDS[0].at || '').slice(0, 10)) : '';
   setView(`
     <p class="muted">${t('cards.why')}</p>
-    ${CARDS.length ? `<div class="cards-head">${mini('zshyvok', 52)}<div>
+    ${CARDS.length ? `<div class="cards-head">${mini('kartky', 52)}<div>
       <b>${esc(t('cards.sum').replace('{n}', CARDS.length))}</b>
       ${last ? `<small class="muted">${esc(t('cards.last').replace('{d}', last))}</small>` : ''}</div>
       <input id="cards-q" data-act="cards.find" data-live="1" placeholder="${esc(t('cards.find'))}"></div>` : ''}
@@ -203,7 +203,7 @@ let CARDS_LIMIT = 60;
 function drawCards() {
   const box = el('cards-list');
   if (!box) return;
-  if (!CARDS.length) { box.innerHTML = emptyMini('zshyvok', t('cards.none')); return; }
+  if (!CARDS.length) { box.innerHTML = emptyMini('kartky', t('cards.none')); return; }
   const q = CARDS_Q.trim().toLowerCase();
   const all = q ? CARDS.filter((r) => `${r.shifra || ''} ${r.case_key || ''} ${r.title || ''}`.toLowerCase().includes(q)) : CARDS;
   const rows = all.slice(0, CARDS_LIMIT).map((r) => `<div class="lrow">

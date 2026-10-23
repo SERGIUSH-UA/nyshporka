@@ -3,7 +3,7 @@
 import { t, LANG } from '../core/strings.js';
 import { TOKEN, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
-  renderWarnings, renderCoverage, curGen, alive, maskot } from '../core/view.js';
+  renderWarnings, renderCoverage, curGen, alive, maskot, mini } from '../core/view.js';
 import { SCREENS, ACTIONS, KEYS } from '../core/registry.js';
 import { SECTIONS, NAV_LABEL, show, renderNav,
   refreshJobs } from '../core/nav.js';
@@ -70,7 +70,7 @@ function siftDraw() {
       <button data-act="sift.step" data-arg="1"${
         ST.sift.i + 1 < ST.sift.hits.length ? '' : ' disabled'}>${t('sift.next')}</button>
     </div>
-    <div class="warn">${t('sift.rule')}</div>
+    <div class="warn empty-mini">${mini('syto', 48)}<div>${t('sift.rule')}</div></div>
     <p class="mono">${esc(h.name || '')} · ${t('common.page')} ${esc(h.page || '')}
        · ${badge} · ${t('sift.score')} ${esc(h.score || '')}</p>
     <div id="sift-crop"><p class="muted">${t('sift.crop.load')}…</p></div>

@@ -81,7 +81,7 @@ function drawList() {
       <div><b>${esc(noEmoji(r.title))}</b>
         <small class="muted">${r.kind ? `<span class="tag">${esc(kindLabel(r.kind))}</span> ` : ''}${esc(dayOf(r.mtime, LANG))}</small></div>
       <button data-act="rs.read" data-arg="${esc(r.path)}">${t('rs.read')}</button></div>`).join('') + more
-    : (ROWS.length ? `<p class="muted">${t('rs.nomatch')}</p>` : emptyMini('lupa', t('rs.none')));
+    : (ROWS.length ? `<p class="muted">${t('rs.nomatch')}</p>` : emptyMini('sviy', t('rs.none')));
 }
 
 async function readReport(path) {

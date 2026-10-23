@@ -327,12 +327,22 @@ function maskot(pose, width = 150, cls = '') {
  * маскота (див. `MASKOT`). Перелік закритий: невідома назва не малюється.
  */
 const MINI = ['sumka', 'lupa', 'pero', 'viazka', 'teka', 'derevo', 'pechatka', 'mapa',
-  'hodynnyk', 'shukhliada', 'zshyvok', 'skrynia'];
+  'hodynnyk', 'shukhliada', 'zshyvok', 'skrynia',
+  // друга дюжина (23.10.2026): повітряна куля — Хмара, лоток — Черга, книга —
+  // прочитане, коробка — каталоги й описи, сито — розбір, ключ — налаштування,
+  // картки — канон і Супряга, хата — сайт родини, сувій — звіти й експорт,
+  // колба — Лабораторія.
+  'povitrulia', 'lotok', 'knyha', 'arkhiv', 'syto', 'kliuch', 'kartky', 'hata', 'sviy', 'kolba'];
 
 function mini(name, size = 48, cls = '') {
   if (!MINI.includes(name)) return '';
   return `<img class="mini${cls ? ` ${cls}` : ''}" src="/ui/img/mini-${name}.webp"`
     + ` alt="" width="${size}" height="${size}" loading="lazy" decoding="async">`;
+}
+
+/** Вступ екрана з мініатюрою ліворуч — там, де під заголовком лише речення. */
+function leadMini(name, html) {
+  return `<div class="lead-mini">${mini(name, 56)}<p class="muted">${html}</p></div>`;
 }
 
 /** Порожній стан із мініатюрою: річ, а під нею — що це означає й що робити. */
@@ -351,7 +361,7 @@ function fld(label, control, cls = '') {
   return `<label class="fld${cls ? ` ${cls}` : ''}"><span class="fld-l">${esc(label)}</span>${control}</label>`;
 }
 
-export { mini, emptyMini };
+export { mini, emptyMini, leadMini };
 export { esc, safeHref, el, renderWarnings, renderCoverage, setView, setViewTarget, busy, fld,
   splitWarnings, notesBlock, hasAlerts, seedAttr,
   failure, boxError, busyForm, alive, maskot, MASKOT, humanError, labelCells };

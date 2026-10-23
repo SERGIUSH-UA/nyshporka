@@ -57,7 +57,7 @@ function paintCloud(env, again = false) {
   unreleased ? tile(t('cloud.unreleased'), unreleased, 'ov-warn') : ''}</div>
     ${spentBy(RUNS)}
     <div class="dash-box"><h3>${t('cloud.now')}</h3>
-      ${live.length ? live.map(runRow).join('') : emptyMini('skrynia', t('cloud.none.live'))}</div>
+      ${live.length ? live.map(runRow).join('') : emptyMini('povitrulia', t('cloud.none.live'))}</div>
     <div class="dash-box"><h3>${t('cloud.past')}</h3>
       ${past.length ? past.map(runRow).join('') : `<p class="muted">${t('cloud.none.past')}</p>`}</div>`, again);
 }

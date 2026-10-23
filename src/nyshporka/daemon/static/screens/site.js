@@ -2,7 +2,7 @@
 
 import { t } from '../core/strings.js';
 import { callOp } from '../core/net.js';
-import { esc, el, setView, boxError, renderWarnings } from '../core/view.js';
+import { esc, el, setView, boxError, renderWarnings, mini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { show, onJob, jobChip } from '../core/nav.js';
 import { ic } from '/ui/icons.js';
@@ -35,7 +35,7 @@ function card(kind, info, canon, can = true) {
     ? `${esc(t('site.built').replace('{t}', when(info.built_at)))}${c.persons !== undefined
       ? ` · ${esc(t('site.counts').replace('{p}', c.persons).replace('{f}', c.families ?? 0)
         .replace('{h}', c.hypotheses ?? 0))}` : ''}`
-    : `<span class="muted">${t('site.none')}</span>`}</p>
+    : `<span class="site-none">${mini('hata', 48)}<span class="muted">${t('site.none')}</span></span>`}</p>
     ${stale ? `<p class="warn">${esc(t('site.stale').replace('{n}', canon).replace('{s}', c.persons))}</p>` : ''}
     <div class="row">
       ${info.built ? `<a class="btn primary" href="${esc(info.url)}" target="_blank" rel="noopener">${

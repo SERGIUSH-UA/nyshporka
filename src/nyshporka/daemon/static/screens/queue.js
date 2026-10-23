@@ -132,7 +132,7 @@ function queueBody(env) {
     ? `<table class="tbl-cards"><thead><tr><th>${t('queue.col.case')}</th><th>${t('queue.col.state')}</th>
         <th>${t('queue.col.pages')}</th><th></th></tr></thead>
         <tbody>${rows.map((r) => queueRow(r, pulse)).join('')}</tbody></table>`
-    : emptyMini('viazka', t('queue.empty'));
+    : emptyMini('lotok', t('queue.empty'));
   return `${queueRunner(data)}
     <p class="muted">${esc(queueEta(data.left))}</p>
     ${renderWarnings(env)}${table}`;

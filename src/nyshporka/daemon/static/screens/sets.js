@@ -115,7 +115,7 @@ function paintSets(env) {
     if (was && SETS.some((x) => x.name === was)) sel.value = was;
   }
   if (!SETS.length) {
-    box.innerHTML = emptyMini('shukhliada', t('sets.none')) + renderWarnings(env);
+    box.innerHTML = emptyMini('kolba', t('sets.none')) + renderWarnings(env);
     return undefined;
   }
   const rows = SETS.map((s) => {

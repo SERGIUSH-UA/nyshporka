@@ -4,7 +4,7 @@ import { fmtDay } from '../core/bits.js';
 import { t } from '../core/strings.js';
 import { callOp, FINAL_STATES, apiFetch } from '../core/net.js';
 import { esc, safeHref, el, setView, busy, failure, boxError, busyForm,
-  renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
+  renderWarnings, renderCoverage, curGen, alive, leadMini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { onJob, jobChip } from '../core/nav.js';
 import { ST } from '../core/state.js';
@@ -35,7 +35,7 @@ SCREENS.sources = async () => {
   if (!env.ok) return failure(env);
   const d = env.data;
   setView(`
-    <p class="muted">${t('sources.why')}</p>
+    ${leadMini('arkhiv', t('sources.why'))}
     <form class="row" data-act="sources.find">
       <input name="q" placeholder="${t('sources.q')}" value="${esc(seed.q || '')}" autofocus>
       <button type="submit">${t('sources.find')}</button>

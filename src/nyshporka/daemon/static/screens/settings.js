@@ -4,7 +4,7 @@ import { toast } from '../core/bits.js';
 import { t, tOr } from '../core/strings.js';
 import { TOKEN, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
-  renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
+  renderWarnings, renderCoverage, curGen, alive, leadMini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { NAV_LABEL, show, renderNav, refreshJobs, setSections } from '../core/nav.js';
 import { ST } from '../core/state.js';
@@ -57,7 +57,7 @@ SCREENS.settings = async () => {
     </tr>`;
   }).join('');
   setView(`<h2>${t('sect.title')}</h2>
-    <p class="muted">${t('sect.why')}</p>
+    ${leadMini('kliuch', t('sect.why'))}
     ${renderWarnings(env)}
     <p>${t('sect.preset')}:
       ${presets.map((p) => `<button data-act="sections.preset" data-arg="${esc(p)}"

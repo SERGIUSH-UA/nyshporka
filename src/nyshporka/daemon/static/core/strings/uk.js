@@ -1534,6 +1534,7 @@ export default {
     'read.engine.logofet': 'Логофет',
     'read.engine.regent': 'Регент',
     'cloud.incident.unknown': 'подія без опису',
+    'export.rows': 'рядків: {n}',
     'load.count': 'Рахую…',
     'load.card': 'Читаю картку справи…',
     'load.plan': 'Складаю план читання…',

@@ -152,7 +152,7 @@ function fondSummary(s) {
  * взагалі: відповідь була не на те питання, і порада вела не туди.
  */
 function fondNone() {
-  return `<div class="warn empty-mini">${mini('mapa', 72)}<div><b>${t('fonds.none')}</b>
+  return `<div class="warn empty-mini">${mini('arkhiv', 72)}<div><b>${t('fonds.none')}</b>
     <p class="muted">${t('fonds.none.why')}</p></div></div>`;
 }
 

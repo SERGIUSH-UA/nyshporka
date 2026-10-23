@@ -1598,6 +1598,7 @@ export default {
     'read.engine.logofet': 'Логофет',
     'read.engine.regent': 'Регент',
     'cloud.incident.unknown': 'событие без описания',
+    'export.rows': 'строк: {n}',
     'load.count': 'Считаю…',
     'load.card': 'Читаю карточку дела…',
     'load.plan': 'Составляю план чтения…',

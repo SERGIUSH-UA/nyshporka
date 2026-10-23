@@ -1598,6 +1598,7 @@ export default {
     'read.engine.logofet': 'Logofet',
     'read.engine.regent': 'Regent',
     'cloud.incident.unknown': 'zdarzenie bez opisu',
+    'export.rows': 'wierszy: {n}',
     'load.count': 'Liczę…',
     'load.card': 'Czytam kartę sprawy…',
     'load.plan': 'Układam plan odczytu…',

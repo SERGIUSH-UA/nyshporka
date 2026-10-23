@@ -298,11 +298,19 @@ def test_hash_listener_is_set_before_the_first_screen() -> None:
 def test_empty_states_carry_a_miniature() -> None:
     """Порожній СТАН — з мініатюрою речі; видача пошуку («нічого не знайдено») — без."""
     want = {"screens/hyp.js": "emptyMini('lupa', t('hyp.none'))",
-            "screens/queue.js": "emptyMini('viazka', t('queue.empty'))",
+            "screens/queue.js": "emptyMini('lotok', t('queue.empty'))",
             "screens/project.js": "emptyMini('hodynnyk', t('ov.new.none'))",
-            "screens/label.js": "emptyMini('shukhliada', t('sets.none'))",
+            "screens/label.js": "emptyMini('kolba', t('sets.none'))",
             "core/nav.js": "emptyMini('derevo', t('project.none'))",
-            "screens/fonds.js": "mini('mapa', 72)"}
+            "screens/fonds.js": "mini('arkhiv', 72)",
+            "screens/cloud.js": "emptyMini('povitrulia', t('cloud.none.live'))",
+            "screens/settings.js": "leadMini('kliuch', t('sect.why'))",
+            "screens/sources.js": "leadMini('arkhiv', t('sources.why'))",
+            "screens/canon.js": "emptyMini('kartky', t('canon.none'))",
+            "screens/research.js": "emptyMini('sviy', t('rs.none'))",
+            "screens/sift.js": "mini('syto', 48)",
+            "screens/site.js": "mini('hata', 48)",
+            "screens/runs.js": "mini('knyha', 72)"}
     for rel, s in want.items():
         assert s in (FRONT_DIR / rel).read_text(encoding="utf-8"), rel
     share = (FRONT_DIR / "screens/share.js").read_text(encoding="utf-8")
@@ -361,3 +369,16 @@ def test_progress_is_drawn_not_only_counted() -> None:
     cloud = (FRONT_DIR / "screens/cloud.js").read_text(encoding="utf-8")
     assert "ratioBar(r.pages_done || 0, n)" in runs
     assert "ratioBar(r.pages_done || 0, r.frames_total)" in cloud and "JSON.stringify(x)" not in cloud
+
+
+def test_every_miniature_named_in_code_has_its_file() -> None:
+    """Кожна назва з `MINI` має файл `mini-<назва>.webp`, і кожен файл — назву в `MINI`."""
+    import re
+
+    from _front import SHARED_DIR
+
+    src = (FRONT_DIR / "core/view.js").read_text(encoding="utf-8")
+    block = src[src.index("const MINI = ["):src.index("];", src.index("const MINI = ["))]
+    names = set(re.findall(r"'([a-z]+)'", block))
+    files = {p.stem.removeprefix("mini-") for p in (SHARED_DIR / "img").glob("mini-*.webp")}
+    assert names == files and len(names) == 22, (names ^ files, len(names))

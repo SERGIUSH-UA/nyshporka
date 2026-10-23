@@ -86,7 +86,7 @@ SCREENS.label = async () => {
   sel.innerHTML = LB.sets.map((s) =>
     `<option value="${esc(s.name)}"${s.name === LB.set ? ' selected' : ''}>${esc(s.name)}</option>`).join('');
   if (!LB.sets.length) {
-    el('lb-work').innerHTML = emptyMini('shukhliada', t('sets.none'));
+    el('lb-work').innerHTML = emptyMini('kolba', t('sets.none'));
     return;
   }
   if (!LB.set) LB.set = LB.sets[0].name;
