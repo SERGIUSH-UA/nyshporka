@@ -19,7 +19,7 @@
 import { t, tOr, LANG } from '../core/strings.js';
 import { TOKEN, PROJECT, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
-  renderWarnings, renderCoverage, curGen, alive, maskot, mini, emptyMini } from '../core/view.js';
+  renderWarnings, renderCoverage, curGen, alive, maskot, emptyMini } from '../core/view.js';
 import { modelName, fmtDay, pathTail } from '../core/bits.js';
 import { SCREENS, ACTIONS, screenOfOp } from '../core/registry.js';
 import { SECTIONS, NAV_LABEL, show, renderNav, screenOn,
@@ -228,7 +228,7 @@ function paintHome(env, gen = curGen(), keep = false) {
   if (empty) {
     // Порожній простір — перша зустріч, тож маскот вітає. Це стан ПРОЦЕСУ
     // («ще нічого не поклали»), а не висновок про архів.
-    put(`${SECTIONS.hub_only ? '<div id="hub-cards"></div>' : '<div id="adopt-banner"></div>'}<div class="vitannia">${maskot('vitaie', 140)}
+    put(`${SECTIONS.hub_only ? '<div id="hub-cards"></div>' : '<div id="adopt-banner"></div>'}<div class="vitannia vitannia-hero">${maskot('vitaie', 140)}
         <div><h2>${t('home.title')}</h2><p>${t('home.hello')}</p></div></div>
       ${agentCard(PULSE)}
       ${renderWarnings(env)}
@@ -252,16 +252,20 @@ function paintHome(env, gen = curGen(), keep = false) {
  * статистикою — тринадцять блоків підряд (оцінка консолі 22.10.2026).
  */
 function hubOverview(env, d) {
+  // Мальовані речі дослідника (23.10.2026) замість мініатюр: інструмент — предмет.
   const tools = [
-    ['read', 'pero', 'nav.read', 'tool.read.hint'],
-    ['library', 'viazka', 'nav.library', 'tool.library.hint'],
-    ['newcase', 'teka', 'stage.act.newcase', 'tool.newcase.hint'],
-    ['newproject', 'derevo', 'stage.act.newproject', 'tool.newproject.hint'],
+    ['read', '/ui/img/art-pero.webp', 'nav.read', 'tool.read.hint'],
+    ['library', '/ui/img/art-knyhy.webp', 'nav.library', 'tool.library.hint'],
+    ['newcase', '/ui/img/art-shukhliada.webp', 'stage.act.newcase', 'tool.newcase.hint'],
+    ['newproject', '/ui/img/art-vinok.webp', 'stage.act.newproject', 'tool.newproject.hint'],
   ].filter(([scr]) => screenOn(scr)).map(([scr, pic, label, hint]) =>
-    `<button class="tool" data-act="nav" data-arg="${scr}">${mini(pic, 56)}<span><b>${
+    `<button class="tool tool-art" data-act="nav" data-arg="${scr}"><img class="tool-pic" src="${pic}" alt="" loading="lazy" decoding="async"><span><b>${
       esc(t(label).replace(/^＋\s*/, ''))}</b><small>${esc(t(hint))}</small></span></button>`).join('');
   const recent = lastRuns(d.reading, 5);
-  return `<div id="hub-cards"></div>
+  const ws = d.workspace || {};
+  return `<div class="ov-hero ov-hero-hub"><div class="ov-title"><span class="pj-badge pj-hub"><img src="/ui/img/art-skrynky.webp" alt=""></span>
+      <span class="hero-t"><b>${esc(ws.name || t('project.hub'))}</b><small>${esc(t('project.hub.why'))}</small></span></div></div>
+    <div id="hub-cards"></div>
     ${renderWarnings(env)}
     ${stepsBox(d)}
     <div class="dash-sec"><h3>${t('home.tools')}</h3><div class="tools">${tools}</div></div>

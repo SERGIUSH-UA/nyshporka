@@ -271,6 +271,24 @@ function layerTag(screen) {
  * («Бібліотека» → «Бібліотека справ»), а сказати, де людина й чиї дані
  * бачить, не було кому.
  */
+/**
+ * Мальована річ у заголовку сторінки (макет дослідника, 23.10.2026): предмет
+ * екрана, а не оздоба навмання — листи для канону, компас для гіпотез, лупа для
+ * пошуку. Шляхи повністю: тест пакета звіряє кожну названу картинку з файлом.
+ * Огляди мають свою картину на всю ширину, тож тут їх немає.
+ */
+const HEAD_ART = {
+  canon: '/ui/img/art-konverty.webp', hyp: '/ui/img/art-kompas.webp', sift: '/ui/img/art-lupa.webp',
+  research: '/ui/img/art-knyhy.webp', history: '/ui/img/art-suvii.webp', site: '/ui/img/art-vinok.webp',
+  profile: '/ui/img/art-vinok.webp', projects: '/ui/img/art-vinok.webp', library: '/ui/img/art-knyhy.webp',
+  view: '/ui/img/art-knyhy.webp', cases: '/ui/img/art-skrynky.webp', queue: '/ui/img/art-skrynky.webp',
+  sources: '/ui/img/art-shukhliada.webp', fonds: '/ui/img/art-shukhliada.webp', cards: '/ui/img/art-shukhliada.webp',
+  geog: '/ui/img/art-kompas.webp', read: '/ui/img/art-pero.webp', runs: '/ui/img/art-pero.webp',
+  search: '/ui/img/art-lupa.webp', eye: '/ui/img/art-lupa.webp', export: '/ui/img/art-pechatka.webp',
+  give: '/ui/img/art-konverty.webp', pull: '/ui/img/art-konverty.webp', settings: '/ui/img/art-kliuch.webp',
+  adopt: '/ui/img/art-skrynky.webp',
+};
+
 function renderHead(screen) {
   const box = el('phead');
   if (!box) return;
@@ -284,7 +302,9 @@ function renderHead(screen) {
   if (screen !== 'home') crumbs.push(`<span>${esc(screenLabel(screen))}</span>`);
   const act = (SECTIONS.screen_action || {})[screen];
   const actOn = act && screenOn(act) && (act !== 'newproject' || SECTIONS.hub_only);
-  box.innerHTML = `<nav class="crumbs" aria-label="${esc(t('side.crumbs'))}">${crumbs.join('<i>›</i>')}</nav>
+  const art = HEAD_ART[screen] || '';
+  if (box.classList) box.classList.toggle('has-art', !!art);
+  box.innerHTML = `${art ? `<img class="ph-art" src="${art}" alt="" decoding="async">` : ''}<nav class="crumbs" aria-label="${esc(t('side.crumbs'))}">${crumbs.join('<i>›</i>')}</nav>
     <div class="ph-row"><h1>${esc(title)}</h1>${layerTag(screen)}${actOn
     ? `<span class="ph-acts"><button class="primary" data-act="nav" data-arg="${esc(act)}">${
       esc(t(`stage.act.${act}`))}</button></span>` : ''}</div>`;

@@ -219,9 +219,9 @@ function setKpi(id, value, sub, tone = '') {
  */
 export function projectShell() {
   return `<section class="ov" id="ov-head">
-    <div class="ov-title"><span id="ov-badge"></span>
+    <div class="ov-hero ov-hero-rid"><div class="ov-title"><span id="ov-badge"></span>
       <span class="muted" id="ov-sub"></span>
-      <button class="ghost ctl-sm ov-style" data-act="phead.style">${t('phead.style')}</button></div>
+      <button class="ghost ctl-sm ov-style" data-act="phead.style">${t('phead.style')}</button></div></div>
     <div class="ov-kpis">
       ${kpi('ov-k-canon', t('nav.canon'), 'canon', 'page', ART.canon)}
       ${kpi('ov-k-hyp', t('nav.hyp'), 'hyp', 'scale', ART.hyp)}
