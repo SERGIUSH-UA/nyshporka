@@ -14,6 +14,7 @@ import { listView } from '../core/listview.js';
 import { onJob } from '../core/nav.js';
 import { esc, el, setView, busy, failure, boxError, busyForm, renderWarnings, curGen, alive, fld, emptyMini, mini, safeHref } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
+import { ST } from '../core/state.js';
 import { openModal, confirmAct, closeModal, modalSeq } from '../core/modal.js';
 import { kv, pill, toast, ratioBar, fmtDay } from '../core/bits.js';
 import { bars as chartBars } from '/ui/chart.js';
@@ -227,15 +228,21 @@ async function giveStart(cases) {
 
 // ── Взяти ────────────────────────────────────────────────────────────────────
 SCREENS.pull = async () => {
+  // Прийшли з Каталогів з тим самим запитом — шукаємо одразу, не змушуючи набирати вдруге.
+  const seed = (ST.pull && ST.pull.q) || '';
+  ST.pull = null;
   setView(`
     <p class="muted">${t('pull.why')}</p>
-    <form class="row" data-act="pull.find">
-      ${fld(t('pull.q'), `<input name="query" placeholder="${esc(t('pull.q.ph'))}" required autofocus>`)}
+    <form class="row" data-act="pull.find" id="pull-form">
+      ${fld(t('pull.q'), `<input name="query" placeholder="${esc(t('pull.q.ph'))}" required autofocus
+        value="${esc(seed)}">`)}
       <button type="submit">${t('pull.find')}</button>
     </form>
     <div class="dash-box" id="pull-box"><p class="muted">${t('pull.hint')}</p></div>
     <div id="pull-stats"></div>`);
   pullStats(curGen());
+  const form = el('pull-form');
+  if (seed && form) await ACTIONS['pull.find']({ preventDefault() {}, target: form });
 };
 
 /**
@@ -441,8 +448,15 @@ Object.assign(ACTIONS, {
   'pull.take': async (_ev, elm) => {
     const r = FOUND[Number(elm.dataset.arg)];
     if (!r) return;
+    // 🔴 Підтвердження називає, що саме ляже: обсяг, роки, чиє й на яких умовах.
+    // Доти у вікні стояла сама шифра (прохід новачка 23.10.2026).
+    const rows = [[t('give.case'), r.shifra],
+      [t('pull.take.pages'), String(r.pages || '?')],
+      ...(r.years ? [[t('pull.take.years'), r.years]] : []),
+      ...(r.publisher ? [[t('pull.take.from'), r.publisher]] : []),
+      ...(r.license ? [[t('pull.take.license'), r.license]] : [])];
     const yes = await confirmAct({ title: t('pull.take.title'), text: t('pull.take.why'),
-      rows: [[t('give.case'), r.shifra]], okLabel: t('pull.take') });
+      rows, okLabel: t('pull.take') });
     if (!yes) return;
     const box = el('pull-box');
     if (box) box.innerHTML = `<p class="muted">${t('pull.taking')}</p>`;

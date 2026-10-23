@@ -6,7 +6,7 @@ import { callOp, FINAL_STATES, apiFetch } from '../core/net.js';
 import { esc, safeHref, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, renderCoverage, curGen, alive, leadMini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
-import { onJob, jobChip } from '../core/nav.js';
+import { onJob, jobChip, goto } from '../core/nav.js';
 import { ST } from '../core/state.js';
 import { ic } from '/ui/icons.js';
 
@@ -406,25 +406,73 @@ function renderFind(env) {
   if (!env.ok) return boxError('hits', env);
   const { hits = [], fonds = [], coverage = {} } = env.data || {};
   el('hits').innerHTML = `
+    <div id="pool-hint"></div>
     ${renderWarnings(env)}
     ${hits.length ? '' : `<p><b>${t('sources.nothing')}.</b> ${t('sources.zero_warning')}</p>`}
     ${fondsBlock(fonds)}
     <div id="fondcard"></div>
-    <table><tbody>${hits.map((h) => `<tr>
+    <table><tbody>${hits.map((h, i) => `<tr data-hit="${i}">
       <td>${esc(srcName(h.source))}</td>
       <td>${esc(h.title)}<br><span class="muted">${esc(h.shifra || '')} ${esc(h.years || '')}
         ${esc(h.note || '')}</span>${hitCrop(h)}</td>
       <td class="num">${h.frames ? `${h.frames} ${t('common.frames')}` : ''}</td>
-      <td>${hitAction(h)}</td>
+      <td class="hit-act">${hitAction(h)}</td>
     </tr>`).join('')}</tbody></table>
     ${hits.length >= FIND_LIMIT
     ? `<p class="warn-inline">${esc(t('sources.ceiling').replace('{n}', FIND_LIMIT))}</p>`
     : ''}
     <p class="muted">${t('sources.searched')}: ${esc((coverage.searched || []).join(', ') || '—')}</p>`;
+  poolHint(String((env.data || {}).q || ''), hits);
   return undefined;
 }
 
+/** Ключ справи з розібраних полів: `CDIAK/224/1/794`; без справи — порожньо. */
+function caseKeyOf(repo, fond, opys, spr) {
+  const n = (x) => String(x || '').trim().toUpperCase();
+  return n(repo) && n(fond) && n(spr) ? [n(repo), n(fond), n(opys) || '_', n(spr)].join('/') : '';
+}
+
+/** Опис і справа знахідки з рядка шифри: «ф.224 оп.1 спр.794», «Опис 1 Справа 23». */
+function hitKey(h) {
+  const s = String(h.shifra || '');
+  const m = s.match(/оп\.?\s*([\w-]+)\D+?спр\.?\s*([\w-]+)/i)
+    || s.match(/Опис\s+([\w-]+)\s+Справа\s+([\w-]+)/i);
+  return m ? caseKeyOf(h.repo || h.archive, h.fond, m[1], m[2]) : '';
+}
+
+/**
+ * 🤝 Чи вже прочитано це в Супрязі — тим самим запитом, поруч із видачею.
+ *
+ * 🔴 Справа, яку не вдалось завантажити з архіву, лежала в Супрязі прочитаною, і
+ * дізнатись це можна було лише на іншому екрані (прохід новачка 23.10.2026).
+ * Супряга недоступна чи мовчить — смуги просто немає: це підказка, а не знаменник.
+ */
+async function poolHint(q, hits) {
+  if (!q) return;
+  const env = await callOp('share.pull', { query: q });
+  const box = el('pool-hint');
+  if (!box || !env.ok) return;
+  const found = (env.data || {}).found || [];
+  if (!found.length) return;
+  const keys = new Set(found.map((r) => caseKeyOf(r.repo, r.fond, r.opys, r.spr)));
+  hits.forEach((h, i) => {
+    const k = hitKey(h);
+    if (!k || !keys.has(k)) return;
+    const cell = document.querySelector(`tr[data-hit="${i}"] .hit-act`);
+    if (cell) {
+      cell.insertAdjacentHTML('beforeend', `<br><button class="ctl-sm" data-act="sources.pool"
+        data-arg="${esc(String(h.shifra || q))}" title="${esc(t('sources.pool.why'))}">${t('sources.pool.take')}</button>`);
+    }
+  });
+  const n = (env.data || {}).count || found.length;
+  box.innerHTML = `<div class="warn next"><button data-act="sources.pool" data-arg="${esc(q)}">${
+    t('sources.pool.take')}</button> <span>${esc(t('sources.pool.hint').replace('{n}', n))}</span></div>`;
+}
+
 Object.assign(ACTIONS, {
+  /** До «Взяти» з тим самим запитом — він виконається там одразу. */
+  'sources.pool': (_ev, elm) => goto('pull', { q: elm.dataset.arg || '' }),
+
   /**
    * 🔎 Пошук по каталогах — роботою в черзі, з поступом по джерелах.
    *
