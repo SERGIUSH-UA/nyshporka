@@ -48,7 +48,14 @@ const DATA = {
   'evidence.add': { path: 'data/citations/test/0005_l4.jpg', sha256: 'aa', size: 9, existed: false },
   'reports.list': { rows: [
     { path: 'research/dvory.md', title: 'Двори роду', kind: 'research', mtime: 1760000000, size: 10 },
-    { path: 'plans/dali.md', title: 'Куди далі', kind: 'plans', mtime: 1750000000, size: 10 }] },
+    { path: 'plans/dali.md', title: 'Куди далі', kind: 'plans', mtime: 1750000000, size: 10 },
+    { path: 'archive/stare.md', title: 'Старий план', kind: 'archive', mtime: 1740000000, size: 10 }] },
+  'share.list': { rows: [
+    { at: '2026-10-20T10:00:00+0300', event: 'pack', shifra: 'ДАХмО 1-1-1', case_key: 'DAHMO/1/1/1', pages: 10 },
+    { at: '2026-10-21T10:00:00+0300', event: 'pack', shifra: 'ДАХмО 1-1-1', case_key: 'DAHMO/1/1/1', pages: 12 },
+    { at: '2026-10-19T10:00:00+0300', event: 'pack', shifra: 'ЦДІАК 224-1-5', case_key: 'CDIAK/224/1/5', pages: 7 },
+    { at: '2026-10-18T10:00:00+0300', event: 'import', shifra: 'ANRM 211-1-62', case_key: 'ANRM/211/1/62',
+      pages: 5, publisher: 'Тарас Вигаданий' }] },
   'reports.read': { path: 'research/dvory.md', title: 'Двори роду',
     text: '# Двори\n\nТекст **жирно** <script>x</script>\n\n- один\n- два' },
   'history.auto': { git: true, repo: true, own: false, auto: true },
@@ -136,12 +143,19 @@ globalThis.__CROP_FAIL = false;
 out.siftNone = [document.getElementById('hyp-sift').textContent, document.getElementById('hyp-sift').disabled];
 out.cropHuman = document.getElementById('hyp-crop-0').innerHTML || '';
 
-const R = await import('./screens/research.js');
-out.filtered = R.filterReports(DATA['reports.list'].rows, 'двори', '').map((r) => r.path);
-out.filteredKind = R.filterReports(DATA['reports.list'].rows, '', 'plans').map((r) => r.path);
 await SCREENS.research();
+await tick();
+out.rsBody = document.getElementById('research-body').innerHTML || '';
+ACTIONS['lv.q'](null, { value: 'двори', dataset: { lv: 'research' } });
+out.rsFound = document.getElementById('research-body').innerHTML || '';
+ACTIONS['lv.q'](null, { value: '', dataset: { lv: 'research' } });
 await ACTIONS['rs.read'](null, el('research/dvory.md'));
 out.report = dlg();
+
+await SCREENS.cards();
+out.myCards = view();
+out.myCardsBody = document.getElementById('cards-body').innerHTML || '';
+out.myCardsChips = document.getElementById('cards-chips').innerHTML || '';
 
 await SCREENS.history();
 await tick();
@@ -319,11 +333,28 @@ def test_hypothesis_crops_and_goes_to_sift_with_the_run(probe) -> None:
 
 
 def test_research_filters_and_renders_markdown_safely(probe) -> None:
-    assert probe["filtered"] == ["research/dvory.md"]
-    assert probe["filteredKind"] == ["plans/dali.md"]
+    body = probe["rsBody"]
+    # Тека зі свіжішим звітом — вище, хоч групи й рівні за розміром.
+    order = [body.index(p) for p in ("research/dvory.md", "plans/dali.md", "archive/stare.md")]
+    assert order == sorted(order), "теки не за свіжістю"
+    assert "research/dvory.md" in probe["rsFound"] and "plans/dali.md" not in probe["rsFound"]
     r = probe["report"]
     assert "<b>жирно</b>" in r and "<li>один</li>" in r
     assert "<script>" not in r and "&lt;script&gt;" in r
+
+
+def test_my_cards_one_row_per_case_grouped_by_archive(probe) -> None:
+    """Журнал обміну — подія на кожне пакування: справа однаково один рядок."""
+    body = probe["myCardsBody"]
+    assert body.count('data-arg="DAHMO/1/1/1"') == 1, "справа двічі — по рядку на подію"
+    assert ">12<" in body, "сторінки не з останньої події"
+    assert all(f'data-g="{g}"' in body for g in ("ДАХмО", "ЦДІАК", "ANRM"))
+    assert "Тарас Вигаданий" in body
+    assert "1 справа ·" in body and "1 справ " not in body, "підсумок групи без відмінка"
+    chips = probe["myCardsChips"]
+    assert '<b class="num">2</b><span>віддано' in chips and '<b class="num">1</b><span>взято' in chips
+    # «Віддано» — справи, а не всі рядки журналу й не взяті.
+    assert "Віддано справ: 2" in probe["myCards"]
 
 
 def test_history_log_diff_and_restore_only_after_yes(probe) -> None:

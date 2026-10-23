@@ -40,6 +40,18 @@ def test_events_come_back_newest_first(space: Path) -> None:
     assert [r["shifra"] for r in journal.read(journal.PACKED)] == ["A"]
 
 
+def test_listing_names_one_archive_however_the_shifra_is_spelled(space: Path) -> None:
+    """Прийняте з Супряги — латинкою, своє — кирилицею: архів однаково один."""
+    from nyshporka import ops as O
+
+    journal.record(journal.PACKED, shifra="ДАЖО 1-1-5", case_key="DAZHO/1/1/5", pages=3)
+    journal.record(journal.IMPORTED, shifra="DAZHO 1-1-6", case_key="DAZHO/1/1/6", pages=4)
+    journal.record(journal.PACKED, shifra="ДАВіО 1-1-7", case_key="DAVO/1/1/7", pages=5)
+    rows = O.call("share.list", {"what": "all"}).data["rows"]
+    assert {r["case_key"]: r["archive"] for r in rows} == {
+        "DAZHO/1/1/5": "ДАЖО", "DAZHO/1/1/6": "ДАЖО", "DAVO/1/1/7": "ДАВіО"}
+
+
 def test_stats_count_cases_not_events(space: Path) -> None:
     """Повторний імпорт тієї самої справи не подвоює зроблену роботу."""
     for _ in range(3):

@@ -134,7 +134,7 @@ async function cardsList() {
       { id: 'private', label: t('canon.private'), test: (r) => !!r.private },
     ],
     group: (r) => ({ id: r.kind, label: t(`canon.kind.${r.kind}`) }),
-    groupSummary: (g) => esc(t('canon.lv.gsum').replace('{n}', g.length)
+    groupSummary: (g) => esc(t('canon.lv.gsum').replace('{cnt}', tn('lv.n.cards', g.length))
       .replace('{c}', g.filter((r) => r.citations > 0).length)),
     head: `<th>${t('canon.lv.card')}</th><th>${t('canon.lv.cites')}</th><th></th>`,
     cells: (r) => `<td><b>${esc(unwiki(r.title))}</b><br><small class="muted"><span class="mono">${esc(r.id)}</span>${

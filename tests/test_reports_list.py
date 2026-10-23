@@ -25,6 +25,10 @@ def space(tmp_path: Path) -> Path:
     (rep / "research" / "sydoruk.md").write_text(
         "---\nkind: research\n---\n\n# Сидоруки в ревізії\n\nтекст\n", encoding="utf-8")
     (rep / "htr" / "RESUME.md").write_text("# прогони\n", encoding="utf-8")
+    for kind in ("dahmo", "davo", "davio"):
+        (rep / kind).mkdir()
+        (rep / kind / "f.md").write_text("# справа\n", encoding="utf-8")
+        os.utime(rep / kind / "f.md", (2_000_000, 2_000_000))
     (tmp_path / "secret.md").write_text("# поза звітами\n", encoding="utf-8")
     os.utime(rep / "top.md", (1_000_000, 1_000_000))
     yield tmp_path
@@ -33,9 +37,17 @@ def space(tmp_path: Path) -> Path:
 
 def test_list_has_titles_kinds_and_no_htr(space: Path) -> None:
     rows = O.call("reports.list", {}).data["rows"]
-    assert [(r["path"], r["title"], r["kind"]) for r in rows] == [
+    assert [(r["path"], r["title"], r["kind"]) for r in rows if r["kind"] in ("research", "")] == [
         ("research/sydoruk.md", "Сидоруки в ревізії", "research"),
         ("top.md", "top", "")]
+
+
+def test_archive_folders_get_the_archive_name(space: Path) -> None:
+    """Тека на ім'я архіву — скороченням; два коди одного архіву — одне ім'я."""
+    rows = {r["kind"]: r["archive"] for r in O.call("reports.list", {}).data["rows"]}
+    assert rows["dahmo"] == "ДАХмО"
+    assert rows["davo"] == rows["davio"] == "ДАВіО"
+    assert rows["research"] == "" and rows[""] == ""
 
 
 def test_read_gives_the_text(space: Path) -> None:

@@ -552,6 +552,10 @@ table.cov { max-width: 44rem; margin: .4rem 0; }
    тупиком, як до появи кнопок. */
 .tbl-wide { overflow-x: auto; }
 .tbl-wide table { min-width: 56rem; }
+/* Вивантаження: 14 стовпців. Стиснуті під ширину аркуша, вони ламали ім'я по
+   слову в рядок; тепер стовпчик не вужчий за 9rem, а таблиця прокручується
+   вбік у своїй рамці, не тягнучи за собою форму. */
+.tbl-wide table.tbl-fit th, .tbl-wide table.tbl-fit td { min-width: 9rem; }
 
 /* Картка справи розгортається ПІД рядком таблиці. */
 .card-row > td { background: var(--s-2); }
@@ -1561,7 +1565,9 @@ th { font-family: var(--font-serif); letter-spacing: .1em; }
 .lv-t { width: 100%; margin: 0; }
 .lv-t td.lv-ck, .lv-t th.lv-ck { width: 2rem; padding-right: 0; }
 .lv-t tr.lv-on { background: color-mix(in srgb, var(--honey) 9%, transparent); }
-.lv-t td.lv-nw { white-space: nowrap; }
+/* Вузькі стовпчики (шифра, дата, кнопка) — за вмістом, решта — назві: інакше
+   кожна група, окрема таблиця, ставила стовпчики на свої місця. */
+.lv-t td.lv-nw { white-space: nowrap; width: 1%; }
 .lv-more { display: flex; align-items: center; gap: .7rem; margin: 0; padding: .45rem .75rem .6rem; }
 .lv-none { padding: .6rem .2rem; }
 /* Смуга дії тримається внизу видимої частини: пачку видно, хоч би де людина гортала. */

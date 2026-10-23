@@ -1347,8 +1347,25 @@ def share_list(a: ShareListArgs) -> Envelope:
         # 🔴 «Усе» — це весь ОБМІН, а не весь журнал. Відмова «цю не віддам»
         # живе в тому ж файлі й без цього рядка показувалась тут як прийом.
         rows = [r for r in rows if r.get("event") in journal.EXCHANGE]
-    return ok({"rows": rows, "count": len(rows),
+    return ok({"rows": _with_archive(rows), "count": len(rows),
                "journal": str(journal.journal_path())})
+
+
+def _with_archive(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Скорочення архіву до кожного рядка журналу — з коду в ключі справи.
+
+    Шифра в журналі буває і «ДАЖО 1-1-5», і «DAZHO 1-1-5» (прийняте з
+    Супряги приходить латинкою): за першим словом шифри консоль клала один
+    архів двома групами.
+    """
+    from nyshporka.archives import active
+
+    arch = active()
+    for r in rows:
+        code = str(r.get("case_key") or "").split("/")[0]
+        if code:
+            r["archive"] = arch.repo_label(arch.canon_repo(code))
+    return rows
 
 
 def _share_list_mine() -> Envelope:

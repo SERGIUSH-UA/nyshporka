@@ -4,18 +4,19 @@
  * Пишуть їх агент і людина, лежать вони в теці проєкту, і досі їх було видно
  * лише у файлах. Тут — перелік із пошуком і читання у вікні. Прочитане
  * рушіями (`reports/htr`) сюди не входить: це не звіти, а мільйон рядків.
+ *
+ * Звітів буває кілька тисяч (у великому дослідженні — 4720), тож перелік спільний (`listView`):
+ * групи за текою, найсвіжіша тека вгорі, плитки «за тиждень / за місяць».
+ * Доти це був один стовпчик по 60 і випадний перелік видів.
  */
 
-import { t, tOr, LANG } from '../core/strings.js';
+import { t, tOr, tn, LANG } from '../core/strings.js';
 import { callOp, staleThenFresh } from '../core/net.js';
+import { listView } from '../core/listview.js';
 import { esc, el, setView, busy, failure, boxError, curGen, alive, emptyMini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { openModal, modalSeq, modalTitle } from '../core/modal.js';
 import { mdLite, dayOf, noEmoji } from '../core/bits.js';
-
-/** Перелік з останньої відповіді — фільтр у браузері, без запиту на кожну літеру. */
-let ROWS = [];
-const RS = { q: '', kind: '' };
 
 SCREENS.research = async () => {
   const gen = curGen();
@@ -27,62 +28,49 @@ SCREENS.research = async () => {
   });
 };
 
+const DAY = 86400;
+
+/** «Свіже» — за останні `days` днів від `now` (секунди, як `mtime`). */
+const freshWithin =(days, now = Date.now() / 1000) => (r) => now - Number(r.mtime || 0) <= days * DAY;
+
 function paintResearch(env, again = false) {
   if (!env.ok) return failure(env);
-  ROWS = (env.data || {}).rows || [];
+  const rows = [...((env.data || {}).rows || [])];
   // Найновіші зверху: «що ми робили останнім» — головне питання цього екрана.
-  ROWS.sort((a, b) => Number(b.mtime || 0) - Number(a.mtime || 0));
-  const count = {};
-  ROWS.forEach((r) => { if (r.kind) count[r.kind] = (count[r.kind] || 0) + 1; });
-  const kinds = Object.keys(count).sort((a, b) => count[b] - count[a]);
-  setView(`
-    <p class="muted">${t('rs.why')}</p>
-    <div class="row">
-      <label class="fld"><span class="fld-l">${t('rs.find')}</span>
-        <input id="rs-q" data-act="rs.find" data-live="1" value="${esc(RS.q)}"
-          placeholder="${esc(t('rs.find.ph'))}"></label>
-      <label class="fld"><span class="fld-l">${t('rs.kind')}</span>
-        <select id="rs-kind" data-act="rs.find"><option value="">${t('canon.kind.all')}</option>
-          ${kinds.map((k) => `<option value="${esc(k)}"${RS.kind === k ? ' selected' : ''}>${esc(kindLabel(k))} · ${count[k]}</option>`).join('')}
-        </select></label>
-    </div>
-    <div class="dash-box" id="rs-list"></div>`, again);
-  drawList();
+  rows.sort((a, b) => Number(b.mtime || 0) - Number(a.mtime || 0));
+  setView(`<p class="muted">${t('rs.why')}</p>
+    ${rows.length ? '<div id="rs-list"></div>' : `<div class="dash-box">${emptyMini('sviy', t('rs.none'))}</div>`}`, again);
+  if (!rows.length) return;
+  listView(el('rs-list'), {
+    id: 'research',
+    rows,
+    key: (r) => r.path,
+    text: (r) => `${r.title} ${r.path}`,
+    placeholder: t('rs.find.ph'),
+    chips: [
+      { id: 'week', label: t('rs.lv.week'), test: freshWithin(7), tone: 'ok' },
+      { id: 'month', label: t('rs.lv.month'), test: freshWithin(30) },
+    ],
+    // Теки одного архіву (`davo`, `davio`) — однією групою під його скороченням.
+    group: (r) => (r.archive ? { id: `a:${r.archive}`, label: r.archive }
+      : { id: r.kind || '', label: r.kind ? capFirst(kindLabel(r.kind)) : t('rs.lv.loose') }),
+    // Тека зі свіжішим звітом — вище: рядки вже йдуть від нових, тож перший
+    // рядок групи і є її найсвіжіший.
+    groupSort: (a, b) => Number(b.rows[0].mtime || 0) - Number(a.rows[0].mtime || 0),
+    groupSummary: (g) => esc(t('rs.lv.gsum').replace('{cnt}', tn('lv.n.reports', g.length))
+      .replace('{d}', dayOf(g[0].mtime, LANG))),
+    head: `<th>${t('rs.lv.report')}</th><th>${t('rs.lv.when')}</th><th></th>`,
+    cells: (r) => `<td><b>${esc(noEmoji(r.title || r.path))}</b><br><small class="muted mono">${esc(r.path)}</small></td>
+      <td class="lv-nw">${esc(dayOf(r.mtime, LANG))}</td>
+      <td class="lv-nw"><button data-act="rs.read" data-arg="${esc(r.path)}">${t('rs.read')}</button></td>`,
+  });
 }
 
 /** Вид звіту — перша тека в `reports/`; знайомі назви — словами, решта —
  *  ім'ям теки без підкреслень і з великої літери, а не `village_sweep`. */
 const kindLabel = (k) => tOr(`rs.k.${k}`, '') || humanKind(k);
-function humanKind(k) {
-  const s = String(k || '').replace(/[_-]+/g, ' ').trim();
-  return s ? s[0].toUpperCase() + s.slice(1) : s;
-}
-
-/** Скільки рядків показано: тисячі звітів одним шматком гальмували екран. */
-const PAGE = 60;
-
-/** Рядки під поточний фільтр: назва, шлях і вид — без урахування регістру. */
-export function filterReports(rows, q, kind) {
-  const n = String(q || '').trim().toLowerCase();
-  return rows.filter((r) => (!kind || r.kind === kind)
-    && (!n || `${r.title} ${r.path}`.toLowerCase().includes(n)));
-}
-
-function drawList() {
-  const box = el('rs-list');
-  if (!box) return;
-  const all = filterReports(ROWS, RS.q, RS.kind);
-  const limit = RS.limit || PAGE;
-  const rows = all.slice(0, limit);
-  const more = all.length > rows.length
-    ? `<p class="row"><button class="ghost" data-act="rs.more">${t('rs.more').replace('{n}', Math.min(PAGE, all.length - rows.length))}</button>
-        <span class="muted">${t('rs.shown').replace('{n}', rows.length).replace('{all}', all.length)}</span></p>` : '';
-  box.innerHTML = rows.length ? rows.map((r) => `<div class="lrow">
-      <div><b>${esc(noEmoji(r.title))}</b>
-        <small class="muted">${r.kind ? `<span class="tag">${esc(kindLabel(r.kind))}</span> ` : ''}${esc(dayOf(r.mtime, LANG))}</small></div>
-      <button data-act="rs.read" data-arg="${esc(r.path)}">${t('rs.read')}</button></div>`).join('') + more
-    : (ROWS.length ? `<p class="muted">${t('rs.nomatch')}</p>` : emptyMini('sviy', t('rs.none')));
-}
+const capFirst = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+const humanKind = (k) => capFirst(String(k || '').replace(/[_-]+/g, ' ').trim());
 
 async function readReport(path) {
   openModal({ title: path, body: `<p class="muted">${t('common.loading')}</p>` });
@@ -98,15 +86,5 @@ async function readReport(path) {
 }
 
 Object.assign(ACTIONS, {
-  'rs.find': () => {
-    RS.q = String((el('rs-q') || {}).value || '');
-    RS.kind = String((el('rs-kind') || {}).value || '');
-    RS.limit = PAGE;
-    drawList();
-  },
-  'rs.more': () => {
-    RS.limit = (RS.limit || PAGE) + PAGE;
-    drawList();
-  },
   'rs.read': (_ev, elm) => readReport(elm.dataset.arg),
 });

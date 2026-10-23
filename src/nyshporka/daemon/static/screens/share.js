@@ -8,7 +8,7 @@
  * консоль показує її причину, а не ховає справу з переліку мовчки.
  */
 
-import { t, tOr } from '../core/strings.js';
+import { t, tOr, tn } from '../core/strings.js';
 import { callOp, staleThenFresh, staleBadge, apiFetch, TOKEN } from '../core/net.js';
 import { listView } from '../core/listview.js';
 import { onJob } from '../core/nav.js';
@@ -97,7 +97,7 @@ function paintGive(env, again = false) {
     toggles: [{ id: 'notpool', label: t('give.notpool'), test: (r) => !Number(r.pool_n || 0) }],
     group: giveRepo,
     groupSummary: (rows) => esc(t('give.group.sum')
-      .replace('{n}', rows.length)
+      .replace('{cnt}', tn('lv.n.cases', rows.length))
       .replace('{r}', rows.filter((r) => READY.includes(r.status)).length)
       .replace('{p}', pagesOf(rows).toLocaleString('uk'))),
     // «Позначити групу» бере лише готові: неповне й без кадрів людина
@@ -272,59 +272,73 @@ function pullRows(d) {
 }
 
 // ── Мої картки ───────────────────────────────────────────────────────────────
+/**
+ * Журнал обміну: справа — один рядок, групи за архівом, плитки «віддано /
+ * взято / за тиждень», пошук. Справ тисячі (у Майстерні — 6302 з 8354 подій),
+ * тож перелік спільний (`listView`), а не стовпчик по 60.
+ */
 SCREENS.cards = async () => {
   const gen = curGen();
   busy(6);
   const env = await callOp('share.list', { what: 'all' });
   if (!alive(gen)) return;
   if (!env.ok) return failure(env);
-  // Журнал віддачі — подія на кожне пакування й заливку, тож одна справа
-  // стояла десятками рядків (понад 470 тис. знаків на сторінці, QA 23.10.2026).
-  // Тепер справа — один рядок з останньою подією, пошук і порції по 60.
+  const cards = cardsOf((env.data || {}).rows || []);
+  const last = cards[0] ? fmtDay(String(cards[0].at || '').slice(0, 10)) : '';
+  setView(`
+    <p class="muted">${t('cards.why')}</p>
+    ${cards.length ? `<div class="cards-head">${mini('kartky', 52)}<div>
+      <b>${esc(t('cards.sum').replace('{n}', cards.filter((r) => r.given).length))}</b>
+      ${last ? `<small class="muted">${esc(t('cards.last').replace('{d}', last))}</small>` : ''}</div></div>
+    <div id="cards-list"></div>` : `<div class="dash-box">${emptyMini('kartky', t('cards.none'))}</div>`}`);
+  if (!cards.length) return;
+  const weekAgo = new Date(Date.now() - 7 * 86400e3).toISOString().slice(0, 10);
+  listView(el('cards-list'), {
+    id: 'cards',
+    rows: cards,
+    key: (r) => r.case_key || r.shifra,
+    text: (r) => `${r.shifra || ''} ${r.case_key || ''} ${r.publisher || ''}`,
+    placeholder: t('cards.find'),
+    chips: [
+      { id: 'given', label: t('cards.ev.pack'), test: (r) => r.given, tone: 'ok' },
+      { id: 'taken', label: t('cards.ev.import'), test: (r) => r.taken, tone: 'info' },
+      { id: 'week', label: t('rs.lv.week'), test: (r) => String(r.at || '').slice(0, 10) >= weekAgo },
+    ],
+    // Архів — від сервера, за кодом у ключі справи: шифра прийнятого з Супряги
+    // буває латинкою («DAZHO»), і за першим словом той самий архів двоївся.
+    group: (r) => (r.archive ? { id: r.archive, label: r.archive } : giveRepo(r)),
+    groupSummary: (rows) => esc(t('cards.gsum').replace('{cnt}', tn('lv.n.cases', rows.length))
+      .replace('{p}', pagesOf(rows).toLocaleString('uk'))),
+    head: `<th>${t('give.case')}</th><th>${t('cards.lv.event')}</th><th class="num">${t('cards.lv.pages')}</th><th></th>`,
+    cells: (r) => `<td class="mono lv-nw">${shifraCell(r, true)}</td>
+      <td>${pill(r.event === 'pack' ? 'ok' : 'info', tOr(`cards.ev.${r.event}`, r.event))}
+        <small class="muted">${esc(fmtDay(String(r.at || '').slice(0, 10)))}${r.publisher ? ` · ${esc(r.publisher)}` : ''}</small></td>
+      <td class="num">${esc(r.pages || '')}</td>
+      <td class="lv-nw"><button data-act="cards.open" data-arg="${esc(r.case_key || r.shifra)}">${t('cards.card')}</button></td>`,
+  });
+};
+
+/**
+ * Журнал обміну → справа одним рядком з останньою подією. Подія пишеться на
+ * кожне пакування й заливку, тож одна справа стояла десятками рядків (понад
+ * 470 тис. знаків на сторінці, QA 23.10.2026). `given`/`taken` — чи справу
+ * хоч раз віддано чи взято: остання подія цього не каже.
+ */
+export function cardsOf(rows) {
   const seen = new Map();
-  [...((env.data || {}).rows || [])]
+  [...rows]
     .sort((x, y) => String(y.at || '').localeCompare(String(x.at || '')))
     .forEach((r) => {
       const k = r.case_key || r.shifra || '';
-      if (k && !seen.has(k)) seen.set(k, { ...r, events: 0 });
-      if (k) seen.get(k).events += 1;
+      if (!k) return;
+      if (!seen.has(k)) seen.set(k, { ...r, events: 0, given: false, taken: false });
+      const c = seen.get(k);
+      c.events += 1;
+      if (r.event === 'pack') c.given = true;
+      if (r.event === 'import') c.taken = true;
     });
-  CARDS = [...seen.values()];
-  CARDS_Q = '';
-  CARDS_LIMIT = 60;
-  const last = CARDS[0] ? fmtDay(String(CARDS[0].at || '').slice(0, 10)) : '';
-  setView(`
-    <p class="muted">${t('cards.why')}</p>
-    ${CARDS.length ? `<div class="cards-head">${mini('kartky', 52)}<div>
-      <b>${esc(t('cards.sum').replace('{n}', CARDS.length))}</b>
-      ${last ? `<small class="muted">${esc(t('cards.last').replace('{d}', last))}</small>` : ''}</div>
-      <input id="cards-q" data-act="cards.find" data-live="1" placeholder="${esc(t('cards.find'))}"></div>` : ''}
-    <div class="dash-box" id="cards-list"></div>`);
-  drawCards();
-};
-
-let CARDS = [];
-let CARDS_Q = '';
-let CARDS_LIMIT = 60;
-
-function drawCards() {
-  const box = el('cards-list');
-  if (!box) return;
-  if (!CARDS.length) { box.innerHTML = emptyMini('kartky', t('cards.none')); return; }
-  const q = CARDS_Q.trim().toLowerCase();
-  const all = q ? CARDS.filter((r) => `${r.shifra || ''} ${r.case_key || ''} ${r.title || ''}`.toLowerCase().includes(q)) : CARDS;
-  const rows = all.slice(0, CARDS_LIMIT).map((r) => `<div class="lrow">
-      <div><b class="mono">${shifraCell(r)}</b>
-        <small class="muted">${pill(r.event === 'pack' ? 'ok' : 'info', tOr(`cards.ev.${r.event}`, r.event))}
-          ${esc(fmtDay(String(r.at || '').slice(0, 10)))}${r.pages ? ` · ${esc(t('pull.pages').replace('{n}', r.pages))}` : ''}</small></div>
-      ${r.case_key || r.shifra ? `<button data-act="cards.open" data-arg="${esc(r.case_key || r.shifra)}">${t('cards.card')}</button>` : ''}
-    </div>`).join('');
-  const more = all.length > CARDS_LIMIT
-    ? `<p class="row"><button class="ghost" data-act="cards.more">${esc(t('rs.more').replace('{n}', Math.min(60, all.length - CARDS_LIMIT)))}</button>
-        <span class="muted">${esc(t('rs.shown').replace('{n}', Math.min(CARDS_LIMIT, all.length)).replace('{all}', all.length))}</span></p>` : '';
-  box.innerHTML = rows ? rows + more : `<p class="muted">${t('rs.nomatch')}</p>`;
+  return [...seen.values()];
 }
-
 async function openCard(key) {
   openModal({ title: key, body: `<p class="muted">${t('common.loading')}</p>` });
   const seq = modalSeq();
@@ -443,8 +457,6 @@ Object.assign(ACTIONS, {
     }
   },
   'cards.open': (_ev, elm) => openCard(elm.dataset.arg),
-  'cards.find': () => { CARDS_Q = String((el('cards-q') || {}).value || ''); CARDS_LIMIT = 60; drawCards(); },
-  'cards.more': () => { CARDS_LIMIT += 60; drawCards(); },
   'sprofile.save': async (ev) => {
     ev.preventDefault();
     const fd = Object.fromEntries(new FormData(ev.target).entries());

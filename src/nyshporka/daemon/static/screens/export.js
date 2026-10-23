@@ -55,6 +55,16 @@ async function exportPicks(gen) {
   }).join('')}</div>`;
 }
 
+/**
+ * Клітинка перегляду: довге — до 80 знаків із «…», повне — у підказці.
+ * Без знака обрізаний коментар («Дата — «») виглядав як зламаний (дослідник,
+ * 23.10.2026); у CSV текст іде повністю.
+ */
+function cutCell(v) {
+  const s = String(v ?? '');
+  return s.length > 80 ? `<td title="${esc(s)}">${esc(s.slice(0, 79))}…</td>` : `<td>${esc(s)}</td>`;
+}
+
 Object.assign(ACTIONS, {
   'export.pick': (_ev, elm) => {
     const form = el('view').querySelector('form[data-act="export.run"]');
@@ -76,11 +86,10 @@ Object.assign(ACTIONS, {
     el('hits').innerHTML = `
       ${renderWarnings(env)}
       ${rows.length ? `<button data-act="export.csv">${t('export.csv')}</button>` : ''}
-      <table><thead><tr>${columns.map(
+      <div class="tbl-wide"><table class="tbl-fit"><thead><tr>${columns.map(
         (c) => `<th>${esc(labels[c] || c)}</th>`).join('')}</tr></thead>
-      <tbody>${rows.slice(0, 200).map((r) => `<tr>${columns.map(
-        (c) => `<td>${esc(String(r[c] ?? '').slice(0, 80))}</td>`).join('')}</tr>`).join('')}
-      </tbody></table>
+      <tbody>${rows.slice(0, 200).map((r) => `<tr>${columns.map((c) => cutCell(r[c])).join('')}</tr>`).join('')}
+      </tbody></table></div>
       <p class="muted">${esc(t('export.rows').replace('{n}', rows.length))}</p>`;
   },
 

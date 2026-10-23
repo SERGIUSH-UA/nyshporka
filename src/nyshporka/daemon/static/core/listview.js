@@ -35,7 +35,8 @@ const LV = new Map();
  *
  * @param {HTMLElement} box
  * @param {object} cfg  id, rows, key(r), text(r), chips[{id,label,test,tone}],
- *   toggles[{id,label,test}], group(r)→{id,label}, groupSummary(rows)→html,
+ *   toggles[{id,label,test}], group(r)→{id,label}, groupSort(a,b) (групи
+ *   {id,label,rows}; типово більші вище), groupSummary(rows)→html,
  *   head (html <tr>), cells(r)→html (<td>…), pageSize, select, canPick(r),
  *   groupPick(r), actions(sel)→html, selSummary(sel)→text, placeholder, empty
  */
@@ -100,8 +101,10 @@ function groupsOf(st, rows) {
     if (!by.has(id)) by.set(id, { id, label, rows: [] });
     by.get(id).rows.push(r);
   }
-  // Більші групи вище: там, де справ найбільше, людина й починає.
-  return [...by.values()].sort((a, b) => b.rows.length - a.rows.length || String(a.label).localeCompare(String(b.label), 'uk'));
+  // Більші групи вище: там, де справ найбільше, людина й починає. Екран може
+  // дати свій порядок — «Дослідження» ставить вище теку зі свіжішим звітом.
+  const bySize = (a, b) => b.rows.length - a.rows.length || String(a.label).localeCompare(String(b.label), 'uk');
+  return [...by.values()].sort(st.cfg.groupSort || bySize);
 }
 
 function paint(st) {
@@ -123,10 +126,11 @@ function paint(st) {
   }
   const rows = visibleRows(st);
   const groups = groupsOf(st, rows);
-  // Групу видно розгорнутою, коли їх мало або людина щось шукає: тоді згорнуте
-  // ховало б саме те, що вона щойно знайшла.
-  const autoOpen = groups.length <= 2 || !!st.q.trim();
   const size = cfg.pageSize || 50;
+  // Групу видно розгорнутою, коли їх мало, коли людина щось шукає або коли
+  // весь перелік уміщається в одну порцію: тоді згорнуте ховало б саме те,
+  // що вона щойно знайшла плиткою чи пошуком.
+  const autoOpen = groups.length <= 2 || !!st.q.trim() || rows.length <= size;
   const body = el(`${cfg.id}-body`);
   if (!body) return;
   if (!rows.length) {

@@ -416,11 +416,24 @@ def _report_title(path: Path) -> str:
     section="research", tier="situational", scope="project",
     when="які звіти досліджень є в проєкті — перелік із назвами")
 def reports_list(_: NoArgs) -> Envelope:
+    from nyshporka.archives import active
     from nyshporka.core import workspace as W
     from nyshporka.search.textops import layer_files
 
     rep = W.workspace().reports
     files, _cuts = layer_files("notes")
+    arch = active()
+    labels: dict[str, str] = {}
+
+    def archive_of(kind: str) -> str:
+        # Тека на ім'я архіву (`dahmo`, `davo`) — його скороченням, «ДАХмО», а
+        # не «Dahmo»; дві теки одного архіву (`davo`, `davio`) — одним іменем,
+        # тож консоль кладе їх в одну групу.
+        if kind not in labels:
+            code = arch.resolve_code(kind) if kind else ""
+            labels[kind] = arch.repo_label(code) if code else ""
+        return labels[kind]
+
     rows: list[dict[str, Any]] = []
     for f in files:
         try:
@@ -428,8 +441,9 @@ def reports_list(_: NoArgs) -> Envelope:
         except OSError:
             continue
         rel = f.relative_to(rep)
+        kind = rel.parts[0] if len(rel.parts) > 1 else ""
         rows.append({"path": rel.as_posix(), "title": _report_title(f),
-                     "kind": rel.parts[0] if len(rel.parts) > 1 else "",
+                     "kind": kind, "archive": archive_of(kind),
                      "mtime": st.st_mtime, "size": st.st_size})
     rows.sort(key=lambda r: r["mtime"], reverse=True)
     return ok({"root": str(rep), "rows": rows})
