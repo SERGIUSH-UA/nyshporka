@@ -159,6 +159,12 @@
   --pt-err: #B3372F;
   --pt-err-bg: #F8E3DE;
   --pt-focus: #1F514C;
+  --sw-light-bg: #F5EDDC;
+  --sw-light-card: #FBF7EF;
+  --sw-light-accent: #0F3D3A;
+  --sw-dark-bg: #14201D;
+  --sw-dark-card: #1A2824;
+  --sw-dark-accent: #E3A64B;
   --engine-pysar: #3a4a86;
   --engine-diak: #2c645c;
   --engine-skryba: #733f80;
@@ -326,6 +332,12 @@
   --pt-err: #F08A80;
   --pt-err-bg: #33201D;
   --pt-focus: #E8B872;
+  --sw-light-bg: #F5EDDC;
+  --sw-light-card: #FBF7EF;
+  --sw-light-accent: #0F3D3A;
+  --sw-dark-bg: #14201D;
+  --sw-dark-card: #1A2824;
+  --sw-dark-accent: #E3A64B;
   --engine-pysar: #9db4e0;
   --engine-diak: #79c7b9;
   --engine-skryba: #c9a0d9;

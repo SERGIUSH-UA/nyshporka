@@ -61,7 +61,7 @@ const NAV_LABEL = {
   sets: 'nav.sets', label: 'nav.label', jobs: 'nav.jobs', queue: 'nav.queue', site: 'nav.site',
   newproject: 'nav.newproject', canon: 'nav.canon', hyp: 'nav.hyp', research: 'nav.research',
   history: 'nav.history', cloud: 'nav.cloud', give: 'nav.give', pull: 'nav.pull', cards: 'nav.cards',
-  sprofile: 'nav.sprofile', feedback: 'nav.feedback', settings: 'nav.settings', projects: 'nav.projects', status: 'nav.status',
+  sprofile: 'nav.sprofile', feedback: 'nav.feedback', welcome: 'nav.welcome', settings: 'nav.settings', projects: 'nav.projects', status: 'nav.status',
   update: 'nav.update', adopt: 'nav.adopt',
 };
 
@@ -290,10 +290,14 @@ const HEAD_ART = {
 };
 
 function renderHead(screen) {
-  const box = el('phead');
-  if (!box) return;
   const inProject = !SECTIONS.hub_only;
   const ctx = inProject ? (projectName() || t('stage.project.label')) : t('stage.hub.label');
+  // Вкладка: «екран — проєкт · Нишпорка». Доти кожна звалась просто «Нишпорка»,
+  // і з кількох відкритих не було видно, де який рід (23.10.2026).
+  const scr = screen === 'home' ? '' : screenLabel(screen);
+  document.title = [scr, ctx].filter(Boolean).join(' — ') + ` · ${t('app.name')}`;
+  const box = el('phead');
+  if (!box) return;
   const gid = groupOf(screen);
   const g = navGroups().find((x) => x.id === gid);
   const crumbs = [`<button data-act="nav" data-arg="home">${esc(ctx)}</button>`];
@@ -371,6 +375,8 @@ async function show(screen) {
     return;
   }
   if (modalOpen()) closeModal();
+  // Знайомство ховає шапку й меню (`body.welcome-on`); будь-який інший екран — повертає.
+  document.body.classList.toggle('welcome-on', screen === 'welcome');
   setViewTarget('view');
   // Випадні списки підказок живуть у `<body>`: поле, до якого вони належали,
   // зникає разом з екраном, а список висів над наступним (прохід 22.10.2026).

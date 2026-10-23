@@ -4695,7 +4695,8 @@ def _profile_payload(p: Any) -> dict[str, Any]:
             # уже шукали. Профіль ці поля читав давно, але назовні не віддавав —
             # тож агент ішов питати те, що вже записане.
             "places": [dict(x) for x in p.places if isinstance(x, dict)],
-            "archives": [dict(x) for x in p.archives if isinstance(x, dict)]}
+            "archives": [dict(x) for x in p.archives if isinstance(x, dict)],
+            "years": {"from": p.years[0], "to": p.years[1]} if p.years else None}
 
 
 def _profile_shell(env: Envelope) -> dict[str, Any]:
@@ -4898,6 +4899,43 @@ def profile_set(a: ProfileSetArgs) -> Envelope:
                  f"профіль «{wrote.name}» записано, але шукається зараз інший — "
                  f"активний задає `fallback` у файлі")
     return _warn_stems(env, wrote)
+
+
+class ProfileWhereArgs(BaseModel):
+    name: str = Field(default="", description="ключ профілю; типово — активний")
+    places: list[dict[str, Any]] | None = Field(
+        default=None, max_length=60,
+        description="села: [{name, also: [інші назви], uezd: повіт}]; не передано — не чіпати, [] — прибрати всі")
+    archives: list[dict[str, Any]] | None = Field(
+        default=None, max_length=60, description="архіви й фонди: [{repo: DAHMO, fond: 315}]")
+    years_from: int | None = Field(default=None, description="роки пошуку: від")
+    years_to: int | None = Field(default=None, description="роки пошуку: до")
+
+    def only_shows(self) -> bool:
+        return self.places is None and self.archives is None and self.years_from is None \
+            and self.years_to is None
+
+
+@op("profile.where", summary="Де шукати рід: села, роки, архіви",
+    args=ProfileWhereArgs, mutates=True,
+    scope="project", skill="start-research",
+    when="записати села роду, роки пошуку й архіви з фондами")
+def profile_where(a: ProfileWhereArgs) -> Envelope:
+    """Регіон дослідження у профіль роду — лише передані поля, решта як була."""
+    from nyshporka.core.profile import ProfileError, resolve, save_where
+    from nyshporka.core.workspace import WorkspaceError
+
+    years = None
+    if a.years_from is not None or a.years_to is not None:
+        years = (a.years_from, a.years_to)
+    try:
+        res = save_where(a.name, places=a.places, archives=a.archives, years=years)
+        wrote = resolve(res["name"])
+    except (ProfileError, WorkspaceError) as exc:
+        env = fail(str(exc))
+        env.suggest("profile.source", "правити текстом")
+        return env
+    return ok({**res, **_profile_payload(wrote)})
 
 
 class ProfileSourceArgs(BaseModel):

@@ -405,3 +405,58 @@ def test_show_returns_places_and_archives_from_the_file(space):
                             "uezd": "Могилівський", "eparchy": "Подільська",
                             "confession": "orthodox"}]
     assert d["archives"] == [{"repo": "DAHMO", "fond": 315}]
+
+
+# ── де шукати: села, роки, архіви ────────────────────────────────────────────
+def test_where_writes_places_archives_years_and_keeps_the_rest(space):
+    """Знайомство й форма «Рід» дописують регіон — рука й заміри лишаються."""
+    from nyshporka.core import profile as P
+
+    (space / "config" / "research_profile.yaml").write_text(HAND, encoding="utf-8")
+    P.reset()
+    env = _call("profile.where", {
+        "places": [{"name": "Сидорівка", "also": "Сидоровка, Sydorówka", "uezd": "Летичівський"},
+                   {"name": "сидорівка"}, {"name": ""}],
+        "archives": [{"repo": "DAHMO", "fond": "315"}, {"repo": "DAHMO", "fond": "315"}],
+        "years_from": 1780, "years_to": 1920})
+    assert env.ok, env.error
+    d = env.data
+    assert d["places"] == [{"name": "Сидорівка", "also": ["Сидоровка", "Sydorówka"],
+                            "uezd": "Летичівський"}], "без дублів і порожніх"
+    assert d["archives"] == [{"repo": "DAHMO", "fond": "315"}]
+    assert d["years"] == {"from": 1780, "to": 1920}
+    text = (space / "config" / "research_profile.yaml").read_text(encoding="utf-8")
+    assert "звірено оком" in text and "zolynwskiego" in text, "рука й заміри на місці"
+
+    # Лише роки — села й архіви не зникають.
+    env = _call("profile.where", {"years_from": 1800, "years_to": 1850})
+    assert env.ok and env.data["places"] and env.data["archives"]
+    assert env.data["years"] == {"from": 1800, "to": 1850}
+
+    # Профіль роду надсилає форму цілком: прибрані рядки зникають.
+    env = _call("profile.where", {"places": [], "archives": []})
+    assert env.ok, env.error
+    assert env.data["places"] == [] and env.data["archives"] == []
+    assert env.data["years"] == {"from": 1800, "to": 1850}
+    text = (space / "config" / "research_profile.yaml").read_text(encoding="utf-8")
+    assert "звірено оком" in text and "Сидорівка" not in text
+
+
+def test_where_refuses_bad_years_and_a_missing_profile(space):
+    assert not _call("profile.where", {"years_from": 1800, "years_to": 1850}).ok, "профілю ще немає"
+    assert _call("profile.set", {"display": "Сидоруцький"}).ok
+    for a, b in ((1900, 1800), (1200, 1300), (1800, None)):
+        env = _call("profile.where", {"years_from": a, "years_to": b})
+        assert not env.ok, (a, b)
+
+
+@pytest.mark.parametrize(("display", "want"), [
+    ("Сікорський", "adj_skyi"), ("Kowalski", "adj_skyi"), ("Чипенко", "noun_ko"),
+    ("Іванов", "noun_ov"), ("Кузьминъ", "noun_ov"), ("Сидорук", "noun_bare"),
+    ("Лутъ", "noun_bare"), ("Сокира", "indeclinable"), ("", "indeclinable"),
+])
+def test_a_new_profile_guesses_the_paradigm_from_the_ending(display: str, want: str) -> None:
+    from nyshporka.core.morph import PARADIGMS, guess_paradigm
+
+    assert guess_paradigm(display) == want
+    assert want in PARADIGMS

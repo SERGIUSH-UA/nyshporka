@@ -25,6 +25,7 @@ import { SCREENS, ACTIONS } from '../core/registry.js';
 import { show } from '../core/nav.js';
 import { ic } from '/ui/icons.js';
 import { swapHtml } from '/ui/dom.js';
+import { whereFields, whereArgs, whereProblem, fillRepos } from './where.js';
 
 /** Останній зріз — щоб форма правки не ходила по нього вдруге. */
 let PS = null;
@@ -46,8 +47,24 @@ SCREENS.profile = async () => {
     ${renderWarnings(env)}
     <div id="prof-card">${card(PS)}</div>
     <div id="prof-form">${form(PS)}</div>
+    ${whereBlock(PS)}
     ${sourceBlock(PS)}`);
+  if (PS.present) fillRepos();
 };
+
+
+/**
+ * Де шукати рід: села, роки, архіви — та сама форма, що в знайомстві.
+ * Без профілю її нема куди записати, тож вона з'являється після заведення роду.
+ */
+function whereBlock(d) {
+  if (!d.present || d.broken) return '';
+  return `<section class="dash-sec"><h3>${t('prof.where')}</h3>
+    <p class="muted">${t('prof.where.why')}</p>
+    <form data-act="prof.where">${whereFields(d)}
+      <div class="row"><button type="submit">${t('prof.save')}</button></div></form>
+    <div id="prof-where"></div></section>`;
+}
 
 
 /**
@@ -225,6 +242,19 @@ Object.assign(ACTIONS, {
     const box = el('prof-hits');
     if (box && said) box.innerHTML = said;
     return undefined;
+  },
+
+  /** Села, роки, архіви. Прибраний рядок зникає з профілю — форма авторитетна. */
+  'prof.where': async (ev) => {
+    ev.preventDefault();
+    const bad = whereProblem();
+    if (bad) { const box = el('prof-where'); if (box) box.innerHTML = `<div class="warn">${esc(bad)}</div>`; return undefined; }
+    const unlock = busyForm(ev.target);
+    const env = await callOp('profile.where', { name: (PS && PS.name) || '', ...whereArgs(true) });
+    unlock();
+    if (!env.ok) return boxError('prof-where', env);
+    toast(t('toast.saved'), { tone: 'ok' });
+    return show('profile');
   },
 
   /** Записати сирий файл. Відмова лишається в коробці — текст не втрачається. */

@@ -76,6 +76,16 @@ export function cycleTheme() {
   apply();
 }
 
+/** Явний вибір (знайомство, налаштування): 'auto' | 'light' | 'dark'. */
+export function setThemeMode(mode) {
+  if (!MODES.includes(mode)) return;
+  try {
+    if (mode === 'auto') localStorage.removeItem(THEME_KEY);
+    else localStorage.setItem(THEME_KEY, mode);
+  } catch (e) { /* приватний режим — тема доживе до перезавантаження */ }
+  apply();
+}
+
 export function initTheme() {
   apply();
   // Зміна системної теми діє ЛИШЕ поки вибір «авто» — інакше явний вибір

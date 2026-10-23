@@ -256,7 +256,7 @@ def test_every_screen_is_reachable_and_belongs_to_a_section() -> None:
         f"крок підсвічує неіснуючу вкладку: {sorted(set(steps.values()) - order)}"
     # `feedback` — вікно відгуку: до нього ведуть меню Супряги в шапці й
     # «Налаштування», а в основному переліку йому не місце, як і шестерні.
-    free = {"settings", "feedback"} | set(steps)
+    free = {"settings", "feedback", "welcome"} | set(steps)
     assert not (order - screens), f"кнопка без екрана: {sorted(order - screens)}"
     assert not (screens - order - free), \
         f"екран без кнопки: {sorted(screens - order - free)}"

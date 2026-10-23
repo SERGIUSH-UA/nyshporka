@@ -224,7 +224,7 @@ def test_the_doctor_asks_whose_clan_we_are_looking_for(
     from nyshporka.setup import doctor
 
     monkeypatch.setenv(W.ENV_WORKSPACE, str(tmp_path / "простір"))
-    res = runner.invoke(app, ["init", "--yes", "--preset", "researcher"])
+    res = runner.invoke(app, ["init", "--yes", "--preset", "researcher", "--single"])
     assert res.exit_code == 0, res.stdout
     assert "profile init" in res.stdout, "крок мусить бути названий одразу"
     W.reset()
@@ -240,4 +240,26 @@ def test_the_doctor_asks_whose_clan_we_are_looking_for(
         parents=True, exist_ok=True)
     got = doctor._profile()
     assert got.level == "warn" and got.fix.startswith("nysh profile init"), got
+    W.reset()
+
+def test_a_new_workspace_is_a_workshop_and_an_old_one_stays_as_it_is(
+        tmp_path: Path, monkeypatch) -> None:
+    """Свіжий простір — одразу Майстерня (проєкти, знайомство в консолі); старий
+    при повторному `init` (інсталятор поверх установки) не перетворюється."""
+    from nyshporka.core import workspace as W
+
+    monkeypatch.setenv(W.ENV_WORKSPACE, str(tmp_path / "нова"))
+    res = runner.invoke(app, ["init", "--yes", "--preset", "researcher"])
+    assert res.exit_code == 0, res.stdout
+    marker = (tmp_path / "нова" / W.MARKER).read_text(encoding="utf-8")
+    assert "hub_only = true" in marker and "nysh serve" in res.stdout
+    W.reset()
+
+    old = tmp_path / "стара"
+    monkeypatch.setenv(W.ENV_WORKSPACE, str(old))
+    assert runner.invoke(app, ["init", "--yes", "--single"]).exit_code == 0
+    W.reset()
+    assert runner.invoke(app, ["init", "--yes"]).exit_code == 0, "повторний init"
+    assert "hub_only" not in (old / W.MARKER).read_text(encoding="utf-8")
+    assert not (old / "projects").exists()
     W.reset()

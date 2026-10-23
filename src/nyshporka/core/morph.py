@@ -296,6 +296,31 @@ def paradigm(pid: str) -> Paradigm:
             f"невідома парадигма «{pid}». Є: {', '.join(sorted(PARADIGMS))}") from None
 
 
+_SKYI_TAILS = ("ський", "ский", "скій", "ski", "sky", "skyj", "skij")
+_OV_TAILS = ("ов", "ев", "єв", "ин", "ін", "овъ", "евъ", "инъ", "ow", "ew", "ov", "ev")
+_VOWELS = set("аеєиіїоуюяыэaeiouy")
+
+
+def guess_paradigm(display: str) -> str:
+    """Парадигма за закінченням прізвища — для першого заведення профілю.
+
+    🔴 Лише початкове значення, яке людина бачить і може змінити в «Профілі
+    роду». Доти новий проєкт завжди діставав `adj_skyi`, і «Сидорук» шукався
+    у формах «Сидорского» — тобто не шукався зовсім. Невідоме закінчення на
+    голосну дає `indeclinable`: одна правильна форма краща за вигадану таблицю.
+    """
+    word = display.strip().split()[-1].lower() if display.strip() else ""
+    if word.endswith(_SKYI_TAILS):
+        return "adj_skyi"
+    if word.endswith(("ко", "ko")):
+        return "noun_ko"
+    if word.endswith(_OV_TAILS):
+        return "noun_ov"
+    if not word or word[-1] in _VOWELS:
+        return "indeclinable"
+    return "noun_bare"
+
+
 # ── переноси ─────────────────────────────────────────────────────────────────
 def hyphenate(word: str, cut: int, joiner: str = " ") -> tuple[str, str, str]:
     """Слово, розірване переносом → (повний запис, голова, хвіст).

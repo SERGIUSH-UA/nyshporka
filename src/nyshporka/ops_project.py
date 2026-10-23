@@ -66,6 +66,7 @@ def project_new(a: ProjectNewArgs) -> Envelope:
     data: dict[str, Any] = {"root": str(made.root), "files": made.files, "profile": None}
     env = ok(data)
     if a.surname:
+        from nyshporka.core.morph import guess_paradigm
         from nyshporka.core.ops import REGISTRY
 
         # Профіль — тією самою операцією, що й `nysh profile init`, але в
@@ -73,6 +74,7 @@ def project_new(a: ProjectNewArgs) -> Envelope:
         with W.using(W._build(made.root, "explicit")):
             got = REGISTRY.call("profile.set", {
                 "display": a.surname,
+                "paradigm": guess_paradigm(a.surname),
                 "substrings": [v.strip() for v in a.variants if v.strip()]})
         if got.ok:
             data["profile"] = got.data

@@ -127,6 +127,10 @@ class ResearchProfile:
     selftest: dict[str, Any] = field(default_factory=dict)
     places: tuple[dict[str, Any], ...] = ()
     archives: tuple[dict[str, Any], ...] = ()
+    #: Роки пошуку: від і до (`years: {from, to}`). Заводиться знайомством і
+    #: формою «Рід»; пошук його поки не читає — це рамка дослідження для людини
+    #: й помічника (звідки починати, що замовляти).
+    years: tuple[int, int] | None = None
 
     # ── похідні таблиці ──────────────────────────────────────────────────────
     @property
@@ -328,7 +332,18 @@ def _build(name: str, body: dict[str, Any]) -> ResearchProfile:
         selftest=body.get("selftest") or {},
         places=tuple(body.get("places") or []),
         archives=tuple(body.get("archives") or []),
+        years=_years(body.get("years")),
     )
+
+
+def _years(value: Any) -> tuple[int, int] | None:
+    if not isinstance(value, dict) or value.get("from") is None or value.get("to") is None:
+        return None
+    try:
+        a, b = int(value["from"]), int(value["to"])
+    except (TypeError, ValueError):
+        return None
+    return (a, b)
 
 
 def resolve(name: str | None = None) -> ResearchProfile:
@@ -785,6 +800,117 @@ def save(name: str, display: str, *, paradigm: str = "adj_skyi",
     atomic_write_text(path, out)
     reset()
     return {"name": name, "path": str(path), "mode": mode}
+
+
+#: Межі років пошуку: метричні книги й ревізії — від XVI ст., живі люди — сьогодні.
+YEAR_MIN, YEAR_MAX = 1500, 2100
+
+
+def _clean_list(value: Any, limit: int = 40) -> list[str]:
+    items = value if isinstance(value, list) else str(value or "").split(",")
+    return [s for s in (str(x).strip() for x in items) if s][:limit]
+
+
+def _where_places(was: list[Any], places: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Села з форми; поля, яких форма не знає (`eparchy`, `confession`), — з наявних."""
+    old = {str(x.get("name") or "").strip().lower(): x for x in was if isinstance(x, dict)}
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for x in places[:60]:
+        name = str((x or {}).get("name") or "").strip()
+        if not name or name.lower() in seen:
+            continue
+        seen.add(name.lower())
+        row = {k: v for k, v in (old.get(name.lower()) or {}).items()
+               if k not in ("name", "also", "uezd")}
+        item: dict[str, Any] = {"name": name}
+        also = _clean_list((x or {}).get("also"))
+        if also:
+            item["also"] = also
+        uezd = str((x or {}).get("uezd") or "").strip()
+        if uezd:
+            item["uezd"] = uezd
+        out.append({**item, **row})
+    return out
+
+
+def _where_archives(archives: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for x in archives[:60]:
+        repo = str((x or {}).get("repo") or "").strip()
+        fond = str((x or {}).get("fond") or "").strip()
+        if not repo or (repo, fond) in seen:
+            continue
+        seen.add((repo, fond))
+        out.append({"repo": repo, **({"fond": fond} if fond else {})})
+    return out
+
+
+def _patch_key(text: str, name: str, indent: int, key: str, value: Any) -> str:
+    """Замінити чи дописати блок `key:` профілю, решту лишити як була."""
+    span = _block(text, name, indent)
+    if span is None:
+        raise ProfileError(f"профіль «{name}» є в конфігу, але його блока не видно — "
+                           f"правте текстом")
+    lines = text.splitlines(keepends=True)
+    start, end = span
+    inner = "".join(lines[start + 1:end])
+    rendered = _render({key: value}, indent + 2)
+    sub = _block(inner, key, indent + 2)
+    if sub is None:
+        tail = end
+        while tail > start + 1 and not lines[tail - 1].strip():
+            tail -= 1
+        return "".join([*lines[:tail], rendered, *lines[tail:]])
+    if _has_comment(inner, sub):
+        raise ProfileError(f"у блоці «{key}» цього профілю стоять коментарі — "
+                           f"дамп їх не переносить, правте текстом")
+    sl = inner.splitlines(keepends=True)
+    return "".join([*lines[:start + 1], *sl[:sub[0]], rendered, *sl[sub[1]:], *lines[end:]])
+
+
+def save_where(name: str = "", *, places: list[dict[str, Any]] | None = None,
+               archives: list[dict[str, Any]] | None = None,
+               years: tuple[int | None, int | None] | None = None) -> dict[str, Any]:
+    """Регіон дослідження: села, архіви, роки. Лише передані ключі.
+
+    Той самий запобіжник, що й у `save()`: правка — заміна саме свого блока,
+    а перед записом результат перечитується й звіряється з наміром.
+    """
+    path = config_path()
+    if not path.is_file():
+        raise ProfileError("спершу назвіть рід — прізвище, яке шукаєте")
+    raw = _raw()
+    profs = raw.get("profiles") or {}
+    name = (name or "").strip() or str(raw.get("fallback") or "")
+    if name not in profs:
+        raise ProfileError(f"профілю «{name}» немає — спершу назвіть рід")
+    was = profs[name] or {}
+    body: dict[str, Any] = {}
+    if places is not None:
+        body["places"] = _where_places(list(was.get("places") or []), places)
+    if archives is not None:
+        body["archives"] = _where_archives(archives)
+    if years is not None:
+        a, b = years
+        if a is None or b is None:
+            raise ProfileError("роки пошуку — обидва: від і до")
+        if not (YEAR_MIN <= a <= YEAR_MAX and YEAR_MIN <= b <= YEAR_MAX) or a > b:
+            raise ProfileError(f"роки пошуку — від {YEAR_MIN} до {YEAR_MAX}, «від» не пізніше «до»")
+        body["years"] = {"from": int(a), "to": int(b)}
+    if not body:
+        return {"name": name, "path": str(path), "mode": "unchanged"}
+    text = path.read_text(encoding="utf-8")
+    indent = _profiles_indent(text)
+    out = text
+    for key, value in body.items():
+        out = _patch_key(out, name, indent, key, value)
+    _verify(text, out, path, name, body)
+    atomic_write_text(path.with_name(path.name + ".bak"), text)
+    atomic_write_text(path, out)
+    reset()
+    return {"name": name, "path": str(path), "mode": "updated"}
 
 
 def _verify(before: str, after: str, path: Path, name: str,

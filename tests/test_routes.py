@@ -100,7 +100,7 @@ def test_when_skill_scope_are_filled_where_they_must_be() -> None:
 PROJECT = {"text.sheet", "text.verdicts", "library.verdict",
            "canon.check", "canon.import", "canon.index", "canon.new_id", "canon.next",
            "site.build", "site.rebuild", "site.status",
-           "profile.set", "profile.show", "profile.source",
+           "profile.set", "profile.show", "profile.source", "profile.where",
            "migrate.done", "migrate.scan", "migrate.status",
            # Екрани проєкту (хвиля 7б): канон, гіпотези, звіти, історія.
            "canon.cards", "canon.card", "canon.hyps", "canon.hyp",

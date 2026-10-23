@@ -160,6 +160,8 @@ SCREENS: dict[str, str] = {
     "update": "core",
     # Відгук про Нишпорку — вікно поверх будь-якого екрана, у меню не стоїть.
     "feedback": "core",
+    # Знайомство — перший запуск порожньої Майстерні; у меню не стоїть.
+    "welcome": "core",
     # Перенос роду з кореня в проєкт (0.37) — крок Огляду, у меню не стоїть.
     "adopt": "core",
     # 🔴 «Рід» у `core`, а не в «Дослідженні»: він вирішує, як працює пошук,
@@ -216,7 +218,7 @@ SCREENS: dict[str, str] = {
 #: 🔴 `settings` не має гейта навмисно: саме ним вмикають і вимикають секції.
 #: Замкнути його всередині секції означало б, що вимкнена секція неможливо
 #: увімкнути назад — і виглядало б це як поламаний застосунок, а не як вибір.
-UNGATED_SCREENS: frozenset[str] = frozenset({"settings", "update", "feedback"})
+UNGATED_SCREENS: frozenset[str] = frozenset({"settings", "update", "feedback", "welcome"})
 
 
 @dataclass(frozen=True)
@@ -283,7 +285,7 @@ LAYERS: dict[str, str] = {
                      "queue", "runs", "cloud", "view", "export", "give", "pull", "cards",
                      "sprofile"), "shared"),
     **dict.fromkeys(("jobs", "sets", "label", "settings", "update", "newproject", "adopt",
-                     "feedback"),
+                     "feedback", "welcome"),
                     "service"),
 }
 
@@ -371,6 +373,7 @@ OP_SCREEN: dict[str, str] = {
     "sample.install": "home",
     "profile.show": "profile",
     "profile.set": "profile",
+    "profile.where": "profile",
     "profile.source": "profile",
     # ⬆️ Версія й оновлення — у налаштуваннях: питання про застосунок, а не
     # про дослідження.

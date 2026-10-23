@@ -5,7 +5,7 @@ import { t } from '../core/strings.js';
 import { PROJECT, callOp } from '../core/net.js';
 import { esc, el, setView, boxError, busyForm, fld, humanError, mini, emptyMini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
-import { goto, jobDone, jobChip, currentScreen, SECTIONS } from '../core/nav.js';
+import { goto, jobDone, jobChip, currentScreen, SECTIONS, screenOn } from '../core/nav.js';
 import { openModal, closeModal } from '../core/modal.js';
 import { decRow, noEmoji, fmtDay } from '../core/bits.js';
 import { projectBadge as badge, projectColor, projectsNow, currentPid, iconPicker, iconSrc, scenePicker, sceneSrc,
@@ -240,6 +240,7 @@ export function projectShell() {
       ${kpi('ov-k-mat', t('phead.material'), 'search', 'drawers', ART.mat)}
       ${kpi('ov-k-hist', t('nav.history'), 'history', 'clock', ART.hist)}
     </div>
+    <div class="dash-sec steps" id="ov-plan" hidden></div>
     <div class="ov-cols">
       ${ovSection('book-open', t('canon.next'), ART.decide, '<div id="ov-decide"><span class="skel-cell"></span></div>')}
       ${ovSection('ledger', t('ov.new'), ART.news, '<div id="ov-new"><span class="skel-cell"></span></div>')}
@@ -289,6 +290,7 @@ export async function fillProject(stillHere = () => true) {
         : emptyMini('pero', t('canon.next.none'));
     }),
     fillMaterial(stillHere),
+    fillPlan(stillHere),
     Promise.all([callOp('history.log', { limit: 4 }), callOp('reports.list', {})]).then(([hl, rl]) => {
       const box = el('ov-new');
       if (!stillHere() || !box) return;
@@ -306,6 +308,43 @@ export async function fillProject(stillHere = () => true) {
     }),
   ];
   await Promise.all(jobs);
+}
+
+/**
+ * 🧭 План нового роду: рід → справи → читання → пошук.
+ *
+ * Новий проєкт доти відкривався чотирма нулями й порожнім «що вирішити», і
+ * людина не знала, з чого почати (дослідник, 23.10.2026). План стоїть, доки
+ * хоч один крок не зроблено, і зникає, коли зроблено всі. Перший незроблений —
+ * головною кнопкою: решта не забороняється, але порядок видно.
+ */
+async function fillPlan(stillHere = () => true) {
+  const [pr, any, read, here] = await Promise.all([
+    callOp('profile.show', {}),
+    callOp('cases.list', { limit: 1 }),
+    callOp('cases.list', { htr: 'read', limit: 1 }),
+    callOp('cases.list', { searched: 'here', limit: 1 })]);
+  const box = el('ov-plan');
+  if (!stillHere() || !box) return;
+  const total = (e) => (e.ok ? Number((e.data || {}).total || 0) : 0);
+  const p = pr.ok ? (pr.data || {}) : {};
+  const all = [
+    { k: 'ov.plan.family', ok: !!p.present && !!(p.places || []).length, nav: 'profile' },
+    { k: 'ov.plan.cases', ok: total(any) > 0, nav: 'newcase' },
+    { k: 'ov.plan.read', ok: total(read) > 0, nav: 'read' },
+    { k: 'ov.plan.search', ok: total(here) > 0, nav: 'search' },
+  ].filter((x) => screenOn(x.nav));
+  if (!all.length || all.every((x) => x.ok)) { box.hidden = true; return; }
+  const first = all.find((x) => !x.ok);
+  box.hidden = false;
+  box.innerHTML = `<h3>${ic('check-circle', 'ic-sm')} ${esc(t('ov.plan'))}
+      <span class="aside">${all.filter((x) => x.ok).length} ${esc(t('dash.of'))} ${all.length}</span></h3>
+    <div class="dash-box">${all.map((x, i) => `<div class="step${x.ok ? ' on' : ''}">
+      <span class="step-m">${x.ok ? ic('check-circle', 'ic-o ic-sm') : `<b class="num">${i + 1}</b>`}</span>
+      <span class="step-t">${esc(t(x.k))}<br><span class="muted">${esc(t(`${x.k}.why`))}</span></span>
+      <span class="step-n"></span>
+      <span>${x.ok ? '' : `<button${x === first ? ' class="primary"' : ''} data-act="nav" data-arg="${x.nav}">${
+        esc(t('step.go'))}</button>`}</span></div>`).join('')}</div>`;
 }
 
 /** Матеріал Майстерні зрізом проєкту: скільки прочитаного він ще не шукав. */

@@ -19,12 +19,13 @@
 import { t, tOr, LANG } from '../core/strings.js';
 import { TOKEN, PROJECT, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
-  renderWarnings, renderCoverage, curGen, alive, maskot, emptyMini } from '../core/view.js';
+  renderWarnings, renderCoverage, curGen, alive, maskot, emptyMini, mini } from '../core/view.js';
 import { modelName, fmtDay, pathTail } from '../core/bits.js';
 import { SCREENS, ACTIONS, screenOfOp } from '../core/registry.js';
 import { SECTIONS, NAV_LABEL, show, renderNav, screenOn,
   refreshJobs } from '../core/nav.js';
 import { ST } from '../core/state.js';
+import { welcomeDone } from './welcome.js';
 import { openModal } from '../core/modal.js';
 import { ic, eng } from '/ui/icons.js';
 import { swapHtml, skelRows, skelCards } from '/ui/dom.js';
@@ -112,6 +113,41 @@ function doors() {
   </div>`;
 }
 
+/**
+ * Перший запуск: порожня Майстерня (ні проєктів, ні справ) і знайомство ще не
+ * пройдене в цьому браузері — замість Огляду відкривається знайомство.
+ * 🔴 Огляд робочого простору людині, що вперше відкрила застосунок, не каже
+ * нічого: їй треба мова, вигляд, проєкт і рід (дослідник, 23.10.2026).
+ */
+async function firstRun(gen) {
+  NO_PROJECTS = false;
+  if (!SECTIONS.hub_only) return false;
+  const reg = (PULSE && PULSE.registry) || {};
+  if (reg.cases || reg.unfiled) return false;
+  const pl = await callOp('project.list', {});
+  if (!alive(gen)) return true;
+  if (!pl.ok || ((pl.data || {}).projects || []).length) return false;
+  NO_PROJECTS = true;
+  if (welcomeDone()) return false;
+  location.hash = 'welcome';
+  return true;
+}
+
+/** Порожня Майстерня без жодного проєкту (знайомство пропустили) — `firstRun` знає. */
+let NO_PROJECTS = false;
+
+/**
+ * Головна дія Майстерні без проєктів — завести перший. Справи, читання й пошук
+ * без проєкту роду не мають, куди писати знайдене, тож двері «у мене є скани»
+ * тут другорядні.
+ */
+function firstProject() {
+  return `<div class="dash-box first-pj">${mini('derevo', 96)}<div>
+      <h3>${esc(t('home.first.title'))}</h3><p>${esc(t('home.first.why'))}</p>
+      <p class="row"><button class="primary" data-act="nav" data-arg="newproject">${esc(t('home.first.go'))}</button>
+        <a class="btn ghost" href="/?step=lang#welcome">${esc(t('set.welcome'))}</a></p></div></div>`;
+}
+
 SCREENS.home = async () => {
   const gen = curGen();
   // Огляд роду — лише рід: показники, «що вирішити», що нового. Стан
@@ -125,6 +161,7 @@ SCREENS.home = async () => {
   PULSE = env.data;
   // Простір, відкритий просто в теці проєкту (без `?p=`), — теж рід.
   if (PULSE && PULSE.project) { projectFrame(gen); return; }
+  if (await firstRun(gen)) return;
   paintHome(env, gen);
   hubCards(gen);
   // Без `await`: екран уже намальовано, і чекати на цей рядок нема чого.
@@ -228,11 +265,14 @@ function paintHome(env, gen = curGen(), keep = false) {
   if (empty) {
     // Порожній простір — перша зустріч, тож маскот вітає. Це стан ПРОЦЕСУ
     // («ще нічого не поклали»), а не висновок про архів.
-    put(`${SECTIONS.hub_only ? '<div id="hub-cards"></div>' : '<div id="adopt-banner"></div>'}<div class="vitannia vitannia-hero">${maskot('vitaie', 140)}
+    // Без проєктів картки проєктів — лише «+ Новий проєкт», і її вже несе `firstProject()`.
+    const top = SECTIONS.hub_only ? (NO_PROJECTS ? '' : '<div id="hub-cards"></div>') : '<div id="adopt-banner"></div>';
+    put(`${top}<div class="vitannia vitannia-hero">${maskot('vitaie', 140)}
         <div><h2>${t('home.title')}</h2><p>${t('home.hello')}</p></div></div>
+      ${NO_PROJECTS ? firstProject() : ''}
       ${agentCard(PULSE)}
       ${renderWarnings(env)}
-      ${doors()}
+      ${NO_PROJECTS ? '' : doors()}
       ${stepsBox(PULSE)}
       <p class="muted mono">${esc(ws.root || '')}</p>`);
   } else {

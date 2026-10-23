@@ -388,6 +388,8 @@ def test_project_color_glyph_and_variants(tmp_path: Path) -> None:
                                  "variants": ["Sydoruk", " "], "color": "#8a5a2b",
                                  "glyph": "С"})
     assert env.ok, env.error
+    # Парадигма — за закінченням, а не завжди `adj_skyi` («Сидорского»).
+    assert env.data["profile"]["paradigm"] == "noun_bare"
     rows = {r["id"]: r for r in O.call("project.list").data["projects"]}
     assert (rows["rid-s"]["color"], rows["rid-s"]["glyph"]) == ("#8a5a2b", "С")
     # Огляд проєкту в консолі бере колір і знак зі статусу проєкту.

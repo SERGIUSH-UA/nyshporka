@@ -765,10 +765,17 @@ def init(
     yes: bool = typer.Option(False, "--yes", "-y", help="без питань (для інсталятора)"),
     no_history: bool = typer.Option(False, "--no-history",
                                     help="не заводити локальний git (ведете історію самі)"),
-    hub: bool = typer.Option(False, "--hub",
-                             help="Майстерня для кількох проєктів: роди — `nysh project new`"),
+    single: bool = typer.Option(False, "--single",
+                                help="простір старого типу: один рід просто в корені"),
+    hub: bool = typer.Option(False, "--hub", hidden=True,
+                             help="Майстерня (типово й так; лишено для сумісності)"),
 ) -> None:
     """Створити робочий простір — теку, де житиме дослідження.
+
+    Новий простір — одразу Майстерня: роди й замовлення живуть у проєктах
+    (`nysh project new`, знайомство в консолі). Старий формат «один рід у
+    корені» — лише `--single` (рішення дослідника 23.10.2026: свіжа установка
+    показувала пункти роду без роду й не давала створити проєкт).
 
     🔴 Мовчки простір не створюється ніколи: тека, що з'явилась сама, — це
     дослідження, яке потім не можуть знайти.
@@ -814,12 +821,15 @@ def init(
             console.print(f"[warn]є: {', '.join(sorted(S.PRESETS))}[/warn]")
             preset = typer.prompt("Набір", default=S.DEFAULT_PRESET)
 
+    # Майстерня — лише для НОВОГО простору: наявний (інсталятор поверх старої
+    # установки) не перетворюється, його переносять у проєкт окремо (`project adopt`).
+    hub = p.creating and not single
     root = wizard.create(p.root, name=name, preset=preset, hub=hub)
     console.print(f"✅ готово: {root}")
     _init_history(root, skip=no_history)
     if hub:
-        console.print("[muted]далі: `nysh project new <ім'я> --surname <Прізвище>` — "
-                      "перший проєкт роду[/muted]")
+        console.print("[muted]далі: `nysh serve` — консоль проведе знайомство й заведе перший "
+                      "проєкт; або `nysh project new <ім'я> --surname <Прізвище>`[/muted]")
         return
     if preset:
         console.print(f"[muted]частини: {preset} · змінити — `nysh sections`[/muted]")
