@@ -111,8 +111,14 @@ h4 > .ic { align-self: center; }
    волосяною лінією, назва засічкою, активний розділ ПІДКРЕСЛЕНИЙ медом, а не
    залитий. Заливка на екрані лишається за головною дією — інакше вкладка й
    кнопка «Шукати» сперечаються, що тут головне. */
+/* 🔴 `backdrop-filter` робить шапку окремим шаром, і `z-index` її випадних
+   списків діє лише всередині неї: без власного рівня шапку з усім вмістом
+   перекривали картки сторінки, що йдуть у розмітці пізніше (перемикач проєкту
+   обрізало карткою «Канон», 23.10.2026). 30 — вище за сторінку, нижче за
+   висувне меню телефона (35/40), вікна й сповіщення. */
 header { background: color-mix(in srgb, var(--s-0) 94%, transparent);
   backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  position: relative; z-index: 30;
   padding: 8px 12px; border-bottom: 1px solid var(--line); flex: 0 0 auto;
   display: flex; align-items: center; gap: 10px; }
 .logo { font-family: var(--font-serif); font-weight: 700; color: var(--fg); font-size: 18px; }
