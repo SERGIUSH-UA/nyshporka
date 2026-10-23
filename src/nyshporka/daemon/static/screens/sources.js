@@ -1,7 +1,7 @@
 /** 🔎 Каталоги: де взагалі є документи — поза цим комп'ютером. */
 
 import { fmtDay } from '../core/bits.js';
-import { t } from '../core/strings.js';
+import { t, tn } from '../core/strings.js';
 import { callOp, FINAL_STATES, apiFetch } from '../core/net.js';
 import { esc, safeHref, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, renderCoverage, curGen, alive, leadMini } from '../core/view.js';
@@ -361,7 +361,7 @@ function fondsBlock(fonds) {
     <table><tbody>${fonds.map((f) => `<tr>
       <td><b>${esc(f.label || '?')} ф.${esc(f.fond)}</b><br>
         <span class="muted">${esc(f.sample || '')}</span></td>
-      <td class="num">${esc(f.hits)} ${t('sources.fond.hits')}</td>
+      <td class="num">${esc(tn('unit.hits', Number(f.hits)))}</td>
       <td class="mono">${f.year_from ? `${esc(f.year_from)}–${esc(f.year_to)}` : ''}</td>
       <td class="muted">${esc((f.sources || []).map(srcName).join(', '))}</td>
       <td><button data-act="sources.fond" data-repo="${esc(f.repo || f.archive || '')}"
@@ -415,7 +415,7 @@ function renderFind(env) {
       <td>${esc(srcName(h.source))}</td>
       <td>${esc(h.title)}<br><span class="muted">${esc(h.shifra || '')} ${esc(h.years || '')}
         ${esc(h.note || '')}</span>${hitCrop(h)}</td>
-      <td class="num">${h.frames ? `${h.frames} ${t('common.frames')}` : ''}</td>
+      <td class="num">${h.frames ? `${esc(tn('unit.frames', Number(h.frames)))}` : ''}</td>
       <td class="hit-act">${hitAction(h)}</td>
     </tr>`).join('')}</tbody></table>
     ${hits.length >= FIND_LIMIT
@@ -531,7 +531,7 @@ Object.assign(ACTIONS, {
       ${nodes.length ? `<table><tbody>${nodes.map((n) => `<tr>
         <td class="mono">${esc(n.ref || '')}</td>
         <td>${esc(n.label || '')}</td>
-        <td class="num">${n.frames ? `${n.frames} ${t('common.frames')}` : ''}</td>
+        <td class="num">${n.frames ? `${esc(tn('unit.frames', Number(n.frames)))}` : ''}</td>
       </tr>`).join('')}</tbody></table>`
         : `<p class="muted">${t('sources.nonodes')}</p>`}
       ${renderCoverage(env)}`;

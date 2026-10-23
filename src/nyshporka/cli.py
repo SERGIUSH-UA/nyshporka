@@ -2211,7 +2211,9 @@ def cases_build(
         console.print("[muted]реєстр зібрав інший процес уже після цього запиту — "
                       "своєї збірки не запускали[/muted]")
     if res["rescanned"]:
-        console.print(f"[muted]бібліотеку перезібрано: {res['entries']} справ[/muted]")
+        from nyshporka.utils.plural import cases
+
+        console.print(f"[muted]бібліотеку перезібрано: {cases(res['entries'])}[/muted]")
     for line in renamed_report():
         console.print(f"[warn]{line}[/warn]")
     for line in broken_binds_report():

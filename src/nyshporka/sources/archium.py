@@ -186,7 +186,9 @@ def parse_search(view_html: str) -> list[SearchRow]:
         out.append(SearchRow(
             fond=parts.get("фонд", ""), opys=parts.get("опис", ""),
             spr=parts.get("справа", ""),
-            title=title_node.text(strip=True) if title_node else "",
+            # 🔴 Роздільник обов'язковий: сайт обгортає збіг окремим тегом, а
+            # `strip=True` клеїть вузли впритул — «м-каМеджибіжЛетичівського».
+            title=_flat(title_node.text(separator=" ", strip=True)) if title_node else "",
             # У підписі дата й обсяг стоять разом («1806, 16 аркушів»); обсяг
             # виноситься в поле, бо ним звіряють повноту завантаження.
             date=date.split(",")[0].strip(),

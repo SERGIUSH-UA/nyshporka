@@ -15,7 +15,7 @@
  * знаменник дорівнює чисельнику, — це та сама вада, від якої існує правило
  * «нуль зі знаменником», просто в новому вбранні: воно завжди показує 100%.
  */
-import { t, LANG } from '../core/strings.js';
+import { t, LANG, tn } from '../core/strings.js';
 import { callOp, staleThenFresh } from '../core/net.js';
 import { esc, el, setView, busy, failure, renderWarnings,
   curGen, alive, mini } from '../core/view.js';
@@ -253,7 +253,7 @@ function runsGroupHtml(g) {
       <span class="shifra" title="${esc(g.case_dir || g.key || '')}">${esc(g.shifra
         || (String(g.key || '').startsWith('dir:') ? pathTail(g.case_dir || g.key.slice(4)) : g.key))}</span>
       <span class="name" title="${esc(g.title || '')}">${esc(g.title || '')}</span>
-      ${n ? `<span class="frames dim">${esc(n)} ${t('common.frames')}</span>` : ''}
+      ${n ? `<span class="frames dim">${esc(tn('unit.frames', Number(n)))}</span>` : ''}
       ${g.key ? `<button class="ctl-sm" data-act="runs.lib" data-arg="${esc(g.key)}"
         title="${esc(t('runs.act.lib'))}">${ic('books', 'ic-o ic-sm')}</button>` : ''}
     </h3>

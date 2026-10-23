@@ -62,7 +62,9 @@ export function paintUpdate(env) {
       <div class="up-acts">${d.newer ? `<button class="primary" data-act="up.apply">${esc(t('up.apply'))}</button>` : ''}
         <button data-act="up.check">${esc(t('bell.check'))}</button></div></div>
     <h3 class="sub-h">${esc(t('up.whatsnew'))}</h3>
-    ${rels ? `<div class="up-rels">${rels}</div>` : emptyMini('lihtar', esc(d.newer ? t('up.nonotes') : t('up.nonews')))}
+    ${rels ? `<div class="up-rels">${rels}</div>` : emptyMini('lihtar', esc(d.newer ? t('up.nonotes')
+      // Ще не перевіряли — «стоїть найновіша» було б вигадкою (прохід новачка 23.10.2026).
+      : (d.latest ? t('up.nonews') : t('up.nonews.unchecked'))))}
     <h3 class="sub-h">${esc(t('up.models'))}</h3>
     ${models ? `<div class="card up-models">${mini('kolba', 56)}<div><ul>${models}</ul>
         <button data-act="up.models">${esc(t('up.models.get'))}</button><span id="up-models-job"></span></div></div>`

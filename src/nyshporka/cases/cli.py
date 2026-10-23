@@ -84,7 +84,10 @@ def cmd_build(
     tail = (f" · свідомо нічиїх: {res['decided']}" if res.get("decided") else "")
     bad = res.get("unreadable") or []
     mark = "⚠" if bad else "✅"
-    console.print(f"{mark} реєстр: [bold]{res['cases']}[/bold] справ · "
+    from nyshporka.utils.plural import plural
+
+    word = plural(int(res["cases"] or 0), "справа", "справи", "справ")
+    console.print(f"{mark} реєстр: [bold]{res['cases']}[/bold] {word} · "
                   f"нерозв'язаних прогонів: {res['orphans']}{tail} · {res['path']}")
     if bad:
         # 🔴 Аудит 29.09.2026: битий файл шару раніше зникав мовчки, і реєстр

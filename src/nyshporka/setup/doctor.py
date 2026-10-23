@@ -581,7 +581,9 @@ def _case_keys() -> Check:
     unknown = [e for e in lib if (ck := casekey.parse(e.get("key"))) is not None
                and not ck.bundle and not ck.opys_known]
     if not unknown:
-        return Check(name, "ok", f"{len(lib)} справ — опис відомий у кожної")
+        from nyshporka.utils.plural import cases
+
+        return Check(name, "ok", f"{cases(len(lib))} — опис відомий у кожної")
     head = ", ".join(str(e.get("shifra") or e.get("key")) for e in unknown[:3])
     more = f" і ще {len(unknown) - 3}" if len(unknown) > 3 else ""
     return Check(

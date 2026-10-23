@@ -158,3 +158,13 @@ def test_site_refusal_is_explained_not_bare(code: int, word: str) -> None:
     msg = explain(HttpError(f"https://archium.example/file-viewer/1: HTTP {code}", status=code))
     assert word in msg and "https://archium.example/file-viewer/1" in msg
     assert f"HTTP {code}" in msg
+
+
+def test_search_title_keeps_spaces_around_the_highlighted_match() -> None:
+    """Сайт обгортає збіг тегом; заголовок не клеїться в «м-каМеджибіжЛетичівського»."""
+    html = ('<div class="row"><div class="left"><span>Фонд 224</span><span>Опис 1</span>'
+            '<span>Справа 793</span></div><div class="right"><a href="/files/51871/">x</a>'
+            '<p class="doc-title">Метрична книга м-ка <mark>Меджибіж</mark> Летичівського повіту</p>'
+            '<p class="date">1736, 90 аркушів</p></div></div>')
+    rows = A.parse_search(html)
+    assert rows and rows[0].title == "Метрична книга м-ка Меджибіж Летичівського повіту"

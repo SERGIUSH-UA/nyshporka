@@ -14,7 +14,7 @@
  * Сплутати їх означає видати «зрізу не збирали» за «жодну справу не читали».
  */
 import { toast, fmtDay } from '../core/bits.js';
-import { t } from '../core/strings.js';
+import { t, tn } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, renderWarnings,
   curGen, alive, hasAlerts, emptyMini } from '../core/view.js';
@@ -203,7 +203,7 @@ function libMoreActive() {
 function libSummary(s) {
   const bits = [
     // Справи, а не теки: одна справа буває кількома теками (фрагменти плівки).
-    `${ic('books', 'ic-sm')} ${esc(s.all ?? 0)} ${t('lib.sum.all')}${
+    `${ic('books', 'ic-sm')} ${esc(tn('unit.cases', Number(s.all ?? 0)))}${
       s.folders > s.all ? ` <span class="dim">(${esc(s.folders)} ${t('lib.sum.folders')})</span>` : ''}`,
     s.on_disk != null ? `${ic('disk', 'ic-sm')} ${esc(s.on_disk)} ${t('lib.sum.disk')}` : '',
     s.offloaded ? `<span title="${esc(t('lib.noframes'))}">${esc(s.offloaded)} ${

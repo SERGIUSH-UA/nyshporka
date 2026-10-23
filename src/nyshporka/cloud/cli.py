@@ -59,13 +59,10 @@ def _say(text: str) -> None:
 
 
 def _plural(n: int, one: str, few: str, many: str) -> str:
-    """«1 процес · 2 процеси · 5 процесів». Число тут бачать щоразу."""
-    n = abs(int(n))
-    if n % 10 == 1 and n % 100 != 11:
-        return one
-    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
-        return few
-    return many
+    """«1 процес · 2 процеси · 5 процесів» (`utils.plural`)."""
+    from nyshporka.utils.plural import plural
+
+    return plural(n, one, few, many)
 
 
 def _size(nbytes: int) -> str:

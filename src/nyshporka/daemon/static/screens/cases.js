@@ -1,7 +1,7 @@
 /** 📂 Мої справи й заведення нової. */
 
 import { toast } from '../core/bits.js';
-import { t, LANG } from '../core/strings.js';
+import { t, LANG, tn } from '../core/strings.js';
 import { TOKEN, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm, fld,
   renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
@@ -76,7 +76,7 @@ SCREENS.cases = async () => {
 function intakeCount(d, c) {
   if (!d.registry) return '';
   const bits = [`<b>${esc(c.waiting || 0)}</b> ${t('intake.undescribed')}`];
-  if (c.waiting_frames) bits.push(`${esc(c.waiting_frames)} ${t('common.frames')}`);
+  if (c.waiting_frames) bits.push(`${esc(tn('unit.frames', Number(c.waiting_frames)))}`);
   const lib = Number(c.described || 0)
     ? ` · <button data-act="nav" data-arg="library">${esc(c.described)}
         ${t('intake.described')} →</button>` : '';
@@ -96,7 +96,7 @@ function intakeGroup(g, id) {
       ${title ? `<span class="muted"> — ${esc(title)}</span>` : ''}
       ${one && one.note ? `<span class="tag">${esc(one.note)}</span>` : ''}</span>
     <span class="muted mono">${one ? '' : `${esc(folders.length)} ${t('intake.subdirs')} · `}${
-  esc(g.frames)} ${t('common.frames')}</span>
+  esc(tn('unit.frames', Number(g.frames)))}</span>
     <span class="acts" id="ia-${id}">
       ${one ? folderActs(one) : `<button class="ctl-sm" data-act="intake.toggle" data-arg="${id}">${
         t('intake.show')}</button>`}
@@ -261,7 +261,7 @@ SCREENS.newcase = async () => {
     <legend class="rd-step"><span class="rd-n">${n}</span>${esc(t(key))}</legend>${body}</fieldset>`;
   setView(`
     ${EDIT ? `<div class="warn">${t('case.editing')} <b class="mono">${dir}</b>
-       · ${esc(EDIT.scans)} ${t('common.frames')}<br>
+       · ${esc(tn('unit.frames', Number(EDIT.scans)))}<br>
        <span class="muted">${t('case.keep')}</span></div>`
     : `<p class="muted">${t('case.why')}</p>`}
     <form data-act="case.save" id="case-form">
