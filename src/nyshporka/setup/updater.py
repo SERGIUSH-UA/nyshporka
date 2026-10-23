@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
@@ -57,13 +58,22 @@ def _run(cmd: list[str], env: dict[str, str], log) -> int:  # type: ignore[no-un
         return 127
 
 
-def _relaunch(argv: list[str], cwd: str, env: dict[str, str], log_path: str) -> None:
+def _relaunch(argv: list[str], cwd: str, env: dict[str, str], out_path: str) -> str:
+    """Відкрити консоль знову; повертає причину, якщо не вдалося (інакше «»).
+
+    Вивід нової консолі — в окремий файл, а не в журнал оновлення: інакше
+    «чому не оновилось» тонуло б під банером і попередженнями сервера.
+    """
     flags = 0
     if os.name == "nt":
         flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-    with open(log_path, "a", encoding="utf-8") as out:
-        subprocess.Popen(argv, cwd=cwd or None, env=env, stdout=out, stderr=subprocess.STDOUT,
-                         stdin=subprocess.DEVNULL, creationflags=flags, close_fds=True)
+    try:
+        with open(out_path, "a", encoding="utf-8") as out:
+            subprocess.Popen(argv, cwd=cwd or None, env=env, stdout=out, stderr=subprocess.STDOUT,
+                             stdin=subprocess.DEVNULL, creationflags=flags, close_fds=True)
+    except OSError as exc:
+        return f"{type(exc).__name__}: {exc}"
+    return ""
 
 
 def main(task_path: str) -> int:
@@ -85,13 +95,22 @@ def main(task_path: str) -> int:
         result["rc"] = rc
         if rc == 0 and task.get("after"):
             for step in task["after"]:
-                _run(step, env, log)
+                if _run(step, env, log) != 0:
+                    result["after_failed"] = " ".join(step)
         log.write(f"\n{'✅ оновлено' if rc == 0 else '❌ не оновилось'} · перезапуск консолі\n")
+    if task.get("relaunch"):
+        why = _relaunch(task["relaunch"], task.get("cwd", ""), env,
+                        task.get("console_log") or task["log"])
+        if why:
+            result["relaunch_failed"] = why
+            with open(task["log"], "a", encoding="utf-8") as log:
+                log.write(f"консоль не відкрилась: {why} — відкрийте Нишпорку ярликом\n")
     result["finished"] = time.time()
     with open(task["result"], "w", encoding="utf-8") as fh:
         json.dump(result, fh, ensure_ascii=False)
-    if task.get("relaunch"):
-        _relaunch(task["relaunch"], task.get("cwd", ""), env, task["log"])
+    # Завдання (argv, теки) не лишається в тимчасовій теці назавжди.
+    with contextlib.suppress(OSError):
+        os.remove(task_path)
     return 0 if result["ok"] else 1
 
 

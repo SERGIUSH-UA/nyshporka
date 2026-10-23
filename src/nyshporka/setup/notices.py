@@ -32,6 +32,9 @@ KEY_CACHE = "notices_cache"
 EVERY_RELEASES = 24 * 3600
 EVERY_SUPRIAHA = 3600
 
+#: Після збою мережі — повтор за годину, а не за добу: збій не новина.
+RETRY_AFTER_FAIL = 3600
+
 #: Фонова перевірка — не більше однієї водночас.
 _LOCK = threading.Lock()
 
@@ -74,9 +77,19 @@ def _cache() -> dict[str, Any]:
     return dict(got) if isinstance(got, dict) else {}
 
 
-def _save(cache: dict[str, Any]) -> None:
+def _save(cache: dict[str, Any], keys: tuple[str, ...] | None = None) -> None:
+    """Записати кеш. З `keys` — лише ці поля поверх СВІЖО прочитаного кешу.
+
+    🔴 Перевірка триває секунди; позначка «прочитано», зроблена за цей час
+    (`mark_read`), інакше затиралась би старим знімком (рев'ю 23.10.2026).
+    """
     from nyshporka.core.workspace import state_set
 
+    if keys is not None:
+        cache = {**_cache(), **{k: cache[k] for k in keys if k in cache}}
+        for k in keys:
+            if k not in cache:
+                cache.pop(k, None)
     state_set(**{KEY_CACHE: cache})
 
 
@@ -87,10 +100,12 @@ def _due(at: Any, every: int) -> bool:
         return True
 
 
-def _key(v: str) -> tuple[int, ...]:
-    from nyshporka.setup.update import _key as k
+def _newer(a: str, b: str) -> bool:
+    """Чи `a` новіша за `b` — з вирівнюванням довжини (`0.36` = `0.36.0`)."""
+    from nyshporka.setup.update import _cmp_key
 
-    return k(v)
+    x, y = _cmp_key(a, b)
+    return x > y
 
 
 def _api(path: str, params: dict[str, str]) -> str:
@@ -136,7 +151,8 @@ def mark_read(ids: list[int] | None, lang: str = "uk") -> dict[str, Any]:
     from nyshporka.share.catalog import _fetcher
 
     url = _api("/notifications/read", {})
-    body: dict[str, Any] = {} if ids is None else {"ids": list(ids)}
+    # «Усе» — явно (`all`): порожнє тіло портал читає як «нічого» (рев'ю 23.10.2026).
+    body: dict[str, Any] = {"all": True} if ids is None else {"ids": list(ids)}
     resp = _fetcher(url, accept_json=True).post(url, json_body=body)
     got = json.loads(resp.text if hasattr(resp, "text") else str(resp))
     cache = _cache()
@@ -161,9 +177,18 @@ def refresh(*, force: bool = False, lang: str = "uk") -> dict[str, Any]:
     s = settings()
     cache = _cache()
     now = time.time()
+    mine: list[str] = []
     if force or (s["updates"] and _due(cache.get("releases_at"), EVERY_RELEASES)):
         rel = latest()
-        cache.update(latest=rel.latest, latest_why=rel.why, releases_at=now)
+        mine += ["latest", "latest_why", "releases", "releases_why", "releases_at"]
+        # 🔴 Збій PyPI не стирає відому нову версію й не відкладає повтор на добу:
+        # «не дізнались» — не «новин немає» (рев'ю 23.10.2026).
+        if rel.known:
+            cache.update(latest=rel.latest, releases_at=now)
+            cache.pop("latest_why", None)
+        else:
+            cache["latest_why"] = rel.why
+            cache["releases_at"] = now - EVERY_RELEASES + RETRY_AFTER_FAIL
         try:
             cache["releases"] = _releases(__version__, lang)
             cache.pop("releases_why", None)
@@ -174,14 +199,16 @@ def refresh(*, force: bool = False, lang: str = "uk") -> dict[str, Any]:
     # Доти «Перевірити» підтягувало сповіщення при вимкненому вимикачі, і
     # дзвіночок показував «2» над попапом «Новин немає» (знімок 23.10.2026).
     if s["supriaha"] and logged_in() and (force or _due(cache.get("supriaha_at"), EVERY_SUPRIAHA)):
+        mine += ["supriaha", "supriaha_why", "supriaha_at"]
         try:
             cache["supriaha"] = _notifications(lang)
             cache.pop("supriaha_why", None)
+            cache["supriaha_at"] = now
         except Exception as exc:
             cache["supriaha_why"] = f"{type(exc).__name__}: {exc}"[:200]
-        cache["supriaha_at"] = now
-    _save(cache)
-    return cache
+            cache["supriaha_at"] = now - EVERY_SUPRIAHA + min(RETRY_AFTER_FAIL, EVERY_SUPRIAHA)
+    _save(cache, tuple(mine))
+    return {**_cache()}
 
 
 def due() -> bool:
@@ -191,6 +218,11 @@ def due() -> bool:
     return bool((s["updates"] and _due(cache.get("releases_at"), EVERY_RELEASES))
                 or (s["supriaha"] and logged_in()
                     and _due(cache.get("supriaha_at"), EVERY_SUPRIAHA)))
+
+
+def refreshing() -> bool:
+    """Чи йде зараз фонова перевірка (тоді консоль перечитає стан трохи згодом)."""
+    return _LOCK.locked()
 
 
 def refresh_later(lang: str = "uk") -> bool:
@@ -253,18 +285,27 @@ def last_update() -> dict[str, Any]:
 def snapshot() -> dict[str, Any]:
     """Що показати: стан із кешу (без мережі) і число на дзвіночку."""
     cache = _cache()
+    s = settings()
     latest = str(cache.get("latest") or "")
-    newer = bool(latest) and _key(latest) > _key(__version__)
+    newer = bool(latest) and _newer(latest, __version__)
     releases = [r for r in cache.get("releases") or []
-                if _key(str(r.get("version") or "")) > _key(__version__)]
+                if _newer(str(r.get("version") or ""), __version__)]
+    # Сховище ключів питаємо лише тоді, коли сповіщення ввімкнені: на macOS і
+    # Linux воно може просити розблокування в людини, що їх і не вмикала.
+    signed = logged_in() if s["supriaha"] else False
     sup = cache.get("supriaha") if isinstance(cache.get("supriaha"), dict) else {}
-    if not (settings()["supriaha"] and logged_in()):
+    if not (s["supriaha"] and signed):
         sup = {}  # вимкнено чи вийшли — ні в переліку, ні в числі на дзвіночку
     models = new_models()
-    badge = (1 if newer else 0) + (1 if models else 0) + int((sup or {}).get("unread") or 0)
+    # 🔴 На дзвіночку — лише НОВІШІ версії вже поставлених моделей. Моделі, яких
+    # людина не ставила взагалі (набір «каталог»), лишаються на екрані, але
+    # крапки не запалюють: інакше дзвіночок світився б завжди.
+    fresh_models = [m for m in models if m.get("reason") == "update"]
+    badge = (1 if newer else 0) + (1 if fresh_models else 0) + int((sup or {}).get("unread") or 0)
     return {"installed": __version__, "latest": latest, "newer": newer,
-            "releases": releases, "models": models, "supriaha": sup or {},
-            "logged_in": logged_in(), "settings": settings(), "badge": badge,
+            "releases": releases, "models": models, "models_newer": len(fresh_models),
+            "supriaha": sup or {},
+            "logged_in": signed, "settings": s, "badge": badge,
             "last_update": last_update(),
             "checked_at": cache.get("releases_at"), "why": {
                 k: cache[k] for k in ("latest_why", "releases_why", "supriaha_why") if cache.get(k)}}

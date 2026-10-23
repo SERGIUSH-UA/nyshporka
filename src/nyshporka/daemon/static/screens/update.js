@@ -169,7 +169,9 @@ export function updating(d, { every = 2000, give_up_ms = 5 * 60 * 1000 } = {}) {
       const res = await apiFetch('/api/health');
       const h = res && res.ok ? await res.json() : null;
       if (!h) sawDown = true;
-      if (h && (h.version ? h.version !== d.from : sawDown)) {
+      // Сервер зник і повернувся — перезавантажити за будь-якої версії: якщо
+      // оновлення впало, стара версія покаже банер із журналом (рев'ю 23.10.2026).
+      if (h && (sawDown || (h.version && h.version !== d.from))) {
         draw('done');
         setTimeout(() => { if (typeof location !== 'undefined' && location.reload) location.reload(); }, 1500);
         return;

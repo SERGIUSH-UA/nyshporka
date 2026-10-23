@@ -1287,3 +1287,21 @@ details.np-folder > summary { padding: 0; background: none; font-size: .85rem; c
 @media (prefers-reduced-motion: reduce) { .up-step.now .rd-n { animation: none; } }
 .up-log { max-height: 14rem; overflow: auto; white-space: pre-wrap; font-size: .78rem; margin: .5rem 0 0; }
 .up-ok { padding: .7rem 1rem; }
+
+/* 🔔 Попап дзвіночка стоїть поза #view/#dlg, тож база кнопок туди не доходить
+   (QA 23.10.2026: «браузерні» кнопки з рамкою outset). Дії — та сама родина;
+   сповіщення — пункти меню, довгий заголовок переноситься, а не налазить. */
+.hmenu-pop.bell-pop { max-width: min(24rem, 92vw); }
+.bell-pop :where(button) { font: inherit; font-size: .82rem; font-weight: 500; cursor: pointer; color: var(--fg);
+  background: var(--s-3); border: 1px solid var(--line-2); border-radius: var(--r-s); padding: .2rem .7rem; }
+.bell-pop :where(button):hover { border-color: var(--line-3); }
+.bell-pop button.primary { background: var(--accent-fill); color: var(--accent-ink); border-color: var(--accent-fill); font-weight: 600; }
+.bell-pop button.ghost { background: none; }
+.bell-pop button.bell-item { display: flex; align-items: flex-start; width: 100%; text-align: left; background: none;
+  border: 0; padding: 7px 9px; font-size: inherit; font-weight: 400; }
+.bell-pop button.bell-item:hover { background: var(--s-4); }
+.bell-pop button.bell-item > span { display: grid; gap: .1rem; min-width: 0; }
+.bell-pop button.bell-item b { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+.bell-pop button.linkish { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline;
+  font-size: inherit; }
+.bell-pop .hm-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .3rem .4rem 0; }

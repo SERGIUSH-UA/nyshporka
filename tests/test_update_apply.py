@@ -124,3 +124,24 @@ def test_last_update_reaches_the_screen(console: dict[str, Any]) -> None:
                                       encoding="utf-8")
     lu = N.snapshot()["last_update"]
     assert lu["ok"] is False and lu["to"] == "0.37.0" and "помилка мережі" in lu["tail"]
+
+
+def test_relaunch_of_python_m_is_not_the_script_itself() -> None:
+    """`python -m nyshporka serve`: argv[0] — `__main__.py`, який сам не стартує."""
+    from nyshporka.ops_notices import _relaunch_argv
+
+    got = _relaunch_argv([str(Path(__file__)), "serve"])  # будь-який справжній .py
+    assert got[:3] == [sys.executable, "-m", "nyshporka"] and got[-1] == "--no-browser"
+
+
+def test_helper_records_a_failed_relaunch_and_keeps_logs_apart(tmp_path: Path) -> None:
+    task = _helper_task(tmp_path, [sys.executable, "-c", "print('встановлено')"])
+    task["relaunch"] = [str(tmp_path / "немає-такого.exe")]
+    task["console_log"] = str(tmp_path / "console.log")
+    tp = tmp_path / "task.json"
+    tp.write_text(json.dumps(task), encoding="utf-8")
+    updater.main(str(tp))
+    res = json.loads(Path(task["result"]).read_text(encoding="utf-8"))
+    assert res["ok"] is True and res.get("relaunch_failed"), "консоль не відкрилась — це записано"
+    assert "консоль не відкрилась" in (tmp_path / "update.log").read_text(encoding="utf-8")
+    assert not tp.exists(), "завдання не лишається в тимчасовій теці"

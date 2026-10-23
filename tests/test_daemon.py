@@ -1080,3 +1080,11 @@ def test_bracketed_ipv6_loopback_is_our_own_name(client: TestClient) -> None:
         assert client.get("/api/health", headers={"Host": own}).status_code == 200, own
     for bad in ("[::1", "[::2]", "evil.example:8788"):
         assert client.get("/api/health", headers={"Host": bad}).status_code == 403, bad
+
+
+def test_update_is_not_started_from_a_network_device(ws: Workspace) -> None:
+    """🔴 Оновлення ставить пакети й перезапускає консоль на СЕРВЕРІ — не з телефона."""
+    lan = _lan(_lan_app(ws))
+    lan.post("/api/access", json={"key": ACCESS})
+    r = lan.post("/api/op/update.apply", json={"dry_run": True}, headers={TOKEN_HEADER: TOKEN})
+    assert r.status_code == 403 and "комп'ютера" in r.json()["error"]

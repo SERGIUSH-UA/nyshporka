@@ -140,6 +140,21 @@ out.md = BT.mdLite(['Вступ', '', '| Справа | Сторінок |', '|-
   out.bellHidden = !!(document.getElementById('bell-n') || {}).hidden;
   out.bellMenu = BL.bellMenu();
   await import('./screens/update.js'); await SCREENS.update(); await tick(60); out.update = view(); }
+{ const UP = await import('./screens/update.js');
+  let n = 0; const f0 = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).includes('/api/health')) {
+      n += 1;
+      if (n === 1) throw new Error('консоль закрита');
+      return { ok: true, status: 200, json: async () => ({ ok: true, version: '0.36.1' }) };
+    }
+    return f0(url, opts);
+  };
+  out.reloaded = false;
+  globalThis.location.reload = () => { out.reloaded = true; };
+  UP.updating({ from: '0.36.1', to: '0.36.2', log: 'x.log' }, { every: 5 });
+  await tick(1800);
+  globalThis.fetch = f0; out.healthAsked = n; }
 const SH = await import('./screens/share.js');
 { const t0 = Date.now(); await SCREENS.give(); out.giveMs = Date.now() - t0; }
 out.card = SH.cardRows({ title: 'Сповідка', years: [1801, 1803], places: ['Городківка', 'Липівка'],
@@ -413,3 +428,9 @@ def test_update_screen_shows_versions_notes_models_and_switches(hub) -> None:
     assert "Дзвіночок і оновлення" in v and 'href="https://nyshporka.online/onovlennia/nyshporka-0-37-0"' in v
     assert "Писар v28" in v and 'data-act="up.models"' in v
     assert 'data-act="net.set" data-arg="updates"' in v and 'data-arg="supriaha" checked' in v
+
+
+def test_failed_update_still_reloads_to_show_the_log(hub) -> None:
+    """Сервер зник і повернувся ТІЄЮ САМОЮ версією (оновлення впало) — сторінка
+    перезавантажується, щоб показати журнал, а не чекає вічно (рев'ю 23.10.2026)."""
+    assert hub["healthAsked"] >= 2 and hub["reloaded"] is True

@@ -836,6 +836,13 @@ def create_app(ws: Workspace | None = None, *, token: str = "",
         # телефона його не побачить, а той, хто сидить за сервером, побачить
         # вікно, якого не відкривав. Перевірка стоїть до `workers.start`:
         # `pick.ask` — довга операція і пішла б у чергу.
+        # 🔴 Оновлення ставить пакети й перезапускає консоль НА СЕРВЕРІ — з
+        # телефона, спареного ключем, цього робити не можна (рев'ю 23.10.2026).
+        if _NETWORK_CONN.get() and name == "update.apply":
+            return JSONResponse(
+                _envelope("оновлювати застосунок можна лише з комп'ютера, де він стоїть, "
+                          "а не з іншого пристрою в мережі"),
+                status_code=403)
         if _NETWORK_CONN.get() and (
                 name == "pick.ask"
                 or (name == "pick.can" and bool((payload or {}).get("deep")))):

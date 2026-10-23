@@ -52,7 +52,7 @@ def notices_state(a: NoticesStateArgs) -> Envelope:
     from nyshporka.setup import notices as N
 
     started = N.refresh_later(_lang(a.lang))
-    return ok({**N.snapshot(), "refreshing": started})
+    return ok({**N.snapshot(), "refreshing": started or N.refreshing()})
 
 
 @op("notices.check", summary="Перевірити зараз: нова версія й сповіщення Супряги",
@@ -80,6 +80,8 @@ class NoticesReadArgs(BaseModel):
 def notices_read(a: NoticesReadArgs) -> Envelope:
     from nyshporka.setup import notices as N
 
+    if not N.settings()["supriaha"]:
+        return fail("сповіщення Супряги в консолі вимкнені (Налаштування → Мережа)")
     if not N.logged_in():
         return fail("на цій машині не виконано вхід у Супрягу — сповіщень немає")
     try:
@@ -135,7 +137,10 @@ def _relaunch_argv(argv: list[str]) -> list[str]:
     from pathlib import Path
 
     head = argv[0] if argv else ""
-    if head and Path(head).is_file():
+    if head.lower().endswith(".py"):
+        # `python -m nyshporka serve`: argv[0] — `__main__.py`, сам він не стартує.
+        exe = [sys.executable, "-m", "nyshporka"]
+    elif head and Path(head).is_file():
         exe = [head]
     elif head and Path(head + ".exe").is_file():
         exe = [head + ".exe"]
@@ -249,9 +254,10 @@ def update_apply(a: UpdateApplyArgs) -> Envelope:
             "cmd": U.command(), "env": U.uv_python_env(),
             "after": after, "relaunch": relaunch, "cwd": D.LAUNCH.get("cwd") or "",
             "from": rel.installed, "to": rel.latest, "wait": 90,
-            "log": str(home / "update.log"), "result": str(home / "result.json")}
+            "log": str(home / "update.log"), "result": str(home / "result.json"),
+            "console_log": str(home / "console.log")}
     if a.dry_run:
-        return ok({"plan": {k: task[k] for k in ("cmd", "relaunch", "after", "from", "to", "log", "pids")}})
+        return ok({"plan": {k: task[k] for k in ("cmd", "relaunch", "after", "from", "to", "log")}})
     tmp = Path(tempfile.mkdtemp(prefix="nysh-update-"))
     helper = tmp / "updater.py"
     shutil.copyfile(Path(__file__).parent / "setup" / "updater.py", helper)

@@ -48,8 +48,9 @@ def net(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
     monkeypatch.setattr(U, "latest", latest)
     monkeypatch.setattr(N, "_releases", releases)
     monkeypatch.setattr(N, "_notifications", sup)
-    monkeypatch.setattr(N, "new_models", lambda: [{"id": "m", "label": "Модель", "size": 1,
-                                                   "script": "", "engine": "", "reason": "install"}])
+    monkeypatch.setattr(N, "new_models", lambda: [
+        {"id": "m", "label": "Модель", "size": 1, "script": "", "engine": "", "reason": "update"},
+        {"id": "n", "label": "Не ставлена", "size": 1, "script": "", "engine": "", "reason": "install"}])
     return calls
 
 
@@ -134,3 +135,63 @@ def test_background_refresh_runs_once(state: Path, net: dict[str, int], monkeypa
             break
         time.sleep(0.02)
     assert net["pypi"] == 1 and N.refresh_later() is False, "щойно перевірили — більше не питаємо"
+
+
+def test_mark_read_sends_explicit_all_or_ids(state: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """«Усе прочитано» — явне `all: true`; порожнє тіло портал читає як «нічого»."""
+    from nyshporka.share import catalog
+
+    sent: list[Any] = []
+
+    class Resp:
+        text = '{"read": 1, "unread": 0}'
+
+    class F:
+        def post(self, url: str, json_body: Any = None) -> Resp:
+            sent.append(json_body)
+            return Resp()
+
+    monkeypatch.setattr(catalog, "_fetcher", lambda url, **kw: F())
+    N.mark_read(None)
+    N.mark_read([7])
+    assert sent == [{"all": True}, {"ids": [7]}]
+
+
+def test_only_newer_models_light_the_bell(state: Path, net: dict[str, int], monkeypatch: pytest.MonkeyPatch) -> None:
+    """Моделі, яких людина не ставила, — на екрані, але не на дзвіночку."""
+    monkeypatch.setattr(N, "new_models", lambda: [
+        {"id": "n", "label": "Не ставлена", "size": 1, "script": "", "engine": "", "reason": "install"}])
+    snap = N.snapshot()
+    assert snap["models"] and snap["models_newer"] == 0 and snap["badge"] == 0
+
+
+def test_failed_check_keeps_known_version_and_retries_soon(
+        state: Path, net: dict[str, int], monkeypatch: pytest.MonkeyPatch) -> None:
+    """Збій PyPI не стирає відому нову версію й не відкладає повтор на добу."""
+    monkeypatch.setattr(N, "logged_in", lambda: False)
+    N.set_settings(updates=True)
+    N.refresh(force=True)
+    assert N.snapshot()["latest"] == "99.0.0"
+    monkeypatch.setattr(U, "latest", lambda timeout=3.0: U.Release(installed="0.0.0", why="мережа мовчить"))
+    N.refresh(force=True)
+    snap = N.snapshot()
+    assert snap["latest"] == "99.0.0" and snap["newer"] is True, "відома новина лишилась"
+    at = N._cache()["releases_at"]
+    assert time.time() - at > N.EVERY_RELEASES - N.RETRY_AFTER_FAIL - 5, "повтор — за годину, не за добу"
+
+
+def test_read_needs_the_supriaha_switch(state: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(N, "logged_in", lambda: True)
+    env = O.call("notices.read", {})
+    assert not env.ok and "вимкнені" in env.error
+
+
+def test_mark_read_survives_a_concurrent_refresh(state: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`refresh` пише лише свої поля поверх свіжого кешу — позначка «прочитано» не губиться."""
+    from nyshporka.core.workspace import state_set
+
+    state_set(notices_cache={"supriaha": {"unread": 0, "items": [{"id": 1, "read": True}]}})
+    cache = {"latest": "1.0.0", "supriaha": {"unread": 2, "items": [{"id": 1, "read": False}]}}
+    N._save(cache, ("latest",))
+    got = N._cache()
+    assert got["latest"] == "1.0.0" and got["supriaha"]["items"][0]["read"] is True
