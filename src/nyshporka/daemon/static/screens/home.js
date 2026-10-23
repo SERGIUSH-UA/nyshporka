@@ -23,10 +23,10 @@ import { esc, el, setView, busy, failure, boxError, busyForm,
 import { modelName, fmtDay, pathTail } from '../core/bits.js';
 import { SCREENS, ACTIONS, screenOfOp } from '../core/registry.js';
 import { SECTIONS, NAV_LABEL, show, renderNav, screenOn,
-  refreshJobs } from '../core/nav.js';
+  refreshJobs, jobDone, jobChip } from '../core/nav.js';
 import { ST } from '../core/state.js';
 import { welcomeDone } from './welcome.js';
-import { openModal } from '../core/modal.js';
+import { openModal, closeModal } from '../core/modal.js';
 import { ic, eng } from '/ui/icons.js';
 import { swapHtml, skelRows, skelCards } from '/ui/dom.js';
 import { attachCombobox } from '/ui/combobox.js';
@@ -847,6 +847,9 @@ function when(iso) {
 }
 
 
+/** Операції перевірки машини, що йдуть роботою з поступом у самому рядку. */
+const LONG_FIX = ['htr.install', 'models.get'];
+
 Object.assign(ACTIONS, {
   'home.scans': async () => {
     // 🔴 Раніше ця картка — перший клік того, заради кого все й робилось —
@@ -895,7 +898,7 @@ Object.assign(ACTIONS, {
       // команда лишається для решти — чесно, як команда.
       const act = c.op
         ? `<button class="ctl-sm" data-act="check.fix" data-arg="${esc(c.op)}"
-             >${esc(t('check.fix'))}</button>`
+             >${esc(tOr(`fix.${c.op}`, t('check.fix')))}</button>`
         : (c.fix ? `<code>${esc(c.fix)}</code>` : '');
       return `<tr><td>${mark}</td><td><b>${esc(srv(c.name))}</b><br>
         <span class="muted">${esc(c.detail)}</span></td>
@@ -948,6 +951,24 @@ Object.assign(ACTIONS, {
       box.innerHTML = line;
       return undefined;
     }
+    // 🔴 Рушії й моделі — довга робота прямо тут, у рядку перевірки. Доти
+    // поруч стояла лише команда терміналу, і людина з майстра-інсталятора не
+    // мала як поставити читання з консолі (прохід новачка 23.10.2026).
+    if (LONG_FIX.includes(name)) {
+      // У таблиці перевірки — клітинка рядка; поруч із відмовою (порада) — сама смуга.
+      const cell = elm.closest ? (elm.closest('td') || elm.parentElement) : null;
+      const say = (html) => { if (cell) cell.innerHTML = html; };
+      say(`<span class="muted">${esc(t('check.fixing'))}</span>`);
+      const env = await callOp(name, {});
+      if (!env.ok) { say(`<span class="warn-inline">${esc(env.error || '?')}</span>`); return undefined; }
+      const id = (env.data || {}).job_id;
+      if (!id) { say(ic('check-circle', 'ic-sm')); return undefined; }
+      const job = await jobDone(id, (j) => say(jobChip(j)));
+      say(job.state === 'done'
+        ? `${ic('check-circle', 'ic-sm')} ${esc(t('check.fixed'))}`
+        : `<span class="warn-inline">${esc(job.error || t('job.failed'))}</span>`);
+      return undefined;
+    }
     const scr = screenOfOp(name);
     return scr ? show(scr) : undefined;
   },
@@ -957,6 +978,10 @@ Object.assign(ACTIONS, {
   // аркушах» — одне питання, і розводити їх по різних екранах означало б
   // сховати відповідь від того, хто щойно поставив застосунок.
   'sample.install': async () => {
+    // 🔴 Кнопка стоїть у вікні перевірки, а результат малюється на екран: без
+    // закриття вікна він лягав ПІД нього, і зразок «розгортався мовчки»
+    // (прохід новачка 23.10.2026).
+    closeModal();
     busy();
     const env = await callOp('sample.install', {});
     if (!env.ok) return failure(env);

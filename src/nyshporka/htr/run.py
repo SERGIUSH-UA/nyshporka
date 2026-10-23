@@ -32,6 +32,10 @@ class ReadError(RuntimeError):
     """Прогін не можна почати — з поясненням, що саме заважає."""
 
 
+class EngineMissing(ReadError):
+    """Середовища рушіїв на цій машині немає або воно неповне — лагодиться `htr.install`."""
+
+
 @dataclass(frozen=True)
 class Plan:
     """Що саме буде запущено. Показується до старту."""
@@ -610,7 +614,7 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
     if not rep.ok or rep.python is None:
         why = "; ".join(rep.problems) or (
             f"бракує: {', '.join(rep.missing)}" if rep.missing else "не зібране")
-        raise ReadError(f"середовище рушіїв не готове ({why}) — `nysh htr install`")
+        raise EngineMissing(f"середовище рушіїв не готове ({why}) — `nysh htr install`")
 
     ws = workspace()
     # 🔴 Не `case.name`: у двох фондах є `spr-145`, і друга писала б поверх першої.

@@ -235,7 +235,7 @@ def _torch() -> Check:
         return Check("Прискорення (GPU)", "warn",
                      "torch у середовищі рушіїв немає",
                      "nysh htr install — читання працюватиме й на процесорі, "
-                     "просто ~20 с – 1 хв на сторінку замість ~10–15 с")
+                     "просто ~20 с – 1 хв на сторінку замість ~10–15 с", op="htr.install")
 
     if not rep.cuda:
         # 🔴 Карту питає драйвер, а не цей torch. На CPU-збірці він про CUDA не
@@ -409,7 +409,7 @@ def _engines() -> Check:
             # Intel Mac: PyPI без колес torch, тож команда збирає інакше — і
             # людині варто знати, звідки візьметься інтерпретатор і чому.
             hint += " · Intel Mac: python і torch беруться з conda-forge (micromamba приїде сам)"
-        return Check(ENGINES, "warn", why, hint)
+        return Check(ENGINES, "warn", why, hint, op="htr.install")
     bits = [f"kraken {rep.kraken}" if rep.kraken else "",
             f"torch {rep.torch}" if rep.torch else "",
             "CUDA" if rep.cuda else "CPU"]
@@ -429,7 +429,7 @@ def _models() -> Check:
     have = packs.installed()
     if not have:
         return Check("Моделі письма", "warn", f"жодної не завантажено ({where})",
-                     "nysh models get")
+                     "nysh models get", op="models.get")
     return Check("Моделі письма", "ok", f"{', '.join(sorted(have))} · {where}")
 
 

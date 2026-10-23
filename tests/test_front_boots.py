@@ -338,7 +338,13 @@ globalThis.fetch = async (url, opts) => {
   if (String(url).includes('/api/ops/find')) {
     return { ok: true, status: 200, json: async () => ({ q: 'x', hits: [
       { name: 'cloud.stop', cli: 'cloud stop', when: 'зупинити оренду', summary: '', screen: '' },
+      { name: 'doctor', cli: 'doctor', when: 'щось не працює', summary: '', screen: '' },
       { name: 'case.register', cli: 'case', when: 'завести справу', summary: '', screen: 'newcase' }] }) };
+  }
+  // Каталог дій консолі: `cloud.stop` консоль виконує, `doctor` — лише термінал.
+  if (String(url).endsWith('/api/ops')) {
+    return { ok: true, status: 200, json: async () => ({ ops: [
+      { name: 'cloud.stop', summary: '', mutates: true, long: false, schema: {} }] }) };
   }
   if (String(url).endsWith('/api/sections')) {
     return { ok: true, status: 200, json: async () => ({ ok: true, v: 1,
@@ -1530,3 +1536,7 @@ def test_ask_palette_shows_screen_and_terminal_actions(probe) -> None:
     assert 'data-act="ask.go" data-arg="newcase"' in hits
     assert "nysh cloud stop" in hits
     assert 'data-act="ask.form" data-arg="cloud.stop"' in hits
+    # 🔴 Дія, якої консоль не виконує, — команда з копіюванням, а не «Форма»,
+    # що відкривала `nysh op … --help` (прохід новачка 23.10.2026).
+    assert 'data-act="ask.form" data-arg="doctor"' not in hits
+    assert 'data-act="ask.copy" data-arg="nysh doctor"' in hits

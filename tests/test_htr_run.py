@@ -395,3 +395,25 @@ def test_daemon_queue_asks_for_the_guard(monkeypatch: pytest.MonkeyPatch) -> Non
     with pytest.raises(_Stop):
         asyncio.run(W._start_read(None, None, {"case_dir": "x"}))  # type: ignore[arg-type]
     assert seen.get("zone") is True
+
+
+def test_missing_engines_is_its_own_refusal_with_the_console_fix(space: Path,
+                                                                 tmp_path: Path,
+                                                                 monkeypatch) -> None:
+    """Відмова «рушіїв немає» — окремим типом, і `read.plan` радить `htr.install`.
+
+    Консоль малює з цієї поради кнопку «Поставити рушії» поруч із відмовою.
+    """
+    from nyshporka import ops as O
+    from nyshporka.htr import env as E
+
+    case = tmp_path / "data" / "raw" / "справа"
+    case.mkdir(parents=True)
+    (case / "0001.jpg").write_bytes(b"x")
+    monkeypatch.setattr(E, "inspect_cached",
+                        lambda venv: E.EnvReport(ok=False, problems=("немає інтерпретатора",)))
+    with pytest.raises(R.EngineMissing):
+        R.plan(case)
+    env = O.call("read.plan", {"case_dir": str(case)})
+    assert not env.ok and "рушіїв" in env.error
+    assert [n.op for n in env.next] == ["htr.install"]

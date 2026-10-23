@@ -15,6 +15,7 @@ import { openModal, closeModal, confirmAct } from './modal.js';
 import { renderWarnings } from './view.js';
 import { schemaFormHtml, schemaValues } from './schemaform.js';
 import { bellMenu, fillBell } from './bell.js';
+import { copyText } from './bits.js';
 import { loadProjects, projectColor, projectChip, projectBadge } from './projects.js';
 
 /** Відкрите меню шапки — щоб клік повз нього закривав його. */
@@ -203,6 +204,11 @@ async function askFind() {
   if (seq !== ASK_SEQ || !el('ask-hits')) return;
   const hits = (got && got.hits) || [];
   if (!got) { box.innerHTML = `<p class="warn">${t('common.error')}</p>`; return; }
+  // 🔴 «Форма» — лише для дії, яку консоль справді виконає. Доти кнопка стояла
+  // й біля команд терміналу і відкривала вікно з `nysh op htr.install --help`
+  // під службовою назвою дії (прохід новачка 23.10.2026).
+  const known = new Set((await opsCatalog()).map((o) => o.name));
+  if (seq !== ASK_SEQ || !el('ask-hits')) return;
   box.innerHTML = hits.length ? hits.map((h) => {
     const scr = h.screen || OP_SCREEN[h.name] || '';
     // Дія з екраном — куди поведе кнопка; команда терміналу — лише для дії, яку
@@ -212,8 +218,16 @@ async function askFind() {
     return `<div class="ask-hit"><div><b>${esc(h.when || h.summary)}</b>
         ${sub}</div>
       ${scr ? `<button type="button" data-act="ask.go" data-arg="${esc(scr)}">${t('ask.open')}</button>`
-    : `<button type="button" data-act="ask.form" data-arg="${esc(h.name)}">${t('ask.form')}</button>`}</div>`;
+    : known.has(h.name)
+      ? `<button type="button" data-act="ask.form" data-arg="${esc(h.name)}">${t('ask.form')}</button>`
+      : `<button type="button" class="ghost" data-act="ask.copy" data-arg="${esc(cliLine(h))}"
+          title="${esc(t('ask.cli.why'))}">${t('ask.copy')}</button>`}</div>`;
   }).join('') : `<p class="muted">${t('ask.none')}</p>`;
+}
+
+/** Команда терміналу знахідки — як її набирають. */
+function cliLine(h) {
+  return `nysh ${String(h.cli || '').replace(/^nysh\s+/, '')}`.trim();
 }
 
 // ── «Усі дії»: форма зі схеми ───────────────────────────────────────────────
@@ -308,6 +322,10 @@ Object.assign(ACTIONS, {
   'ask.find': () => askFind(),
   'ask.go': (_ev, elm) => { closeModal(); show(elm.dataset.arg); },
   'ask.form': (_ev, elm) => openForm(elm.dataset.arg),
+  'ask.copy': async (_ev, elm) => {
+    const done = await copyText(elm.dataset.arg);
+    elm.textContent = done ? t('ask.copied') : elm.dataset.arg;
+  },
   'ask.run': (ev) => { ev.preventDefault(); return runForm(ev); },
   'modal.close': () => closeModal(false),
   'modal.ok': () => closeModal(true),

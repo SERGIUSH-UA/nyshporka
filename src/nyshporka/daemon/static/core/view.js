@@ -127,6 +127,9 @@ function seedAttr(n) {
   return n && n.args ? ` data-seed="${esc(JSON.stringify(n.args))}"` : '';
 }
 
+/** Поради, які консоль виконує на місці роботою (`check.fix`), без екрана. */
+const FIX_HERE = ['htr.install', 'models.get'];
+
 function renderNext(env) {
   const steps = (env.next || []).filter((n) => (n.level || 'note') !== 'agent');
   const notes = [];
@@ -139,6 +142,12 @@ function renderNext(env) {
     // застережень — тобто відбирає увагу рівно в тих, які щось означають.
     // Засіб, про який вона каже, і так на цьому екрані.
     if (scr && scr === here) return '';
+    // Рушії й моделі ставляться з консолі на місці (`check.fix` на Огляді):
+    // кнопка поруч із відмовою, а не команда терміналу в примітках.
+    if (!scr && FIX_HERE.includes(n.op)) {
+      return `<div class="warn next"><span><button data-act="check.fix" data-arg="${esc(n.op)}">`
+        + `${esc(t(`fix.${n.op}`))}</button></span> <span>${esc(n.why)}</span></div>`;
+    }
     // Порада без екрана — команда терміналу: людині з консолі її нема куди
     // натиснути, тож вона йде в примітки, а не окремою смугою.
     if (!scr) {

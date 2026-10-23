@@ -3728,7 +3728,7 @@ def htr_env_cmd(as_json: bool = typer.Option(False, "--json", help="машинн
 
 
 @htr_app.command("install")
-@route("htr install", skill="read-case", mutates=True,
+@route("htr install", op="htr.install", skill="read-case", mutates=True,
        when="поставити рушії читання на цю машину")
 def htr_install(
     no_cuda: bool = typer.Option(False, "--no-cuda", help="не чіпати torch"),
@@ -3814,7 +3814,7 @@ def models_list() -> None:
 
 
 @models_app.command("get")
-@route("models get", skill="read-case", mutates=True,
+@route("models get", op="models.get", skill="read-case", mutates=True,
        when="завантажити ваги моделей читання")
 def models_get(
     which: str = typer.Argument("", help="id пака; порожньо — усі, яких бракує"),

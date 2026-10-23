@@ -296,3 +296,16 @@ def test_loader_passport_in_order_project_is_private(tmp_path: Path) -> None:
     W.use(W._build(hub / "projects" / "rid", "test"))
     b = patch_meta(raw / "spr-2", {"archive": "DAHMO"})
     assert "private" not in json.loads(b.read_text(encoding="utf-8"))
+
+
+def test_engines_and_models_are_one_console_action_each() -> None:
+    """🔴 «Що зробити? → поставити рушії» стояло двічі: операцією й командою.
+
+    І ставилось лише терміналом: «Форма» відкривала `nysh op htr.install --help`
+    (прохід новачка 23.10.2026). Тепер це довга операція консолі, а команда
+    терміналу — її обгортка, тож у переліку дія одна.
+    """
+    for name in ("htr.install", "models.get"):
+        op = O.get(name)
+        assert op is not None and op.long and op.mutates, name
+        assert [e.kind for e in M.entries() if e.name == name] == ["op"], name

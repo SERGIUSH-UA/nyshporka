@@ -4521,13 +4521,16 @@ def read_plan(a: ReadArgs) -> Envelope:
     дізнатись «модель не та» або «кадрів не двадцять, а три тисячі» після
     старту означає втратити ніч. Той самий поділ, що `manifest` перед `fetch`.
     """
-    from nyshporka.htr.run import ReadError, plan
+    from nyshporka.htr.run import EngineMissing, ReadError, plan
 
     try:
         # `zone`: операцію кличе застосунок, і план мусить казати те саме, що
         # скаже черга (`read.start`), — термінал має свій `nysh read` без гарду.
         p = plan(a.case_dir, out_dir=a.out_dir, script=a.script,
                  second_voice=a.second_voice, model=a.model, also=a.also, zone=True)
+    except EngineMissing as exc:
+        # Консоль малює з поради кнопку «Поставити рушії» поруч із відмовою.
+        return fail(str(exc)).suggest("htr.install", "поставити рушії читання (~2.5 ГБ, довго)")
     except ReadError as exc:
         return fail(str(exc))
     env = ok({"plan": p.as_dict()})
@@ -5158,6 +5161,41 @@ def htr_env(a: EnvArgs) -> Envelope:
                  f"бракує: {', '.join(rep.missing)} — рушій із цими залежностями "
                  f"не запуститься")
     return env
+
+
+# 🔴 Рушії ставились лише командою терміналу. Перевірка машини, помилка
+# «середовище рушіїв не готове» й «Що зробити?» відсилали до `nysh htr install`,
+# а кнопка «Форма» в палітрі відкривала вікно з тією самою командою (прохід
+# новачка 23.10.2026). Довга робота, бо torch під карту — це гігабайти.
+@op("htr.install", summary="Поставити рушії читання на цю машину (~2.5 ГБ)",
+    mutates=True, long=True, section="htr", skill="read-case",
+    when="поставити рушії читання на цю машину")
+def htr_install(_: NoArgs) -> Envelope:
+    """Те саме, що `nysh htr install`: окреме середовище рушіїв поруч із простором."""
+    from nyshporka.core import progress
+    from nyshporka.core.workspace import WorkspaceError
+    from nyshporka.htr import env as E
+    from nyshporka.setup import doctor as doc
+
+    try:
+        venv = doc.engine_venv()
+    except WorkspaceError as exc:
+        return fail(str(exc))
+    progress.report(0, 1, "збираю середовище рушіїв — це довго")
+    try:
+        rep = E.setup(venv)
+    except (E.ToolMissing, E.UntrustedMount) as exc:
+        return fail(str(exc))
+    progress.report(1, 1, "")
+    env = ok({"ok": rep.ok, "python": str(rep.python or ""), "kraken": rep.kraken,
+              "torch": rep.torch, "cuda": rep.cuda, "missing": list(rep.missing)})
+    for p in rep.problems:
+        env.warn("engine_problem", p)
+    if rep.missing:
+        env.warn("engine_incomplete", f"бракує: {', '.join(rep.missing)}")
+    return env if rep.ok else fail(
+        "рушії не зібрались: " + ("; ".join(rep.problems) or ", ".join(rep.missing)
+                                  or "причини не названо"))
 
 
 # ── секції застосунку ────────────────────────────────────────────────────────
