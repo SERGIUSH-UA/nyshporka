@@ -3,8 +3,7 @@
 import { toast, ratioBar } from '../core/bits.js';
 import { t } from '../core/strings.js';
 import { callOp } from '../core/net.js';
-import { esc, el, setView, busy, failure, boxError,
-  renderWarnings, curGen, alive } from '../core/view.js';
+import { esc, el, setView, busy, failure, boxError, renderWarnings, curGen, alive, emptyMini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { ic } from '/ui/icons.js';
 import { swapHtml } from '/ui/dom.js';
@@ -133,7 +132,7 @@ function queueBody(env) {
     ? `<table class="tbl-cards"><thead><tr><th>${t('queue.col.case')}</th><th>${t('queue.col.state')}</th>
         <th>${t('queue.col.pages')}</th><th></th></tr></thead>
         <tbody>${rows.map((r) => queueRow(r, pulse)).join('')}</tbody></table>`
-    : `<p class="muted">${t('queue.empty')}</p>`;
+    : emptyMini('viazka', t('queue.empty'));
   return `${queueRunner(data)}
     <p class="muted">${esc(queueEta(data.left))}</p>
     ${renderWarnings(env)}${table}`;

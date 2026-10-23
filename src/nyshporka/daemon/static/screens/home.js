@@ -19,7 +19,7 @@
 import { t, tOr, LANG } from '../core/strings.js';
 import { TOKEN, PROJECT, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
-  renderWarnings, renderCoverage, curGen, alive, maskot, mini } from '../core/view.js';
+  renderWarnings, renderCoverage, curGen, alive, maskot, mini, emptyMini } from '../core/view.js';
 import { modelName, fmtDay, pathTail } from '../core/bits.js';
 import { SCREENS, ACTIONS, screenOfOp } from '../core/registry.js';
 import { SECTIONS, NAV_LABEL, show, renderNav, screenOn,
@@ -157,7 +157,7 @@ SCREENS.projects = async () => {
   busy(3);
   const html = await projectCards({ all: true });
   if (!alive(gen)) return;
-  setView(html || `<p class="muted">${t('project.none')}</p>`);
+  setView(html || emptyMini('derevo', t('project.none')));
 };
 
 /**
@@ -556,7 +556,7 @@ function canonSection(d) {
     // воно каже те саме, що рядок вище, лише службовими словами — і секція
     // виходила подвійним поясненням однієї речі.
     return sec('books', t('dash.canon'),
-      `<p class="muted">${t('dash.canon.none')}</p>`);
+      emptyMini('pechatka', t('dash.canon.none')));
   }
   const cov = c.coverage || {};
   const nums = [

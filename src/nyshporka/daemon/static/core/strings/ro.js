@@ -1592,6 +1592,7 @@ export default {
     'cardf.frames.none': 'necunoscut',
     'dash.cases.unfiled': 'dosare noi: {n}',
     'dash.cases.bundles': 'colecții: {n}',
+    'view.recent': 'Citite recent',
     'load.count': 'Număr…',
     'load.card': 'Citesc fișa dosarului…',
     'load.plan': 'Alcătuiesc planul de citire…',

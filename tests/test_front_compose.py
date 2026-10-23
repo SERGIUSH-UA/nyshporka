@@ -51,6 +51,8 @@ const DATA = {
     script_trust: 'fixed', models: {}, engines: [], done: {}, gaps: [] },
   'queue.status': { items: [], runner: null, counts: {} },
   'share.suggest': { rows: [], count: 0, total: 0, summary: {}, refreshing: true },
+  'runs.list': { runs: [{ name: 'tst_pysar', shifra: 'ТЕСТ 1-1-1', title: 'Сповідка 1801', model: 'pysar_cyr_v28.pt',
+    pages_done: 12, updated: '2026-10-20T10:00:00', case_key: 'TEST/1/1/1' }], shown: 1, total: 1 },
   'read.plan': { plan: { frames: 9, script: 'cyrillic', model: 'models/pysar_cyr_v19.pt',
     voices: [], out_dir: 'reports/htr/t1' } },
 };
@@ -117,6 +119,10 @@ out.day = [BT.fmtDay('2026-07-23T00:00:00Z'), BT.fmtDay('1993-08-28'), BT.fmtDay
 out.forms = BT.fieldValue('name_variants', [{ form: 'Городківка' }, { form: 'Городковка' }]);
 out.md = BT.mdLite(['Вступ', '', '| Справа | Сторінок |', '|---|---|', '| [[I9001]] | 12 |', '',
   'Кінець'].join(String.fromCharCode(10)), refs);
+{ const asked = []; const f0 = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => { if (String(url).includes('runs.list')) asked.push(JSON.parse(opts.body || '{}')); return f0(url, opts); };
+  await import('./screens/view.js'); ST.view = null; await SCREENS.view(); await tick(60);
+  out.viewEmpty = (document.getElementById('view-recent') || {}).innerHTML || ''; out.runsAsked = asked; globalThis.fetch = f0; }
 const SH = await import('./screens/share.js');
 { const t0 = Date.now(); await SCREENS.give(); out.giveMs = Date.now() - t0; }
 out.card = SH.cardRows({ title: 'Сповідка', years: [1801, 1803], places: ['Городківка', 'Липівка'],
@@ -282,3 +288,25 @@ def test_hash_listener_is_set_before_the_first_screen() -> None:
     """Слухач адреси — до першого показу: повільний перший екран не блокує «Назад»."""
     app = (FRONT_DIR / "app.js").read_text(encoding="utf-8")
     assert app.index("addEventListener('hashchange'") < app.index("await show(routeHash());")
+
+
+def test_empty_states_carry_a_miniature() -> None:
+    """Порожній СТАН — з мініатюрою речі; видача пошуку («нічого не знайдено») — без."""
+    want = {"screens/hyp.js": "emptyMini('lupa', t('hyp.none'))",
+            "screens/queue.js": "emptyMini('viazka', t('queue.empty'))",
+            "screens/project.js": "emptyMini('hodynnyk', t('ov.new.none'))",
+            "screens/label.js": "emptyMini('shukhliada', t('sets.none'))",
+            "core/nav.js": "emptyMini('derevo', t('project.none'))",
+            "screens/fonds.js": "mini('mapa', 72)"}
+    for rel, s in want.items():
+        assert s in (FRONT_DIR / rel).read_text(encoding="utf-8"), rel
+    share = (FRONT_DIR / "screens/share.js").read_text(encoding="utf-8")
+    assert "emptyMini('" not in share.split("t('pull.none')")[0].rsplit("\n", 1)[-1]
+
+
+def test_empty_viewer_offers_recent_runs(hub) -> None:
+    """Порожній Гортач — картки нещодавно прочитаного; підказки — порцією, не весь перелік."""
+    v = hub["viewEmpty"]
+    assert "Нещодавно прочитане" in v and 'data-act="view.pick"' in v and 'data-arg="tst_pysar"' in v
+    assert "ТЕСТ 1-1-1" in v and "сторінок: 12" in v and "20.10.2026" in v
+    assert hub["runsAsked"] and all(a.get("page_size") for a in hub["runsAsked"]), hub["runsAsked"]

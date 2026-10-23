@@ -77,7 +77,8 @@ def _html() -> str:
 
 
 def _called_from_js() -> set[str]:
-    return set(re.findall(r"callOp\(\s*'([^']+)'", _js()))
+    # `staleThenFresh` — той самий виклик операції, лише з минулою відповіддю наперед.
+    return set(re.findall(r"(?:callOp|staleThenFresh)\(\s*'([^']+)'", _js()))
 
 
 def _called_from_cli() -> set[str]:
@@ -279,7 +280,7 @@ def test_screens_send_only_fields_the_schema_accepts() -> None:
     from nyshporka import ops as O
 
     bad: list[str] = []
-    for m in re.finditer(r"callOp\(\s*'([^']+)',\s*\{(.*?)\}\)", _js(), re.S):
+    for m in re.finditer(r"(?:callOp|staleThenFresh)\(\s*'([^']+)',\s*\{(.*?)\}[,)]", _js(), re.S):
         op = O.get(m.group(1))
         if op is None or op.args is None:
             continue

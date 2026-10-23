@@ -11,7 +11,7 @@
 
 import { t } from '../core/strings.js';
 import { callOp } from '../core/net.js';
-import { esc, el, setView, busy, failure, boxError, curGen, alive, humanError } from '../core/view.js';
+import { esc, el, setView, busy, failure, boxError, curGen, alive, humanError, emptyMini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { show } from '../core/nav.js';
 import { openModal, modalSeq } from '../core/modal.js';
@@ -46,7 +46,7 @@ SCREENS.hyp = async () => {
   setView(`
     <p class="muted">${t('hyp.why')}</p>
     <div class="ov-kpis k3">${tile('open')}${tile('awaiting')}${tile('closed')}</div>
-    <div class="dash-box">${rows || `<p class="muted">${t('hyp.none')}</p>`}</div>`);
+    <div class="dash-box">${rows || emptyMini('lupa', t('hyp.none'))}</div>`);
   const seed = ST.hyp;
   ST.hyp = null;
   if (seed && seed.id) await openHyp(seed.id);

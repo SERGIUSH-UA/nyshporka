@@ -421,7 +421,7 @@ async function chooseProject(screen) {
     </div>`).join('');
   setView(`<p><b>${t('project.need.title')}</b></p>
     <p class="muted">${t('project.need.why')}</p>
-    <div class="pcards">${cards || `<p class="muted">${t('project.none')}</p>`}</div>
+    <div class="pcards">${cards || emptyMini('derevo', t('project.none'))}</div>
     <p><button data-act="nav" data-arg="newproject">${t('stage.act.newproject')}</button></p>`);
 }
 

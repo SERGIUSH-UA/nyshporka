@@ -11,7 +11,7 @@
 
 import { t, tOr, tn, LANG } from '../core/strings.js';
 import { callOp } from '../core/net.js';
-import { esc, el, setView, busy, failure, boxError, renderWarnings, curGen, alive, emptyMini } from '../core/view.js';
+import { esc, el, setView, boxError, renderWarnings, curGen, alive, emptyMini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { goto } from '../core/nav.js';
 import { openModal, modalSeq, modalTitle } from '../core/modal.js';
@@ -25,16 +25,17 @@ const CN = { q: '', kind: '' };
 
 SCREENS.canon = async () => {
   const gen = curGen();
-  busy(6);
-  const [chk, nxt] = await Promise.all([
-    callOp('canon.check', {}), callOp('canon.next', { limit: 3 })]);
-  if (!alive(gen)) return;
-  if (!chk.ok) return failure(chk);
+  // Перевірка канону й «що вирішити» — секунда-півтори (обхід карток і
+  // доказів), а пошук і перелік карток від них не залежать: каркас одразу,
+  // ці два блоки — скелетоном і домальовуються (замір 23.10.2026).
+  const chkP = callOp('canon.check', {});
+  const nxtP = callOp('canon.next', { limit: 3 });
+  const skel = '<div class="skel skel-card"></div>';
   setView(`
     <p class="muted">${t('canon.why')}</p>
     <div class="dash-two">
-      <div class="dash-box" id="cn-check">${checkBox(chk)}</div>
-      <div class="dash-box" id="cn-next">${nextBox(nxt)}</div>
+      <div class="dash-box" id="cn-check">${skel}</div>
+      <div class="dash-box" id="cn-next">${skel}</div>
     </div>
     <div class="dash-box">
       <div class="row">
@@ -59,7 +60,14 @@ SCREENS.canon = async () => {
     history.replaceState(null, '', `${location.pathname}?${q.toString()}${location.hash}`);
     openCard(card);
   }
-  await cardsList();
+  const boxes = Promise.all([chkP, nxtP]).then(([chk, nxt]) => {
+    if (!alive(gen)) return;
+    const c = el('cn-check');
+    const n = el('cn-next');
+    if (c) { if (chk.ok) c.innerHTML = checkBox(chk); else boxError('cn-check', chk); }
+    if (n) n.innerHTML = nextBox(nxt);
+  });
+  await Promise.all([cardsList(), boxes]);
 };
 
 /** Вид знахідки перевірки → мітка ліворуч від неї. Невідомий код — «інше». */

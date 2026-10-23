@@ -14,8 +14,7 @@
  */
 import { t } from '../core/strings.js';
 import { callOp } from '../core/net.js';
-import { esc, el, setView, boxError, renderWarnings,
-  curGen, alive } from '../core/view.js';
+import { esc, el, setView, boxError, renderWarnings, curGen, alive, emptyMini } from '../core/view.js';
 import { SCREENS, ACTIONS, KEYS } from '../core/registry.js';
 import { ST } from '../core/state.js';
 import { ic } from '/ui/icons.js';
@@ -87,7 +86,7 @@ SCREENS.label = async () => {
   sel.innerHTML = LB.sets.map((s) =>
     `<option value="${esc(s.name)}"${s.name === LB.set ? ' selected' : ''}>${esc(s.name)}</option>`).join('');
   if (!LB.sets.length) {
-    el('lb-work').innerHTML = `<p class="muted">${t('sets.none')}</p>`;
+    el('lb-work').innerHTML = emptyMini('shukhliada', t('sets.none'));
     return;
   }
   if (!LB.set) LB.set = LB.sets[0].name;

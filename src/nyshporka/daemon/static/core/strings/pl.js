@@ -1592,6 +1592,7 @@ export default {
     'cardf.frames.none': 'nieznane',
     'dash.cases.unfiled': 'nowych folderów: {n}',
     'dash.cases.bundles': 'zbiorów: {n}',
+    'view.recent': 'Ostatnio przeczytane',
     'load.count': 'Liczę…',
     'load.card': 'Czytam kartę sprawy…',
     'load.plan': 'Układam plan odczytu…',

@@ -1592,6 +1592,7 @@ export default {
     'cardf.frames.none': 'inconnu',
     'dash.cases.unfiled': 'nouveaux dossiers : {n}',
     'dash.cases.bundles': 'recueils : {n}',
+    'view.recent': 'Lus récemment',
     'load.count': 'Calcul…',
     'load.card': 'Lecture de la fiche du dossier…',
     'load.plan': 'Préparation du plan de lecture…',

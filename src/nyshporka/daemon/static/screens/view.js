@@ -24,12 +24,13 @@
 import { t, LANG } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, failure, renderWarnings,
-  curGen, alive } from '../core/view.js';
+  curGen, alive, mini } from '../core/view.js';
+import { modelName, fmtDay } from '../core/bits.js';
 import { SCREENS, ACTIONS, KEYS } from '../core/registry.js';
 import { ST } from '../core/state.js';
 import { ic, eng } from '/ui/icons.js';
-import { swapHtml } from '/ui/dom.js';
-import { attachCombobox } from '/ui/combobox.js';
+import { swapHtml, skelCards } from '/ui/dom.js';
+import { attachCombobox, cbValue } from '/ui/combobox.js';
 import { lightbox } from '/ui/lightbox.js';
 import { loadPageFull, readerLabels } from '../core/pageload.js';
 
@@ -65,6 +66,7 @@ SCREENS.view = async () => {
         ${v.run ? '' : 'autofocus'}>
       <button type="submit">${t('view.open')}</button>
     </form>
+    <div id="view-recent"></div>
     <div id="view-bar"></div>
     <div id="view-split">
       <div id="view-stage"></div>
@@ -72,7 +74,9 @@ SCREENS.view = async () => {
     </div>
     <div id="view-line"></div>
     <div id="view-alt"></div>`);
-  await viewRunHints();
+  const recent = el('view-recent');
+  if (!v.run && recent) recent.innerHTML = `<div class="read-picks">${skelCards(4)}</div>`;
+  await viewRunHints(!v.run);
   if (!alive(gen)) return;
   viewBindSync();
   if (v.run) {
@@ -94,24 +98,77 @@ SCREENS.view = async () => {
  * поле, і без `destroy()` у `<body>` накопичувались би попапи, а на
  * `document` — слухачі, що тримають посилання на давно викинуті поля.
  */
-async function viewRunHints() {
+async function viewRunHints(recent = false) {
   if (_runCb) { _runCb.destroy(); _runCb = null; }
-  const input = el('view').querySelector('input[name="run"]');
-  if (!input) return;
-  const env = await callOp('runs.list', {});
-  if (!env.ok) return;
-  const runs = (env.data || {}).runs || [];
-  VS.all = runs;
-  _runCb = attachCombobox(input, {
-    items: runs.map((r) => r.name).filter(Boolean),
-    empty: t('view.run.none'),
-  });
+  // Пошуком на сервері, порцією: прогонів десятки тисяч, і весь перелік
+  // одним запитом коштував 1–2 с на кожне відкриття (замір 23.10.2026).
+  const load = async (q) => {
+    const env = await callOp('runs.list', { q, page_size: 30 });
+    return env.ok ? ((env.data || {}).runs || []) : null;
+  };
+  const runs = await load('');
+  if (runs === null) { const box = el('view-recent'); if (box) box.innerHTML = ''; return; }
+  if (recent) viewRecent(runs);
   // 🔴 Знаменник поруч: порожньо в гортачі означає різне при нулі прочитаних
   // справ і при трьохстах. У першому випадку тут кнопка, а не докір.
   if (!runs.length) {
     el('view-bar').innerHTML = `<div class="warn">${t('view.run.empty')}
       <button data-act="nav" data-arg="read">${t('nav.read')}</button></div>`;
   }
+  const input = el('view').querySelector('input[name="run"]');
+  if (!input) return;
+  _runCb = attachCombobox(input, { items: runs.map(runItem), empty: t('view.run.none') });
+  let timer = null;
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const got = await load(input.value || '');
+      if (got && _runCb && _runCb.setItems) _runCb.setItems(got.map(runItem));
+    }, 250);
+  });
+}
+
+/** Пункт підказки: шифра й модель, ім'я прогону — у дію. */
+function runItem(r) {
+  return { value: r.name, label: r.shifra ? `${r.shifra} · ${modelName(r.model)}` : r.name, hint: runHint(r) };
+}
+
+function runHint(r) {
+  return [r.title || '', r.pages_done ? t('pull.pages').replace('{n}', r.pages_done) : '',
+    r.updated ? fmtDay(String(r.updated).slice(0, 10)) : ''].filter(Boolean).join(' · ');
+}
+
+/**
+ * Порожній гортач — нещодавно прочитане картками. Доти тут стояло саме поле,
+ * і людина мусила пам'ятати ім'я прогону, щоб хоч щось побачити.
+ */
+function viewRecent(runs) {
+  const box = el('view-recent');
+  if (!box) return;
+  const done = runs.filter((r) => r.pages_done > 0 && r.name).slice(0, 8);
+  box.innerHTML = done.length ? `<h3 class="sub-h">${t('view.recent')}</h3><div class="read-picks">${done.map((r) =>
+    `<button class="card" data-act="view.pick" data-arg="${esc(r.name)}">${mini('pero', 40)}
+      <span><b>${esc(r.shifra || r.name)}</b><small>${esc(modelName(r.model) || r.name)}</small>
+      <small class="muted">${esc(runHint(r))}</small></span></button>`).join('')}</div>` : '';
+}
+
+/**
+ * Прогони тієї самої справи — для «двійника» (той самий аркуш іншим рушієм).
+ * Два вузькі запити замість усього переліку: сам прогін за іменем, тоді його
+ * справа. Сторінка показується, не чекаючи їх; двійник домальовується.
+ */
+async function viewRunPeers(run, gen) {
+  const one = await callOp('runs.list', { q: run, page_size: 200 });
+  if (!alive(gen) || VS.run !== run) return;
+  const mine = ((one.ok && (one.data || {}).runs) || []).find((r) => r.name === run);
+  let peers = mine ? [mine] : [];
+  if (mine && mine.case_key) {
+    const env = await callOp('runs.list', { case: mine.case_key, page_size: 200 });
+    if (!alive(gen) || VS.run !== run) return;
+    if (env.ok) peers = (env.data || {}).runs || peers;
+  }
+  VS.all = peers;
+  if (VS.pages.length) viewAltReset();
 }
 
 /** Відкрити прогін: перелік сторінок + перша (або названа) сторінка. */
@@ -134,7 +191,10 @@ async function viewOpenRun(run, page = '', line = null) {
   // Скидаючи його тут, ми щоразу відкривали б знімок наново тому, хто його
   // щойно сховав.
   VS = { ...VS, run, meta: d, pages: d.pages || [], i: -1,
-         lines: [], geo: {}, alt: null };
+         lines: [], geo: {}, alt: null, all: [] };
+  const recent = el('view-recent');
+  if (recent) recent.innerHTML = '';
+  viewRunPeers(run, gen);
   const want = page ? VS.pages.findIndex((p) => p.page === page) : 0;
   if (VS.pages.length && want < 0) {
     // Прогін є, сторінки немає — це різні відповіді, і зводити їх до «немає
@@ -486,7 +546,15 @@ Object.assign(ACTIONS, {
   'view.open': async (ev) => {
     ev.preventDefault();
     const fd = new FormData(ev.target);
-    await viewOpenRun(String(fd.get('run') || '').trim());
+    const input = ev.target.querySelector ? ev.target.querySelector('input[name="run"]') : null;
+    await viewOpenRun(String((input && cbValue(input)) || fd.get('run') || '').trim());
+  },
+
+  'view.pick': async (_ev, elm) => {
+    const run = elm.dataset.arg || '';
+    const input = el('view').querySelector('input[name="run"]');
+    if (input) input.value = run;
+    await viewOpenRun(run);
   },
 
   'view.step': (_ev, elm) => viewShow(VS.i + Number(elm.dataset.arg || 0)),

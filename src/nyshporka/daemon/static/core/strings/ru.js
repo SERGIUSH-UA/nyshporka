@@ -1592,6 +1592,7 @@ export default {
     'cardf.frames.none': 'неизвестно',
     'dash.cases.unfiled': 'новых папок: {n}',
     'dash.cases.bundles': 'сборников: {n}',
+    'view.recent': 'Недавно прочитанное',
     'load.count': 'Считаю…',
     'load.card': 'Читаю карточку дела…',
     'load.plan': 'Составляю план чтения…',

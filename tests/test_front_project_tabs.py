@@ -112,7 +112,7 @@ const out = {};
 
 await SCREENS.canon();
 await tick();
-out.canon = view() + (document.getElementById('cn-list').innerHTML || '') + (document.getElementById('cn-check').innerHTML || '');
+out.canon = view() + (document.getElementById('cn-list').innerHTML || '') + (document.getElementById('cn-check').innerHTML || '') + (document.getElementById('cn-next').innerHTML || '');
 await ACTIONS['canon.card'](null, el('I9001'));
 out.card = dlg();
 
@@ -433,3 +433,11 @@ def test_project_cards_stand_out_with_counts(probe) -> None:
     c = probe["cards"]
     assert 'class="pj-card"' in c and "--pj:#aa3300" in c
     assert "Рід Сидоруків" in c and ">2<" in c.split("pj-stats")[1]
+
+
+def test_canon_paints_before_the_check_returns() -> None:
+    """Перевірка канону — 1,5 с; каркас і пошук не чекають її (скелетони в двох блоках)."""
+    src = (FRONT_DIR / "screens/canon.js").read_text(encoding="utf-8")
+    body = src[src.index("SCREENS.canon = async"):src.index("await Promise.all([cardsList(), boxes]);")]
+    assert body.index("setView(") < body.index("Promise.all([chkP, nxtP])")
+    assert "await callOp('canon.check'" not in body and "busy(" not in body

@@ -3,7 +3,7 @@
 import { ic } from '/ui/icons.js';
 import { t } from '../core/strings.js';
 import { PROJECT, callOp } from '../core/net.js';
-import { esc, el, setView, boxError, busyForm, fld, humanError, mini } from '../core/view.js';
+import { esc, el, setView, boxError, busyForm, fld, humanError, mini, emptyMini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { goto, jobDone, jobChip, currentScreen, SECTIONS } from '../core/nav.js';
 import { openModal, closeModal } from '../core/modal.js';
@@ -234,7 +234,7 @@ export async function fillProject(stillHere = () => true) {
       box.innerHTML = (d.next || []).length ? (d.next || []).map((x) => decRow(x)).join('')
         + (more > 0 ? `<p><button class="ghost ctl-sm" data-act="nav" data-arg="hyp">${
           esc(t('ov.more').replace('{n}', more))}</button></p>` : '')
-        : `<p class="muted">${t('canon.next.none')}</p>`;
+        : emptyMini('pero', t('canon.next.none'));
     }),
     fillMaterial(stillHere),
     Promise.all([callOp('history.log', { limit: 4 }), callOp('reports.list', {})]).then(([hl, rl]) => {
@@ -250,7 +250,7 @@ export async function fillProject(stillHere = () => true) {
           esc(r.subject)}</span></div>`),
         ...reps.map((r) => `<button class="ov-feed ov-link" data-act="rs.read" data-arg="${esc(r.path)}">
           <span class="muted">${ic('note', 'ic-o ic-sm')}</span><span>${esc(noEmoji(r.title))}</span></button>`)];
-      box.innerHTML = items.length ? items.join('') : `<p class="muted">${t('ov.new.none')}</p>`;
+      box.innerHTML = items.length ? items.join('') : emptyMini('hodynnyk', t('ov.new.none'));
     }),
   ];
   await Promise.all(jobs);

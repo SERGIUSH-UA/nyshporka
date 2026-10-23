@@ -3,8 +3,7 @@
 import { ratioBar } from '../core/bits.js';
 import { t } from '../core/strings.js';
 import { callOp, SEQ } from '../core/net.js';
-import { esc, safeHref, el, setView, busy, failure, busyForm,
-  renderWarnings, curGen, alive } from '../core/view.js';
+import { esc, safeHref, el, setView, busy, failure, busyForm, renderWarnings, curGen, alive, mini } from '../core/view.js';
 import { SCREENS, ACTIONS, PAGERS } from '../core/registry.js';
 import { show, goto, onJob, jobChip, jobNotes } from '../core/nav.js';
 import { ST } from '../core/state.js';
@@ -153,8 +152,8 @@ function fondSummary(s) {
  * взагалі: відповідь була не на те питання, і порада вела не туди.
  */
 function fondNone() {
-  return `<div class="warn"><b>${t('fonds.none')}</b>
-    <p class="muted">${t('fonds.none.why')}</p></div>`;
+  return `<div class="warn empty-mini">${mini('mapa', 72)}<div><b>${t('fonds.none')}</b>
+    <p class="muted">${t('fonds.none.why')}</p></div></div>`;
 }
 
 /** Форма збирання розгорнута, коли збирати ще нічого не збирали. */

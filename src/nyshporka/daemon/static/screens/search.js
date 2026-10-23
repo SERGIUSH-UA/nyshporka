@@ -1,7 +1,7 @@
 /** 🔎 Пошук у прочитаному. */
 
 import { t, LANG } from '../core/strings.js';
-import { callOp, SEQ, FINAL_STATES, apiFetch } from '../core/net.js';
+import { callOp, SEQ, FINAL_STATES, apiFetch, staleThenFresh } from '../core/net.js';
 import { esc, el, setView, boxError, busyForm, fld,
   renderWarnings, maskot } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
@@ -279,10 +279,16 @@ async function profileHint() {
 async function searchIndexState() {
   const box = el('search-index');
   if (!box) return;
-  const env = await callOp('search.state', {});
-  if (!env.ok) return;
+  // Обхід стору — секунда на холодній консолі: доти смужка-скелетон, при
+  // повторному відкритті — минулий стан одразу (`staleThenFresh`).
+  if (!box.innerHTML) box.innerHTML = '<div class="skel skel-cell" style="max-width:28rem"></div>';
+  await staleThenFresh('search.state', {}, (env) => paintIndexState(box, env));
+}
+
+function paintIndexState(box, env) {
+  if (!env.ok) { box.innerHTML = ''; return; }
   const d = env.data || {};
-  if (!d.runs) return;                       // читати ще нема чого
+  if (!d.runs) { box.innerHTML = ''; return; } // читати ще нема чого
   const mb = (d.bytes || 0) / (1024 * 1024);
   box.innerHTML = d.stale
     ? `<div class="warn">${esc(t('search.index.partial')
