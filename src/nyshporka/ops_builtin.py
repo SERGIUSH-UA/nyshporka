@@ -1327,7 +1327,7 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
                      "repo": h.repo, "archive": h.archive, "fond": h.fond,
                      "page": h.page, "crop_url": h.crop_url}
                     for h in found)
-    shown = hits[:a.limit]
+    shown = _interleave(hits)[:a.limit]
     env = ok({"q": a.q, "hits": shown, "fonds": _by_fond(shown),
               "coverage": {"searched": searched, "unavailable": unavailable,
                            "basis": basis, "truncated": truncated,
@@ -1352,9 +1352,31 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
                  "каталог зібрано не до кінця (обхід спинили чи він обірвався): "
                  + ", ".join(partial) + " — знахідки звідти неповні, а нуль нічого "
                  "не доводить; «Оновити каталог» докінчить обхід", level=ALERT)
+    labels = {s.id: getattr(s, "label", "") or s.id for s in asked}
     _warn_once(env, hits=hits, searched=searched,
-               unavailable=unavailable, truncated=truncated)
+               unavailable=unavailable, truncated=truncated, labels=labels)
+    env.data["coverage"]["labels"] = labels
     return env
+
+
+def _interleave(hits: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Знахідки джерел по черзі, у межах джерела — як віддало.
+
+    🔴 Доти видача йшла джерело за джерелом і різалась на стелі: на «Меджибіж»
+    23 радянські книги ДРАЦС ДАХмО займали верх, метрики XVIII ст. ЦДІАК — низ, а
+    Duck Inspector із 50 знахідками не потрапив у перші 40 жодним рядком
+    (прохід новачка 23.10.2026).
+    """
+    groups: dict[object, list[dict[str, object]]] = {}
+    for h in hits:
+        groups.setdefault(h.get("source"), []).append(h)
+    out: list[dict[str, object]] = []
+    queues = list(groups.values())
+    while queues:
+        for q in queues:
+            out.append(q.pop(0))
+        queues = [q for q in queues if q]
+    return out
 
 
 def _ask_sources(srcs: list[Any], q: str,
@@ -1555,7 +1577,8 @@ def _by_fond(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _warn_once(env: Envelope, *, hits: list[dict[str, object]],
                searched: list[str], unavailable: list[dict[str, str]],
-               truncated: list[dict[str, Any]]) -> None:
+               truncated: list[dict[str, Any]],
+               labels: dict[str, str] | None = None) -> None:
     """Одне попередження на пошук — і тільки там, де знаменник пошкоджено.
 
     🔴 Чому не по попередженню на джерело. Раніше кожне джерело з вкладеним
@@ -1584,18 +1607,21 @@ def _warn_once(env: Envelope, *, hits: list[dict[str, object]],
         parts.append("жодне джерело не змогло шукати — цей нуль нічого не означає")
     if truncated:
         code = code or "search_truncated"
+        name = (labels or {}).get
         where = "; ".join(
-            f"{t['source']} ({t.get('why') or 'стеля ' + str(t['ceiling'])})"
+            f"{name(t['source'], t['source'])} "
+            f"({t.get('why') or 'не більше ' + str(t['ceiling']) + ' знахідок'})"
             for t in truncated)
         # Порада про фонд — лише для обрізки за стелею: джерело, що саме
         # пояснило обрізку (`why`), уже сказало, як звузити, і «бери фонд
         # цілком» для бази осіб безглузде.
         own = all(t.get("why") for t in truncated)
         parts.append(f"видача обрізана — перелік неповний: {where}"
-                     + ("" if own else ". Звужуй запит або бери фонд цілком"))
+                     + ("" if own else ". Звузьте запит або візьміть фонд цілком"))
     if unavailable and not hits:
         code = code or "partial_denominator"
-        where = "; ".join(f"{u['source']}: {u['why']}" for u in unavailable)
+        where = "; ".join(f"{(labels or {}).get(u['source'], u['source'])}: {u['why']}"
+                          for u in unavailable)
         parts.append(f"нуль неповний — не шукали в {where}")
     if searched and not hits:
         data = env.data if isinstance(env.data, dict) else {}

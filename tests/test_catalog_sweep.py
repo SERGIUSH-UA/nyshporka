@@ -82,7 +82,9 @@ def test_answer_order_is_the_source_order_not_the_arrival_order(
     slow = _Src("slow", delay=0.3, hits=2)
     fast = _Src("fast", hits=2)
     env = _search(monkeypatch, slow, fast, limit=3)
-    assert [h["source"] for h in env.data["hits"]] == ["slow", "slow", "fast"]
+    # По черзі за порядком джерел: стеля не віддає всю видачу першому джерелу
+    # (прохід новачка 23.10.2026 — Duck не потрапляв у перші 40 жодним рядком).
+    assert [h["source"] for h in env.data["hits"]] == ["slow", "fast", "slow"]
     assert env.data["coverage"]["searched"] == ["slow", "fast"]
 
 

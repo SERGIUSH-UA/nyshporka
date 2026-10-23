@@ -421,7 +421,8 @@ function renderFind(env) {
     ${hits.length >= FIND_LIMIT
     ? `<p class="warn-inline">${esc(t('sources.ceiling').replace('{n}', FIND_LIMIT))}</p>`
     : ''}
-    <p class="muted">${t('sources.searched')}: ${esc((coverage.searched || []).join(', ') || '—')}</p>`;
+    <p class="muted">${t('sources.searched')}: ${esc((coverage.searched || [])
+    .map((s) => (coverage.labels || {})[s] || srcName(s)).join(', ') || '—')}</p>`;
   poolHint(String((env.data || {}).q || ''), hits);
   return undefined;
 }
