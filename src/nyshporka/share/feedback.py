@@ -91,8 +91,11 @@ class Attachment:
 
 # ── очищення ─────────────────────────────────────────────────────────────────
 def _variants(p: Path) -> list[str]:
-    s = str(p)
-    out = {s, p.as_posix(), s.replace("\\", "\\\\")}
+    # Обидва письма шляху на будь-якій платформі: журнал із Windows-машини
+    # розбирають і в Linux (Docker, CI), а `str()` там дає лише прямі скісні.
+    posix = p.as_posix()
+    win = posix.replace("/", "\\")
+    out = {str(p), posix, win, win.replace("\\", "\\\\")}
     return sorted((v for v in out if len(v) > 3), key=len, reverse=True)
 
 
