@@ -39,7 +39,7 @@ def usable_cores() -> int:
     """Ядра, продані НАМ, а не наявні в хоста (квота cgroup, прив'язка процесу)."""
     cores = float(os.cpu_count() or 1)
     try:
-        allowed = len(os.sched_getaffinity(0))  # type: ignore[attr-defined]
+        allowed = len(os.sched_getaffinity(0))  # type: ignore[attr-defined,unused-ignore]
         if allowed:
             cores = min(cores, float(allowed))
     except (AttributeError, OSError):
