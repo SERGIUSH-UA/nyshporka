@@ -25,6 +25,7 @@ from nyshporka import ops_pick as _pick  # noqa: F401  (те саме: реєс�
 from nyshporka import ops_print as _print  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_project as _project  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_queue as _queue  # noqa: F401  (те саме: реєстрація)
+from nyshporka import ops_reading as _reading  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_records as _records  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_share as _share  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_site as _site  # noqa: F401  (те саме: реєстрація)

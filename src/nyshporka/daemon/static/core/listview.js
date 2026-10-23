@@ -141,7 +141,9 @@ function paint(st) {
       const shown = st.shown.get(g.id) || size;
       const pickable = g.rows.filter(cfg.groupPick || cfg.canPick || (() => true));
       const nSel = pickable.filter((r) => st.sel.has(cfg.key(r))).length;
-      const head = cfg.group ? `<header class="lv-gh">
+      // `div`, не `header`: глобальне `header` шапки застосунку (z-index 30) клало
+      // заголовки груп над липкою смугою дії — «Віддати» ховалось на телефоні.
+      const head = cfg.group ? `<div class="lv-gh">
           <button type="button" class="lv-fold" data-act="lv.fold" data-lv="${lv}" data-arg="${esc(g.id)}" aria-expanded="${open}"
             aria-label="${esc(g.label)}"><span class="chev-s"></span></button>
           ${cfg.select && pickable.length ? `<input type="checkbox" class="lv-gck" data-act="lv.pickg" data-lv="${lv}" data-arg="${esc(g.id)}"
@@ -149,7 +151,7 @@ function paint(st) {
             data-part="${nSel && nSel < pickable.length ? '1' : ''}">` : ''}
           <b class="lv-gl">${esc(g.label)}</b>
           <span class="muted lv-gs">${cfg.groupSummary ? cfg.groupSummary(g.rows) : esc(String(g.rows.length))}</span>
-        </header>` : '';
+        </div>` : '';
       if (!open) return `<section class="lv-g" data-g="${esc(g.id)}">${head}</section>`;
       const list = g.rows.slice(0, shown).map((r) => {
         const k = cfg.key(r);

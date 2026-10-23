@@ -1571,6 +1571,8 @@ th { font-family: var(--font-serif); letter-spacing: .1em; }
    числами, пошук і перемикачі, групи зі згортанням і «позначити групу», показ
    частинами, липка смуга дії внизу. ── */
 .lv { display: grid; gap: .75rem; }
+/* Перелік під панелями (Канон: «Перевірка» й «Що вирішити») — з відступом, а не впритул. */
+* + .lv { margin-top: 1.25rem; }
 .lv-chips { display: flex; flex-wrap: wrap; gap: .5rem; }
 #view .lv-chip { display: grid; justify-items: start; gap: .05rem; min-width: 7.5rem; padding: .5rem .8rem;
   border: 1px solid var(--rim, var(--line-2)); border-left: 4px solid var(--line-3); border-radius: var(--r-m);
@@ -1725,3 +1727,21 @@ body.welcome-on main { max-width: none; }
 @media (max-width: 560px) { .first-pj { flex-direction: column; align-items: flex-start; } }
 .wh-form { margin-bottom: .8rem; }
 .wrap-any { overflow-wrap: anywhere; }
+/* ▶ Зараз читається (`screens/now.js`): одна панель на екранах Читання. */
+#view .rn { display: grid; gap: .4rem; margin: 0 0 1rem; padding: .7rem .9rem; border: 1px solid var(--rim, var(--line-2));
+  border-left: 4px solid var(--honey); border-radius: var(--r-m); background: var(--s-2); }
+.rn h3 { margin: 0 0 .2rem; font: 600 1rem/1.2 var(--font-serif); }
+.rn-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: .4rem .9rem; align-items: center;
+  padding: .35rem 0; border-top: 1px solid var(--line); }
+.rn-row:first-of-type { border-top: 0; }
+.rn-mark { color: var(--accent); }
+.rn-what { display: grid; gap: .1rem; min-width: 0; }
+.rn-what b { overflow-wrap: anywhere; }
+.rn-prog { display: flex; align-items: center; gap: .4rem; white-space: nowrap; }
+.rn-prog .ratio-bar { width: 6rem; height: 6px; margin-top: 0; }
+.rn-prog .ratio-bar > i { background: var(--honey); }
+.rn-acts { display: flex; flex-wrap: wrap; gap: .35rem; justify-content: flex-end; }
+@media (max-width: 760px) {
+  .rn-row { grid-template-columns: auto minmax(0, 1fr); }
+  .rn-prog, .rn-acts { grid-column: 2; justify-content: flex-start; }
+}

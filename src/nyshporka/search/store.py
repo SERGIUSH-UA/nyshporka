@@ -677,6 +677,41 @@ def _bound() -> dict[str, str | None]:
     return _BOUND[1]
 
 
+def _text_unchanged(d: Path, pages: int, indexed_at: str) -> bool:
+    """Чи текст прогону той самий, що ліг у стор, — хоч штамп мети й інший.
+
+    🔴 Штамп — час і розмір `_htr_meta.json` та теки, а мету переписує багато
+    що, крім читання: позначка проєкту, постійна тека справи, ключ. Одна така
+    правка 22.10.2026 зробила «застарілими» 9 394 прогони з 16 079, і пошук
+    пропонував перечитати в стор 3,4 млн сторінок, яких ніхто не міняв.
+
+    Тож штамп — лише сигнал «могло змінитись», а відповідь дає сам текст:
+    скільки `.txt` і чи жоден файл прогону (крім мети) не новіший за збірку.
+    Час — файлової системи цієї машини, а не годинника в меті: прогін із хмари
+    приходить із часом машини, що його читала.
+    """
+    try:
+        since = time.mktime(time.strptime(indexed_at, "%Y-%m-%dT%H:%M:%S"))
+    except (ValueError, OverflowError):
+        return False
+    n = 0
+    try:
+        with os.scandir(d) as it:
+            for e in it:
+                name = e.name
+                if name.startswith("_htr_meta") or name.endswith(".tmp") or not e.is_file():
+                    continue
+                # Секунда збірки обрізана вниз: файл тієї самої секунди — «новіший»,
+                # і прогін переіндексується. Помилка лише в обережний бік.
+                if e.stat().st_mtime >= since:
+                    return False
+                if name.endswith(".txt"):
+                    n += 1
+    except OSError:
+        return False
+    return n > 0 and n == pages
+
+
 def _index(conn: sqlite3.Connection, run: str, *, only_stale: bool, wait: float,
            waiting: Callable[[], None] | None) -> int | None:
     """Проіндексувати один прогін. Повертає число рядків.
@@ -697,10 +732,21 @@ def _index(conn: sqlite3.Connection, run: str, *, only_stale: bool, wait: float,
     txts = sorted(d.glob("*.txt"))
     _begin_write(conn, wait=wait, waiting=waiting)
     if only_stale:
-        row = conn.execute("select stamp, coalesce(rules,'') from runs where run=?",
-                           (run,)).fetchone()
+        row = conn.execute("select stamp, coalesce(rules,''), coalesce(indexed_at,''), "
+                           "coalesce(pages,0) from runs where run=?", (run,)).fetchone()
         if row and stamp and row[0] == stamp and row[1] == rules_hash():
             conn.rollback()
+            return None
+        if (row and stamp and row[1] == rules_hash()
+                and _text_unchanged(d, int(row[3]), str(row[2]))):
+            # Змінилась лише мета: новий штамп і поля з неї, текст — як був.
+            conn.execute(
+                "update runs set stamp=?, case_key=?, case_dir=?, model=?, script=?, "
+                "engine_ids=?, shared=? where run=?",
+                (stamp, _run_key(run, meta), meta.get("case_dir") or "",
+                 meta.get("model") or "", meta.get("script") or "",
+                 json.dumps(S.run_engine_ids(meta)), S.shared_of(meta), run))
+            conn.commit()
             return None
     old = conn.execute("select id from runs where run=?", (run,)).fetchone()
     if old:

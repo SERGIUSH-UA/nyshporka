@@ -15,6 +15,7 @@ import { attachCombobox, cbValue } from '/ui/combobox.js';
 import { pathField } from '../core/paths.js';
 import { openCloudGo } from './cloud.js';
 import { loadProjects, projectsNow, currentPid, projectChip, projectInfo } from '../core/projects.js';
+import { nowBox, fillNow } from './now.js';
 
 /** Тека, для якої показана картка. Живе між входами: справа не міняється. */
 let RD = { case_dir: '', script: '', card: null };
@@ -45,6 +46,7 @@ SCREENS.read = async () => {
   ST.read = null;
   setView(`
     <p class="muted">${t('read.why')}</p>
+    ${nowBox()}
     ${stepHead(1, 'read.step.case')}
     <form class="row" data-act="read.pick">
       ${pathField({ name: 'case_dir', mode: 'dir', purpose: 'read.case_dir',
@@ -53,6 +55,7 @@ SCREENS.read = async () => {
     </form>
     <div id="card"></div>
     <div id="hits"></div>`);
+  fillNow(gen);
   await readCases();
   if (!alive(gen)) return;
   if (RD.case_dir) await readCard();

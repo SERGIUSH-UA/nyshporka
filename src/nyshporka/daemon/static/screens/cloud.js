@@ -19,6 +19,7 @@ import { show, jobDone, jobChip } from '../core/nav.js';
 import { openModal, confirmAct, modalSeq } from '../core/modal.js';
 import { kv, pill, dayOf, toast, ratioBar } from '../core/bits.js';
 import { loadProjects, projectCount, projectChip, currentName, projectInfo } from '../core/projects.js';
+import { nowBox, fillNow } from './now.js';
 
 const FINAL = ['done', 'failed'];
 const money = (v) => (v === null || v === undefined ? '—' : `$${Number(v).toFixed(2)}`);
@@ -50,6 +51,7 @@ function paintCloud(env, again = false) {
     esc(label)}</span><span class="ov-kpi-v"><b class="num">${esc(value)}</b></span></div>`;
   setView(`
     <p class="muted">${t('cloud.why')}</p>
+    ${nowBox()}
     ${renderWarnings(env)}
     <div class="ov-kpis k3">${RUNS.length ? tile(t('cloud.spent.last').replace('{n}', RUNS.length), money(spent)) : ''}${
   tile(t('cloud.live'), d.live || 0, d.live ? 'ov-info' : '')}${
@@ -60,6 +62,7 @@ function paintCloud(env, again = false) {
       ${live.length ? live.map(runRow).join('') : emptyMini('povitrulia', t('cloud.none.live'))}</div>
     <div class="dash-box"><h3>${t('cloud.past')}</h3>
       ${past.length ? past.map(runRow).join('') : `<p class="muted">${t('cloud.none.past')}</p>`}</div>`, again);
+  fillNow(curGen());
 }
 
 /**

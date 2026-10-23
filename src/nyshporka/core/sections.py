@@ -434,6 +434,9 @@ OP_SCREEN: dict[str, str] = {
     "read.plan": "read",
     "read.start": "read",
     "runs.list": "runs",
+    # Панель «Зараз читається» стоїть на всіх екранах Читання; дім — Прогони.
+    "reading.now": "runs",
+    "read.stop": "runs",
     "queue.status": "queue",
     "queue.add": "queue",
     "queue.retry": "queue",

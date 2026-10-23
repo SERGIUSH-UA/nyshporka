@@ -8,6 +8,7 @@ import { SCREENS, ACTIONS } from '../core/registry.js';
 import { ic } from '/ui/icons.js';
 import { swapHtml } from '/ui/dom.js';
 import { loadProjects, projectCount, projectChip, currentName } from '../core/projects.js';
+import { nowBox, fillNow } from './now.js';
 
 /**
  * 🔴 Чергу веде ОКРЕМИЙ процес (`nysh queue run`), а не застосунок: він
@@ -158,6 +159,7 @@ async function queueLoad(full = false) {
   }
   setView(`
     <p class="muted">${t('queue.why')}</p>
+    ${nowBox()}
     <form class="row" data-act="queue.add">
       <input name="refs" required placeholder="${esc(t('queue.add.ph'))}">
       <label class="lbl-mini"><input type="checkbox" name="share" value="1">
@@ -167,6 +169,7 @@ async function queueLoad(full = false) {
     <p class="consequence">${esc(t('read.lands').replace('{p}', currentName() || t('read.for.hub')))}</p>
     <div id="queue-msg"></div>
     <div id="queue-body">${queueBody(env)}</div>`);
+  fillNow(curGen());
 }
 
 /** Оновлення, поки екран відкритий; зупиняється саме, щойно з нього пішли. */

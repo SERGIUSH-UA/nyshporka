@@ -27,6 +27,7 @@ import { ic, eng } from '/ui/icons.js';
 import { swapHtml } from '/ui/dom.js';
 import { pager, step } from '/ui/pager.js';
 import { loadProjects, projectCount, projectChip } from '../core/projects.js';
+import { nowBox, fillNow } from './now.js';
 
 /** Фільтр переліку. Живе між входами на екран, як і в бібліотеці. */
 let RUNS = { q: '', engine: '', state: '', page: 0 };
@@ -121,6 +122,7 @@ async function runsPaint(env, full, live) {
 
   setView(`
     <p class="muted">${t('runs.why')}</p>
+    ${nowBox()}
     <div class="row">
       <input id="runs-q" type="search" placeholder="${esc(t('runs.q'))}"
              value="${esc(RUNS.q)}" data-act="runs.filter" data-live="1">
@@ -140,6 +142,7 @@ async function runsPaint(env, full, live) {
       .replace('{n}', d.everything || 0)
       .replace('{c}', d.all_cases || 0))}</p>
     <div id="runs-body">${body || runsEmptyHtml(env, d.everything || 0)}</div>`);
+  fillNow(curGen());
   runsFocus();
   if (needCases) bindCasesLater(live);
   return undefined;

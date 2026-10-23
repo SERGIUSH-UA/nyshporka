@@ -620,3 +620,46 @@ def test_lock_beyond_the_deadline_is_named_loudly(space: Path,
     assert ST.LOCKED_SKIPPED == ["проба"]
     w = [x for x in env.warnings if x.code == "locked_skipped"]
     assert w and w[0].level == "alert" and "НЕ проіндексовано" in w[0].text
+
+
+def test_meta_only_change_restamps_without_reindexing(space: Path,
+                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    """Позначка проєкту чи нова тека справи в меті — не привід перечитувати текст.
+
+    🔴 Масова правка мет 22.10.2026 зробила «застарілими» 9 394 прогони з 16 079:
+    штамп — час і розмір мети, а текст ніхто не міняв.
+    """
+    import os
+    import time
+
+    from nyshporka.search import store as ST
+
+    run = space / "reports" / "htr" / "проба"
+    old = time.time() - 3600
+    for f in run.iterdir():
+        os.utime(f, (old, old))
+    list(ST.ensure_all(["проба"]))
+    assert ST.is_fresh("проба")
+    meta = json.loads((run / "_htr_meta.json").read_text(encoding="utf-8"))
+    meta["project"] = ""
+    meta["case_dir"] = "D:/архів/проба"
+    (run / "_htr_meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    assert not ST.is_fresh("проба")
+    dropped: list[int] = []
+    real = ST._delete_run
+    monkeypatch.setattr(ST, "_delete_run", lambda c, i: (dropped.append(i), real(c, i)))
+    list(ST.ensure_all(["проба"]))
+    assert ST.is_fresh("проба") and dropped == [], "текст не перечитувався"
+    conn = ST.connect(readonly=True)
+    try:
+        row = conn.execute("select case_dir, pages from runs where run='проба'").fetchone()
+    finally:
+        conn.close()
+    assert tuple(row) == ("D:/архів/проба", 2), "поля з мети оновлено, сторінки ті самі"
+
+    # Сторінку перечитано — новіший файл: тоді переіндексація.
+    (run / "0002.txt").write_text("Липовеньке перечитано\n", encoding="utf-8")
+    meta["updated"] = "x"
+    (run / "_htr_meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    list(ST.ensure_all(["проба"]))
+    assert dropped, "змінений текст переіндексовано"
