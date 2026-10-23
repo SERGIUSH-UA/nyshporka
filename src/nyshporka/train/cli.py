@@ -566,13 +566,16 @@ def promote_cmd(
     label: str = typer.Option("", "--label", help="або мітка: best | epNN"),
     force: bool = typer.Option(False, "--force",
                                help="без заміру на holdout або поверх наявного файла"),
+    license_: str = typer.Option("", "--license",
+                                 help="ліцензія в картці; типово CC BY-NC-SA 4.0, від ваг "
+                                      "під CC BY-SA 4.0 — CC BY-SA 4.0 (ShareAlike)"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Зробити чекпойнт бойовою моделлю: копія у data/spotter/models, картка, PRODUCTION.json."""
     from nyshporka import ops as O
 
     env = O.call("train.promote", {"run": run, "as_name": as_name, "why": why, "epoch": epoch,
-                                   "label": label, "force": force})
+                                   "label": label, "force": force, "license": license_})
     if _answer(env, as_json):
         return
     console.print(f"🏆 {env.data['model']}  [muted]{env.data['production']}[/muted]")

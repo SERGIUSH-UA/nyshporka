@@ -53,8 +53,12 @@ the case AGPL covers.
 ⚠ The `strhub` package contains the `models/abinet` submodule under a non-commercial
 USTC licence. Nyshporka uses **only PARSeq** from it (Apache-2.0).
 
-**Model weights are separate, under [CC BY-SA 4.0](https://github.com/SERGIUSH-UA/nyshporka/blob/main/LICENSE-MODELS.md).** They are not
-in the package, they come in a separate release, and AGPL has no
-defined “corresponding source code” for binary weights — so it would protect nothing, yet
-it would put off those who want to use them honestly. The terms are the same in spirit: free,
-including commercially, with attribution, and fine-tuned weights stay open.
+**Model weights are separate, under [CC BY-SA 4.0 and CC BY-NC-SA 4.0](https://github.com/SERGIUSH-UA/nyshporka/blob/main/LICENSE-MODELS.md).** They are not
+in the package, they come in separate releases, and AGPL has no
+defined “corresponding source code” for binary weights — so it would protect nothing.
+Weights released before 0.37.0 stay under CC BY-SA 4.0: free, including
+commercially, with attribution, and fine-tuned weights stay open. Weights
+released from 0.37.0 on are under CC BY-NC-SA 4.0 with an additional permission:
+a natural person may use them in paid genealogical research they carry out
+themselves, including for clients. Embedding them in someone else's product,
+service or API requires written permission (info@nyshporka.online).

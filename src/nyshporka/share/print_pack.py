@@ -27,6 +27,7 @@ from typing import Any
 from nyshporka import vydannia
 from nyshporka.share import bundle, gates, journal
 from nyshporka.share.bundle import Manifest
+from nyshporka.share.profile import DEFAULT_LICENSE
 from nyshporka.share.publish import PublishError
 
 #: Одиниця сторінки пакета: друкована сторінка або цілий номер, коли меж
@@ -63,7 +64,7 @@ def pack_print(src: Path, code: str, year: int, *, title: str,
                issues: list[dict[str, Any]] | None = None,
                publisher: str = "", contact: str = "", site: str = "",
                note: str = "", links: list[dict[str, str]] | None = None,
-               license_text: str = "CC0-1.0", source_terms: str = "",
+               license_text: str = DEFAULT_LICENSE, source_terms: str = "",
                doc_type: str = "",
                dest: Path | None = None, dry_run: bool = False) -> dict[str, Any]:
     """Зібрати пакет одного року видання з теки сторінок.

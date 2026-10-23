@@ -212,6 +212,12 @@ ALLOW: tuple[tuple[str, str], ...] = (
     # не чиясь особиста. Точково: те саме прізвище чи адреса деінде — знахідка.
     ("TRADEMARKS.md", "clan-surname"),
     ("TRADEMARKS.md", "contact-email"),
+    # Та сама публічна скринька — адреса для комерційної ліцензії ваг (з 0.37.0):
+    # умови її називають, щоб дозвіл було в кого просити.
+    ("LICENSE-MODELS.md", "contact-email"),
+    ("README.md", "contact-email"),
+    ("CHANGELOG.md", "contact-email"),
+    ("docs/signing*.md", "contact-email"),
 )
 
 

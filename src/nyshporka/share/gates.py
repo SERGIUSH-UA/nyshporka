@@ -255,7 +255,7 @@ def _known_archive(repo: str) -> bool:
 def _gate_license(m: Manifest, v: Verdict) -> None:
     if not str(m.license.get("text") or "").strip():
         v.refuse("не вказано ліцензію тексту. Без неї отримувач не знає, що з "
-                 "цим можна робити: --license CC0-1.0",
+                 "цим можна робити: --license CC-BY-NC-SA-4.0",
                  rule="no_license", field="license.text")
 
 

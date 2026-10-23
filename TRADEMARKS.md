@@ -9,8 +9,8 @@
 Ліцензії проєкту дають права на код, ваги моделей і тексти, але не на назви:
 
 * код — [AGPL-3.0-or-later](LICENSE): це ліцензія на авторське право, а розділ 7(e) дозволяє окремо відмовити в правах на торговельні марки й назви, що й зроблено цим файлом;
-* ваги моделей — [CC BY-SA 4.0](LICENSE-MODELS.md), розділ 2(b)(2): права на торговельні марки не ліцензуються;
-* тексти в Супрязі — ліцензія, яку обрав вкладник (типово CC0-1.0, розділ 4(a): права на торговельні марки не зачіпаються).
+* ваги моделей — [CC BY-SA 4.0 і CC BY-NC-SA 4.0](LICENSE-MODELS.md), розділ 2(b)(2) обох: права на торговельні марки не ліцензуються;
+* тексти в Супрязі — ліцензія, яку обрав вкладник: типова для нових внесків — CC BY-NC-SA 4.0 (розділ 2(b)(2): права на торговельні марки не ліцензуються), для внесків до 0.37.0 — CC0-1.0 (розділ 4(a): права на торговельні марки не зачіпаються).
 
 ## 1. Можна без дозволу
 
@@ -64,7 +64,8 @@ archival cases on that site. These names, together with the logo, mascot and sea
 Dalishchynskyi, and have been used for the project since August 2026. None of the
 project's licences grants rights to these marks: the AGPL-3.0-or-later is a copyright
 licence and its §7(e) lets the author decline trademark rights, which this file does;
-CC BY-SA 4.0 (§2(b)(2), model weights) and CC0-1.0 (§4(a), default for texts) exclude
+CC BY-SA 4.0 and CC BY-NC-SA 4.0 (§2(b)(2), model weights and the default for new
+texts) and CC0-1.0 (§4(a), the default for texts shared before 0.37.0) exclude
 trademark rights explicitly.
 
 1. **Allowed without permission:** referring to the project in articles, posts, videos,

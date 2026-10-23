@@ -63,7 +63,7 @@ podane i o nic nie pyta (dla skryptów i instalatora).
 |---|---|---|
 | pseudonim w katalogu | `--as` | bez imienia |
 | kontakt (publiczny) | `--contact`, usunąć — `--contact -` | brak |
-| licencja tekstu | `--license` | `CC0-1.0` |
+| licencja tekstu | `--license` | `CC-BY-NC-SA-4.0` |
 | kiedy przekazywać | `--consent nikoly \| pytaty \| zavzhdy` | `pytaty` — prowadzić listę i przypominać |
 | pytać pulę przed odczytem | `--lookup / --no-lookup` | **nie** |
 | geometria wierszy | `--geometry / --no-geometry` | tak |
@@ -351,6 +351,7 @@ nysh share stats         # скільки віддано, скільки при�
 ## Licencja
 
 Pakiet mówi, na jakich warunkach przekazywany jest tekst (`--license`,
-domyślnie `CC0-1.0`), i osobno — warunki źródła skanów (`--source-terms`),
+domyślnie `CC-BY-NC-SA-4.0`), i osobno — warunki źródła skanów (`--source-terms`),
 jeśli istnieją. Bez licencji pakiet się nie złoży: odbiorca musi wiedzieć, co
 wolno z tym robić.
+Wkłady przekazane przed 0.37.0 z dawną domyślną licencją CC0-1.0 pozostają na niej.

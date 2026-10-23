@@ -61,7 +61,7 @@ only records what was given and asks nothing (for scripts and the installer).
 |---|---|---|
 | pseudonym in the catalogue | `--as` | no name |
 | contact (public) | `--contact`, to remove — `--contact -` | none |
-| text licence | `--license` | `CC0-1.0` |
+| text licence | `--license` | `CC-BY-NC-SA-4.0` |
 | when to share | `--consent nikoly \| pytaty \| zavzhdy` | `pytaty` — keep a list and remind |
 | ask the pool before reading | `--lookup / --no-lookup` | **no** |
 | line positions | `--geometry / --no-geometry` | yes |
@@ -339,6 +339,7 @@ nysh share stats         # скільки віддано, скільки при�
 
 ## Licence
 
-The package states on what terms the text is shared (`--license`, `CC0-1.0` by default),
+The package states on what terms the text is shared (`--license`, `CC-BY-NC-SA-4.0` by default),
 and separately the terms of the scan source (`--source-terms`), if there are any. Without a licence
 the package will not be built: the recipient has to know what they may do with it.
+Contributions shared before 0.37.0 with the former default CC0-1.0 stay under it.

@@ -57,9 +57,13 @@ pe care îl acoperă AGPL.
 ⚠ Pachetul `strhub` conține submodulul `models/abinet` sub licența
 non-comercială USTC. Nyshporka folosește din el **doar PARSeq** (Apache-2.0).
 
-**Ponderile modelelor — separat, sub [CC BY-SA 4.0](https://github.com/SERGIUSH-UA/nyshporka/blob/main/LICENSE-MODELS.md).** Ele
-nu se află în pachet, vin într-o versiune separată, iar AGPL nu are pentru
+**Ponderile modelelor — separat, sub [CC BY-SA 4.0 și CC BY-NC-SA 4.0](https://github.com/SERGIUSH-UA/nyshporka/blob/main/LICENSE-MODELS.md).** Ele
+nu se află în pachet, vin în versiuni separate, iar AGPL nu are pentru
 ponderile binare un „cod sursă corespunzător” definit — adică nu ar proteja
-nimic, în schimb i-ar descuraja pe cei care vor să le folosească cinstit.
-Condițiile sunt aceleași în spirit: liber, inclusiv comercial, cu atribuire,
-iar ponderile antrenate suplimentar rămân deschise.
+nimic. Ponderile publicate înainte de 0.37.0 rămân sub CC BY-SA 4.0: liber,
+inclusiv comercial, cu atribuire, iar ponderile antrenate suplimentar rămân
+deschise. Ponderile publicate începând cu 0.37.0 sunt sub CC BY-NC-SA 4.0 cu o
+permisiune suplimentară: o persoană fizică le poate folosi în cercetări
+genealogice plătite pe care le face ea însăși, inclusiv la comanda clienților.
+Integrarea lor în produsul, serviciul sau API-ul altcuiva cere permisiune
+scrisă (info@nyshporka.online).

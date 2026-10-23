@@ -337,6 +337,8 @@ class PromoteArgs(BaseModel):
     epoch: int = Field(default=-1, description="номер епохи; -1 — переможець за recall")
     label: str = Field(default="", description="або мітка: best | epNN")
     force: bool = Field(default=False, description="без select.json / поверх наявного файла")
+    license: str = Field(default="", description="ліцензія в картці; порожньо — CC BY-NC-SA 4.0, "
+                         "а від ваг, випущених під CC BY-SA 4.0, — CC BY-SA 4.0 (ShareAlike)")
 
 
 @op("train.promote", summary="Зробити чекпойнт бойовою моделлю: копія, картка, PRODUCTION.json",
@@ -348,7 +350,8 @@ def train_promote(a: PromoteArgs) -> Envelope:
 
     try:
         got = P.promote(a.run, as_name=a.as_name, why=a.why,
-                        epoch=None if a.epoch < 0 else a.epoch, label=a.label, force=a.force)
+                        epoch=None if a.epoch < 0 else a.epoch, label=a.label, force=a.force,
+                        license=a.license)
     except (P.PromoteError, Exception) as exc:
         return fail(str(exc))
     env = ok(got)

@@ -59,9 +59,13 @@ précisément le cas que couvre l'AGPL.
 ⚠ Le paquet `strhub` contient le sous-module `models/abinet` sous une licence non
 commerciale de l'USTC. Nyshporka n'en utilise **que PARSeq** (Apache-2.0).
 
-**Les poids des modèles — à part, sous [CC BY-SA 4.0](https://github.com/SERGIUSH-UA/nyshporka/blob/main/LICENSE-MODELS.md).** Ils ne
-sont pas dans le paquet, ils arrivent par une version publiée séparée, et l'AGPL ne
-définit pas de « code source correspondant » pour des poids binaires — elle ne
-protégerait donc rien, mais rebuterait ceux qui veulent les utiliser honnêtement.
-Les conditions sont les mêmes dans l'esprit : libre, y compris commercialement,
-avec attribution, et les poids affinés restent ouverts.
+**Les poids des modèles — à part, sous [CC BY-SA 4.0 et CC BY-NC-SA 4.0](https://github.com/SERGIUSH-UA/nyshporka/blob/main/LICENSE-MODELS.md).** Ils ne
+sont pas dans le paquet, ils arrivent par des versions publiées séparées, et l'AGPL ne
+définit pas de « code source correspondant » pour des poids binaires — elle ne
+protégerait donc rien. Les poids publiés avant la 0.37.0 restent sous
+CC BY-SA 4.0 : libre, y compris commercialement, avec attribution, et les poids
+affinés restent ouverts. Les poids publiés à partir de la 0.37.0 sont sous
+CC BY-NC-SA 4.0 avec une autorisation supplémentaire : une personne physique peut
+les utiliser pour des recherches généalogiques rémunérées qu'elle mène
+elle-même, y compris pour des clients. Les intégrer dans le produit, le service
+ou l'API d'autrui exige une autorisation écrite (info@nyshporka.online).

@@ -113,3 +113,21 @@ def test_promote_writes_weights_card_and_production(space: W.Workspace) -> None:
     assert got2["previous"][0]["model"] == "pysar_cyr_v18.pt"
     prod = json.loads((dest.parent / "PRODUCTION.json").read_text(encoding="utf-8"))
     assert prod["production"]["cyrillic"]["_previous"][0]["model"] == "pysar_cyr_v18.pt"
+
+
+def test_promote_license_follows_the_base_and_can_be_named() -> None:
+    """Нові ваги — CC BY-NC-SA 4.0; від ваг, випущених під CC BY-SA 4.0, — BY-SA
+    (ShareAlike: інакше картка називала б ліцензію, на яку людина не має права)."""
+    assert P.LICENSE == "CC BY-NC-SA 4.0"
+    assert P.license_for("") == P.LICENSE
+    assert P.license_for("pysar_cyr_v29.pt") == P.LICENSE
+    assert P.license_for(r"D:\models\pysar_cyr_v28.pt") == "CC BY-SA 4.0"
+    assert P.license_for("/srv/m/pysar_cyr_v19.pt") == "CC BY-SA 4.0"
+
+
+def test_promote_writes_the_named_license(space: W.Workspace) -> None:
+    SEL.evaluate("v1__own__deadbeef", predictor=_predictor, ws=space)
+    got = P.promote("v1__own__deadbeef", as_name="pysar_cyr_v18.pt", why="x",
+                    license="CC BY-NC-SA 4.0", ws=space)
+    card = json.loads(Path(got["model"]).with_suffix(".json").read_text(encoding="utf-8"))
+    assert card["license"] == "CC BY-NC-SA 4.0"

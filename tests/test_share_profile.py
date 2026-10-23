@@ -38,6 +38,27 @@ def test_typovo_ne_dilytysia(space: Path) -> None:
     assert got.shares, "«питати» — це все-таки згода вести перелік"
 
 
+def test_typova_licenziia_novykh_vneskiv(space: Path) -> None:
+    """З 0.37.0 типова ліцензія нових внесків — CC BY-NC-SA 4.0, а не CC0.
+
+    CC0, яку старий профіль записав сам, не будучи обраною, переходить на нову;
+    CC0, названа людиною (`share setup --license`), лишається.
+    """
+    from nyshporka import ops as O
+
+    assert P.load().license == P.DEFAULT_LICENSE == "CC-BY-NC-SA-4.0"
+    assert P.pack_defaults()["license"] == "CC-BY-NC-SA-4.0"
+    P.config_path().parent.mkdir(parents=True, exist_ok=True)
+    P.config_path().write_text("handle: x\nlicense: CC0-1.0\nconsent: pytaty\n", encoding="utf-8")
+    assert P.load().license == "CC-BY-NC-SA-4.0", "CC0 зі старого профілю — не вибір"
+    assert O.call("share.setup", {"license": "CC0-1.0"}).ok
+    got = P.load()
+    assert got.license == "CC0-1.0" and got.license_chosen, "названу CC0 не перемічаємо"
+    assert P.pack_defaults()["license"] == "CC0-1.0"
+    assert O.call("share.setup", {"handle": "y"}).ok
+    assert P.load().license == "CC0-1.0", "інша правка профілю вибору не скидає"
+
+
 def test_profil_perezhyvaie_zapys(space: Path) -> None:
     prof = P.load()
     prof.handle = "sergiush"

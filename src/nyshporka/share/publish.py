@@ -25,6 +25,7 @@ from nyshporka.share import (
 )
 from nyshporka.share import segment as SG
 from nyshporka.share.bundle import Manifest
+from nyshporka.share.profile import DEFAULT_LICENSE
 
 
 class PublishError(RuntimeError):
@@ -753,7 +754,7 @@ def build_manifest(scope: str, *,
                    publisher: str = "", contact: str = "", site: str = "",
                    note: str = "", links: list[dict[str, str]] | None = None,
                    extra: dict[str, Any] | None = None,
-                   license_text: str = "CC0-1.0",
+                   license_text: str = DEFAULT_LICENSE,
                    source_terms: str = "",
                    archive_name: str = "",
                    skip_runs: tuple[str, ...] | list[str] = (),

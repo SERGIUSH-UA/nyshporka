@@ -516,6 +516,9 @@ def share_setup(a: ShareSetupArgs) -> Envelope:
     if a.consent and a.consent not in P.CONSENT:
         return fail(f"режим згоди приймає: {', '.join(P.CONSENT)}")
 
+    named = str(a.license or "").strip()
+    if named and named != got.license:
+        got.license_chosen = True
     for field_ in ("handle", "contact", "site", "license", "source_terms", "consent"):
         value = str(getattr(a, field_) or "").strip()
         if value == NONE_MARK and field_ in ("handle", "contact", "site", "source_terms"):

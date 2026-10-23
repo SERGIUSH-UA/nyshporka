@@ -24,6 +24,15 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+#: Типова ліцензія тексту НОВИХ внесків у Супрягу (з 0.37.0; доти — CC0-1.0).
+#: Вкладник може назвати іншу (`--license`, профіль). Наявні внески лишаються
+#: під тією ліцензією, з якою їх віддано: вона записана в маніфесті пакета.
+DEFAULT_LICENSE = "CC-BY-NC-SA-4.0"
+#: Колишня типова. До 0.37.0 профіль записував її у файл і тоді, коли людина
+#: нічого не обирала, тож без позначки `license_chosen` вона означає «не обрано»
+#: і переходить на нову типову (рішення дослідника 23.10.2026).
+OLD_DEFAULT_LICENSE = "CC0-1.0"
+
 #: Ім'я файлу в теці конфігів простору.
 CONFIG_NAME = "supriaha.yaml"
 
@@ -61,7 +70,10 @@ class Profile:
     contact: str = ""
     site: str = ""
     #: Ліцензія тексту за замовчуванням.
-    license: str = "CC0-1.0"
+    license: str = DEFAULT_LICENSE
+    #: Ліцензію людина назвала сама (`share setup --license` чи відповідь, що
+    #: відрізняється від запропонованої). Лише тоді CC0-1.0 лишається CC0-1.0.
+    license_chosen: bool = False
     #: Умови джерела сканів — окремим полем від ліцензії тексту.
     source_terms: str = ""
     #: `nikoly` | `zavzhdy` | `pytaty`
@@ -131,6 +143,8 @@ def load() -> Profile:
     got.extra = {k: v for k, v in raw.items() if k not in known}
     if got.consent not in CONSENT:
         got.consent = PYTATY
+    if got.license == OLD_DEFAULT_LICENSE and not got.license_chosen:
+        got.license = DEFAULT_LICENSE
     return got
 
 
@@ -164,6 +178,6 @@ def pack_defaults(profile: Profile | None = None) -> dict[str, str]:
         "publisher": p.handle,
         "contact": p.contact,
         "site": p.site,
-        "license": p.license or "CC0-1.0",
+        "license": p.license or DEFAULT_LICENSE,
         "source_terms": p.source_terms,
     }

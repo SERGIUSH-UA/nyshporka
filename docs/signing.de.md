@@ -61,9 +61,13 @@ genau der Fall, den die AGPL abdeckt.
 nicht-kommerziellen Lizenz der USTC. Nyshporka verwendet daraus **nur
 PARSeq** (Apache-2.0).
 
-**Die Gewichte der Modelle stehen gesondert unter [CC BY-SA 4.0](https://github.com/SERGIUSH-UA/nyshporka/blob/main/LICENSE-MODELS.md).** Im Paket
-sind sie nicht enthalten, sie kommen mit einem eigenen Release, und die AGPL
+**Die Gewichte der Modelle stehen gesondert unter [CC BY-SA 4.0 und CC BY-NC-SA 4.0](https://github.com/SERGIUSH-UA/nyshporka/blob/main/LICENSE-MODELS.md).** Im Paket
+sind sie nicht enthalten, sie kommen mit eigenen Releases, und die AGPL
 hat für binäre Gewichte keinen definierten „entsprechenden Quellcode“ — sie
-würde also nichts schützen, aber diejenigen abschrecken, die sie redlich
-nutzen wollen. Die Bedingungen sind dem Geist nach dieselben: frei, auch
-kommerziell, mit Namensnennung, und nachtrainierte Gewichte bleiben offen.
+würde also nichts schützen. Gewichte, die vor 0.37.0 veröffentlicht wurden,
+bleiben unter CC BY-SA 4.0: frei, auch kommerziell, mit Namensnennung, und
+nachtrainierte Gewichte bleiben offen. Gewichte ab 0.37.0 stehen unter
+CC BY-NC-SA 4.0 mit einer zusätzlichen Erlaubnis: Eine natürliche Person darf
+sie für bezahlte genealogische Forschung nutzen, die sie selbst durchführt,
+auch im Auftrag von Kunden. Der Einbau in fremde Produkte, Dienste oder APIs
+erfordert eine schriftliche Erlaubnis (info@nyshporka.online).

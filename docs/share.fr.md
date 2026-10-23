@@ -67,7 +67,7 @@ quelle option, il enregistre seulement ce qui est indiqué et ne demande rien
 |---|---|---|
 | pseudonyme au catalogue | `--as` | sans nom |
 | contact (public) | `--contact`, pour le retirer — `--contact -` | aucun |
-| licence du texte | `--license` | `CC0-1.0` |
+| licence du texte | `--license` | `CC-BY-NC-SA-4.0` |
 | quand verser | `--consent nikoly \| pytaty \| zavzhdy` | `pytaty` — tenir une liste et le rappeler |
 | consulter la banque avant une lecture | `--lookup / --no-lookup` | **non** |
 | géométrie des lignes | `--geometry / --no-geometry` | oui |
@@ -373,6 +373,7 @@ nysh share stats         # скільки віддано, скільки при�
 ## Licence
 
 Le paquet indique à quelles conditions le texte est versé (`--license`, par défaut
-`CC0-1.0`) et, à part, les conditions de la source des scans (`--source-terms`),
+`CC-BY-NC-SA-4.0`) et, à part, les conditions de la source des scans (`--source-terms`),
 s'il y en a. Sans licence, le paquet ne se construit pas : le destinataire doit
 savoir ce qu'il peut en faire.
+Les contributions partagées avant la 0.37.0 avec l'ancienne valeur par défaut CC0-1.0 restent sous celle-ci.

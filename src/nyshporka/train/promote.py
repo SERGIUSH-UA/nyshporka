@@ -26,7 +26,23 @@ from nyshporka.train import state as ST
 from nyshporka.utils.atomic import read_json, write_json
 
 NAME_RE = re.compile(r"^pysar_[\w\-]*_v(\d+)[a-z]*\.pt$")
-LICENSE = "CC BY-SA 4.0"
+#: Ліцензія нових ваг (LICENSE-MODELS.md, з 0.37.0).
+LICENSE = "CC BY-NC-SA 4.0"
+#: Ваги, випущені під CC BY-SA 4.0 до 0.37.0 (релізи weights-v1…v3).
+#: 🔴 ShareAlike: дотреноване від них лишається під CC BY-SA 4.0 — інакше
+#: картка називала б ліцензію, на яку людина не має права.
+LICENSE_SHAREALIKE = "CC BY-SA 4.0"
+SHAREALIKE_BASES = frozenset({
+    "pysar_cyr_v17.pt", "pysar_cyr_v19.pt", "pysar_cyr_v28.pt",
+    "diak_cyr_v4.mlmodel", "diak_cyr_v6.safetensors", "diak_cyr_v10.safetensors",
+    "skryba_f792_v6.mlmodel", "skryba_pp_v3.safetensors",
+})
+
+
+def license_for(base: str) -> str:
+    """Типова ліцензія картки за основою, від якої дотреновано."""
+    name = base.replace("\\", "/").rsplit("/", 1)[-1]
+    return LICENSE_SHAREALIKE if name in SHAREALIKE_BASES else LICENSE
 
 
 class PromoteError(ValueError):
@@ -48,7 +64,7 @@ def _ckpt_for(st: ST.RunState, epoch: int | None, label: str, ws: Workspace) -> 
 
 def promote(run_id: str, *, as_name: str, why: str, epoch: int | None = None,
             label: str = "", force: bool = False, script: str = "cyrillic",
-            ws: Workspace | None = None) -> dict[str, Any]:
+            license: str = "", ws: Workspace | None = None) -> dict[str, Any]:
     w = ws if ws is not None else workspace()
     if not NAME_RE.match(as_name):
         raise PromoteError(f"ім'я «{as_name}» не пройде вибір моделі: потрібно "
@@ -85,7 +101,8 @@ def promote(run_id: str, *, as_name: str, why: str, epoch: int | None = None,
             "sets": sel.get("sets"), "micro": (sel.get("micro") or {}).get(lbl),
             "macro": (sel.get("macro") or {}).get(lbl), "thresh": sel.get("thresh"),
             "winner_recall": sel.get("winner_recall")},
-        "why": why.strip(), "license": LICENSE, "forced": bool(force and sel is None),
+        "why": why.strip(), "license": license.strip() or license_for(base),
+        "forced": bool(force and sel is None),
         "created": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     write_json(dest_dir / (as_name[:-3] + ".json"), card)

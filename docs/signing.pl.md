@@ -56,9 +56,12 @@ AGPL obejmuje.
 ⚠ Pakiet `strhub` zawiera podmoduł `models/abinet` na niekomercyjnej licencji
 USTC. Nyshporka korzysta z niego **tylko z PARSeq** (Apache-2.0).
 
-**Wagi modeli — osobno, na licencji [CC BY-SA 4.0](https://github.com/SERGIUSH-UA/nyshporka/blob/main/LICENSE-MODELS.md).** W pakiecie ich
-nie ma, przychodzą osobnym wydaniem, a AGPL dla binarnych wag nie ma
-określonego „odpowiedniego kodu źródłowego” — czyli niczego by nie chroniła, za
-to odstraszałaby tych, którzy chcą użyć ich uczciwie. Warunki są te same w
-duchu: swobodnie, także komercyjnie, z podaniem autorstwa, a douczone wagi
-pozostają otwarte.
+**Wagi modeli — osobno, na licencjach [CC BY-SA 4.0 i CC BY-NC-SA 4.0](https://github.com/SERGIUSH-UA/nyshporka/blob/main/LICENSE-MODELS.md).** W pakiecie ich
+nie ma, przychodzą osobnymi wydaniami, a AGPL dla binarnych wag nie ma
+określonego „odpowiedniego kodu źródłowego” — czyli niczego by nie chroniła.
+Wagi wydane przed 0.37.0 pozostają na CC BY-SA 4.0: swobodnie, także
+komercyjnie, z podaniem autorstwa, a douczone wagi pozostają otwarte. Wagi
+wydane od 0.37.0 są na CC BY-NC-SA 4.0 z dodatkowym zezwoleniem: osoba fizyczna
+może używać ich w płatnych badaniach genealogicznych, które prowadzi sama,
+także na zlecenie klientów. Wbudowanie ich w cudzy produkt, usługę lub API
+wymaga pisemnej zgody (info@nyshporka.online).

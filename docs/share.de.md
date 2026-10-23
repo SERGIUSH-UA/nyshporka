@@ -69,7 +69,7 @@ Installationsprogramm).
 |---|---|---|
 | Pseudonym im Katalog | `--as` | ohne Namen |
 | Kontakt (öffentlich) | `--contact`, entfernen — `--contact -` | keiner |
-| Lizenz des Textes | `--license` | `CC0-1.0` |
+| Lizenz des Textes | `--license` | `CC-BY-NC-SA-4.0` |
 | wann teilen | `--consent nikoly \| pytaty \| zavzhdy` | `pytaty` — Liste führen und erinnern |
 | vor dem Lesen im Pool nachfragen | `--lookup / --no-lookup` | **nein** |
 | Zeilenpositionen | `--geometry / --no-geometry` | ja |
@@ -379,6 +379,7 @@ nysh share stats         # скільки віддано, скільки при�
 ## Lizenz
 
 Das Paket nennt, zu welchen Bedingungen der Text geteilt wird (`--license`,
-standardmäßig `CC0-1.0`), und gesondert die Bedingungen der Scanquelle
+standardmäßig `CC-BY-NC-SA-4.0`), und gesondert die Bedingungen der Scanquelle
 (`--source-terms`), falls es welche gibt. Ohne Lizenz lässt sich das Paket
 nicht zusammenstellen: Der Empfänger muss wissen, was er damit tun darf.
+Beiträge, die vor 0.37.0 mit der früheren Voreinstellung CC0-1.0 geteilt wurden, bleiben unter ihr.

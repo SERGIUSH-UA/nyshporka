@@ -66,7 +66,7 @@ instalare).
 |---|---|---|
 | pseudonim în catalog | `--as` | fără nume |
 | contact (public) | `--contact`, ștergere — `--contact -` | nu există |
-| licența textului | `--license` | `CC0-1.0` |
+| licența textului | `--license` | `CC-BY-NC-SA-4.0` |
 | când se oferă | `--consent nikoly \| pytaty \| zavzhdy` | `pytaty` — ține lista și amintește |
 | întreabă banca comună înaintea citirii | `--lookup / --no-lookup` | **nu** |
 | contururile rândurilor | `--geometry / --no-geometry` | da |
@@ -366,6 +366,7 @@ nysh share stats         # скільки віддано, скільки при�
 ## Licență
 
 Pachetul numește condițiile în care se oferă textul (`--license`, implicit
-`CC0-1.0`) și, separat, condițiile sursei scanărilor (`--source-terms`), dacă
+`CC-BY-NC-SA-4.0`) și, separat, condițiile sursei scanărilor (`--source-terms`), dacă
 există. Fără licență pachetul nu se va asambla: destinatarul trebuie să știe
 ce poate face cu el.
+Contribuțiile date înainte de 0.37.0 cu vechea licență implicită CC0-1.0 rămân sub ea.
