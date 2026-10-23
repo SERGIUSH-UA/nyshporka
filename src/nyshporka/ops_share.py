@@ -551,6 +551,14 @@ class ShareSuggestArgs(_CardFields):
     ready: bool = Field(default=False, description="лише готові до віддачі й ті, де "
                                                    "в пулі бракує рамок")
 
+    def only_shows(self) -> bool:
+        """Перелік без `take`/`all`/`skip` нічого не пише — пульс не б'є.
+
+        Доти кожне відкриття «Віддати» оголошувало дані зміненими, і саме цим
+        скидало кеш власного переліку (`share.suggest._MEMO`).
+        """
+        return not (self.take or self.all or self.skip)
+
 
 @op("share.suggest", summary="Що прочитано, але ще не віддано",
     args=ShareSuggestArgs, mutates=True, section=SECTION,

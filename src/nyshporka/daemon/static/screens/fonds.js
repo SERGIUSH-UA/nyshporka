@@ -255,7 +255,7 @@ async function fondLoad(full = false) {
     ${(d.rows || []).length ? `<div class="tbl-wide"><table class="tbl-cards"><thead><tr>
       <th>${t('fonds.col.shifra')}</th><th>${t('fonds.col.title')}</th>
       <th>${t('fonds.col.years')}</th><th class="num">${t('fonds.col.folios')}</th>
-      <th class="num">${t('fonds.col.dv')}</th><th>${t('fonds.col.scan')}</th>
+      <th class="num" title="${t('fonds.col.dv.why')}">${t('fonds.col.dv')}</th><th>${t('fonds.col.scan')}</th>
       <th>${t('fonds.col.disk')}</th>
       <th class="num" title="${t('fonds.col.conf.why')}">${t('fonds.col.conf')}</th>
       <th></th></tr></thead><tbody>

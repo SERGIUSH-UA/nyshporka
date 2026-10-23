@@ -1,9 +1,10 @@
 /** 👁 Облік переглянутого оком. */
 
+import { fmtDay, ratioBar } from '../core/bits.js';
 import { t, LANG } from '../core/strings.js';
 import { TOKEN, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
-  renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
+  renderWarnings, renderCoverage, curGen, alive, mini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { SECTIONS, NAV_LABEL, show, renderNav,
   refreshJobs } from '../core/nav.js';
@@ -36,7 +37,7 @@ SCREENS.eye = async () => {
       <button type="submit">${t('eye.check')}</button>
     </form>
     <div id="hits"></div>`);
-  if (!e.case) return;
+  if (!e.case) { await eyeRecent(curGen()); return; }
   await ACTIONS['eye.check']({
     preventDefault() {}, target: el('view').querySelector('form') });
   // Скан, на якому спрацював пошук, підставляється у форму занесення: людина
@@ -45,7 +46,33 @@ SCREENS.eye = async () => {
   if (note && e.scan) note.querySelector('input[name="scan"]').value = e.scan;
 };
 
+/**
+ * Поки справу не вибрано — справи, де аркуші помічали останніми (`pages.recent`):
+ * повернутись до вчорашньої справи одним кліком, а не згадувати шифру.
+ */
+async function eyeRecent(gen) {
+  const box = el('hits');
+  if (!box) return;
+  box.innerHTML = `<div class="read-picks">${skelCards(3)}</div>`;
+  const env = await callOp('pages.recent', { limit: 9 });
+  if (!alive(gen)) return;
+  const rows = env.ok ? ((env.data || {}).rows || []).filter((r) => r.shifra || r.key) : [];
+  if (!rows.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `<h3 class="sub-h">${t('eye.recent')}</h3><div class="read-picks">${rows.map((r) => `
+    <button class="card" data-act="eye.pick" data-arg="${esc(r.shifra || r.key)}">
+      ${mini('lupa', 40)}<span><b>${esc(r.shifra || r.key)}</b><small>${esc(r.title || '')}</small>
+      <small class="muted">${esc(t('eye.recent.n').replace('{n}', r.pages).replace('{f}', r.full))} · ${esc(fmtDay(String(r.updated || '').slice(0, 10)))}</small>
+      ${ratioBar(r.full, r.pages)}</span></button>`).join('')}</div>`;
+}
+
 Object.assign(ACTIONS, {
+  'eye.pick': (_ev, elm) => {
+    const form = el('view').querySelector('form[data-act="eye.check"]');
+    const input = form && form.querySelector('input[name="case"]');
+    if (!input) return undefined;
+    input.value = elm.dataset.arg;
+    return ACTIONS['eye.check']({ preventDefault() {}, target: form });
+  },
   // 🔴 Спершу план, і лише окремою кнопкою — старт. Справа читається годинами;
   // дізнатись «модель не та» або «кадрів не 20, а 3000» після запуску означає
   // втратити ніч.

@@ -149,6 +149,11 @@ def _only_shows(args: Any) -> bool:
     """Змінна оп, покликана в режимі «лише показати», — даних не міняє."""
     # `run=False` у `cloud.go` — кошторис без оренди: після нього реєстр
     # «відставав», хоча в просторі нічого не мінялось (22.10.2026).
+    # Модель аргументів може сказати це сама (`only_shows()`), коли «лише
+    # показати» — не окремий прапорець, а відсутність дії (`share.suggest`).
+    own = getattr(args, "only_shows", None)
+    if callable(own) and own() is True:
+        return True
     return (getattr(args, "show", False) is True
             or getattr(args, "dry_run", False) is True
             or getattr(args, "run", None) is False)

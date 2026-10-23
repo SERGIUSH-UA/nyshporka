@@ -3682,6 +3682,54 @@ def case_show(a: CaseShowArgs) -> Envelope:
 
 
 # ── облік прочитаного ────────────────────────────────────────────────────────
+class PagesRecentArgs(BaseModel):
+    limit: int = Field(default=9, ge=1, le=60, description="скільки справ")
+
+
+@op("pages.recent", summary="Справи, де аркуші помічали оком останніми",
+    args=PagesRecentArgs, mutates=False, section="research",
+    when="що ми останнім дивились оком — повернутись до справи")
+def pages_recent(a: PagesRecentArgs) -> Envelope:
+    """Останні справи сховища сторінок — за часом зміни файлу справи.
+
+    Екран «Переглянуте оком» був полем на порожній сторінці: щоб повернутись до
+    справи, яку дивились учора, треба було пам'ятати її шифру. Читаються лише
+    `limit` найсвіжіших файлів, не все сховище.
+    """
+    import json as _json
+    import os as _os
+    from datetime import datetime as _dt
+
+    from nyshporka.pagestore import store
+
+    root = store.pages_root()
+    found: list[tuple[int, str]] = []
+    if root.is_dir():
+        with _os.scandir(root) as repos:
+            for r in repos:
+                if not r.is_dir():
+                    continue
+                with _os.scandir(r.path) as files:
+                    for f in files:
+                        if f.name.endswith(".json") and f.is_file():
+                            found.append((f.stat().st_mtime_ns, f.path))
+    found.sort(reverse=True)
+    rows: list[dict[str, Any]] = []
+    for mtime, path in found[:a.limit]:
+        try:
+            d = _json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        pages = d.get("pages") or {}
+        rows.append({
+            "key": d.get("key", ""), "shifra": d.get("shifra", ""), "title": d.get("title", ""),
+            "pages": len(pages),
+            "full": sum(1 for v in pages.values() if isinstance(v, dict) and v.get("status") == "full"),
+            "updated": _dt.fromtimestamp(mtime / 1e9).isoformat(timespec="seconds"),
+        })
+    return ok({"rows": rows, "total": len(found)})
+
+
 class PagesStatusArgs(BaseModel):
     case: str = Field(description="справа у будь-якому форматі")
     scans: str = Field(default="", description="кома-список сканів для точкової перевірки")

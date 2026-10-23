@@ -183,7 +183,54 @@ def _status(pages: int, frames: int) -> str:
     return GOTOVA if pages >= GOTOVA_CHASTKA * frames else NEPOVNA
 
 
+#: Перелік неподіленого за ключем «простір + пульс + відбиток тек прогонів».
+#: Пульс б'є на кожну операцію, що пише (віддача, зріз пулу, картка, бібліотека),
+#: а відбиток тек ловить прогін, що закінчився поза операціями. Доти перелік
+#: рахувався наново на кожне відкриття «Віддати» — 3–8 с (замір 23.10.2026).
+_MEMO: tuple[tuple[Any, ...], list[dict[str, Any]]] | None = None
+
+
+def _memo_key() -> tuple[Any, ...]:
+    """Простір, пульс, теки прогонів — і самі файли, з яких складається перелік.
+
+    Файли окремо, бо журнал, картки чи зріз пише не лише операція (пульс), а й
+    код напряму — тоді пульс мовчить, а перелік мусить змінитись.
+    """
+    from nyshporka import htr_store
+    from nyshporka.core import pulse
+    from nyshporka.core.workspace import workspace
+    from nyshporka.library import library_path
+    from nyshporka.share import card, journal, pool
+
+    def stamp(path: Any) -> tuple[int, int]:
+        try:
+            st = path.stat()
+            return (st.st_mtime_ns, st.st_size)
+        except Exception:
+            return (-1, -1)
+
+    files = tuple(stamp(f()) for f in (journal.journal_path, card.cards_path,
+                                       pool.snapshot_path, library_path))
+    return (str(workspace().hub), pulse.seq(), htr_store._runs_stamp(), files)
+
+
 def nepodileni() -> list[dict[str, Any]]:
+    """Перелік неподіленого — з пам'яті, поки ні дані, ні прогони не змінились.
+
+    Копія, а не спільний список: рядки переліку далі доповнюються на місці.
+    """
+    import copy
+
+    global _MEMO
+    key = _memo_key()
+    if _MEMO is not None and _MEMO[0] == key:
+        return copy.deepcopy(_MEMO[1])
+    rows = _nepodileni_now()
+    _MEMO = (key, rows)
+    return copy.deepcopy(rows)
+
+
+def _nepodileni_now() -> list[dict[str, Any]]:
     """Прочитане своїми руками, чого ще немає в Супрязі.
 
     Три відсіви, і кожен має причину:

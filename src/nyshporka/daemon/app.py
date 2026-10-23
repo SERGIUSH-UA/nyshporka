@@ -416,6 +416,28 @@ def _conn_is_loopback(scope: dict[str, Any]) -> bool:
     return is_loopback_host(_conn_server(scope)[0])
 
 
+def _warm_up(space: Workspace) -> None:
+    """Прогріти найдовші переліки у фоні, щойно демон стартував.
+
+    «Віддати» на холодному старті рахується секундами, і саме його людина
+    відкриває першим після перезапуску. Потік фоновий і тихий: невдача тут
+    нічого не ламає, просто перше відкриття порахує саме.
+    """
+    import threading
+
+    def run() -> None:
+        try:
+            from nyshporka import ops as O
+            from nyshporka.core import workspace as W
+
+            with W.using(space):
+                O.call("share.suggest", {})
+        except Exception:
+            pass
+
+    threading.Thread(target=run, name="nysh-warm-up", daemon=True).start()
+
+
 def create_app(ws: Workspace | None = None, *, token: str = "",
                host: str | None = None, access_key: str = "",
                tls: bool = False) -> FastAPI:
@@ -1455,6 +1477,7 @@ def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *,
             else:
                 app = create_app(space)
                 url = f"http://{host}:{port}/{page.lstrip('/')}"
+            _warm_up(space)
             # Старт застосунку — те саме перше враження, що й `nysh info`, тож
             # знак і лінія бренду тут ті самі. Далі вивід перехоплює uvicorn.
             from nyshporka import __version__, brand

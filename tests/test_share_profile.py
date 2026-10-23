@@ -157,6 +157,27 @@ def test_spakovane_znykaie_z_pereliku(space: Path, monkeypatch: Any) -> None:
     assert S.nepodileni() == []
 
 
+def test_perelik_z_pamiati_poky_dani_ti_sami(space: Path, monkeypatch: Any) -> None:
+    """Перелік рахується раз, поки ні дані, ні журнал не змінились (3–8 с на «Віддати»)."""
+    rows = [{"case_key": "DAHMO/315/1", "shifra": "ДАХмО 315-1-1", "pages_done": 3,
+             "shared": "", "updated": "2026-09-20", "frames": 3, "model": "m",
+             "title": ""}]
+    monkeypatch.setattr("nyshporka.htr_store.list_cases", lambda: rows)
+    monkeypatch.setattr(S, "_MEMO", None)
+    calls = {"n": 0}
+    real = S._nepodileni_now
+
+    def counted() -> list[dict[str, Any]]:
+        calls["n"] += 1
+        return real()
+
+    monkeypatch.setattr(S, "_nepodileni_now", counted)
+    assert len(S.nepodileni()) == 1 and len(S.nepodileni()) == 1
+    assert calls["n"] == 1, "той самий перелік порахувано вдруге"
+    journal.record(journal.PACKED, shifra="ДАХмО 315-1-1", case_key="DAHMO/315/1", pages=3)
+    assert S.nepodileni() == [] and calls["n"] == 2, "зміна журналу не скинула пам'ять"
+
+
 def test_nahaduvannia_movchyt_bez_pidstavy(space: Path, monkeypatch: Any) -> None:
     """Порожній перелік — порожній рядок. І жодної мережі."""
     monkeypatch.setattr("nyshporka.htr_store.list_cases", lambda: [])
@@ -386,3 +407,14 @@ def test_perelik_bere_te_same_chyslo_shcho_pakuvannia(space: Path, monkeypatch: 
     assert got["DAHMO/315/6"]["frames_unknown"] == "скани знищено"
     assert (got["DAHMO/315/7"]["status"], got["DAHMO/315/7"]["frames_unknown"]) == (
         S.BEZ_KADRIV, "")
+
+
+def test_perelik_bez_dii_ne_byie_pulsu() -> None:
+    """Відкриття «Віддати» не оголошує дані зміненими — інакше саме скидало б свій кеш."""
+    from nyshporka.core.ops import _only_shows
+    from nyshporka.ops_share import ShareSuggestArgs
+
+    assert _only_shows(ShareSuggestArgs())
+    assert not _only_shows(ShareSuggestArgs(take="ДАХмО 315-1-1"))
+    assert not _only_shows(ShareSuggestArgs(all=True))
+    assert not _only_shows(ShareSuggestArgs(skip="ДАХмО 315-1-1"))
