@@ -1517,3 +1517,23 @@ th { font-family: var(--font-serif); letter-spacing: .1em; }
   #view .ov-hero { min-height: 10rem; }
   #view .vitannia-hero { min-height: 12rem; }
 }
+
+/* ── Аркуш на папері (дослідник, 23.10.2026: «тексти без підкладок важко читати»).
+   У світлій темі папір із дубом — це стіл, а вміст екрана лежить на світлому
+   аркуші: таблиця бібліотеки, абзаци-пояснення, підписи полів, «показано N із M»
+   просто на візерунку губились. Огляди (`home`) — без аркуша: там усе в картках,
+   і папір між ними — частина вигляду. Заголовок сторінки лишається на папері,
+   але на власній смужці-підкладці, бо крихти дрібні. Темна тема паперу не має. */
+:root[data-theme="light"] main.on-sheet > #view {
+  background: color-mix(in srgb, var(--s-2) 90%, transparent);
+  border: 1px solid var(--rim, var(--line-2)); border-radius: var(--r-l); box-shadow: var(--sh-2);
+  padding: 1.1rem 1.25rem 1.3rem; }
+:root[data-theme="light"] main.on-sheet > #view:empty { display: none; }
+:root[data-theme="light"] #shell > main > .phead:not(:empty) {
+  background: color-mix(in srgb, var(--s-2) 72%, transparent); border-radius: var(--r-l);
+  padding: .55rem .9rem .65rem; margin-left: -.15rem; }
+:root[data-theme="light"] #shell > main > .phead.has-art { padding-right: 7.5rem; }
+/* На оглядах між картками лишаються лише заголовки розділів — і їм підкладка. */
+:root[data-theme="light"] main:not(.on-sheet) #view :is(.dash-sec > h3, .hub-projects > h2) {
+  display: flex; width: fit-content; max-width: 100%; padding: .2rem .7rem; border-radius: var(--r-s);
+  background: color-mix(in srgb, var(--s-2) 82%, transparent); }

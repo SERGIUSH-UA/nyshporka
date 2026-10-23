@@ -402,6 +402,9 @@ async function show(screen) {
   // в кожному екрані, бо це властивість розкладки, а не змісту.
   const main = document.querySelector('main');
   if (main) main.classList.toggle('wide', WIDE_SCREENS.includes(screen));
+  // Огляди стоять на папері картками; решта екранів — на аркуші (`app.css`,
+  // «аркуш на папері»): таблиця чи абзац просто на візерунку не читаються.
+  if (main) main.classList.toggle('on-sheet', screen !== 'home');
   // На телефоні меню — висувне: перехід його закриває.
   document.body.classList.remove('side-open');
   sideBtnState();
