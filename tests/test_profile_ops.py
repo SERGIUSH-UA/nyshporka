@@ -460,3 +460,36 @@ def test_a_new_profile_guesses_the_paradigm_from_the_ending(display: str, want: 
 
     assert guess_paradigm(display) == want
     assert want in PARADIGMS
+
+def test_first_clan_names_a_placeholder_workspace_and_spares_a_chosen_name(tmp_path: Path):
+    """🔴 Простір у типовій теці звався «Нишпорка» — як застосунок.
+
+    «Зріз для «Нишпорка»», «Для кого: Нишпорка» (прохід новачка 23.10.2026).
+    Тепер типова тека дає «Моє дослідження», а перший названий рід міняє цю
+    заглушку на «Рід …». Назву, дану людиною, не чіпає ніщо.
+    """
+    from nyshporka import ops as O
+    from nyshporka.core import profile as P
+    from nyshporka.core import workspace as W
+    from nyshporka.setup import wizard
+
+    root = wizard.create(tmp_path / W.DEFAULT_DIRNAME)
+    assert W._read_marker(root / W.MARKER)["name"] == W.DEFAULT_NAME
+    W.use(W._build(root, "test"))
+    P.reset()
+    try:
+        env = O.call("profile.set", {"display": "Гончаренко", "paradigm": "noun_ko"})
+        assert env.ok, env.error
+        assert env.data["workspace_name"] == "Рід Гончаренко"
+        assert W._read_marker(root / W.MARKER)["name"] == "Рід Гончаренко"
+
+        own = wizard.create(tmp_path / "Сидоруки", name="Сидоруки з Поділля")
+        W.use(W._build(own, "test"))
+        P.reset()
+        env = O.call("profile.set", {"display": "Сидорук", "paradigm": "noun_bare"})
+        assert env.ok, env.error
+        assert "workspace_name" not in env.data
+        assert W._read_marker(own / W.MARKER)["name"] == "Сидоруки з Поділля"
+    finally:
+        P.reset()
+        W.reset()

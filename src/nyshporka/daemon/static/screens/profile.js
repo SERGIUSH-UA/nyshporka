@@ -238,6 +238,13 @@ Object.assign(ACTIONS, {
     // що ПОШУК НИМ НЕ КОРИСТУЄТЬСЯ, — і далі читала нулі як відповідь.
     const said = env.warnings && env.warnings.length ? renderWarnings(env) : '';
     toast(t('toast.saved'), { tone: 'ok' });
+    // Простір звався заглушкою («Моє дослідження», «Нишпорка») — і тепер зветься
+    // родом. Назву показують шапка, меню й підписи всіх екранів, тож перечитуємо
+    // сторінку цілком; це трапляється раз на простір.
+    if ((env.data || {}).workspace_name && typeof location !== 'undefined' && location.reload) {
+      location.reload();
+      return undefined;
+    }
     await show('profile');
     const box = el('prof-hits');
     if (box && said) box.innerHTML = said;

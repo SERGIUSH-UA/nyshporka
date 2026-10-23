@@ -4952,6 +4952,11 @@ def profile_set(a: ProfileSetArgs) -> Envelope:
     except ProfileError as exc:
         return fail(str(exc))
     env = ok({**res, **_profile_payload(wrote)})
+    from nyshporka.core.workspace import name_after_clan
+
+    renamed = name_after_clan(wrote.display or wrote.name)
+    if renamed:
+        env.data["workspace_name"] = renamed
     if wrote.name != _active_name():
         env.warn("not_active",
                  f"профіль «{wrote.name}» записано, але шукається зараз інший — "

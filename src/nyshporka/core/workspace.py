@@ -397,6 +397,14 @@ def _looks_like_workspace(path: Path) -> bool:
 #: мовчки: перейменування в одній стороні лишило б другу шукати старе ім'я.
 DEFAULT_DIRNAME = "Нишпорка"
 
+#: Назва простору в типовій теці. 🔴 Доти назвою ставало ім'я теки, тобто
+#: «Нишпорка», як і сам застосунок: «зріз для «Нишпорка»», «прошукано для
+#: «Нишпорка»», «Для кого: Нишпорка» (прохід новачка 23.10.2026).
+DEFAULT_NAME = "Моє дослідження"
+
+#: Назви, які людина не давала — їх замінює перше найменування роду.
+PLACEHOLDER_NAMES = frozenset({DEFAULT_DIRNAME, DEFAULT_NAME})
+
 
 def _home_candidates() -> tuple[Path, ...]:
     """Звичні місця, де може лежати вже створений простір.
@@ -685,6 +693,30 @@ def state_set(**fields: Any) -> None:
                                            ensure_ascii=False))
     except OSError:
         pass  # запам'ятати не вдалось — це зручність, а не умова роботи
+
+
+def name_after_clan(display: str) -> str | None:
+    """Назва-заглушка простору чи проєкту → «Рід <прізвище>». Нова назва або `None`.
+
+    Кличеться, коли людина вперше називає рід: до того простір звався іменем
+    типової теки, і цю назву людина не обирала. Дану людиною не чіпаємо ніколи.
+    """
+    ws = workspace()
+    if not display.strip() or ws.name not in PLACEHOLDER_NAMES or ws.readonly:
+        return None
+    table = "project" if ws.project else "workspace"
+    marker = ws.marker
+    if not marker.is_file():
+        return None
+    import json
+
+    new = f"Рід {display.strip()}"
+    text = marker.read_text(encoding="utf-8")
+    line = "name = " + json.dumps(new, ensure_ascii=False)
+    _write_marker(marker, _marker_set(text, "name", line, table))
+    _replace_current(replace(ws, name=new))
+    _cached.cache_clear()
+    return new
 
 
 def remember(ws: Workspace) -> None:
