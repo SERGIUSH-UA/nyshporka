@@ -97,7 +97,7 @@ def test_when_skill_scope_are_filled_where_they_must_be() -> None:
 
 
 # Дизайн багатопроєктності, розд. 7: проєктні й змішані дії.
-PROJECT = {"text.sheet", "text.verdicts", "library.verdict",
+PROJECT = {"text.sheet", "text.verdicts", "text.verdict", "library.verdict",
            "canon.check", "canon.import", "canon.index", "canon.new_id", "canon.next",
            "site.build", "site.rebuild", "site.status",
            "profile.set", "profile.show", "profile.source", "profile.where",

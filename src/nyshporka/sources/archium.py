@@ -465,7 +465,8 @@ class ArchiumSource:
     # запам'ятовуємо в просторі, і видача показує її замість кнопки.
 
     def _gone_path(self) -> Path | None:
-        return (self.workspace / "data" / "raw" / self.slug / "_crawl" / "gone.json"
+        # Поруч зі станом обходу (`state_rel`) — та сама тека `_crawl` джерела.
+        return (self.workspace / self.state_rel.with_name("gone.json")
                 if self.workspace else None)
 
     def _gone(self) -> dict[str, str]:

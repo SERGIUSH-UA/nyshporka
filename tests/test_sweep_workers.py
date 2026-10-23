@@ -18,7 +18,7 @@ def machine(monkeypatch: pytest.MonkeyPatch):
     import psutil
 
     state = {"cores": 12, "physical": 6, "free_gb": 20.0}
-    monkeypatch.setattr("nyshporka.htr.runner.usable_cores", lambda: state["cores"])
+    monkeypatch.setattr("nyshporka.core.cpu.usable_cores", lambda: state["cores"])
     monkeypatch.setattr(psutil, "cpu_count", lambda logical=True: (
         state["cores"] if logical else state["physical"]))
     monkeypatch.setattr(psutil, "virtual_memory",
