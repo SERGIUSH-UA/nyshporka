@@ -115,6 +115,7 @@ const BT = await import('./core/bits.js');
 const refs = { I9001: 'Іван Сидорук', PL9001: 'Городківка' };
 out.named = BT.named('Чоловік I9001, [[PL9001]], [[I9002|Петро]], **важливо**, I9999', refs);
 out.namedTwice = BT.named('[[I9001]] — це I9001', refs);
+out.namedRest = BT.named('дочка Никити I9036, а свідок I9001', { I9036: 'Никита Леонтійович Сидорук', I9001: 'Іван Сидорук' });
 out.day = [BT.fmtDay('2026-07-23T00:00:00Z'), BT.fmtDay('1993-08-28'), BT.fmtDay('1850')];
 out.forms = BT.fieldValue('name_variants', [{ form: 'Городківка' }, { form: 'Городковка' }]);
 out.md = BT.mdLite(['Вступ', '', '| Справа | Сторінок |', '|---|---|', '| [[I9001]] | 12 |', '',
@@ -310,3 +311,11 @@ def test_empty_viewer_offers_recent_runs(hub) -> None:
     assert "Нещодавно прочитане" in v and 'data-act="view.pick"' in v and 'data-arg="tst_pysar"' in v
     assert "ТЕСТ 1-1-1" in v and "сторінок: 12" in v and "20.10.2026" in v
     assert hub["runsAsked"] and all(a.get("page_size") for a in hub["runsAsked"]), hub["runsAsked"]
+
+
+def test_name_before_an_id_is_not_repeated(hub) -> None:
+    """«Никити I9036» → «Никити Леонтійович Сидорук», а не «Никити Никита Леонтійович…»."""
+    r = hub["namedRest"]
+    assert ">Леонтійович Сидорук</span>" in r and "Никита" not in r.split("title=")[0]
+    assert 'title="Никита Леонтійович Сидорук · I9036"' in r
+    assert ">Іван Сидорук</span>" in r, "ім'я не стоїть перед ID — повністю"

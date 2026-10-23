@@ -284,7 +284,7 @@ def test_canon_shows_check_cards_and_decisions(probe) -> None:
     assert "Іван Сидорук" in c and "I9001" in c
     assert "1 помилка" in c and "мати без джерела" in c
     assert 'data-act="canon.hyp" data-arg="H9001"' in c
-    assert 'title="I9002">Петро Сидорук</span>' in c, "ID у «що вирішити» — ім'ям"
+    assert 'title="Петро Сидорук · I9002">Сидорук</span>' in c, "ID у «що вирішити» — ім'ям"
 
 
 def test_canon_card_window_has_facts_evidence_and_hypotheses(probe) -> None:

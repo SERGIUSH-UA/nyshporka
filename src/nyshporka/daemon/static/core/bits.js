@@ -105,17 +105,26 @@ export function unwiki(text) {
  * полем `refs` відповіді.
  */
 export function named(text, refs = {}) {
-  const name = (rid) => (refs && refs[rid] ? `<span class="ref" title="${esc(rid)}">${esc(refs[rid])}</span>` : esc(rid));
+  const name = (rid, shown = '') => (refs && refs[rid]
+    ? `<span class="ref" title="${esc(shown ? `${refs[rid]} · ${rid}` : rid)}">${esc(shown || refs[rid])}</span>` : esc(rid));
+  // «Никити I9036» — ім'я вже стоїть перед ID (у будь-якому відмінку): тоді
+  // лише решта імені, інакше виходило «Никити Никита Леонтійович» (23.10.2026).
+  const rest = (rid, before) => {
+    const full = String(refs[rid] || '').trim().split(/\s+/);
+    const prev = (before.match(/([\p{L}'’ʼ]+)\s*$/u) || [])[1] || '';
+    const stem = (w) => w.toLowerCase().slice(0, 4);
+    return full.length > 1 && prev.length >= 3 && stem(prev) === stem(full[0]) ? full.slice(1).join(' ') : '';
+  };
   // 🔴 Посилання — ОДНИМ проходом. Доти `[[I9036]]` спершу ставав
   // `<span title="I9036">…</span>`, а наступна заміна голих id знаходила
   // `I9036` уже в атрибуті й вкладала туди другий тег — і в назвах гіпотез
   // проступав сирий HTML (`…"&gt;Никита…`, 65 разів на екрані, QA 23.10.2026).
   return esc(String(text ?? ''))
     .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]|\[\[([^\]]+)\]\]|\b(?:I|F|PL|H)\d{2,}\b|\bS_[A-Za-z0-9_]+\b/g,
-      (m, _rid, label, wiki) => {
+      (m, _rid, label, wiki, at, all) => {
         if (label !== undefined) return label;
         if (wiki !== undefined) return name(wiki);
-        return refs && refs[m] ? name(m) : m;
+        return refs && refs[m] ? name(m, rest(m, all.slice(0, at))) : m;
       })
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
