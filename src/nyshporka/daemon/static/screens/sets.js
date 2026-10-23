@@ -19,7 +19,8 @@ import { SCREENS, ACTIONS } from '../core/registry.js';
 import { goto, onJob, jobChip, jobNotes } from '../core/nav.js';
 import { ST } from '../core/state.js';
 import { ic } from '/ui/icons.js';
-import { attachCombobox } from '/ui/combobox.js';
+import { cbValue } from '/ui/combobox.js';
+import { loadRuns, attachRunPicker } from '../core/runpick.js';
 
 /** Набори, як їх віддав останній `train.sets` — для селектів у формах. */
 let SETS = [];
@@ -148,10 +149,10 @@ async function setsRunHints() {
   if (_runCb) { _runCb.destroy(); _runCb = null; }
   const input = el('view').querySelector('input[name="run"]');
   if (!input) return;
-  const env = await callOp('runs.list', {});
-  if (!env.ok) return;
-  const runs = ((env.data || {}).runs || []).map((r) => r.name).filter(Boolean);
-  _runCb = attachCombobox(input, { items: runs, empty: t('view.run.none') });
+  // Пошуком на сервері, порцією, а не всі прогони (`core/runpick.js`).
+  const runs = await loadRuns('');
+  if (runs === null || !document.contains(input)) return;
+  _runCb = attachRunPicker(input, runs);
 }
 
 /**
@@ -172,6 +173,9 @@ Object.assign(ACTIONS, {
   'sets.cut': async (ev) => {
     ev.preventDefault();
     const fd = Object.fromEntries(new FormData(ev.target).entries());
+    // У полі видно шифру й модель; у дію — ім'я прогону (`cbValue`).
+    const runIn = ev.target.querySelector ? ev.target.querySelector('input[name="run"]') : null;
+    if (runIn) fd.run = cbValue(runIn) || fd.run;
     const free = busyForm(ev.target);
     const env = await callOp('train.cut', { run: fd.run, name: fd.name, pages: fd.pages,
       pick: Number(fd.pick || 0), domain: fd.domain });

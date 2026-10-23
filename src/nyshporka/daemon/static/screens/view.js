@@ -25,12 +25,13 @@ import { t, LANG } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, failure, renderWarnings,
   curGen, alive, mini } from '../core/view.js';
-import { modelName, fmtDay } from '../core/bits.js';
+import { modelName } from '../core/bits.js';
+import { loadRuns, runHint, attachRunPicker } from '../core/runpick.js';
 import { SCREENS, ACTIONS, KEYS } from '../core/registry.js';
 import { ST } from '../core/state.js';
 import { ic, eng } from '/ui/icons.js';
 import { swapHtml, skelCards } from '/ui/dom.js';
-import { attachCombobox, cbValue } from '/ui/combobox.js';
+import { cbValue } from '/ui/combobox.js';
 import { lightbox } from '/ui/lightbox.js';
 import { loadPageFull, readerLabels } from '../core/pageload.js';
 
@@ -100,13 +101,8 @@ SCREENS.view = async () => {
  */
 async function viewRunHints(recent = false) {
   if (_runCb) { _runCb.destroy(); _runCb = null; }
-  // Пошуком на сервері, порцією: прогонів десятки тисяч, і весь перелік
-  // одним запитом коштував 1–2 с на кожне відкриття (замір 23.10.2026).
-  const load = async (q) => {
-    const env = await callOp('runs.list', { q, page_size: 30 });
-    return env.ok ? ((env.data || {}).runs || []) : null;
-  };
-  const runs = await load('');
+  // Пошуком на сервері, порцією (`core/runpick.js`).
+  const runs = await loadRuns('');
   if (runs === null) { const box = el('view-recent'); if (box) box.innerHTML = ''; return; }
   if (recent) viewRecent(runs);
   // 🔴 Знаменник поруч: порожньо в гортачі означає різне при нулі прочитаних
@@ -117,25 +113,7 @@ async function viewRunHints(recent = false) {
   }
   const input = el('view').querySelector('input[name="run"]');
   if (!input) return;
-  _runCb = attachCombobox(input, { items: runs.map(runItem), empty: t('view.run.none') });
-  let timer = null;
-  input.addEventListener('input', () => {
-    clearTimeout(timer);
-    timer = setTimeout(async () => {
-      const got = await load(input.value || '');
-      if (got && _runCb && _runCb.setItems) _runCb.setItems(got.map(runItem));
-    }, 250);
-  });
-}
-
-/** Пункт підказки: шифра й модель, ім'я прогону — у дію. */
-function runItem(r) {
-  return { value: r.name, label: r.shifra ? `${r.shifra} · ${modelName(r.model)}` : r.name, hint: runHint(r) };
-}
-
-function runHint(r) {
-  return [r.title || '', r.pages_done ? t('pull.pages').replace('{n}', r.pages_done) : '',
-    r.updated ? fmtDay(String(r.updated).slice(0, 10)) : ''].filter(Boolean).join(' · ');
+  _runCb = attachRunPicker(input, runs);
 }
 
 /**

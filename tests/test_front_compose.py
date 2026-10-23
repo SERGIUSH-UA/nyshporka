@@ -123,7 +123,10 @@ out.md = BT.mdLite(['Вступ', '', '| Справа | Сторінок |', '|-
 { const asked = []; const f0 = globalThis.fetch;
   globalThis.fetch = async (url, opts) => { if (String(url).includes('runs.list')) asked.push(JSON.parse(opts.body || '{}')); return f0(url, opts); };
   await import('./screens/view.js'); ST.view = null; await SCREENS.view(); await tick(60);
-  out.viewEmpty = (document.getElementById('view-recent') || {}).innerHTML || ''; out.runsAsked = asked; globalThis.fetch = f0; }
+  out.viewEmpty = (document.getElementById('view-recent') || {}).innerHTML || ''; out.runsAsked = asked.slice();
+  asked.length = 0; await import('./screens/runs.js'); await SCREENS.runs(); await tick(40);
+  await ACTIONS['runs.filter'](); await ACTIONS['runs.filter'](); await tick(40);
+  out.runsCalls = asked.length; globalThis.fetch = f0; }
 const SH = await import('./screens/share.js');
 { const t0 = Date.now(); await SCREENS.give(); out.giveMs = Date.now() - t0; }
 out.card = SH.cardRows({ title: 'Сповідка', years: [1801, 1803], places: ['Городківка', 'Липівка'],
@@ -320,3 +323,10 @@ def test_name_before_an_id_is_not_repeated(hub) -> None:
     assert 'title="Никита Леонтійович Сидорук · I9036"' in r
     assert ">Іван Сидорук</span>" in r, "ім'я не стоїть перед ID — повністю"
     assert r.count(">Леонтійович Сидорук</span>") == 2, "і в `[[ID]]` так само"
+
+
+def test_runs_filter_does_not_refetch_and_no_full_lists_for_hints(hub) -> None:
+    """Фільтр і сторінки Прогонів — з уже отриманого; підказки прогону — порцією."""
+    assert hub["runsCalls"] == 1, hub["runsCalls"]
+    for rel in ("screens/sets.js", "screens/view.js"):
+        assert "callOp('runs.list', {})" not in (FRONT_DIR / rel).read_text(encoding="utf-8"), rel

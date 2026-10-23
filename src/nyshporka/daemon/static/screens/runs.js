@@ -42,6 +42,12 @@ const RUNS_PAGE = 25;
 let RUNS_PAGES = 1;
 
 let _runsSeq = 0;
+/**
+ * Остання відповідь `runs.list`. Сторінки й фільтр рахуються з неї на місці:
+ * доти кожна літера в пошуку перепитувала весь перелік (15 тис. прогонів).
+ * Свіжий запит — при вході на екран і після прив'язки справ.
+ */
+let RUNS_ENV = null;
 
 SCREENS.runs = async () => {
   const gen = curGen();
@@ -59,12 +65,13 @@ SCREENS.runs = async () => {
  * перемальовка знищує поле пошуку разом із фокусом, і набране після паузи
  * йде в нікуди.
  */
-async function runsLoad(full = false) {
+async function runsLoad(full = false, fresh = full) {
   const seq = ++_runsSeq;
   const gen = curGen();
-  const env = await callOp('runs.list', {});
+  const env = !fresh && RUNS_ENV ? RUNS_ENV : await callOp('runs.list', {});
   if (seq !== _runsSeq || !alive(gen)) return;
   if (!env.ok) return failure(env);
+  RUNS_ENV = env;
 
   const runs = (env.data || {}).runs || [];
   const groups = runsGroup(runs.filter(runsMatch));
@@ -416,8 +423,8 @@ Object.assign(ACTIONS, {
     const built = await callOp('cases.build', { rescan: false });
     const jid = built.ok ? (built.data || {}).job_id : null;
     BIND_CASES = null;
-    if (!jid) return runsLoad(false);
-    onJob(jid, (j) => { if (j.state === 'done') runsLoad(false); });
+    if (!jid) return runsLoad(false, true);
+    onJob(jid, (j) => { if (j.state === 'done') runsLoad(false, true); });
     return undefined;
   },
 
