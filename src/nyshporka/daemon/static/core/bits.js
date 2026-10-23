@@ -123,7 +123,7 @@ export function named(text, refs = {}) {
     .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]|\[\[([^\]]+)\]\]|\b(?:I|F|PL|H)\d{2,}\b|\bS_[A-Za-z0-9_]+\b/g,
       (m, _rid, label, wiki, at, all) => {
         if (label !== undefined) return label;
-        if (wiki !== undefined) return name(wiki);
+        if (wiki !== undefined) return name(wiki, refs && refs[wiki] ? rest(wiki, all.slice(0, at)) : '');
         return refs && refs[m] ? name(m, rest(m, all.slice(0, at))) : m;
       })
     .replace(/`([^`]+)`/g, '<code>$1</code>')

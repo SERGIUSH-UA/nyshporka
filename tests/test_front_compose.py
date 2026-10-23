@@ -115,7 +115,7 @@ const BT = await import('./core/bits.js');
 const refs = { I9001: 'Іван Сидорук', PL9001: 'Городківка' };
 out.named = BT.named('Чоловік I9001, [[PL9001]], [[I9002|Петро]], **важливо**, I9999', refs);
 out.namedTwice = BT.named('[[I9001]] — це I9001', refs);
-out.namedRest = BT.named('дочка Никити I9036, а свідок I9001', { I9036: 'Никита Леонтійович Сидорук', I9001: 'Іван Сидорук' });
+out.namedRest = BT.named('дочка Никити I9036, а свідок I9001, син Никити [[I9036]]', { I9036: 'Никита Леонтійович Сидорук', I9001: 'Іван Сидорук' });
 out.day = [BT.fmtDay('2026-07-23T00:00:00Z'), BT.fmtDay('1993-08-28'), BT.fmtDay('1850')];
 out.forms = BT.fieldValue('name_variants', [{ form: 'Городківка' }, { form: 'Городковка' }]);
 out.md = BT.mdLite(['Вступ', '', '| Справа | Сторінок |', '|---|---|', '| [[I9001]] | 12 |', '',
@@ -319,3 +319,4 @@ def test_name_before_an_id_is_not_repeated(hub) -> None:
     assert ">Леонтійович Сидорук</span>" in r and "Никита" not in r.split("title=")[0]
     assert 'title="Никита Леонтійович Сидорук · I9036"' in r
     assert ">Іван Сидорук</span>" in r, "ім'я не стоїть перед ID — повністю"
+    assert r.count(">Леонтійович Сидорук</span>") == 2, "і в `[[ID]]` так само"
