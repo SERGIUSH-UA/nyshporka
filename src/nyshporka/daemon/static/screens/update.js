@@ -77,8 +77,8 @@ export function netBox(s, loggedIn) {
   return `<div class="card net-box">
     <label class="chk"><input type="checkbox" data-act="net.set" data-arg="updates"${s.updates ? ' checked' : ''}>
       <span><b>${esc(t('net.updates'))}</b><small class="muted">${esc(t('net.updates.why'))}</small></span></label>
-    <label class="chk"><input type="checkbox" data-act="net.set" data-arg="supriaha"${s.supriaha ? ' checked' : ''}${loggedIn ? '' : ' disabled'}>
-      <span><b>${esc(t('net.sup'))}</b><small class="muted">${esc(loggedIn ? t('net.sup.why') : t('net.sup.login'))}</small></span></label>
+    <label class="chk"><input type="checkbox" data-act="net.set" data-arg="supriaha"${s.supriaha ? ' checked' : ''}>
+      <span><b>${esc(t('net.sup'))}</b><small class="muted">${esc(s.supriaha && !loggedIn ? t('net.sup.login') : t('net.sup.why'))}</small></span></label>
   </div>`;
 }
 

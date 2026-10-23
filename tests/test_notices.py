@@ -195,3 +195,19 @@ def test_mark_read_survives_a_concurrent_refresh(state: Path, monkeypatch: pytes
     N._save(cache, ("latest",))
     got = N._cache()
     assert got["latest"] == "1.0.0" and got["supriaha"]["items"][0]["read"] is True
+
+def test_supriaha_switch_is_never_locked_and_asks_for_login_when_turned_on(
+        state: Path, net: dict[str, int], monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Галочка сповіщень Супряги не блокується: `snapshot` не питає сховище ключів,
+    поки сповіщення вимкнені, тож консоль не знала про вхід і тримала галочку
+    неактивною — увімкнути було неможливо (дослідник, 23.10.2026)."""
+    monkeypatch.setattr(N, "logged_in", lambda: False)
+    env = O.call("settings.net", {"supriaha": True})
+    assert not env.ok and "nysh share login" in env.error
+    assert N.settings()["supriaha"] is False
+    monkeypatch.setattr(N, "logged_in", lambda: True)
+    assert O.call("settings.net", {"supriaha": True}).ok and N.settings()["supriaha"] is True
+    js = (Path(N.__file__).parents[1] / "daemon" / "static" / "screens" / "update.js").read_text(
+        encoding="utf-8")
+    box = js.split("export function netBox")[1].split("Object.assign")[0]
+    assert "disabled" not in box, "галочку Супряги не блокувати — вхід перевіряє settings.net"

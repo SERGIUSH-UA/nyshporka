@@ -35,6 +35,12 @@ def settings_net(a: NetSettingsArgs) -> Envelope:
     """Типово обидва вимкнені: фонової активності в мережі немає (PRIVACY.md)."""
     from nyshporka.setup import notices as N
 
+    # 🔴 Вхід перевіряється тут, у мить, коли людина вмикає сповіщення, а не
+    # заздалегідь у `snapshot`: той сховища ключів не питає, поки сповіщення
+    # вимкнені, тож консоль не знала про вхід і тримала галочку неактивною —
+    # увімкнути сповіщення було неможливо взагалі (дослідник, 23.10.2026).
+    if a.supriaha and not N.logged_in():
+        return fail("щоб отримувати сповіщення Супряги, спершу увійдіть: nysh share login")
     got = N.set_settings(updates=a.updates, supriaha=a.supriaha)
     return ok({**got, "logged_in": N.logged_in()})
 
