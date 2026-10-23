@@ -31,7 +31,7 @@ let SECTIONS = { sections: [], screens: {}, op_screen: {}, presets: {},
 // переглянутого, а не на роботі з кандидатами (холодний прохід 07.10.2026).
 const NAV_ORDER = ['home', 'search', 'canon', 'hyp', 'research', 'profile', 'sources', 'geog', 'fonds',
   'library', 'frames', 'cases', 'read', 'queue', 'runs', 'cloud', 'view', 'sift', 'eye', 'export', 'site',
-  'history', 'give', 'pull', 'cards', 'sets', 'label', 'jobs', 'projects', 'status', 'settings'];
+  'history', 'give', 'pull', 'cards', 'sets', 'label', 'jobs', 'projects', 'status', 'update', 'settings'];
 
 /**
  * Екрани-кроки без власної вкладки → вкладка, яку підсвічувати.
@@ -61,6 +61,7 @@ const NAV_LABEL = {
   newproject: 'nav.newproject', canon: 'nav.canon', hyp: 'nav.hyp', research: 'nav.research',
   history: 'nav.history', cloud: 'nav.cloud', give: 'nav.give', pull: 'nav.pull', cards: 'nav.cards',
   sprofile: 'nav.sprofile', settings: 'nav.settings', projects: 'nav.projects', status: 'nav.status',
+  update: 'nav.update',
 };
 
 /** Чи ввімкнена секція цього екрана. Невідомий екран не блокуємо. */
@@ -207,7 +208,10 @@ function renderNav() {
   const item = (s) => {
     // 🔴 Значок малюється одразу з відомим числом: інакше після перемальовки
     // меню лічильник з'являвся порожнім аж до наступної відповіді черги.
-    const tail = s === 'jobs' ? `<sup id="jobcount">${RUNNING_JOBS || ''}</sup>` : '';
+    const news = ST.news || {};
+    const tail = s === 'jobs' ? `<sup id="jobcount">${RUNNING_JOBS || ''}</sup>`
+      // Крапка «Оновлення»: вийшла версія чи є нові моделі (`core/bell.js`).
+      : s === 'update' ? `<sup class="nav-dot" id="update-dot"${news.newer || (news.models || []).length ? '' : ' hidden'}></sup>` : '';
     return `<button data-act="nav" data-arg="${s}"${s === here ? ' class="on" aria-current="page"' : ''}>`
       + `${icon(icons[s])}<span>${esc(screenLabel(s))}</span>${tail}</button>`;
   };

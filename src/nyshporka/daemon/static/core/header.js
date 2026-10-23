@@ -14,6 +14,7 @@ import { ic } from '/ui/icons.js';
 import { openModal, closeModal, confirmAct } from './modal.js';
 import { renderWarnings } from './view.js';
 import { schemaFormHtml, schemaValues } from './schemaform.js';
+import { bellMenu, fillBell } from './bell.js';
 import { loadProjects, projectColor, projectChip, projectBadge } from './projects.js';
 
 /** Відкрите меню шапки — щоб клік повз нього закривав його. */
@@ -289,7 +290,8 @@ Object.assign(ACTIONS, {
     if (!m) return;
     // Меню ⚙ стоїть у розмітці (мова, тема): його вміст не перебудовується.
     if (id !== 'set-menu') {
-      m.innerHTML = id === 'proj-menu' ? projectMenu() : id === 'jobs-menu' ? jobsMenu() : meMenu();
+      m.innerHTML = id === 'proj-menu' ? projectMenu() : id === 'jobs-menu' ? jobsMenu()
+        : id === 'bell-menu' ? bellMenu() : meMenu();
     }
     m.hidden = false;
     fitMenu(m);
@@ -331,5 +333,6 @@ export function fillHeader() {
   wire();
   fillProject();
   fillMe();
+  fillBell();
 }
 

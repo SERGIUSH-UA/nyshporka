@@ -306,6 +306,10 @@ function busyForm(form) {
 const MASKOT = {
   vitaie: [420, 508], lupa: [560, 647], pratsiuie: [420, 394],
   mapa: [420, 445], kliuch: [420, 420], 'z-doslidnytseiu': [480, 480],
+  // Оновлення й сповіщення (23.10.2026): вийшла версія, ставиться, чекає,
+  // оновлено, дзвонить, пошта — теж процеси й стани, не висновки.
+  vyishlo: [420, 377], onovliuie: [420, 326], chekaie: [420, 379],
+  onovleno: [420, 356], dzvonyt: [420, 316], poshta: [420, 360],
 };
 
 function maskot(pose, width = 150, cls = '') {
@@ -334,7 +338,9 @@ const MINI = ['sumka', 'lupa', 'pero', 'viazka', 'teka', 'derevo', 'pechatka', '
   // прочитане, коробка — каталоги й описи, сито — розбір, ключ — налаштування,
   // картки — канон і Супряга, хата — сайт родини, сувій — звіти, листи з пером —
   // експорт, колба — Лабораторія.
-  'povitrulia', 'lotok', 'knyha', 'arkhiv', 'syto', 'kliuch', 'kartky', 'hata', 'sviy', 'lysty', 'kolba'];
+  'povitrulia', 'lotok', 'knyha', 'arkhiv', 'syto', 'kliuch', 'kartky', 'hata', 'sviy', 'lysty', 'kolba',
+  // про запас і для дзвіночка: ліхтар — «новин немає», телескоп — нова версія.
+  'globus', 'teleskop', 'fotos', 'lihtar', 'pazl', 'chashka'];
 
 function mini(name, size = 48, cls = '') {
   if (!MINI.includes(name)) return '';

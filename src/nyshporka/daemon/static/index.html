@@ -87,6 +87,16 @@
       <span data-i18n="jobs.chip">Працює</span> <b id="jobs-n">0</b></button>
     <div class="hmenu-pop right" id="jobs-menu" hidden></div>
   </div>
+  <!--
+    🔔 Новини: вийшла версія, нові моделі, сповіщення Супряги. Крапка — лише
+    коли є що сказати; сама консоль у мережу не йде, поки людина не ввімкне
+    перевірку (Налаштування → Мережа, PRIVACY.md).
+  -->
+  <div class="hmenu">
+    <button type="button" class="bell" id="bell-chip" data-act="menu.toggle" data-arg="bell-menu"
+      aria-haspopup="true" aria-expanded="false" data-i18n-title="bell.title"><svg class="ic ic-o" aria-hidden="true"><use href="#i-bell"/></svg><b class="bell-n" id="bell-n" hidden></b></button>
+    <div class="hmenu-pop right bell-pop" id="bell-menu" hidden></div>
+  </div>
   <!-- Профіль Супряги: хто ви в спільноті й скільки віддано. -->
   <div class="hmenu">
     <button type="button" class="chip" id="me-chip" data-act="menu.toggle" data-arg="me-menu"

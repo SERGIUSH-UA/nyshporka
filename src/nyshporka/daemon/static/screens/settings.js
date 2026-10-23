@@ -1,7 +1,8 @@
 /** ⚙ Налаштування секцій. */
 
 import { toast } from '../core/bits.js';
-import { t, tOr } from '../core/strings.js';
+import { t, tOr, LANG } from '../core/strings.js';
+import { netBox } from './update.js';
 import { TOKEN, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
   renderWarnings, renderCoverage, curGen, alive, leadMini } from '../core/view.js';
@@ -71,24 +72,24 @@ SCREENS.settings = async () => {
 };
 
 /**
- * ⬆️ Версія й оновлення.
+ * 🌐 Мережа: фонова перевірка оновлень і сповіщення Супряги.
  *
- * 🔴 Шляху оновлення не було ЗОВСІМ: ні команди, ні перевірки версії, ні рядка
- * в переліку — версія показувалась лише в банері старту в консолі. Людина з
- * `.exe`-установленням не мала звідки дізнатись про нову збірку, тож вада,
- * полагоджена вчора, лишалась у неї назавжди.
- *
- * 🔴 Запит до pypi.org іде ЛИШЕ по натисканню. `PRIVACY.md` обіцяє «фонової
- * активності в мережі немає», і перевірка, зроблена сама, порушила б обіцянку
- * заради зручності, якої ніхто не просив.
+ * 🔴 Обидва вимикачі типово вимкнені: `PRIVACY.md` обіцяє «фонової активності в
+ * мережі немає», і консоль іде в мережу сама лише тоді, коли людина це
+ * ввімкнула тут (рішення дослідника 23.10.2026). Що йде і куди — під кожним.
+ * Сама версія, «що нового» й кнопка оновлення — на екрані «Оновлення».
  */
 function renderVersion() {
   const box = el('ver');
   if (!box) return;
-  box.innerHTML = `<h3>${t('ver.title')}</h3>
-    <p class="muted">${t('ver.why')}</p>
-    <p><button data-act="update.check">${t('ver.check')}</button></p>
-    <div id="ver-hits"></div>`;
+  box.innerHTML = `<h3>${t('up.net')}</h3>
+    <p class="muted">${t('net.why')}</p>
+    <div id="net-box"></div>
+    <p><button data-act="nav" data-arg="update">${ic('bell', 'ic-sm')} ${t('nav.update')}</button></p>`;
+  callOp('notices.state', { lang: LANG }).then((env) => {
+    const nb = el('net-box');
+    if (nb && env.ok) nb.innerHTML = netBox((env.data || {}).settings || {}, (env.data || {}).logged_in);
+  });
 }
 
 /**
@@ -124,21 +125,6 @@ async function renderRoots() {
 }
 
 Object.assign(ACTIONS, {
-  /** Спитати pypi.org — рівно тоді, коли попросили. */
-  'update.check': async () => {
-    const env = await callOp('update.check', {});
-    const box = el('ver-hits');
-    if (!box) return;
-    if (!env.ok) { box.innerHTML = `<div class="warn err">${esc(env.error)}</div>`; return; }
-    const d = env.data || {};
-    // 🔴 Три стани, не два. «Не питали» відрізняється від «свіжа»: звести їх
-    // в одне означало б показати спокій там, де його ніхто не перевіряв.
-    const head = !d.known
-      ? `<div class="warn">${esc(d.installed)} · ${t('ver.unknown')}</div>`
-      : `<div class="warn">${d.newer ? ic('arrow-up', 'ic-sm') : ic('check-circle', 'ic-sm')} ${esc(d.installed)} → ${esc(d.latest)}</div>`;
-    box.innerHTML = head + renderWarnings(env)
-      + (d.newer ? `<p class="muted">${t('ver.how')}</p><code>${esc(d.how)}</code>` : '');
-  },
 
   /** 📂 Оголосити нову теку коренем — вибором, а не набором шляху. */
   'roots.pick': async () => {

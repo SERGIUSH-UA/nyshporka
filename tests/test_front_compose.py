@@ -51,6 +51,13 @@ const DATA = {
     script_trust: 'fixed', models: {}, engines: [], done: {}, gaps: [] },
   'queue.status': { items: [], runner: null, counts: {} },
   'share.suggest': { rows: [], count: 0, total: 0, summary: {}, refreshing: true },
+  'notices.state': { installed: '0.36.2', latest: '0.37.0', newer: true, badge: 4, logged_in: true,
+    settings: { updates: false, supriaha: true }, checked_at: 1792700000,
+    releases: [{ version: '0.37.0', title: 'Дзвіночок і оновлення', summary: 'Нова сторінка оновлень.', date: '2026-10-23',
+      url: 'https://nyshporka.online/onovlennia/nyshporka-0-37-0', release: '' }],
+    models: [{ id: 'pysar-cyr-v28', label: 'Писар v28', size: 300000000, reason: 'update' }],
+    supriaha: { unread: 2, items: [{ id: 7, kind: 'novyna', title: 'Вийшла 0.37', url: 'https://nyshporka.online/x',
+      count: 1, alert: false, at: '2026-10-23T10:00:00Z', read: false }] } },
   'runs.list': { runs: [{ name: 'tst_pysar', shifra: 'ТЕСТ 1-1-1', title: 'Сповідка 1801', model: 'pysar_cyr_v28.pt',
     pages_done: 12, updated: '2026-10-20T10:00:00', case_key: 'TEST/1/1/1' }], shown: 1, total: 1 },
   'read.plan': { plan: { frames: 9, script: 'cyrillic', model: 'models/pysar_cyr_v19.pt',
@@ -128,6 +135,11 @@ out.md = BT.mdLite(['Вступ', '', '| Справа | Сторінок |', '|-
   asked.length = 0; await import('./screens/runs.js'); await SCREENS.runs(); await tick(40);
   await ACTIONS['runs.filter'](); await ACTIONS['runs.filter'](); await tick(40);
   out.runsAskedScreen = asked.slice(); globalThis.fetch = f0; }
+{ const BL = await import('./core/bell.js'); await BL.bellLoad(); await tick(20);
+  out.bellN = (document.getElementById('bell-n') || {}).textContent || '';
+  out.bellHidden = !!(document.getElementById('bell-n') || {}).hidden;
+  out.bellMenu = BL.bellMenu();
+  await import('./screens/update.js'); await SCREENS.update(); await tick(60); out.update = view(); }
 const SH = await import('./screens/share.js');
 { const t0 = Date.now(); await SCREENS.give(); out.giveMs = Date.now() - t0; }
 out.card = SH.cardRows({ title: 'Сповідка', years: [1801, 1803], places: ['Городківка', 'Липівка'],
@@ -381,4 +393,23 @@ def test_every_miniature_named_in_code_has_its_file() -> None:
     block = src[src.index("const MINI = ["):src.index("];", src.index("const MINI = ["))]
     names = set(re.findall(r"'([a-z]+)'", block))
     files = {p.stem.removeprefix("mini-") for p in (SHARED_DIR / "img").glob("mini-*.webp")}
-    assert names == files and len(names) == 23, (names ^ files, len(names))
+    assert names == files and len(names) == 29, (names ^ files, len(names))
+
+
+def test_bell_counts_and_lists_the_news(hub) -> None:
+    """Дзвіночок: число новин, нова версія, моделі, непрочитане Супряги; що вимкнено — рядком."""
+    assert hub["bellN"] == "4" and hub["bellHidden"] is False
+    m = hub["bellMenu"]
+    assert "Вийшла Нишпорка 0.37.0" in m and "у вас 0.36.2" in m and 'data-arg="update"' in m
+    assert "Нові моделі: 1" in m and "Писар v28" in m
+    assert 'data-act="bell.open"' in m and "Вийшла 0.37" in m and "unread" in m
+    assert "Перевірка оновлень вимкнена" in m and 'data-arg="settings"' in m
+
+
+def test_update_screen_shows_versions_notes_models_and_switches(hub) -> None:
+    v = hub["update"]
+    assert "maskot-vyishlo" in v, "вийшла нова версія — маскот «вийшло»"
+    assert "0.36.2" in v and "0.37.0" in v and 'data-act="up.apply"' in v
+    assert "Дзвіночок і оновлення" in v and 'href="https://nyshporka.online/onovlennia/nyshporka-0-37-0"' in v
+    assert "Писар v28" in v and 'data-act="up.models"' in v
+    assert 'data-act="net.set" data-arg="updates"' in v and 'data-arg="supriaha" checked' in v

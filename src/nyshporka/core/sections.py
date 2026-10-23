@@ -155,6 +155,7 @@ SCREENS: dict[str, str] = {
     # переїхала з Огляду: Огляд — про продовження роботи, а не про цифри.
     "projects": "core",
     "status": "core",
+    "update": "core",
     # 🔴 «Рід» у `core`, а не в «Дослідженні»: він вирішує, як працює пошук,
     # і замкнути його всередині секції, яку вимикають, означало б «увімкни
     # частину застосунку, щоб налаштувати те, від чого вона залежить».
@@ -209,7 +210,7 @@ SCREENS: dict[str, str] = {
 #: 🔴 `settings` не має гейта навмисно: саме ним вмикають і вимикають секції.
 #: Замкнути його всередині секції означало б, що вимкнена секція неможливо
 #: увімкнути назад — і виглядало б це як поламаний застосунок, а не як вибір.
-UNGATED_SCREENS: frozenset[str] = frozenset({"settings"})
+UNGATED_SCREENS: frozenset[str] = frozenset({"settings", "update"})
 
 
 @dataclass(frozen=True)
@@ -253,7 +254,7 @@ NAV_GROUPS: tuple[NavGroup, ...] = (
     NavGroup("reading", "Читання", "Reading", ("read", "queue", "runs", "cloud", "view")),
     NavGroup("search", "Пошук", "Search", ("search", "eye")),
     NavGroup("share", "Супряга", "Commons", ("give", "pull", "cards")),
-    NavGroup("service", "Сервіс", "Service", ("jobs", "status", "export", "settings"),
+    NavGroup("service", "Сервіс", "Service", ("jobs", "status", "update", "export", "settings"),
              block="service", fold=False),
     NavGroup("lab", "Лабораторія", "Lab", ("sets", "label"), block="service"),
 )
@@ -275,7 +276,7 @@ LAYERS: dict[str, str] = {
     **dict.fromkeys(("projects", "status", "sources", "geog", "fonds", "cases", "newcase", "frames", "read",
                      "queue", "runs", "cloud", "view", "export", "give", "pull", "cards",
                      "sprofile"), "shared"),
-    **dict.fromkeys(("jobs", "sets", "label", "settings", "newproject"), "service"),
+    **dict.fromkeys(("jobs", "sets", "label", "settings", "update", "newproject"), "service"),
 }
 
 #: Дія сторінки — кнопкою в її заголовку.
@@ -361,7 +362,12 @@ OP_SCREEN: dict[str, str] = {
     "profile.source": "profile",
     # ⬆️ Версія й оновлення — у налаштуваннях: питання про застосунок, а не
     # про дослідження.
-    "update.check": "settings",
+    "update.check": "update",
+    "settings.net": "settings",
+    "notices.state": "update",
+    "notices.check": "update",
+    "notices.read": "update",
+    "models.get": "update",
     "sections.show": "settings",
     "sections.set": "settings",
     "job.query": "jobs",

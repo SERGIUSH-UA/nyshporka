@@ -118,7 +118,7 @@ def test_the_version_check_is_reachable_from_a_screen():
     from nyshporka.core.sections import OP_SCREEN
 
     assert "update.check" in REGISTRY.ops
-    assert OP_SCREEN.get("update.check") == "settings"
+    assert OP_SCREEN.get("update.check") == "update"
 
 
 @pytest.mark.parametrize("check", ["Версія"])

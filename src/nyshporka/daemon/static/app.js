@@ -60,6 +60,7 @@ import './screens/sets.js';
 import './screens/label.js';
 import './screens/jobs.js';
 import './screens/settings.js';
+import './screens/update.js';
 import './screens/project.js';
 import './screens/canon.js';
 import './screens/hyp.js';

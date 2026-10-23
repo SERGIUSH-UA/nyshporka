@@ -361,6 +361,10 @@ BUTTON_COMPONENTS = {
     "ctx-btn", "ask", "gear", "side-btn", "thm", "sg-fold", "hm-item",
     "lib-dots", "lb-ch", "lb-do", "scope-btn", "scope-clear", "fld-btn",
     "aside",
+    # Дзвіночок у шапці (той самий рід, що шестерня), рядок сповіщення в його
+    # меню (різновид `hm-item` з крапкою непрочитаного) і «увімкнути» — посилання
+    # всередині речення, а не кнопка-дія.
+    "bell", "bell-item", "linkish",
 }
 
 

@@ -1228,3 +1228,51 @@ details.np-folder > summary { padding: 0; background: none; font-size: .85rem; c
 .site-none { display: inline-flex; align-items: center; gap: .6rem; }
 .warn.empty-mini { padding: .6rem .8rem; }
 @media (max-width: 520px) { .lead-mini .mini { display: none; } }
+
+/* 🔔 Дзвіночок у шапці: крапка-лічильник лише тоді, коли є що сказати.
+   Коли новина з'являється — дзвіночок раз гойднеться (не безкінечно: те, що
+   ворушиться завжди, перестають помічати). */
+.bell { position: relative; background: none; border: 0; color: var(--fg-3); cursor: pointer; padding: 2px 6px; }
+.bell:hover, .bell.lit { color: var(--fg); }
+.bell .ic { width: 1.25rem; height: 1.25rem; transform-origin: 50% 12%; }
+.bell.lit .ic { animation: bell-ring 1.1s ease-in-out 1; }
+.bell-n { position: absolute; top: -3px; right: -2px; min-width: 1.05rem; height: 1.05rem; padding: 0 .25rem;
+  border-radius: var(--r-pill); background: var(--warn); color: var(--bg); font-size: .66rem; font-weight: 700;
+  line-height: 1.05rem; text-align: center; box-shadow: 0 0 0 2px var(--bg); }
+@keyframes bell-ring { 0%, 100% { transform: rotate(0); } 15% { transform: rotate(14deg); } 30% { transform: rotate(-12deg); }
+  45% { transform: rotate(8deg); } 60% { transform: rotate(-5deg); } 75% { transform: rotate(2deg); } }
+@media (prefers-reduced-motion: reduce) { .bell.lit .ic { animation: none; } }
+.bell-pop { width: min(24rem, 92vw); }
+.bell-body { display: grid; gap: .5rem; max-height: 60vh; overflow-y: auto; }
+.bell-news { display: flex; gap: .7rem; align-items: flex-start; padding: .55rem .6rem; border-radius: var(--r-2, 8px);
+  background: color-mix(in srgb, var(--honey) 10%, var(--s-2)); }
+.bell-news > div { display: grid; gap: .25rem; min-width: 0; }
+.bell-news .mini { flex: none; }
+.bell-news button { justify-self: start; margin-top: .2rem; }
+.hmenu-pop .bell-item.unread b { font-weight: 700; }
+.hmenu-pop .bell-item:not(.unread) b { font-weight: 400; color: var(--fg-2); }
+.hmenu-pop .bell-item.alert b { color: var(--err); }
+.hmenu-pop .bell-item.unread::before { content: ""; flex: none; width: 7px; height: 7px; margin: .45rem .5rem 0 0;
+  border-radius: 50%; background: var(--warn); }
+.bell-foot { justify-content: space-between; }
+.linkish { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; text-decoration: underline;
+  font: inherit; }
+#side .nav-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); margin-left: auto; align-self: center; }
+
+/* ⬆️ Екран «Оновлення»: маскот і версії, картки «що нового», моделі, мережа. */
+#view .up-hero { flex-direction: row; align-items: center; gap: 1.2rem; flex-wrap: wrap; }
+.up-hero .maskot { flex: none; filter: drop-shadow(0 3px 5px rgb(0 0 0 / .18)); }
+.up-hero-t { flex: 1 1 16rem; min-width: 0; }
+.up-hero-t h3 { margin: 0 0 .4rem; font-size: 1.35rem; }
+.up-vers { display: flex; align-items: center; gap: .5rem; margin: 0 0 .3rem; }
+.up-acts { display: flex; flex-direction: column; gap: .5rem; }
+.up-rels { display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: .8rem; }
+#view .up-rel { display: grid; gap: .35rem; align-content: start; }
+.up-rel p { margin: 0; color: var(--fg-2); }
+.up-rel a { justify-self: start; }
+#view .up-models { flex-direction: row; align-items: flex-start; gap: 1rem; }
+.up-models ul { margin: 0 0 .6rem; padding-left: 1.1rem; }
+.net-box { display: grid; gap: .8rem; }
+.net-box .chk { display: flex; gap: .6rem; align-items: flex-start; }
+.net-box .chk span { display: grid; gap: .15rem; }
+@media (max-width: 520px) { .up-hero .maskot { width: 110px; height: auto; } .up-acts { flex-direction: row; } }
