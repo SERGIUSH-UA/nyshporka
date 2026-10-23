@@ -302,7 +302,7 @@ def max_hits() -> int:
 def _query_threads() -> int:
     """Потоки на частини термів: доступні ядра (з квотою контейнера), до 8."""
     try:
-        from nyshporka.htr.runner import usable_cores
+        from nyshporka.core.cpu import usable_cores
 
         return max(1, min(QUERY_THREADS, usable_cores()))
     except Exception:

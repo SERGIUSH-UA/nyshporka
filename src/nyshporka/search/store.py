@@ -1487,7 +1487,7 @@ def _blob_chunks(conn: sqlite3.Connection, pids: list[int], *,
         return _blobs_of(c, chunk)
 
     chunks = [pids[i:i + READ_CHUNK] for i in range(0, len(pids), READ_CHUNK)]
-    from nyshporka.htr.runner import usable_cores
+    from nyshporka.core.cpu import usable_cores
 
     threads = max(1, min(READ_THREADS, usable_cores()))
     ex = ThreadPoolExecutor(max_workers=threads)
@@ -1827,7 +1827,7 @@ def sweep_workers(n_blocks: int, *, worker_gb: float = BLOCK_WORKER_GB) -> int:
 
 
 def _hardware_workers(worker_gb: float) -> int:
-    from nyshporka.htr.runner import usable_cores
+    from nyshporka.core.cpu import usable_cores
 
     by_cores = usable_cores()
     try:
