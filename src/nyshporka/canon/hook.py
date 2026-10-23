@@ -141,6 +141,8 @@ def install(root: Path) -> Path:
                             f"`python -m nyshporka canon precommit` руками")
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(hook_script(), encoding="utf-8", newline="\n")
+    # Без біта виконання git на Linux і macOS хук мовчки пропускає.
+    target.chmod(target.stat().st_mode | 0o111)
     return target
 
 

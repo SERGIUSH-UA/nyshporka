@@ -115,7 +115,8 @@ def test_bulk_stamps_and_counts_match_per_run(space: Path, monkeypatch: pytest.M
     stale_one = ST.stale_count(runs[:4])
     monkeypatch.setattr(ST, "BULK_RUNS", 1)
     assert ST.stamps_for(runs) == one
-    assert ST.stamps_for(runs)["ПРОБА-А"] == one["проба-а"] != ""
+    if (space / "reports" / "htr" / "ПРОБА-А").exists():  # тека без регістру: Windows, macOS
+        assert ST.stamps_for(runs)["ПРОБА-А"] == one["проба-а"] != ""
     assert ST.stale_count(runs[:4]) == stale_one == 2  # «в» не зібрано, «немає» немає
     meta = space / "reports" / "htr" / "проба-а" / "_htr_meta.json"
     meta.write_text(meta.read_text(encoding="utf-8") + " ", encoding="utf-8")
@@ -125,13 +126,11 @@ def test_bulk_stamps_and_counts_match_per_run(space: Path, monkeypatch: pytest.M
 def test_bulk_stamp_ignores_case_of_the_run_folder(space: Path,
                                                    monkeypatch: pytest.MonkeyPatch) -> None:
     """Тека з великими літерами, запит малими — той самий прогін, як у `stamp_of` на Windows."""
-    import os
-
     d = space / "reports" / "htr" / "Проба-Верх"
     d.mkdir()
     (d / "_htr_meta.json").write_text("{}", encoding="utf-8")
     want = ST.stamp_of("проба-верх")
-    if os.path.normcase("A") != os.path.normcase("a"):
-        assert want, "на Windows `stamp_of` знаходить теку без регістру"
+    if (d.parent / "проба-верх").exists():
+        assert want, "без регістру (Windows) `stamp_of` знаходить теку"
     monkeypatch.setattr(ST, "BULK_RUNS", 1)
     assert ST.stamps_for(["проба-верх"]) == {"проба-верх": want}
