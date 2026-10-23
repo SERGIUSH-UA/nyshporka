@@ -143,15 +143,17 @@ def token() -> str:
         return ""
 
 
-def _request(method: str, url: str, *, body: Any = None, auth: str = "") -> dict[str, Any]:
+def _request(method: str, url: str, *, body: Any = None, auth: str = "",
+             timeout: float | None = None, attempts: int | None = None) -> dict[str, Any]:
     from nyshporka.sources.http import HttpError
 
     # 🔴 Свій User-Agent, а не браузерний за замовчуванням: пул пише подію на
     # КОЖЕН запит, і клієнт мусить бути в ній відрізнимий від людини у
     # вкладці. Ключ — лише на довірену адресу, 429 («денна норма») — без
     # повторів: шість спроб на відповідь «завтра» лише тримали б людину.
+    strok = {k: v for k, v in (("timeout", timeout), ("attempts", attempts)) if v is not None}
     try:
-        fetcher = catalog._fetcher(url, auth=auth, accept_json=True)
+        fetcher = catalog._fetcher(url, auth=auth, accept_json=True, **strok)
         if method == "POST":
             resp = fetcher.post(url, json_body=body if body is not None else {})
         else:
@@ -175,6 +177,53 @@ def _request(method: str, url: str, *, body: Any = None, auth: str = "") -> dict
     if not isinstance(got, dict):
         raise UploadError("пул відповів не тим, чого чекали")
     return got
+
+
+#: Скільки чекати відповіді `complete`. Пул на ньому читає текст і геометрію зі
+#: сховища, ганяє ворота й переписує підпис у пакетах — на великій справі це
+#: десятки секунд, а коли сховище цідить байти, і хвилини.
+COMPLETE_TIMEOUT = 300.0
+
+#: Звірка стану після обриву `complete`: скільки разів питати й з якою паузою.
+#: 23.10.2026 одна звірка о 18:26:29.9 сказала «не прийнято», а пул прийняв
+#: внесок 11435 о 18:26:34 — і людині пішов хибний збій.
+STAN_SPROB = 12
+STAN_PAUZA = 10.0
+
+
+def _complete(home: str, vnesok: Any, tok: str) -> dict[str, Any]:
+    """`POST …/complete` — одна спроба з довгим строком.
+
+    🔴 Не повторювати сліпо: `complete` не ідемпотентний, поки виконується.
+    23.10.2026 клієнт за 30 с повторив його (`POOL_ATTEMPTS = 2`), пул ганяв
+    обидва разом, підпис першого прибрав зі сховища старий ключ тексту, і
+    другий відповів 409 «у сховищі немає обʼєкта text» про прийнятий внесок
+    11437. Обрив тут розв'язує звірка стану (`_dochekatysia`), а не повтор.
+    """
+    return _request("POST", f"{home}/contributions/{vnesok}/complete", auth=tok,
+                    timeout=COMPLETE_TIMEOUT, attempts=1)
+
+
+def _dochekatysia(home: str, tok: str, vnesok: Any, kazhy: Any = None) -> dict[str, Any] | None:
+    """Після обриву `complete` — дочекатися, доки пул скаже, чим скінчилось.
+
+    Повертає стан, щойно внесок прийнято (`ready`) або відхилено воротами;
+    `None` — за `STAN_SPROB` звірок відповіді не було.
+    """
+    import time
+
+    stan: dict[str, Any] | None = None
+    for sproba in range(STAN_SPROB):
+        if sproba:
+            time.sleep(STAN_PAUZA)
+        stan = _stan_vnesku(home, tok, vnesok)
+        if stan is None:
+            continue
+        if stan.get("ready") or stan.get("status") == "vidkhyleno":
+            return stan
+        if kazhy is not None and sproba == 0:
+            kazhy("пул ще перевіряє пакет — чекаю на його відповідь…")
+    return stan
 
 
 def _adresa_reiestratsii(home: str, replaces: int | None, why: str,
@@ -375,8 +424,7 @@ def _publish(path: Path, *, base: str, auth: str,
             # посилань не видає, а вердикт ніхто не переглядав.
             _tykhyi(say)("пул відхиляв цей текст старими воротами — перевіряє наново…")
             with etapy("complete"):
-                done = _request("POST", f"{home}/contributions/{got['contribution']}"
-                                        "/complete", auth=tok)
+                done = _complete(home, got["contribution"], tok)
             return _public({**got, **done, "duplicate": False, "rejudged": True})
         with etapy("attach_geom"):
             return _public(_attach_geometry(got, path, home=home, tok=tok,
@@ -436,17 +484,23 @@ def _publish(path: Path, *, base: str, auth: str,
         etap = "complete"
         kazhy("пул перевіряє пакет…")
         with etapy("complete"):
-            done = _request("POST", f"{home}/contributions/{vnesok}/complete", auth=tok)
+            done = _complete(home, vnesok, tok)
     except UploadError as exc:
+        # 🔴 429 і 409 на `complete` — не завжди відмова: так відповідає пул,
+        # коли той самий внесок у цю мить перевіряє інший запит (див.
+        # `_complete`). Їх розв'язує стан, як і обрив.
+        sumnivnyi = etap == "complete" and exc.status in (409, 429)
         # Відмову самого пулу (ворота, стеля) сервер уже знає й записав, і
         # повтор тут не допоможе — тому й підказки повторити немає.
-        if exc.status is not None and exc.status < 500:
+        if exc.status is not None and exc.status < 500 and not sumnivnyi:
             raise
         if etap == "complete":
             # 🔴 Обрив на `complete` не каже, чи пул устиг прийняти внесок:
             # відповідь могла загубитись уже після прийняття. Звіт про збій і
             # «повторіть» на прийнятий внесок — неправда, тож спершу питаємо.
-            stan = _stan_vnesku(home, tok, vnesok)
+            stan = _dochekatysia(home, tok, vnesok, kazhy)
+            if sumnivnyi and not (stan is not None and stan.get("ready")):
+                raise
             if stan is not None and stan.get("ready"):
                 kazhy("відповідь пулу загубилась, але внесок прийнято")
                 return _public({**got, **stan, "confirmed_by_state": True,
@@ -743,8 +797,7 @@ def _attach_geometry(got: dict[str, Any], path: Path, *, home: str, tok: str,
     if not url:
         return {**got, "geometry_attach": attach}
     _put(url, geom.read_bytes())
-    done = _request(
-        "POST", f"{home}/contributions/{got['contribution']}/complete", auth=tok)
+    done = _complete(home, got["contribution"], tok)
     return {**got, **done, "geometry_attached": True}
 
 

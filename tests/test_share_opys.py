@@ -217,7 +217,8 @@ def _paket(space: Path, tmp_path: Path) -> Path:
 def _pul(monkeypatch: pytest.MonkeyPatch, dubl: dict[str, Any]) -> list[tuple[str, str]]:
     calls: list[tuple[str, str]] = []
 
-    def _req(method: str, url: str, *, body: Any = None, auth: str = "") -> dict[str, Any]:
+    def _req(method: str, url: str, *, body: Any = None, auth: str = "",
+             **strok: Any) -> dict[str, Any]:
         calls.append((method, url))
         if url.endswith("/contributions"):
             return dict(dubl)

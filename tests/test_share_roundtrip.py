@@ -39,7 +39,7 @@ class Pul:
         self.ready = False
 
     def request(self, method: str, url: str, *, body: Any = None,
-                auth: str = "") -> dict[str, Any]:
+                auth: str = "", **strok: Any) -> dict[str, Any]:
         if url.endswith("/contributions"):
             self.manifest = dict(body)
             return {"contribution": 7, "upload": {"text": "https://r2.invalid/7/text"}}

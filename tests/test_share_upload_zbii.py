@@ -169,6 +169,7 @@ def _pidhotuvaty(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
         return {"ready": True, "status": "nove"}
 
     monkeypatch.setattr(upload, "_request", _request)
+    monkeypatch.setattr(upload, "STAN_PAUZA", 0.0)
     # 🔴 Запасний шлях теж підмінено: інакше кожен тест із відмовою 403 слав
     # справжній PUT на nyshporka.online (журнал сервера 29.09: 35 запитів
     # `…/contributions/1337/text`). За замовчуванням — «пул без запасного»;
@@ -618,6 +619,87 @@ def test_obryv_complete_bez_pidtverdzhennia(monkeypatch: pytest.MonkeyPatch,
 
     assert zvity and zvity[0][1] == "complete"
     assert "Повторіть" in str(ei.value)
+
+
+def test_stan_dochikuietsia_kilka_zvirok(monkeypatch: pytest.MonkeyPatch,
+                                         tmp_path: Path) -> None:
+    """🔴 Перша звірка «не прийнято» — ще не збій: пул міг дорахувати за секунди.
+
+    23.10.2026 внесок 11435 пул прийняв через 4.6 с після єдиної звірки, і
+    людині пішов хибний збій із звітом розробникові.
+    """
+    paket, zvity = _pidhotuvaty(monkeypatch, tmp_path, complete=_obryv)
+    monkeypatch.setattr(upload, "_put", lambda url, blob: None)
+    vidpovidi = iter([{"ready": False, "status": "nove"}, None,
+                      {"ready": True, "status": "nove"}])
+    pytaly: list[Any] = []
+
+    def _stan(home: str, tok: str, vnesok: Any) -> Any:
+        pytaly.append(vnesok)
+        return next(vidpovidi)
+
+    monkeypatch.setattr(upload, "_stan_vnesku", _stan)
+    got = upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
+
+    assert pytaly == [1337, 1337, 1337] and zvity == []
+    assert got["confirmed_by_state"] is True
+
+
+@pytest.mark.parametrize("status", [409, 429])
+def test_konflikt_complete_a_vnesok_pryiniato(monkeypatch: pytest.MonkeyPatch,
+                                              tmp_path: Path, status: int) -> None:
+    """🔴 409/429 на `complete` при живому паралельному запиті — це прийняття.
+
+    23.10.2026 внесок 11437 відповів 409 «у сховищі немає обʼєкта text»:
+    повтор клієнта застав чужий підпис, що вже переклав текст. Внесок лежав
+    у каталозі.
+    """
+    def _konflikt() -> None:
+        raise upload.UploadError("HTTP %d" % status, status=status)
+
+    paket, zvity = _pidhotuvaty(monkeypatch, tmp_path, complete=_konflikt)
+    monkeypatch.setattr(upload, "_put", lambda url, blob: None)
+    monkeypatch.setattr(upload, "_stan_vnesku",
+                        lambda home, tok, vnesok: {"ready": True, "status": "nove"})
+    got = upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
+    assert got["confirmed_by_state"] is True and zvity == []
+
+
+def test_konflikt_complete_bez_pryiniattia_lyshaietsia_vidmovoiu(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """409, а внесок справді не прийнято — та сама відмова, без звіту про обрив."""
+    def _konflikt() -> None:
+        raise upload.UploadError("HTTP 409: немає тексту", status=409)
+
+    paket, zvity = _pidhotuvaty(monkeypatch, tmp_path, complete=_konflikt)
+    monkeypatch.setattr(upload, "_put", lambda url, blob: None)
+    monkeypatch.setattr(upload, "STAN_SPROB", 2)
+    monkeypatch.setattr(upload, "_stan_vnesku",
+                        lambda home, tok, vnesok: {"ready": False, "status": "nove"})
+    with pytest.raises(upload.UploadError) as ei:
+        upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
+    assert ei.value.status == 409 and zvity == []
+
+
+def test_complete_odna_sproba_z_dovhym_strokom(monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 `complete` не повторюється клієнтом сліпо і чекає довше за пул."""
+    from nyshporka.share import catalog
+
+    vzialy: dict[str, Any] = {}
+
+    class _F:
+        def post(self, url: str, json_body: Any) -> Any:
+            class _R:
+                text = '{"ready": true}'
+            return _R()
+
+    def _fetcher(url: str, **kw: Any) -> _F:
+        vzialy.update(kw)
+        return _F()
+
+    monkeypatch.setattr(catalog, "_fetcher", _fetcher)
+    assert upload._complete("https://nyshporka.online/v1", 7, "k") == {"ready": True}
+    assert vzialy["attempts"] == 1 and vzialy["timeout"] >= 120
 
 
 def test_stan_ne_pytaietsia_pry_zboi_put(monkeypatch: pytest.MonkeyPatch,
