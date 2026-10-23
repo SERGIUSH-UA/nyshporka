@@ -448,6 +448,37 @@ def test_form_says_folder_is_already_described_and_save_names_the_key(space: Pat
                                               "title": "Ревізька казка"}
 
 
+def test_case_taken_from_the_pool_without_frames_is_in_the_library(space: Path) -> None:
+    """🔴 Справа, взята з Супряги без кадрів, не з'являлась у Бібліотеці зовсім.
+
+    Пошук знаходив у ній сотні рядків, а її прогони лишались «нічиїми»: реєстр
+    прив'язує прогін лише до справи, яку знає Бібліотека (прохід новачка 23.10.2026).
+    """
+    from nyshporka import library as L
+    from nyshporka.share import journal
+
+    journal.record(journal.IMPORTED, shifra="ЦДІАК 224-1-794", case_key="CDIAK/224/1/794",
+                   title="Метрична книга церкви Св. Іоанна Богослова", year_from=1787,
+                   year_to=1806, pages=51, runs=["op1-spr-794"])
+    got = {e.key: e for e in L.build_library()}
+    e = got.get("CDIAK/224/1/794")
+    assert e is not None, "взятої справи немає в Бібліотеці"
+    assert (e.on_disk, e.frames, e.desc_source) == (False, 0, "pool")
+    assert (e.title, e.year_from, e.year_to) == (
+        "Метрична книга церкви Св. Іоанна Богослова", 1787, 1806)
+
+    # Кадри дозавантажили й описали самою шифрою — рядок один, назва з пакета.
+    d = L.raw_dir() / "archium-cdiak" / "file-51872"
+    d.mkdir(parents=True)
+    (d / "0001_f1477810.jpg").write_bytes(b"x")
+    R.describe(d, shifra="ЦДІАК 224-1-794")
+    for fn in ("_sidecar_case", "_sidecar_village"):
+        getattr(L, fn).cache_clear()
+    rows = [e for e in L.build_library() if e.key == "CDIAK/224/1/794"]
+    assert len(rows) == 1 and rows[0].on_disk
+    assert rows[0].title == "Метрична книга церкви Св. Іоанна Богослова"
+
+
 def test_paths_inside_the_workspace_stay_relative(space: Path) -> None:
     """🔴 Простір переносять на інший диск і віддають колезі.
 

@@ -1934,6 +1934,20 @@ def build_library() -> list[CaseEntry]:
         seen.add(e.key)
     entries += twins
 
+    # 3c) справи, взяті з Супряги без кадрів: самий текст, теки на диску немає.
+    #     🔴 Доти така справа не з'являлась у Бібліотеці взагалі, а її прогони
+    #     лишались «нічиїми»: реєстр прив'язує прогін лише до відомої справи, а
+    #     пошук при цьому знаходив у ній сотні рядків (прохід новачка 23.10.2026).
+    pool = _pool_rows()
+    for e in entries:
+        got = pool.get(e.key)
+        # Тека справи без назви (щойно завантажені кадри) — назва й роки з пакета.
+        if got and not e.title:
+            e.title = str(got.get("title") or "")
+            e.year_from = e.year_from or _to_int(got.get("year_from"))
+            e.year_to = e.year_to or _to_int(got.get("year_to"))
+    entries += _pool_only_entries(pool, seen)
+
     # 3b) теки в data/raw не знайшлось → вхід = raw_path канону як є (першоджерело-PDF
     #     у data/source/archives тощо). Краще, ніж лишити справу зовсім без входу.
     for e in entries:
@@ -1978,6 +1992,64 @@ def build_library() -> list[CaseEntry]:
     entries.sort(key=lambda e: (not e.curated, e.repo_label or "", e.fond or "",
                                 _to_int(e.spr) or 0))
     return entries
+
+
+def _pool_rows() -> dict[str, dict[str, Any]]:
+    """Прийняте з Супряги за ключем справи (`share.journal`), найсвіжіше — останнім."""
+    try:
+        from nyshporka.share import journal
+
+        rows = journal.read(journal.IMPORTED)
+    except Exception:
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        ck = _ck.parse(str(r.get("case_key") or ""))
+        key = (_mk_key(ck.repo, ck.fond, ck.spr, ck.opys) or "") if ck else ""
+        if key:
+            if not r.get("title"):
+                r = {**r, **_title_from_bundle(str(r.get("path") or ""))}
+            out[key] = r
+    return out
+
+
+def _pool_only_entries(pool: dict[str, dict[str, Any]],
+                       known: set[str]) -> list[CaseEntry]:
+    """Записи для прийнятих справ, яких немає ні в каноні, ні на диску.
+
+    Кадрів у них немає: `on_disk=False`, `frames=0`."""
+    from nyshporka.archives.pack import active
+
+    out: list[CaseEntry] = []
+    for key, r in pool.items():
+        ck = _ck.parse(key)
+        if ck is None or key in known:
+            continue
+        known.add(key)
+        y_from, y_to = _to_int(r.get("year_from")), _to_int(r.get("year_to"))
+        out.append(CaseEntry(
+            key=key, repo=ck.repo, repo_label=active().repo_label(ck.repo),
+            fond=ck.fond, opys=ck.opys, spr=ck.spr,
+            shifra=str(r.get("shifra") or ""), title=str(r.get("title") or ""),
+            year_from=y_from, year_to=y_to, place=str(r.get("place") or ""),
+            on_disk=False, frames=0, desc_source="pool"))
+    return out
+
+
+def _title_from_bundle(path: str) -> dict[str, Any]:
+    """Назва й роки з маніфесту пакета — для записів журналу до 0.37, де їх немає."""
+    if not path or not Path(path).is_file():
+        return {}
+    try:
+        from nyshporka.share import bundle
+
+        case = bundle.read_manifest(Path(path)).case
+    except Exception:
+        return {}
+    years = list(case.get("years") or [])
+    return {"title": str(case.get("title") or ""),
+            "year_from": years[0] if years else None,
+            "year_to": years[-1] if years else None}
 
 
 #: Що змінило ключ у останній перебудові: старий → новий (`write_library`).

@@ -630,8 +630,14 @@ def _accept_seen(seen: Look, src: str, *, force: bool, replace: bool,
     if keep_bundle or seen.downloaded:
         proof = str(journal.keep(seen.path, seen.path.name))
 
+    years = list(seen.manifest.case.get("years") or [])
     journal.record(
         journal.IMPORTED, shifra=seen.manifest.shifra, case_key=key,
+        # Назва й роки — для рядка Бібліотеки, коли кадрів справи на диску
+        # немає (`library._pool_only_entries`): інакше там стояла б сама шифра.
+        title=str(seen.manifest.case.get("title") or ""),
+        year_from=years[0] if years else None,
+        year_to=years[-1] if years else None,
         pages=seen.manifest.pages, bytes=seen.path.stat().st_size,
         sha256=bundle.sha256_of(seen.path),
         publisher=str((seen.manifest.publisher or {}).get("handle") or ""),
