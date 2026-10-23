@@ -545,6 +545,7 @@ export default {
     'lib.nodisk': 'not on disk',
     'lib.unbuilt': 'The summary has never been built.',
     'lib.build': 'Build the summary',
+    'lib.empty': "No cases yet. Point to a folder of scans, find a case in the archive catalogues, or take one already read from the Commons.",
     'lib.count': 'showing {n} of {total}',
     'lib.verdict.set': 'mark',
     'lib.verdict.clear': 'clear verdict',

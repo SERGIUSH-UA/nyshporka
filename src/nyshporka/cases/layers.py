@@ -156,8 +156,20 @@ def entries() -> list[dict[str, Any]]:
 
 
 def has_layers() -> bool:
-    """Чи є зріз обробки взагалі. Без нього колонки показують «?», а не «—»."""
-    return bool(layers_by_key())
+    """Чи є зріз обробки взагалі. Без нього колонки показують «?», а не «—».
+
+    🔴 «Зібрано» — це файл реєстру, а не рядки в ньому. У порожньому просторі
+    реєстр зібраний і порожній, а екран після «Зібрати» далі казав «реєстру
+    справ не збирали» й радив зібрати ще раз (прохід новачка 23.10.2026).
+    """
+    if layers_by_key():
+        return True
+    from nyshporka.cases import db
+
+    try:
+        return db.index_path().is_file()
+    except Exception:
+        return False
 
 
 def status_of(row: dict[str, Any]) -> str:

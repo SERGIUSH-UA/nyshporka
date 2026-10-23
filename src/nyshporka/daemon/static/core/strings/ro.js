@@ -545,6 +545,7 @@ export default {
     'lib.nodisk': 'nu este pe disc',
     'lib.unbuilt': 'Sinteza nu a fost încă construită.',
     'lib.build': 'Construiți sinteza',
+    'lib.empty': "Încă nu există dosare. Arătați un dosar cu scanări, găsiți un dosar în cataloagele arhivelor sau luați unul deja citit din comun.",
     'lib.count': 'afișate {n} din {total}',
     'lib.verdict.set': 'marcați',
     'lib.verdict.clear': 'ștergeți verdictul',

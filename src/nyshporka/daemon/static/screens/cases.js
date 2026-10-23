@@ -60,8 +60,9 @@ SCREENS.cases = async () => {
     <p class="muted">${t('intake.why')}</p>
     <div class="row">
       <button type="button" data-act="intake.other">${ic('pencil-line', 'ic-sm')} ${t('intake.other')}</button>
-      <button type="button" class="ctl-sm" data-act="cases.build"
-        title="${t('cases.build.why')}">${ic('refresh', 'ic-sm')} ${t('cases.build')}</button>
+      ${env.stale && env.stale.is ? '' /* «Оновити» вже стоїть у смузі застарілості */
+    : `<button type="button" class="ctl-sm" data-act="cases.build"
+        title="${t('cases.build.why')}">${ic('refresh', 'ic-sm')} ${t('cases.build')}</button>`}
     </div>
     ${renderWarnings(env)}
     ${intakeCount(d, c)}

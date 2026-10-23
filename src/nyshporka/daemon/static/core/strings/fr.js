@@ -545,6 +545,7 @@ export default {
     'lib.nodisk': 'absent du disque',
     'lib.unbuilt': 'Le récapitulatif n’a jamais été construit.',
     'lib.build': 'Construire le récapitulatif',
+    'lib.empty': "Pas encore de dossiers. Indiquez un dossier de scans, trouvez un dossier dans les catalogues d’archives ou prenez-en un déjà lu au commun.",
     'lib.count': '{n} affichés sur {total}',
     'lib.verdict.set': 'marquer',
     'lib.verdict.clear': 'effacer le verdict',

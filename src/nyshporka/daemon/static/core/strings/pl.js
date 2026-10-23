@@ -545,6 +545,7 @@ export default {
     'lib.nodisk': 'nie ma na dysku',
     'lib.unbuilt': 'Zestawienia jeszcze nie zbierano.',
     'lib.build': 'Zbierz zestawienie',
+    'lib.empty': "Nie ma jeszcze spraw. Wskaż folder ze skanami, znajdź sprawę w katalogach archiwów albo weź już przeczytaną ze Wspólnoty.",
     'lib.count': 'pokazano {n} z {total}',
     'lib.verdict.set': 'oznacz',
     'lib.verdict.clear': 'zdejmij werdykt',

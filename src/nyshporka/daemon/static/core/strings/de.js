@@ -545,6 +545,7 @@ export default {
     'lib.nodisk': 'nicht auf der Platte',
     'lib.unbuilt': 'Die Übersicht wurde noch nicht erstellt.',
     'lib.build': 'Übersicht erstellen',
+    'lib.empty': "Noch keine Akten. Zeigen Sie einen Ordner mit Scans, finden Sie eine Akte in den Archivkatalogen oder nehmen Sie eine bereits gelesene aus der Gemeinschaft.",
     'lib.count': '{n} von {total} angezeigt',
     'lib.verdict.set': 'markieren',
     'lib.verdict.clear': 'Urteil entfernen',

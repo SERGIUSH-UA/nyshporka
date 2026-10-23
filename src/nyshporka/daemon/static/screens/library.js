@@ -17,7 +17,7 @@ import { toast, fmtDay } from '../core/bits.js';
 import { t } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, renderWarnings,
-  curGen, alive, hasAlerts } from '../core/view.js';
+  curGen, alive, hasAlerts, emptyMini } from '../core/view.js';
 import { SCREENS, ACTIONS, PAGERS } from '../core/registry.js';
 import { show, goto } from '../core/nav.js';
 import { ST } from '../core/state.js';
@@ -118,9 +118,32 @@ async function libLoad(full = false) {
     <p class="muted">${t('lib.why')}</p>`;
 
   if (!d.built) {
-    setView(`${head}${renderWarnings(env)}
+    // Кнопка збірки тут одна — головна; та сама в смузі «Реєстр відстав» була б
+    // другою кнопкою однієї дії поруч (прохід новачка 23.10.2026).
+    setView(`${head}${renderWarnings({ ...env, stale: null,
+      next: (env.next || []).filter((n) => n.op !== 'cases.build') })}
       <div class="warn">${t('lib.unbuilt')}
         <button data-act="cases.build">${t('lib.build')}</button></div>`);
+    return;
+  }
+
+  // 🔴 Порожня Бібліотека малювала голу шапку таблиці зі скелетоном рядків —
+  // наче досі вантажиться (прохід новачка 23.10.2026). Порожньо — значить,
+  // справ ще немає: два входи, як на Огляді.
+  if (!d.library_total) {
+    setView(`${head}${renderWarnings(env)}
+      <div class="dash-box">${emptyMini('kartky', t('lib.empty'))}
+        <div class="cards">
+          <button class="card" data-act="home.scans">
+            <span class="card-title">${ic('folder', 'ic-sm')} ${t('home.have_scans')}</span>
+            <span class="card-hint">${t('home.have_scans.hint')}</span></button>
+          <button class="card" data-act="nav" data-arg="sources">
+            <span class="card-title">${ic('search', 'ic-sm')} ${t('home.where')}</span>
+            <span class="card-hint">${t('home.where.hint')}</span></button>
+          <button class="card" data-act="nav" data-arg="pull">
+            <span class="card-title">${ic('book-open', 'ic-sm')} ${t('pull.title')}</span>
+            <span class="card-hint">${t('pull.why')}</span></button>
+        </div></div>`);
     return;
   }
 
