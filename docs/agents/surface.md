@@ -32,7 +32,7 @@ nysh op search.run --args '{"q": "Іваненко", "where": "decode"}'
 рішень, хіти з командою кропу), `reports.list` / `reports.read` (звіти досліджень
 проєкту без `reports/htr`). `cases.list` з `searched: here|not_here` — справи, які
 цей проєкт уже шукав (слід `search_log.json`) чи ще ні. `project.style` — колір,
-знак і значок проєкту в перемикачі консолі (`icon`: мальований кружок, перелік — у відмові на невідомий).
+знак і значок проєкту в перемикачі консолі (`icon`: мальований кружок, перелік — у відмові на невідомий), картинка на картці проєкту й над Оглядом роду (`scene`).
 
 Хмара: `nysh cloud state|go|stop|fetch` — людська форма операцій `cloud.state`,
 `cloud.go`, `cloud.stop`, `cloud.fetch`. 🔴 `cloud.go` без `run=true` — лише сухий

@@ -249,14 +249,15 @@ def sync(root: Path, version: str) -> dict[str, str]:
 
 
 def set_style(root: Path, *, color: str | None = None, glyph: str | None = None,
-              title: str | None = None, icon: str | None = None) -> None:
-    """Назва, колір, знак і значок проєкту в маркері; порожній рядок знімає
-    колір, знак чи значок, `None` — не чіпає. Назву не знімають: без неї
-    лишився б id."""
+              title: str | None = None, icon: str | None = None,
+              scene: str | None = None) -> None:
+    """Назва, колір, знак, значок і картина Огляду проєкту в маркері; порожній
+    рядок знімає колір, знак, значок чи картину, `None` — не чіпає. Назву не
+    знімають: без неї лишився б id."""
     import json
 
     text = (root / W.MARKER).read_text(encoding="utf-8")
-    pairs = [("color", color), ("glyph", glyph), ("icon", icon)]
+    pairs = [("color", color), ("glyph", glyph), ("icon", icon), ("scene", scene)]
     if title and title.strip():
         pairs.append(("name", title.strip()))
     for key, val in pairs:

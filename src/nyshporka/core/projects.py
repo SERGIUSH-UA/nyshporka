@@ -43,6 +43,12 @@ ICONS = ("derevo", "zamok", "sobor", "tserkva", "mlyn", "mist", "hory", "maietok
          "suvii", "korabel", "hodynnyk", "kolossia", "kovadlo", "korona", "herb", "mapa",
          "koleso", "hlechyk", "vynohrad", "soniashnyk", "berezy", "snihy", "maiak",
          "uzberezhzhia", "ostriv", "zemlia")
+#: Картинка проєкту (`[project] scene`): смуга вгорі картки проєкту в
+#: Майстерні, а перші п'ять — ще й картина Огляду роду (у решти, з аркуша
+#: дослідника 23.10.2026, лише мініатюри — на всю ширину вони розмиті).
+#: Порожньо — село. Порядок — як у виборі.
+SCENES = ("doroha", "richka", "dub", "hata", "kimnata", "kraievyd", "arka", "stil",
+          "svitlytsia", "arkhiv", "lis", "nebo", "nich")
 
 
 class ProjectError(W.WorkspaceError):
@@ -64,6 +70,7 @@ class Project:
     color: str = ""
     glyph: str = ""
     icon: str = ""
+    scene: str = ""
 
 
 def check_color(color: str) -> str:
@@ -82,6 +89,13 @@ def check_icon(icon: str) -> str:
     if icon and icon not in ICONS:
         raise ProjectError(f"значка «{icon}» немає; є: {', '.join(ICONS)}")
     return icon
+
+
+def check_scene(scene: str) -> str:
+    if scene and scene not in SCENES:
+        raise ProjectError(f"картини «{scene}» немає; є: {', '.join(SCENES)} "
+                           f"(порожньо — село)")
+    return scene
 
 
 def check_name(name: str) -> str:
@@ -114,9 +128,12 @@ def _from_dir(path: Path) -> Project | None:
     icon = str(tab.get("icon") or "")
     if icon not in ICONS:
         icon = ""
+    scene = str(tab.get("scene") or "")
+    if scene not in SCENES:
+        scene = ""
     return Project(id=path.name, root=path, name=str(tab.get("name") or path.name),
                    kind=kind, archived=bool(tab.get("archived")), color=color, glyph=glyph,
-                   icon=icon)
+                   icon=icon, scene=scene)
 
 
 def list_projects(hub: Path, *, archived: bool = False) -> list[Project]:

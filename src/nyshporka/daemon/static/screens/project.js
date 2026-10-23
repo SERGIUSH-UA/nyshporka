@@ -8,7 +8,8 @@ import { SCREENS, ACTIONS } from '../core/registry.js';
 import { goto, jobDone, jobChip, currentScreen, SECTIONS } from '../core/nav.js';
 import { openModal, closeModal } from '../core/modal.js';
 import { decRow, noEmoji, fmtDay } from '../core/bits.js';
-import { projectBadge as badge, projectColor, projectsNow, currentPid, iconPicker, iconSrc } from '../core/projects.js';
+import { projectBadge as badge, projectColor, projectsNow, currentPid, iconPicker, iconSrc, scenePicker, sceneSrc,
+  sceneThumb } from '../core/projects.js';
 
 /**
  * Перейти в проєкт: нова адреса вкладки (`?p=`), а не стан сторінки — інакше
@@ -150,6 +151,7 @@ export async function projectCards({ limit = 0, all = false } = {}) {
     const open = (h.open || 0) + (h.awaiting || 0);
     const color = projectColor(p) ? ` style="--pj:${esc(p.color)}"` : '';
     return `<button class="pj-card" data-act="project.go" data-arg="${esc(p.id)}"${color}>
+      <img class="pj-scene" src="${sceneThumb(p.scene)}" alt="" loading="lazy">
       <span class="pj-top">${badge(p)}<span><b>${esc(p.name || p.id)}</b>
         <small>${esc(t(`np.kind.${p.kind === 'order' ? 'order' : 'family'}`))}</small></span></span>
       <span class="pj-stats">
@@ -259,6 +261,9 @@ export async function fillProject(stillHere = () => true) {
       if (!stillHere() || !st.ok || !(st.data || {}).project) return;
       const d = st.data;
       HEAD = d;
+      // Картина Огляду — своя в кожного роду; без вибору лишається село.
+      const hero = document.querySelector && document.querySelector('.ov-hero-rid');
+      if (hero && hero.style && hero.style.setProperty && d.scene) hero.style.setProperty('--hero', `url("${sceneSrc(d.scene)}")`);
       const sub = el('ov-sub');
       if (sub) {
         sub.textContent = `${t(`np.kind.${d.kind === 'order' ? 'order' : 'family'}`)}${
@@ -346,6 +351,8 @@ function styleForm() {
       ${d.color ? `<label class="chk"><input type="checkbox" name="nocolor" value="1"> ${t('ov.nocolor')}</label>` : ''}
       ${iconPicker(d.icon || '')}
       <p class="muted fld-hint">${t('np.icon.hint')}</p>
+      ${scenePicker(d.scene || '')}
+      <p class="muted fld-hint">${t('np.scene.hint')}</p>
       <div class="row dlg-acts"><button type="submit" class="primary">${t('sp.save')}</button>
         <button type="button" class="ghost" data-act="modal.close">${t('modal.no')}</button></div>
       <div id="ps-box"></div></form>` });
@@ -361,7 +368,8 @@ Object.assign(ACTIONS, {
     // не мала б мовчки дістати колір, що стояв у полі за замовчуванням.
     const color = fd.get('nocolor') ? '' : String(fd.get('color') || '');
     const args = { name: was.project || PROJECT, glyph: String(fd.get('glyph') || '').trim(),
-      title: String(fd.get('title') || '').trim(), icon: String(fd.get('icon') || '') };
+      title: String(fd.get('title') || '').trim(), icon: String(fd.get('icon') || ''),
+      scene: String(fd.get('scene') || '') };
     if (color !== (was.color || '') && (was.color || fd.get('touched') || fd.get('nocolor'))) args.color = color;
     const env = await callOp('project.style', args);
     if (!env.ok) { boxError('ps-box', env); return; }

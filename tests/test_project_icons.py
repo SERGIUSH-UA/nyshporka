@@ -1,4 +1,5 @@
-"""🖼 Значки проєктів: мальований кружок замість літери в перемикачі.
+"""🖼 Значки проєктів: мальований кружок замість літери в перемикачі; картина
+Огляду роду — своя в кожного проєкту.
 
 Перелік значків живе в трьох місцях — `core/projects.py::ICONS`, консоль
 (`core/projects.js`) і самі картинки `ui/static/img/pj-*.webp`, — плюс назва
@@ -46,6 +47,38 @@ def test_icons_agree_across_python_console_files_and_languages() -> None:
         assert not missing, f"{lang}: без назви {missing}"
 
 
+def test_scenes_agree_across_python_console_files_and_languages() -> None:
+    js = (FRONT_DIR / "core" / "projects.js").read_text(encoding="utf-8")
+    body = re.search(r"export const SCENES = \[(.*?)\];", js, re.S)
+    hero = re.search(r"const HERO = \{(.*?)\};", js, re.S)
+    assert body and hero, "переліки SCENES / HERO у core/projects.js не знайдено"
+    keys = re.findall(r"'(\w*)'", body.group(1))
+    assert keys[0] == "" and tuple(keys[1:]) == P.SCENES
+    for k in ("selo", *P.SCENES):
+        assert (SHARED_DIR / "img" / f"sc-{k}-t.webp").is_file(), k
+    for f in re.findall(r": '([\w-]+)'", hero.group(1)):
+        assert (SHARED_DIR / "img" / f"{f}.webp").is_file(), f
+    for lang in LANGS:
+        text = (FRONT_DIR / "core" / "strings" / f"{lang}.js").read_text(encoding="utf-8")
+        missing = [k for k in ("selo", *P.SCENES) if f"'sc.{k}':" not in text]
+        assert not missing, f"{lang}: без назви {missing}"
+
+
+def test_scene_is_set_kept_and_cleared(tmp_path: Path) -> None:
+    hub = _hub(tmp_path, hub_only=True)
+    W.use(W._build(hub, "test"))
+    assert O.call("project.new", {"name": "rid-s", "icon": "mlyn"}).ok
+    st = O.call("project.style", {"name": "rid-s", "scene": "richka"})
+    assert st.ok and (st.data["scene"], st.data["icon"]) == ("richka", "mlyn")
+    W.use(W._build(hub / "projects/rid-s", "test"))
+    assert O.call("project.status").data["scene"] == "richka"
+    W.use(W._build(hub, "test"))
+    got = O.call("project.style", {"name": "rid-s", "scene": "misto"})
+    assert not got.ok and "doroha" in got.error
+    assert O.call("project.style", {"name": "rid-s", "icon": ""}).data["scene"] == "richka"
+    assert O.call("project.style", {"name": "rid-s", "scene": ""}).data["scene"] == ""
+
+
 def test_icon_is_set_listed_cleared_and_checked(tmp_path: Path) -> None:
     hub = _hub(tmp_path, hub_only=True)
     W.use(W._build(hub, "test"))
@@ -82,6 +115,9 @@ out.icon = P.projectBadge({ id: 'a', name: 'Рід А', color: '#aa3300', icon: 
 out.iconNoColor = P.projectBadge({ id: 'a', name: 'Рід А', icon: 'mlyn' });
 out.letter = P.projectBadge({ id: 'b', name: 'Рід Б', color: '#0055aa', icon: 'nema' });
 out.picker = P.iconPicker('zamok');
+out.scenes = P.scenePicker('dub');
+out.sceneSrc = [P.sceneSrc(''), P.sceneSrc('dub'), P.sceneSrc('nema'), P.sceneSrc('arka')];
+out.sceneThumb = [P.sceneThumb(''), P.sceneThumb('arka'), P.sceneThumb('nema')];
 console.log('@@' + JSON.stringify(out));
 process.exit(0);
 """
@@ -125,3 +161,14 @@ def test_picker_offers_the_letter_and_every_icon(probe) -> None:
     assert pk.count('type="radio" name="icon"') == len(P.ICONS) + 1
     assert 'value="zamok" checked' in pk and 'value="" checked' not in pk
     assert 'title="Замок"' in pk
+
+
+def test_scene_picker_and_files(probe) -> None:
+    sc = probe["scenes"]
+    assert sc.count('type="radio" name="scene"') == len(P.SCENES) + 1
+    assert 'value="dub" checked' in sc and 'title="Дуб над стежкою"' in sc
+    # Невідома картинка — село, а не порожнє тло; мініатюра з аркуша на
+    # всю ширину Огляду не йде — там село.
+    assert probe["sceneSrc"] == ["/ui/img/bg-selo.webp", "/ui/img/sc-dub.webp", "/ui/img/bg-selo.webp",
+                                 "/ui/img/bg-selo.webp"]
+    assert probe["sceneThumb"] == ["/ui/img/sc-selo-t.webp", "/ui/img/sc-arka-t.webp", "/ui/img/sc-selo-t.webp"]

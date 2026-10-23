@@ -72,6 +72,30 @@ export const ICONS = ['derevo', 'zamok', 'sobor', 'tserkva', 'mlyn', 'mist', 'ho
 export const iconSrc = (icon) => `/ui/img/pj-${icon}.webp`;
 
 /**
+ * Картинки проєкту (`[project] scene`), ті самі ключі, що
+ * `core/projects.py::SCENES`; порожній — село. Смуга на картці проєкту — з
+ * мініатюри `sc-<ключ>-t.webp`. Картина Огляду роду — лише в тих, що мають
+ * великий файл (`HERO`): решта з аркуша мініатюрами, і на всю ширину
+ * Огляду вони розмиті — там тоді лишається село.
+ */
+export const SCENES = ['', 'doroha', 'richka', 'dub', 'hata', 'kimnata', 'kraievyd', 'arka', 'stil',
+  'svitlytsia', 'arkhiv', 'lis', 'nebo', 'nich'];
+const HERO = { '': 'bg-selo', doroha: 'sc-doroha', richka: 'sc-richka', dub: 'sc-dub', hata: 'bg-hata',
+  kimnata: 'bg-arkhiv' };
+export const sceneThumb = (s) => `/ui/img/sc-${s && SCENES.includes(s) ? s : 'selo'}-t.webp`;
+export const sceneSrc = (s) => `/ui/img/${HERO[s] || HERO['']}.webp`;
+
+/** Вибір картинки проєкту — мініатюри, радіо `scene`. */
+export function scenePicker(current = '') {
+  const cur = SCENES.includes(current) ? current : '';
+  return `<div class="fld pj-picker"><span class="fld-l">${esc(t('np.scene'))}</span>
+    <div class="sc-picks" role="radiogroup" aria-label="${esc(t('np.scene'))}">${
+  SCENES.map((k) => `<label class="sc-pick" title="${esc(t(`sc.${k || 'selo'}`))}">
+      <input type="radio" name="scene" value="${k}"${cur === k ? ' checked' : ''} aria-label="${esc(t(`sc.${k || 'selo'}`))}">
+      <img src="${sceneThumb(k)}" alt="" loading="lazy"></label>`).join('')}</div></div>`;
+}
+
+/**
  * Кружок проєкту. Мальований значок стоїть замість літери, а колір проєкту
  * стає його обідком; без значка — знак (або перша літера) на кольорі.
  */

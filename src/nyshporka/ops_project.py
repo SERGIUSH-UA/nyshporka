@@ -111,7 +111,7 @@ def project_list(_: NoArgs) -> Envelope:
     for pr in P.list_projects(ws.hub, archived=True):
         rows.append({"id": pr.id, "name": pr.name, "kind": pr.kind,
                      "archived": pr.archived, "here": pr.id == here,
-                     "color": pr.color, "glyph": pr.glyph, "icon": pr.icon,
+                     "color": pr.color, "glyph": pr.glyph, "icon": pr.icon, "scene": pr.scene,
                      "persons": _count_persons(pr.root),
                      "hypotheses": _count_hypotheses(pr.root), "root": str(pr.root)})
     return ok({"hub": str(ws.hub), "here": here, "projects": rows})
@@ -183,6 +183,8 @@ class ProjectStyleArgs(ProjectNameArgs):
     glyph: str | None = Field(default=None, description="буква чи емодзі; порожньо — зняти")
     icon: str | None = Field(default=None, description="значок-кружок (derevo, zamok…); "
                                                        "порожньо — зняти")
+    scene: str | None = Field(default=None, description="картинка проєкту на картці й Огляді "
+                                                        "(doroha, richka, arka…); порожньо — село")
 
 
 @op("project.style", summary="Назва, колір і знак проєкту в консолі",
@@ -201,14 +203,16 @@ def project_style(a: ProjectStyleArgs) -> Envelope:
         P.check_color(a.color or "")
         P.check_glyph(a.glyph or "")
         P.check_icon(a.icon or "")
+        P.check_scene(a.scene or "")
     except P.ProjectError as exc:
         return fail(str(exc))
     # 🔴 Назва — для людини: перенесення роду в проєкт (`project adopt`) лишало
     # в ній id, і консоль скрізь показувала id проєкту (22.10.2026).
-    T.set_style(root, color=a.color, glyph=a.glyph, title=a.title, icon=a.icon)
+    T.set_style(root, color=a.color, glyph=a.glyph, title=a.title, icon=a.icon, scene=a.scene)
     pr = P._from_dir(root)
     return ok({"name": a.name, "title": pr.name if pr else "", "color": pr.color if pr else "",
-               "glyph": pr.glyph if pr else "", "icon": pr.icon if pr else ""})
+               "glyph": pr.glyph if pr else "", "icon": pr.icon if pr else "",
+               "scene": pr.scene if pr else ""})
 
 
 class ProjectAdoptArgs(ProjectNameArgs):
@@ -553,6 +557,8 @@ def _state(ws: Any) -> dict[str, Any]:
     out["glyph"] = str(tab.get("glyph") or "")
     icon = str(tab.get("icon") or "")
     out["icon"] = icon if icon in P.ICONS else ""
+    scene = str(tab.get("scene") or "")
+    out["scene"] = scene if scene in P.SCENES else ""
     out["persons"] = _count_persons(ws.root)
     try:
         from nyshporka.core import profile as PROF

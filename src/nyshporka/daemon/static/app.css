@@ -892,6 +892,12 @@ details.raw pre { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--f
   padding: 1rem 1.1rem; border-top: 4px solid var(--pj); }
 #view .pj-card:hover { border-top-color: var(--pj); }
 #view .pj-new { border-style: dashed; border-top-width: 1px; box-shadow: none; background: transparent; }
+/* Картинка проєкту (`[project] scene`) — смугою вгорі картки, до самих країв:
+   картки родів розрізняються з першого погляду, а не лише назвою. */
+#view .pj-card .pj-scene { display: block; width: calc(100% + 2.2rem); max-width: none; height: 5.4rem;
+  margin: -1rem -1.1rem 0; object-fit: cover; object-position: center 60%;
+  border-radius: calc(var(--r-l) - 2px) calc(var(--r-l) - 2px) 0 0; }
+:root:not([data-theme="light"]) #view .pj-card .pj-scene { filter: brightness(.72) saturate(.9); }
 .pj-top { display: flex; gap: .7rem; align-items: center; }
 .pj-top b { display: block; font-size: 1.05rem; }
 .pj-top small { color: var(--fg-3); }
@@ -918,6 +924,14 @@ details.raw pre { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--f
 .pj-pick:hover img { transform: scale(1.07); }
 .pj-pick input:checked + * { box-shadow: 0 0 0 3px var(--honey); }
 .pj-pick input:focus-visible + * { outline: 2px solid var(--accent); outline-offset: 3px; }
+/* Вибір картини Огляду: мініатюри краєвидів, позначена — медовим обідком. */
+.sc-picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(6.4rem, 1fr)); gap: .5rem; width: 100%; }
+.sc-pick { position: relative; cursor: pointer; }
+.sc-pick input { position: absolute; opacity: 0; pointer-events: none; }
+.sc-pick img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: var(--r-m);
+  border: 1px solid var(--line-2); transition: box-shadow var(--dur-1) var(--ease); }
+.sc-pick input:checked + img { box-shadow: 0 0 0 3px var(--honey); }
+.sc-pick input:focus-visible + img { outline: 2px solid var(--accent); outline-offset: 3px; }
 .pj-stats { display: flex; gap: 1.2rem; color: var(--fg-3); font-size: .9rem; }
 .pj-stats b { color: var(--fg); font-size: 1.15rem; margin-right: .15rem; }
 .pj-stats .pj-warn b { color: var(--warn-fg); }
