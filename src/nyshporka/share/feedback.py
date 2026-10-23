@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import getpass
 import io
 import platform
@@ -121,15 +122,11 @@ def scrub(text: str) -> str:
     out = _BEARER.sub(r"\1 <ключ>", out)
     out = _SECRET.sub(r"\1\2<вирізано>", out)
     out = _IPV4.sub("<ip>", out)
-    names = []
-    try:
+    names: list[str] = []
+    with contextlib.suppress(Exception):
         names.append(getpass.getuser())
-    except Exception:
-        pass
-    try:
+    with contextlib.suppress(Exception):
         names.append(platform.node())
-    except Exception:
-        pass
     for name, label in zip(names, ("<user>", "<host>"), strict=False):
         if len(name) >= 3:
             # Підкреслення — теж межа: «petryk_screenshot» несе ім'я так само.
@@ -251,10 +248,13 @@ def _text_allowed(real: Path, ext: str) -> bool:
     try:
         from nyshporka.core.workspace import workspace
 
-        root = Path(workspace().root).resolve()
+        ws = workspace()
+        root = Path(ws.hub).resolve()
+        # Дані Майстерні й проєкту (сховище сторінок, канон, реєстри) — ні.
+        banned = [Path(ws.hub_data).resolve(), Path(ws.data).resolve()]
     except Exception:
         return False
-    return real.is_relative_to(root) and not real.is_relative_to(root / "data")
+    return real.is_relative_to(root) and not any(real.is_relative_to(b) for b in banned)
 
 
 def from_path(path: str) -> Attachment:
