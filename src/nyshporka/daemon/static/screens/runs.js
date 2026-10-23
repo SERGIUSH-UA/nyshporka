@@ -16,7 +16,7 @@
  * «нуль зі знаменником», просто в новому вбранні: воно завжди показує 100%.
  */
 import { t, LANG } from '../core/strings.js';
-import { callOp } from '../core/net.js';
+import { callOp, staleThenFresh } from '../core/net.js';
 import { esc, el, setView, busy, failure, renderWarnings,
   curGen, alive } from '../core/view.js';
 import { modelName, fmtDay, pathTail } from '../core/bits.js';
@@ -54,8 +54,13 @@ SCREENS.runs = async () => {
   busy();
   // Прогони спільні: з кількома проєктами — чип того, хто замовив.
   await loadProjects();
-  await runsLoad(true);
-  if (!alive(gen)) return;
+  // Перелік — 15 тис. прогонів одним шматком (1–3 с): повторне відкриття
+  // малює минулий одразу, свіжий підміняє його сам (`staleThenFresh`).
+  await staleThenFresh('runs.list', {}, (env) => {
+    if (!alive(gen)) return undefined;
+    RUNS_ENV = env;
+    return runsLoad(true, false);
+  });
 };
 
 /**

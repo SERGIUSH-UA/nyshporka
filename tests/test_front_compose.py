@@ -330,3 +330,10 @@ def test_runs_filter_does_not_refetch_and_no_full_lists_for_hints(hub) -> None:
     assert hub["runsCalls"] == 1, hub["runsCalls"]
     for rel in ("screens/sets.js", "screens/view.js"):
         assert "callOp('runs.list', {})" not in (FRONT_DIR / rel).read_text(encoding="utf-8"), rel
+
+
+def test_runs_screen_paints_the_last_list_first() -> None:
+    """Прогони — 15 тис. рядків; повторне відкриття малює минулий перелік одразу."""
+    src = (FRONT_DIR / "screens/runs.js").read_text(encoding="utf-8")
+    body = src[src.index("SCREENS.runs = async"):src.index("async function runsLoad(")]
+    assert "staleThenFresh('runs.list', {}" in body
