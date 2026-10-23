@@ -101,7 +101,10 @@ def _run_helper(tmp: Path, task: dict[str, Any]) -> dict[str, Any]:
     return json.loads(Path(task["result"]).read_text(encoding="utf-8"))
 
 
-def test_helper_updates_and_reopens(tmp_path: Path) -> None:
+def test_helper_updates_and_reopens(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Кирилиця в журнал і з консоллю cp1252 (Windows-раннер GitHub): крок не падає
+    на кодуванні, і вдале оновлення не записується невдалим."""
+    monkeypatch.setenv("PYTHONIOENCODING", "cp1252")
     res = _run_helper(tmp_path, _helper_task(tmp_path, [sys.executable, "-c", "print('встановлено')"]))
     assert res["ok"] is True and res["to"] == "0.37.0"
     assert "встановлено" in (tmp_path / "update.log").read_text(encoding="utf-8")

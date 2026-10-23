@@ -80,6 +80,10 @@ def main(task_path: str) -> int:
     with open(task_path, encoding="utf-8") as fh:
         task = json.load(fh)
     env = {**os.environ, **{str(k): str(v) for k, v in (task.get("env") or {}).items()}}
+    # Журнал — UTF-8, і Python-кроки (`nysh htr install`) пишуть у нього так само:
+    # з кодуванням консолі cp1252 кирилиця падала UnicodeEncodeError, і вдале
+    # оновлення записувалось невдалим (Windows-раннер GitHub, 23.10.2026).
+    env["PYTHONIOENCODING"] = "utf-8"
     result = {"ok": False, "from": task.get("from", ""), "to": task.get("to", ""),
               "log": task["log"], "started": time.time()}
     with open(task["log"], "w", encoding="utf-8") as log:
