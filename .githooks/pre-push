@@ -1,5 +1,6 @@
 #!/bin/sh
-# Тег релізу (v*) іде на GitHub лише після tools/release_check.py.
+# Тег релізу (v*) іде на GitHub лише після tools/release_check.py, а main —
+# лише після ruff і mypy.
 #
 # Ворота в release.yml ловлять те саме, але вже ПІСЛЯ пушу тега — і тоді
 # тег доводиться знімати й ставити наново. Тут відмова до того, як тег
@@ -19,8 +20,27 @@ for c in python3 python py; do
   fi
 done
 
+# Інтерпретатор середовища розробки — прямо, не через `uv run`: той
+# синхронізує середовище, а поки живий наглядач хмари, це його ламає.
+venv=""
+for c in .venv/Scripts/python.exe .venv/bin/python; do
+  [ -x "$c" ] && { venv=$c; break; }
+done
+
 while read -r local_ref local_sha remote_ref remote_sha; do
   case "$remote_ref" in
+    refs/heads/main)
+      [ "$local_sha" = "$zero" ] && continue
+      # ruff і mypy локально тестів не мають: pytest на Windows зелений, а
+      # CI на GitHub два дні стояв червоним через mypy (жовтень 2026).
+      if [ -z "$venv" ]; then
+        echo "pre-push: немає .venv — ruff і mypy не перевірено (CI перевірить)" >&2
+        continue
+      fi
+      echo "ruff і mypy перед пушем main…"
+      "$venv" -m ruff check . --quiet || rc=1
+      "$venv" -m mypy --no-error-summary || rc=1
+      ;;
     refs/tags/v*)
       [ "$local_sha" = "$zero" ] && continue   # тег видаляють — перевіряти нічого
       tag=${remote_ref#refs/tags/}
@@ -36,5 +56,5 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   esac
 done
 
-[ $rc -ne 0 ] && echo "тег не запушено. Виправити й переставити тег, або свідомо: git push --no-verify" >&2
+[ $rc -ne 0 ] && echo "не запушено. Виправити (і переставити тег, якщо це реліз), або свідомо: git push --no-verify" >&2
 exit $rc

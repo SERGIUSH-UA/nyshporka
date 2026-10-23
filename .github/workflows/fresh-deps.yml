@@ -1,0 +1,49 @@
+name: Свіжі залежності
+
+# 🔴 Основний CI ставить залежності з `uv.lock` (`--locked`), а людина, що
+# ставить Нишпорку сьогодні, отримує найновіші версії в межах pyproject.
+# 03.10.2026 вийшов selectolax 1.0 без рушія Modest — ARCHIUM падав на імпорті
+# в кожного, хто ставив Нишпорку після цієї дати, а CI лишався зеленим на
+# selectolax 0.4 з локу. Чужий реліз ламає нас без жодного нашого коміту, тому
+# цей прогін іде ще й щодня за розкладом.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NYSH_CI: "1"
+
+jobs:
+  fresh:
+    name: найновіші версії · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          python-version: "3.12"
+      # `--upgrade` без `--locked`: розв'язати наново до найновіших версій, як
+      # у свіжій установці. Лок у репо не змінюється — лише в цьому раннері.
+      - name: встановити найновіше
+        run: uv sync --upgrade --group dev
+      - name: які версії стали
+        run: uv pip list
+      - name: pytest
+        run: uv run pytest -rs
