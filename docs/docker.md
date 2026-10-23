@@ -111,11 +111,11 @@ docker run --rm -it -p 127.0.0.1:8788:8788 -v "$PWD/nysh:/srv/nysh" \
 
 Сайт роду відкривається в тому самому застосунку: розділ «Сайт роду», адреса
 http://127.0.0.1:8788/site/ (відкрита версія — `/site-public/`). Зібрати чи
-перезібрати його можна кнопкою там же або командою в контейнері:
+перезібрати його можна кнопкою там же або командою (перша — приватна версія, для себе й родини; друга — відкрита, для публікації):
 
 ```sh
-docker exec nysh nysh site build            # приватна версія, для себе й родини
-docker exec nysh nysh site build --public   # відкрита, для публікації
+docker run --rm -v "$PWD/nysh:/srv/nysh" ghcr.io/sergiush-ua/nyshporka site build
+docker run --rm -v "$PWD/nysh:/srv/nysh" ghcr.io/sergiush-ua/nyshporka site build --public
 ```
 
 Готові сторінки лежать у вашій теці: `nysh/work/site/private/` і
