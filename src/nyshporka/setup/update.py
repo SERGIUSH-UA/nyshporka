@@ -450,6 +450,23 @@ def has_rent() -> bool:
     return True
 
 
+def has_fast() -> bool:
+    """Чи стоїть швидкий індекс пошуку (extra `fast`, пакет `tantivy`).
+
+    🔴 Його людина ставить свідомо (індекс — 7–9 ГБ на мільйон сторінок), і в
+    жоден набір він не входить. Без цієї ознаки `uv tool install --force`
+    перезбирав середовище без `tantivy`, і після оновлення пошук по корпусу
+    мовчки ставав повільним, як без індексу.
+    """
+    from importlib.metadata import PackageNotFoundError, distribution
+
+    try:
+        distribution("tantivy")
+    except PackageNotFoundError:
+        return False
+    return True
+
+
 def tool_env() -> bool:
     """Чи запущено з середовища інструмента uv (`uv tool install`, `.exe`, скрипти).
 
@@ -479,7 +496,7 @@ def runs_in_place() -> bool:
     return tool_env() and sys.platform != "win32"
 
 
-def command(preset: str = "") -> list[str]:
+def command(preset: str = "", add: tuple[str, ...] = ()) -> list[str]:
     """Команда, якою застосунок оновлюється на цій машині.
 
     🔴 Набір не вгадується: `researcher` тягне рушії читання (~2.5 ГБ),
@@ -497,15 +514,18 @@ def command(preset: str = "") -> list[str]:
     ні рушії (вони в окремому venv поруч із простором), ні моделі
     (`<простір>/data/spotter/models`), ні паки довідників (`user_data_dir`).
     Але пакети, дописані туди руками через `uv tool install --with`, воно
-    змиває — їх доведеться назвати знову.
+    змиває — їх доведеться назвати знову. Набори поза пресетом, які вже стоять
+    (`rent`, `fast`), команда називає сама; `add` дописує ще не поставлені.
     """
     from nyshporka.core.sections import install_target
 
     info = install_info()
     got = preset or preset_now(info.get("preset", ""))
     spec = install_target(got)
-    if has_rent():
-        spec = (spec[:-1] + ",rent]") if spec.endswith("]") else spec + "[rent]"
+    kept = [x for x, on in (("rent", has_rent()), ("fast", has_fast())) if on]
+    for x in dict.fromkeys([*kept, *add]):
+        if x not in spec.partition("[")[2].rstrip("]").split(","):
+            spec = (spec[:-1] + f",{x}]") if spec.endswith("]") else spec + f"[{x}]"
     if not tool_env():
         return [sys.executable, "-m", "pip", "install", "--upgrade", spec]
     uv = info.get("uv") or "uv"
@@ -518,7 +538,7 @@ def command_env() -> dict[str, str]:
     return {**os.environ, **uv_python_env()}
 
 
-def how_to_update(preset: str = "") -> str:
+def how_to_update(preset: str = "", add: tuple[str, ...] = ()) -> str:
     """Рядок для людини — той самий, що виконає `nysh update`.
 
     🔴 Аргументи беруться в лапки. Перший із них — шлях до `uv` зі сліду
@@ -536,7 +556,7 @@ def how_to_update(preset: str = "") -> str:
     """
     from nyshporka.htr.view import shell_arg
 
-    parts = command(preset)
+    parts = command(preset, add)
     # Рядок, який людина копіює, мусить нести ті самі теки, що й `nysh update`
     # (`command_env`) — інакше повертається 448 або нова версія лягає на C:.
     env = uv_python_env() if parts[1:2] == ["tool"] else {}

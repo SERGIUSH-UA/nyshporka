@@ -18,8 +18,9 @@ from nyshporka.setup import update as U
 
 @pytest.fixture(autouse=True)
 def _no_rent_plugin(monkeypatch):
-    """Плагін оренди в середовищі розробки стоїть; тести набору його не бачать."""
+    """Плагін оренди й швидкий індекс у середовищі розробки стоять; тести набору їх не бачать."""
     monkeypatch.setattr(U, "has_rent", lambda: False)
+    monkeypatch.setattr(U, "has_fast", lambda: False)
 
 
 def test_a_newer_release_is_recognised_as_newer():
@@ -303,13 +304,13 @@ def test_the_line_for_windows_is_one_powershell_can_run(monkeypatch):
     """
     monkeypatch.setattr(U.sys, "platform", "win32")
     uv = r"D:\Профілі\Ім'я Прізвище\Nyshporka\uv\uv.exe"
-    monkeypatch.setattr(U, "command", lambda preset="": [
+    monkeypatch.setattr(U, "command", lambda preset="", add=(): [
         uv, "tool", "install", "--python", "3.12", "--force", "nyshporka[app,archives]"])
     assert U.how_to_update() == (
         r"& 'D:\Профілі\Ім''я Прізвище\Nyshporka\uv\uv.exe' "
         "tool install --python 3.12 --force 'nyshporka[app,archives]'")
 
-    monkeypatch.setattr(U, "command", lambda preset="": [
+    monkeypatch.setattr(U, "command", lambda preset="", add=(): [
         r"C:\Nysh\uv\uv.exe", "tool", "install", "nyshporka[app]"])
     assert U.how_to_update() == r"C:\Nysh\uv\uv.exe tool install 'nyshporka[app]'", (
         "шлях без пробілів не потребує ні лапок, ні `&`")
@@ -394,3 +395,18 @@ def test_the_rent_plugin_survives_an_update(monkeypatch):
     monkeypatch.setattr(U, "has_rent", lambda: True)
     assert U.command("researcher")[-1].endswith(",rent]")
     assert U.command("lab")[-1] == "nyshporka[app,archives,htr,train,rent]"
+
+
+def test_the_fast_index_survives_an_update_and_is_added_by_name(monkeypatch):
+    """🔴 Швидкий індекс ставлять свідомо; `uv tool install --force` без `fast`
+    знімав `tantivy`, і пошук по корпусу мовчки повільнішав."""
+    monkeypatch.setattr(U, "has_htr", lambda: True)
+    monkeypatch.setattr(U, "tool_env", lambda: True)
+    assert "fast" not in U.command("researcher")[-1], "не стоїть — не дописується"
+    want = U.command("researcher", add=("fast",))[-1]
+    assert want.endswith(",fast]") and want.count("fast") == 1
+    monkeypatch.setattr(U, "has_fast", lambda: True)
+    assert U.command("researcher")[-1] == want
+    assert U.command("researcher", add=("fast",))[-1] == want, "без повтору"
+    monkeypatch.setattr(U, "has_rent", lambda: True)
+    assert U.command("lab")[-1] == "nyshporka[app,archives,htr,train,rent,fast]"

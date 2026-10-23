@@ -222,7 +222,12 @@ def _fast_sync(wanted: bool) -> dict[str, Any] | Envelope | None:
     if not wanted and not FX.exists():
         return None
     if not FX.available():
-        return fail("швидкий індекс потребує пакета tantivy: pip install nyshporka[fast]")
+        from nyshporka.setup.update import how_to_update
+
+        # Команда цієї установки, а не `pip install`: у середовище інструмента uv
+        # (майстер, `uv tool install`) чужий pip пакета не донесе.
+        return fail("швидкий індекс потребує пакета tantivy — поставити: "
+                    + how_to_update(add=("fast",)))
     conn = ST.connect()
     try:
         return FX.sync(conn)

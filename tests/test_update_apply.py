@@ -24,7 +24,7 @@ def console(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(W, "_state_path", lambda: tmp_path / "state" / "state.json")
     monkeypatch.setattr(U, "tool_env", lambda: True)
     monkeypatch.setattr(U, "latest", lambda timeout=3.0: U.Release(installed="0.36.2", latest="0.37.0"))
-    monkeypatch.setattr(U, "command", lambda preset="": ["uv", "tool", "install", "--force", "nyshporka[researcher]"])
+    monkeypatch.setattr(U, "command", lambda preset="", add=(): ["uv", "tool", "install", "--force", "nyshporka[researcher]"])
     monkeypatch.setattr(D, "LAUNCH", {"argv": [sys.executable, "serve", "--port", "8799"],
                                       "cwd": str(tmp_path), "pid": 4242})
     monkeypatch.setattr(D, "_BUSY", [lambda: 0])
