@@ -79,8 +79,10 @@ _VIEWER_FILE_RE = re.compile(r"#file-(\d+)")
 
 
 def _parser(html: str) -> Any:
+    # Рушій lexbor: Modest (`selectolax.parser`) у selectolax 1.0 прибрано —
+    # свіжа установка падала на імпорті, хоч lock-файл CI тримав 0.4.
     try:
-        from selectolax.parser import HTMLParser
+        from selectolax.lexbor import LexborHTMLParser as HTMLParser
     except ImportError as exc:  # pragma: no cover — extras `archives`
         raise SourceError(
             "для роботи з ARCHIUM потрібен розбирач HTML: "
