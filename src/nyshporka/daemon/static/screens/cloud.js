@@ -12,12 +12,12 @@
  */
 
 import { t } from '../core/strings.js';
-import { callOp } from '../core/net.js';
-import { esc, el, setView, busy, failure, boxError, renderWarnings, curGen, alive, humanError } from '../core/view.js';
+import { callOp, staleThenFresh } from '../core/net.js';
+import { esc, el, setView, busy, failure, boxError, renderWarnings, curGen, alive, humanError, emptyMini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { show, jobDone, jobChip } from '../core/nav.js';
 import { openModal, confirmAct, modalSeq } from '../core/modal.js';
-import { kv, pill, dayOf } from '../core/bits.js';
+import { kv, pill, dayOf, toast } from '../core/bits.js';
 import { loadProjects, projectCount, projectChip, currentName, projectInfo } from '../core/projects.js';
 
 const FINAL = ['done', 'failed'];
@@ -29,8 +29,16 @@ let RUNS = [];
 SCREENS.cloud = async () => {
   const gen = curGen();
   busy(5);
-  const [env] = await Promise.all([callOp('cloud.state', { limit: 20 }), loadProjects()]);
-  if (!alive(gen)) return;
+  await loadProjects();
+  // Спершу минулий перелік (з позначкою «оновлюю»), потім свіжий: наглядачів
+  // питають щоразу, і це секунда, коли закривати нічого.
+  await staleThenFresh('cloud.state', { limit: 20 }, (env) => {
+    if (!alive(gen)) return;
+    paintCloud(env);
+  });
+};
+
+function paintCloud(env) {
   if (!env.ok) return failure(env);
   const d = env.data || {};
   RUNS = d.runs || [];
@@ -49,10 +57,10 @@ SCREENS.cloud = async () => {
   unreleased ? tile(t('cloud.unreleased'), unreleased, 'ov-warn') : ''}</div>
     ${spentBy(RUNS)}
     <div class="dash-box"><h3>${t('cloud.now')}</h3>
-      ${live.length ? live.map(runRow).join('') : `<p class="muted">${t('cloud.none.live')}</p>`}</div>
+      ${live.length ? live.map(runRow).join('') : emptyMini('skrynia', t('cloud.none.live'))}</div>
     <div class="dash-box"><h3>${t('cloud.past')}</h3>
       ${past.length ? past.map(runRow).join('') : `<p class="muted">${t('cloud.none.past')}</p>`}</div>`);
-};
+}
 
 /**
  * Витрати за проєктами — з тих самих заходів, що й плитка «Витрачено»: запис
@@ -209,11 +217,11 @@ Object.assign(ACTIONS, {
     if (!yes) return;
     const env = await callOp('cloud.stop', { run_id: id });
     if (!env.ok) { openModal({ title: t('cloud.stop'), body: `<p class="warn">${esc(env.error || '')}</p>` }); return; }
-    if ((env.warnings || []).length) {
-      openModal({ title: t('cloud.stop'), body: renderWarnings(env) });
-      return;
-    }
+    toast(t('toast.cloud.stopped'), { tone: 'ok' });
+    // Застереження — вікном ПОВЕРХ оновленого переліку: доти з ними екран
+    // лишався старим, і зупинений захід далі стояв «живим».
     await show('cloud');
+    if ((env.warnings || []).length) openModal({ title: t('cloud.stop'), body: renderWarnings(env) });
   },
   'cloud.fetch': async (_ev, elm) => {
     const id = elm.dataset.arg;

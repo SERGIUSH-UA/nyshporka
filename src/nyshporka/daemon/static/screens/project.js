@@ -3,11 +3,11 @@
 import { ic } from '/ui/icons.js';
 import { t } from '../core/strings.js';
 import { PROJECT, callOp } from '../core/net.js';
-import { esc, el, setView, boxError, busyForm, fld, humanError } from '../core/view.js';
+import { esc, el, setView, boxError, busyForm, fld, humanError, mini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { goto, jobDone, jobChip, currentScreen, SECTIONS } from '../core/nav.js';
 import { openModal, closeModal } from '../core/modal.js';
-import { decRow } from '../core/bits.js';
+import { decRow, noEmoji } from '../core/bits.js';
 import { projectBadge as badge, projectColor, projectsNow, currentPid } from '../core/projects.js';
 
 /**
@@ -106,8 +106,8 @@ export async function projectCards({ limit = 0, all = false } = {}) {
 let HEAD = null;
 
 /** Картка-показник Огляду проєкту: число, підпис, перехід на закладку. */
-function kpi(id, label, nav) {
-  return `<button class="ov-kpi" id="${id}" data-act="nav" data-arg="${nav}">
+function kpi(id, label, nav, pic = '') {
+  return `<button class="ov-kpi" id="${id}" data-act="nav" data-arg="${nav}">${mini(pic, 52)}
     <span class="ov-kpi-l">${esc(label)}</span>
     <span class="ov-kpi-v"><span class="muted ov-wait">${t('load.count')}</span></span>
     <span class="ov-kpi-s"></span></button>`;
@@ -137,10 +137,10 @@ export function projectShell() {
       <span class="muted" id="ov-sub"></span>
       <button class="ghost ctl-sm ov-style" data-act="phead.style">${t('phead.style')}</button></div>
     <div class="ov-kpis">
-      ${kpi('ov-k-canon', t('nav.canon'), 'canon')}
-      ${kpi('ov-k-hyp', t('nav.hyp'), 'hyp')}
-      ${kpi('ov-k-mat', t('phead.material'), 'search')}
-      ${kpi('ov-k-hist', t('nav.history'), 'history')}
+      ${kpi('ov-k-canon', t('nav.canon'), 'canon', 'pechatka')}
+      ${kpi('ov-k-hyp', t('nav.hyp'), 'hyp', 'lupa')}
+      ${kpi('ov-k-mat', t('phead.material'), 'search', 'shukhliada')}
+      ${kpi('ov-k-hist', t('nav.history'), 'history', 'hodynnyk')}
     </div>
     <div class="ov-cols">
       <div class="dash-box"><h3>${t('canon.next')}</h3><div id="ov-decide"><span class="skel-cell"></span></div></div>
@@ -200,7 +200,7 @@ export async function fillProject(stillHere = () => true) {
         ...rows.map((r) => `<div class="ov-feed"><span class="muted mono">${esc(r.date)}</span><span>${
           esc(r.subject)}</span></div>`),
         ...reps.map((r) => `<button class="ov-feed ov-link" data-act="rs.read" data-arg="${esc(r.path)}">
-          <span class="muted">${ic('note', 'ic-o ic-sm')}</span><span>${esc(r.title)}</span></button>`)];
+          <span class="muted">${ic('note', 'ic-o ic-sm')}</span><span>${esc(noEmoji(r.title))}</span></button>`)];
       box.innerHTML = items.length ? items.join('') : `<p class="muted">${t('ov.new.none')}</p>`;
     }),
   ];
@@ -275,10 +275,15 @@ Object.assign(ACTIONS, {
     elm.disabled = true;
     const env = await callOp('cases.build', {});
     const box = el('ov-mat');
-    if (!env.ok) { if (box) box.innerHTML = `<div class="warn err">${humanError(env.error)}</div>`; return; }
+    if (!env.ok) {
+      elm.disabled = false;     // відмова — кнопка знову натискається, а не мертва
+      if (box) box.innerHTML = `<div class="warn err">${humanError(env.error)}</div>`;
+      return;
+    }
     const job = await jobDone((env.data || {}).job_id, (j) => { const b = el('ov-mat-note'); if (b) b.innerHTML = jobChip(j); });
     // Перемальовуємо весь Огляд: застарілий рядок «Стану Майстерні» теж зникає.
     if (job.state === 'done') goto('home');
+    else elm.disabled = false;
   },
   'project.go': (_ev, elm) => {
     const id = elm.dataset.arg;

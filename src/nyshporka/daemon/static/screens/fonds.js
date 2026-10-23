@@ -569,7 +569,16 @@ function watchHere(box, jobId, done) {
     // куди людина не йшла. Виходило найгірше: натиснув → «готово» → нічого не
     // змінилось і ніде не написано чому.
     box.innerHTML = jobChip(j) + (j.state === 'done' ? jobNotes(j) : '');
-    if (j.state === 'done' && done) done();
+    if (j.state === 'done' && done) {
+      // 🔴 `done` перемальовує екран, і примітки роботи гинули разом зі старою
+      // коробкою — тобто правка вище не доходила до людини. Після перемальовки
+      // їх кладемо в ту саму коробку (за id) на новому екрані.
+      const notes = jobNotes(j);
+      Promise.resolve(done()).then(() => {
+        const again = box.id ? el(box.id) : null;
+        if (again && notes) again.innerHTML = notes;
+      });
+    }
   });
 }
 

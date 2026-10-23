@@ -11,15 +11,15 @@
  *  вибирається сама за мовою браузера.
  */
 import uk from './strings/uk.js';
-import en from './strings/en.js';
-import pl from './strings/pl.js';
-import ro from './strings/ro.js';
-import fr from './strings/fr.js';
-import de from './strings/de.js';
-import ru from './strings/ru.js';
 
 // ── i18n ─────────────────────────────────────────────────────────────────────
-const STRINGS = { uk, en, pl, ro, fr, de, ru };
+// 🔴 Вантажиться лише українська (запасна для кожного ключа) і ПОТОЧНА мова,
+// а не всі сім: словники важать 80–110 КБ кожен, і сім разом — понад
+// 650 КБ на кожне відкриття консолі, з телефона по Wi-Fi теж (замір 23.10.2026).
+// Поточна мова довантажується верхньорівневим `await` нижче: модулі, що
+// імпортують `t`, чекають на неї самі, тож перший рядок інтерфейсу вже
+// перекладений, а не мигає українською.
+const STRINGS = { uk };
 
 /** Код і власна назва мови — у порядку перемикача. */
 const LANGS = [
@@ -53,6 +53,9 @@ function fromBrowser() {
 
 const saved = stored();
 const LANG = saved && ENABLED.includes(saved) ? saved : fromBrowser();
+if (LANG !== 'uk') {
+  try { STRINGS[LANG] = (await import(`./strings/${LANG}.js`)).default; } catch (_e) { /* лишається українська */ }
+}
 const t = (key) => (STRINGS[LANG] && STRINGS[LANG][key]) || STRINGS.uk[key] || key;
 
 /** Переклад, якщо він є саме в поточній мові, інакше — те, що дав сервер.

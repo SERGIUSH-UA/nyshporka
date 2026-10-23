@@ -178,7 +178,10 @@ function renderCoverage(env) {
  * найпомітніше на довгих таблицях, де око вже стоїть на потрібному рядку.
  * `keepScroll: false` тут навмисно: зміна екрана мусить починатись згори.
  */
-function setView(html) { swapHtml(el(VIEW_ID), html, { keepScroll: false }); }
+/** Скільки разів малювали екран: перехід дивиться, чи новий екран уже щось показав. */
+let PAINTS = 0;
+export const paints = () => PAINTS;
+function setView(html) { PAINTS += 1; swapHtml(el(VIEW_ID), html, { keepScroll: false }); }
 
 /**
  * Куди малює `setView`: екран (`view`) чи тіло вікна (`dlg-body`).
@@ -313,6 +316,30 @@ function maskot(pose, width = 150, cls = '') {
 }
 
 /**
+ * 🎒 Мініатюри речей маскота — мальовані в його манері (сумка, лупа, перо,
+ * в'язка справ, печатка, скриня…), квадрат 320 px з прозорим тлом.
+ *
+ * Стоять там, де є місце й де без них були б «сухі букви»: картки «Головного»
+ * на Огляді, показники роду, порожні стани. 🔴 Порожній стан — це СТАН
+ * («нічого не виконується», «усе віддано»), а не висновок пошуку: на видачі
+ * пошуку й «нічого не знайдено» мініатюри немає з тієї ж причини, що й
+ * маскота (див. `MASKOT`). Перелік закритий: невідома назва не малюється.
+ */
+const MINI = ['sumka', 'lupa', 'pero', 'viazka', 'teka', 'derevo', 'pechatka', 'mapa',
+  'hodynnyk', 'shukhliada', 'zshyvok', 'skrynia'];
+
+function mini(name, size = 48, cls = '') {
+  if (!MINI.includes(name)) return '';
+  return `<img class="mini${cls ? ` ${cls}` : ''}" src="/ui/img/mini-${name}.webp"`
+    + ` alt="" width="${size}" height="${size}" loading="lazy" decoding="async">`;
+}
+
+/** Порожній стан із мініатюрою: річ, а під нею — що це означає й що робити. */
+function emptyMini(name, html) {
+  return `<div class="empty-mini">${mini(name, 72)}<div class="muted">${html}</div></div>`;
+}
+
+/**
  * Поле форми з підписом НАД ним; `cls` — ширина («narrow» для років).
  *
  * 🔴 Підписом поля не може бути підказка в ньому: вона зникає, щойно поле
@@ -323,6 +350,7 @@ function fld(label, control, cls = '') {
   return `<label class="fld${cls ? ` ${cls}` : ''}"><span class="fld-l">${esc(label)}</span>${control}</label>`;
 }
 
+export { mini, emptyMini };
 export { esc, safeHref, el, renderWarnings, renderCoverage, setView, setViewTarget, busy, fld,
   splitWarnings, notesBlock, hasAlerts, seedAttr,
   failure, boxError, busyForm, alive, maskot, MASKOT, humanError, labelCells };

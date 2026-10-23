@@ -1,5 +1,6 @@
 /** 📂 Мої справи й заведення нової. */
 
+import { toast } from '../core/bits.js';
 import { t, LANG } from '../core/strings.js';
 import { TOKEN, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm, fld,
@@ -197,6 +198,16 @@ async function checkForm() {
         esc(s.fond)}</b> · ${t('case.opys')} <b>${esc(s.opys)}</b> · ${t('case.spr')} <b>${esc(s.spr)}</b>`
       : (d.shifra_error ? `<span class="warn-inline">${esc(d.shifra_error)}</span>` : '');
   }
+  // 🧭 Кроки майстра: шифра — щойно є тека, опис — щойно шифра розібралась.
+  const unlock = (n, on) => {
+    const f = form.querySelector(`.wz-step[data-step="${n}"]`);
+    if (f && on && f.removeAttribute) f.removeAttribute('data-locked');
+  };
+  const hasDir = !!val('case_dir').trim();
+  unlock(2, hasDir);
+  unlock(3, hasDir && !!d.shifra);
+  const save = el('case-save');
+  if (save && hasDir && d.shifra) save.disabled = false;
   // Позначка «показувати там, де лежить» — лише для теки поза простором.
   const box = el('adopt-box');
   if (box) box.hidden = !(d.dir && d.dir.outside);
@@ -227,18 +238,23 @@ SCREENS.newcase = async () => {
   // полі, і вона зникала, щойно поле заповнене: у формі, відкритій на правку,
   // стояли «ANRM 2-1-1741», «газета», «1854», «1854» — і котре з двох «1854»
   // «від», а котре «до», не казало ніщо (холодний прохід 07.10.2026).
+  // 🧭 Три кроки, що відкриваються по черзі: тека → шифра й архів → що це за
+  // справа. Доти вісім полів стояли підряд, і з чого починати, людина
+  // вгадувала; у правці відкрито все одразу. Заголовок — у шапці сторінки чи
+  // вікна, другого `<h2>` тут немає (він стояв двічі).
+  const step = (n, key, body, open) => `<fieldset class="wz-step"${open ? '' : ' data-locked="1"'} data-step="${n}">
+    <legend class="rd-step"><span class="rd-n">${n}</span>${esc(t(key))}</legend>${body}</fieldset>`;
   setView(`
-    <h2>${t('case.title')}</h2>
     ${EDIT ? `<div class="warn">${t('case.editing')} <b class="mono">${dir}</b>
        · ${esc(EDIT.scans)} ${t('common.frames')}<br>
        <span class="muted">${t('case.keep')}</span></div>`
     : `<p class="muted">${t('case.why')}</p>`}
     <form data-act="case.save" id="case-form">
-      <div class="row">${fld(t('case.dir'), pathField({ name: 'case_dir', mode: 'dir',
+      ${step(1, 'case.step.dir', `<div class="row">${fld(t('case.dir'), pathField({ name: 'case_dir', mode: 'dir',
         purpose: 'case.dir', value: EDIT ? EDIT.case_dir : '',
         ph: t('case.dir.ph'), autofocus: !EDIT }))}</div>
-      ${EDIT ? '' : `<p class="muted fld-hint">${t('case.dirhint')}</p>`}
-      <div class="row">
+      ${EDIT ? '' : `<p class="muted fld-hint">${t('case.dirhint')}</p>`}`, true)}
+      ${step(2, 'case.step.shifra', `<div class="row">
         ${fld(t('case.shifra'), `<input name="shifra" placeholder="ДАХмО 315-1-8433"
           value="${v('shifra')}">`)}
         ${fld(t('case.repo'), `<select name="repo">${repoOptions(sc.repo)}</select>`)}
@@ -254,8 +270,8 @@ SCREENS.newcase = async () => {
           <button type="button" data-act="case.repo.add">${t('case.repo.save')}</button>
         </div>
         <div id="repo-hits"></div>
-      </div>
-      <div class="row">${fld(t('case.name'), `<input name="title"
+      </div>`, !!EDIT)}
+      ${step(3, 'case.step.what', `<div class="row">${fld(t('case.name'), `<input name="title"
         placeholder="${t('case.name.ph')}" value="${v('title')}" ${EDIT ? 'autofocus' : ''}>`)}</div>
       <div class="row">
         ${fld(t('case.type'), `<input name="doc_type" placeholder="${t('case.type.ph')}"
@@ -270,13 +286,13 @@ SCREENS.newcase = async () => {
           value="${v('year_to')}">`, 'narrow')}
       </div>
       <div class="row">${fld(t('case.note'), `<input name="note"
-        placeholder="${t('case.note.ph')}" value="${v('note')}">`)}</div>
+        placeholder="${t('case.note.ph')}" value="${v('note')}">`)}</div>`, !!EDIT)}
       <div id="adopt-box" hidden>
         <div class="warn"><label><input type="checkbox" name="adopt" value="1">
           ${t('case.adopt')}</label><br>
           <span class="muted">${t('case.adopt.why')}</span></div>
       </div>
-      <div class="row"><button type="submit">${t('case.save')}</button>
+      <div class="row"><button type="submit" id="case-save"${EDIT ? '' : ' disabled'}>${t('case.save')}</button>
         ${EDIT ? `<button type="button" data-act="case.fresh">${t('case.fresh')}</button>`
     : ''}</div>
     </form>
@@ -326,12 +342,14 @@ Object.assign(ACTIONS, {
     const env = await callOp('intake.aside',
       { paths: [elm.dataset.path], why: sel ? sel.value : '' });
     if (!env.ok) return failure(env);
+    toast(t('toast.aside'), { tone: 'ok' });
     return show('cases');
   },
 
   'intake.unaside': async (_ev, elm) => {
     const env = await callOp('intake.aside', { paths: [elm.dataset.path], undo: true });
     if (!env.ok) return failure(env);
+    toast(t('toast.unaside'), { tone: 'ok' });
     return show('cases');
   },
 

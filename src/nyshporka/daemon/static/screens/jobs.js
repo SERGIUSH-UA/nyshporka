@@ -1,5 +1,6 @@
 /** ⏳ Черга робіт. */
 
+import { toast } from '../core/bits.js';
 import { t, LANG } from '../core/strings.js';
 import { TOKEN, callOp, SEQ, apiFetch } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
@@ -22,7 +23,7 @@ SCREENS.jobs = async () => {
   // доводилось шукати серед десятка однакових рядків — тобто екран, який має
   // відповідати «що зі мною зараз», відповідав «що тут колись бувало».
   setView(`
-    <div id="jobs"></div>`);
+    <div id="jobs">${skelCards(3)}</div>`);
   await refreshJobs();
 };
 
@@ -43,6 +44,7 @@ Object.assign(ACTIONS, {
       if (box) box.insertAdjacentHTML('afterbegin', `<div class="warn err">${esc(why)}</div>`);
       return;
     }
+    toast(t('toast.jobs.forgot'), { tone: 'ok' });
     await refreshJobs();
   },
 
@@ -64,6 +66,7 @@ Object.assign(ACTIONS, {
         `<div class="warn err">${esc(why)}</div>`);
       return;
     }
+    toast(t('toast.job.cancelled'), { tone: 'ok' });
     await refreshJobs();
   },
 });

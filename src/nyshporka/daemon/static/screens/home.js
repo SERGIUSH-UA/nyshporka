@@ -19,7 +19,7 @@
 import { t, tOr, LANG } from '../core/strings.js';
 import { TOKEN, PROJECT, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
-  renderWarnings, renderCoverage, curGen, alive, maskot } from '../core/view.js';
+  renderWarnings, renderCoverage, curGen, alive, maskot, mini } from '../core/view.js';
 import { modelName } from '../core/bits.js';
 import { SCREENS, ACTIONS, screenOfOp } from '../core/registry.js';
 import { SECTIONS, NAV_LABEL, show, renderNav, screenOn,
@@ -250,12 +250,12 @@ function paintHome(env, gen = curGen()) {
  */
 function hubOverview(env, d) {
   const tools = [
-    ['read', 'quill', 'nav.read', 'tool.read.hint'],
-    ['library', 'books', 'nav.library', 'tool.library.hint'],
-    ['newcase', 'plus', 'stage.act.newcase', 'tool.newcase.hint'],
-    ['newproject', 'plus', 'stage.act.newproject', 'tool.newproject.hint'],
-  ].filter(([scr]) => screenOn(scr)).map(([scr, icon, label, hint]) =>
-    `<button class="tool" data-act="nav" data-arg="${scr}">${ic(icon, 'ic-o')}<span><b>${
+    ['read', 'pero', 'nav.read', 'tool.read.hint'],
+    ['library', 'viazka', 'nav.library', 'tool.library.hint'],
+    ['newcase', 'teka', 'stage.act.newcase', 'tool.newcase.hint'],
+    ['newproject', 'derevo', 'stage.act.newproject', 'tool.newproject.hint'],
+  ].filter(([scr]) => screenOn(scr)).map(([scr, pic, label, hint]) =>
+    `<button class="tool" data-act="nav" data-arg="${scr}">${mini(pic, 56)}<span><b>${
       esc(t(label).replace(/^＋\s*/, ''))}</b><small>${esc(t(hint))}</small></span></button>`).join('');
   const recent = lastRuns(d.reading, 5);
   return `<div id="hub-cards"></div>
@@ -404,7 +404,7 @@ function headline(d, ws) {
   const bits = [`<span class="ws">${esc(ws.name || '')}</span>`];
   if (reg.at) bits.push(`<span>${t('dash.built')}: ${esc(when(reg.at))}</span>`);
   bits.push(p.at
-    ? `<span>${t('dash.pulse')}: ${esc(when(p.at))}${p.by ? ` · ${esc(p.by)}` : ''}</span>`
+    ? `<span>${t('dash.pulse')}: ${esc(when(p.at))}${p.by ? ` · ${esc(p.by_label || p.by)}` : ''}</span>`
     : `<span>${t('dash.never')}</span>`);
   bits.push(`<span class="mono">${esc(ws.root || '')}</span>`);
   return `<div class="dash-head">${bits.join('')}</div>`;

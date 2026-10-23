@@ -5,8 +5,9 @@
  * Тут лише чисті функції над рядками: ні запитів, ні реєстру. Так їх бачить і
  * тест у Node, і кожен екран, без циклу імпортів.
  */
+import { ic } from '/ui/icons.js';
 import { esc } from './view.js';
-import { t, tOr } from './strings.js';
+import { t, tOr, tn } from './strings.js';
 
 /** `<dl class="kv">` з пар; порожні значення випадають. */
 export function kv(rows) {
@@ -203,15 +204,35 @@ export function dayOf(sec, lang = 'uk') {
 }
 
 /**
- * Короткий відгук після дії («Збережено», «Нічого не змінилось»). Дія без
- * видимого результату читається як кнопка, що не працює.
+ * Короткий відгук після дії («Збережено», «Додано в чергу»). Дія без видимого
+ * результату читається як кнопка, що не працює.
+ *
+ * `opts` — число (мс, як було) або `{ tone, ms }`: `ok` — зелена галочка,
+ * `err` — червоний хрестик і довше на екрані, без тону — нейтральний. Тости
+ * стають стосом у `#toasts` (не налазять один на одного, коли дві дії
+ * завершились поруч), видимих — не більше трьох. Помилку, яку треба
+ * прочитати й виправити, показують на екрані, а не тостом: тост зникає.
  */
-export function toast(text, ms = 2600) {
+const TOAST_ICON = { ok: 'check-circle', err: 'x-circle', info: 'info' };
+export function toast(text, opts = {}) {
+  const o = typeof opts === 'number' ? { ms: opts } : opts;
+  const tone = o.tone || '';
+  const ms = o.ms || (tone === 'err' ? 5000 : 2600);
+  let box = document.getElementById('toasts');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'toasts';
+    box.className = 'toasts';
+    box.setAttribute('aria-live', 'polite');
+    document.body.appendChild(box);
+  }
+  [...box.children].slice(0, Math.max(0, box.children.length - 2)).forEach((c) => c.remove());
   const n = document.createElement('div');
-  n.className = 'toast';
-  n.setAttribute('role', 'status');
+  n.className = 'toast' + (tone ? ' toast-' + tone : '');
+  n.setAttribute('role', tone === 'err' ? 'alert' : 'status');
   n.textContent = String(text || '');
-  document.body.appendChild(n);
+  if (TOAST_ICON[tone] && n.insertAdjacentHTML) n.insertAdjacentHTML('afterbegin', ic(TOAST_ICON[tone], 'ic-sm'));
+  box.appendChild(n);
   setTimeout(() => n.classList.add('hide'), ms);
   setTimeout(() => n.remove(), ms + 600);
   return n;
@@ -225,4 +246,27 @@ export async function copyText(text) {
   } catch {
     return false;
   }
+}
+
+/**
+ * Справа з бібліотеки як підказка вибору: людина бачить шифру й назву, роки й
+ * кадри — дрібно, а в дію йде шлях теки (`combobox.cbValue`).
+ */
+export function caseItem(c) {
+  const title = String(c.title || '');
+  const short = title.length > 70 ? `${title.slice(0, 68)}…` : title;
+  const years = c.year_from ? (c.year_to && c.year_to !== c.year_from ? `${c.year_from}–${c.year_to}` : `${c.year_from}`) : '';
+  const head = c.shifra || c.key || c.path;
+  return { value: c.path, label: short ? `${head} · ${short}` : head,
+    hint: [years, c.frames ? tn('unit.frames', c.frames) : ''].filter(Boolean).join(' · ') };
+}
+
+/**
+ * Назва без емодзі: заголовки звітів і змін пишуть люди й агенти, і «🔎»,
+ * «🦔» на початку рядка серед значків пером виглядають наліпками з чужого
+ * набору. Дані не міняються — лише показ.
+ */
+const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F000}-\u{1F2FF}\u{FE0F}\u{200D}\u{20E3}]/gu;
+export function noEmoji(text) {
+  return String(text || '').replace(EMOJI, '').replace(/\s{2,}/g, ' ').trim();
 }

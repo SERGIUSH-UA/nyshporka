@@ -13,6 +13,7 @@
  * коли реєстру немає, і «—» лише тоді, коли перевірили й нічого немає.
  * Сплутати їх означає видати «зрізу не збирали» за «жодну справу не читали».
  */
+import { toast } from '../core/bits.js';
 import { t } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, renderWarnings,
@@ -603,6 +604,7 @@ Object.assign(ACTIONS, {
         + `<p><button data-act="nav" data-arg="library">${t('lib.cancel')}</button></p>`;
       return undefined;
     }
+    toast(t('toast.verdict'), { tone: 'ok' });
     return show('library');
   },
 

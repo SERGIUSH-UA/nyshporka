@@ -167,7 +167,18 @@ function dispatch(ev) {
     alert(`невідома дія: ${name}`);
     return;
   }
-  fn(ev, elm);
+  // ⏳ Дія, що вже йде, вдруге не запускається. Доти більшість кнопок
+  // (черга, хмара, корені, розділи) приймали друге натискання, поки летів
+  // перший запит, — і операція виконувалась двічі. `aria-busy`, а не
+  // `disabled`: частина обробників свідомо лишає кнопку вимкненою після
+  // успіху, і зняти чужу вимкненість тут означало б зламати їм це.
+  if (elm.getAttribute('aria-busy') === 'true') { ev.preventDefault(); return; }
+  const res = fn(ev, elm);
+  if ((ev.type === 'click' || ev.type === 'submit') && res && typeof res.then === 'function') {
+    elm.setAttribute('aria-busy', 'true');
+    const done = () => elm.removeAttribute('aria-busy');
+    res.then(done, (err) => { done(); throw err; });
+  }
 }
 document.addEventListener('click', dispatch);
 document.addEventListener('submit', dispatch);

@@ -23,6 +23,21 @@ const fold = (s) => String(s ?? '').toLocaleLowerCase('uk').replace(/[’'ʼ`]/g
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+// Елемент — рядок або `{value, label, hint}`: людина бачить і шукає за назвою
+// («ДАВіО 904-38-1 · Метрична книга…»), а в дію йде значення (шлях теки).
+// Доти вибір справи в Аркушах і Читанні був переліком шляхів
+// `data/raw/davo/f904_wiki/904-38-1` (прохід провтиків 22.10.2026).
+const lab = (o) => (typeof o === 'string' ? o : String(o.label || o.value || ''));
+const hintOf = (o) => (typeof o === 'string' ? '' : String(o.hint || ''));
+const valOf = (o) => (typeof o === 'string' ? o : String(o.value || ''));
+
+/** Значення поля з комбобоксом: вибране значення, якщо в полі ще та сама назва. */
+export function cbValue(input) {
+  if (!input) return '';
+  const d = input.dataset || {};
+  return d.cbLabel && d.cbLabel === input.value ? (d.cbValue || '') : input.value;
+}
+
 /**
  * Начепити комбобокс на існуючий <input>.
  * @param {HTMLInputElement} input
@@ -102,7 +117,8 @@ export function attachCombobox(input, opts = {}) {
     pop.innerHTML = hit.length
       ? hit.map((ri, k) =>
           `<div class="cb-opt${k === 0 ? ' on' : ''}" role="option" id="${id}-o${k}"`
-          + ` aria-selected="${k === 0}" data-k="${k}">${mark(raw[ri], q)}</div>`).join('')
+          + ` aria-selected="${k === 0}" data-k="${k}">${mark(lab(raw[ri]), q)}${
+            hintOf(raw[ri]) ? `<small class="cb-hint">${esc(hintOf(raw[ri]))}</small>` : ''}</div>`).join('')
         + (total > hit.length
             ? `<div class="cb-more" aria-live="polite">знайдено ${total} — показано `
               + `${hit.length}, уточніть запит</div>` : '')
@@ -176,8 +192,13 @@ export function attachCombobox(input, opts = {}) {
   function pick(k) {
     const ri = rows[k];
     if (ri == null) return;
-    const v = raw[ri];
-    input.value = v;
+    const item = raw[ri];
+    const v = valOf(item);
+    input.value = lab(item);
+    if (input.dataset) {
+      if (typeof item === 'string') { delete input.dataset.cbValue; delete input.dataset.cbLabel; }
+      else { input.dataset.cbValue = v; input.dataset.cbLabel = lab(item); }
+    }
     hide();
     firingOwn = true;
     try {
@@ -244,7 +265,7 @@ export function attachCombobox(input, opts = {}) {
   const api = {
     setItems(a) {
       raw = Array.isArray(a) ? a : [];
-      low = raw.map(fold);
+      low = raw.map((o) => fold(typeof o === 'string' ? o : `${lab(o)} ${hintOf(o)} ${valOf(o)}`));
       // 🔴 Підказки з сервера приходять ПІСЛЯ набору. Якщо список у цю мить
       // закритий (у вільному полі старі підказки не збіглись і він сховався),
       // нові мусять його відкрити, поки людина в полі: інакше «224» набрано,

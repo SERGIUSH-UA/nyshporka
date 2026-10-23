@@ -1,8 +1,8 @@
 /** Секції, шапка, перехід між екранами й черга робіт. */
 import { t, tOr } from './strings.js';
 import { callOp, FINAL_STATES, apiFetch } from './net.js';
-import { esc, el, setView, setViewTarget, curGen, bumpGen, alive, maskot,
-  splitWarnings, notesBlock, seedAttr } from './view.js';
+import { esc, el, setView, setViewTarget, curGen, bumpGen, alive, maskot, busy, paints,
+  splitWarnings, notesBlock, seedAttr, emptyMini } from './view.js';
 import { openModal, closeModal, modalOpen, modalTitle } from './modal.js';
 import { SCREENS, OP_SCREEN } from './registry.js';
 import { ST } from './state.js';
@@ -382,7 +382,13 @@ async function show(screen) {
   sideBtnState();
   renderNav();
   renderHead(screen);
-  await fn();
+  // 🦴 Скелетон, якщо екран мовчить довше за мить. Доти перехід лишав на місці
+  // ПОПЕРЕДНІЙ екран, поки новий чекав сервера (Набори — 2 с, «Віддати» — 6 с),
+  // і здавалось, що клік не спрацював. 140 мс — щоб швидкі екрани не моргали.
+  const p0 = paints();
+  const g0 = curGen();
+  const skel = setTimeout(() => { if (paints() === p0 && curGen() === g0) busy(6); }, 140);
+  try { await fn(); } finally { clearTimeout(skel); }
 }
 
 /** Екран у вікні: той самий модуль, лише `setView` малює в тіло вікна. */
@@ -624,7 +630,7 @@ async function refreshJobs() {
       <button data-act="jobs.cancel" data-job="${esc(j.id)}">${t('jobs.cancel')}</button>
       ${caseLink(j)}
     </div>`).join('');
-  box.innerHTML = head + (cards || `<p class="muted">${t('jobs.none')}</p>`)
+  box.innerHTML = head + (cards || emptyMini('hodynnyk', t('jobs.none')))
     + doneBlock(done);
 }
 

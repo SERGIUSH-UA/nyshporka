@@ -7,11 +7,11 @@
  */
 
 import { t, tOr, LANG } from '../core/strings.js';
-import { callOp } from '../core/net.js';
-import { esc, el, setView, busy, failure, boxError, curGen, alive } from '../core/view.js';
+import { callOp, staleThenFresh } from '../core/net.js';
+import { esc, el, setView, busy, failure, boxError, curGen, alive, emptyMini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { openModal, modalSeq, modalTitle } from '../core/modal.js';
-import { mdLite, dayOf } from '../core/bits.js';
+import { mdLite, dayOf, noEmoji } from '../core/bits.js';
 
 /** Перелік з останньої відповіді — фільтр у браузері, без запиту на кожну літеру. */
 let ROWS = [];
@@ -20,11 +20,21 @@ const RS = { q: '', kind: '' };
 SCREENS.research = async () => {
   const gen = curGen();
   busy(6);
-  const env = await callOp('reports.list', {});
-  if (!alive(gen)) return;
+  // Перелік звітів — тисячі файлів; спершу минула відповідь, потім свіжа.
+  await staleThenFresh('reports.list', {}, (env) => {
+    if (!alive(gen)) return;
+    paintResearch(env);
+  });
+};
+
+function paintResearch(env) {
   if (!env.ok) return failure(env);
   ROWS = (env.data || {}).rows || [];
-  const kinds = [...new Set(ROWS.map((r) => r.kind).filter(Boolean))].sort();
+  // Найновіші зверху: «що ми робили останнім» — головне питання цього екрана.
+  ROWS.sort((a, b) => Number(b.mtime || 0) - Number(a.mtime || 0));
+  const count = {};
+  ROWS.forEach((r) => { if (r.kind) count[r.kind] = (count[r.kind] || 0) + 1; });
+  const kinds = Object.keys(count).sort((a, b) => count[b] - count[a]);
   setView(`
     <p class="muted">${t('rs.why')}</p>
     <div class="row">
@@ -33,15 +43,23 @@ SCREENS.research = async () => {
           placeholder="${esc(t('rs.find.ph'))}"></label>
       <label class="fld"><span class="fld-l">${t('rs.kind')}</span>
         <select id="rs-kind" data-act="rs.find"><option value="">${t('canon.kind.all')}</option>
-          ${kinds.map((k) => `<option value="${esc(k)}"${RS.kind === k ? ' selected' : ''}>${esc(kindLabel(k))}</option>`).join('')}
+          ${kinds.map((k) => `<option value="${esc(k)}"${RS.kind === k ? ' selected' : ''}>${esc(kindLabel(k))} · ${count[k]}</option>`).join('')}
         </select></label>
     </div>
     <div class="dash-box" id="rs-list"></div>`);
   drawList();
-};
+}
 
-/** Вид звіту — перша тека в `reports/`; знайомі назви — словами, решта як є. */
-const kindLabel = (k) => tOr(`rs.k.${k}`, k);
+/** Вид звіту — перша тека в `reports/`; знайомі назви — словами, решта —
+ *  ім'ям теки без підкреслень і з великої літери, а не `village_sweep`. */
+const kindLabel = (k) => tOr(`rs.k.${k}`, '') || humanKind(k);
+function humanKind(k) {
+  const s = String(k || '').replace(/[_-]+/g, ' ').trim();
+  return s ? s[0].toUpperCase() + s.slice(1) : s;
+}
+
+/** Скільки рядків показано: тисячі звітів одним шматком гальмували екран. */
+const PAGE = 60;
 
 /** Рядки під поточний фільтр: назва, шлях і вид — без урахування регістру. */
 export function filterReports(rows, q, kind) {
@@ -53,12 +71,17 @@ export function filterReports(rows, q, kind) {
 function drawList() {
   const box = el('rs-list');
   if (!box) return;
-  const rows = filterReports(ROWS, RS.q, RS.kind);
+  const all = filterReports(ROWS, RS.q, RS.kind);
+  const limit = RS.limit || PAGE;
+  const rows = all.slice(0, limit);
+  const more = all.length > rows.length
+    ? `<p class="row"><button class="ghost" data-act="rs.more">${t('rs.more').replace('{n}', Math.min(PAGE, all.length - rows.length))}</button>
+        <span class="muted">${t('rs.shown').replace('{n}', rows.length).replace('{all}', all.length)}</span></p>` : '';
   box.innerHTML = rows.length ? rows.map((r) => `<div class="lrow">
-      <div><b>${esc(r.title)}</b>
+      <div><b>${esc(noEmoji(r.title))}</b>
         <small class="muted">${r.kind ? `<span class="tag">${esc(kindLabel(r.kind))}</span> ` : ''}${esc(dayOf(r.mtime, LANG))}</small></div>
-      <button data-act="rs.read" data-arg="${esc(r.path)}">${t('rs.read')}</button></div>`).join('')
-    : `<p class="muted">${ROWS.length ? t('rs.nomatch') : t('rs.none')}</p>`;
+      <button data-act="rs.read" data-arg="${esc(r.path)}">${t('rs.read')}</button></div>`).join('') + more
+    : (ROWS.length ? `<p class="muted">${t('rs.nomatch')}</p>` : emptyMini('lupa', t('rs.none')));
 }
 
 async function readReport(path) {
@@ -78,6 +101,11 @@ Object.assign(ACTIONS, {
   'rs.find': () => {
     RS.q = String((el('rs-q') || {}).value || '');
     RS.kind = String((el('rs-kind') || {}).value || '');
+    RS.limit = PAGE;
+    drawList();
+  },
+  'rs.more': () => {
+    RS.limit = (RS.limit || PAGE) + PAGE;
     drawList();
   },
   'rs.read': (_ev, elm) => readReport(elm.dataset.arg),

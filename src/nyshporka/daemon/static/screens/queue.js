@@ -1,5 +1,6 @@
 /** 🚦 Черга справ: що на якому етапі, чому стоїть і що з цим зробити. */
 
+import { toast } from '../core/bits.js';
 import { t } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError,
@@ -190,9 +191,10 @@ SCREENS.queue = async () => {
 };
 
 /** Показати відповідь дії й перечитати перелік. */
-async function queueAfter(env) {
+async function queueAfter(env, said = '') {
   const box = el('queue-msg');
   if (!env.ok) return boxError('queue-msg', env);
+  if (said) toast(said, { tone: 'ok' });
   // Справу, яку черга не взяла, видно одразу, а не в згорнутих примітках:
   // інакше «Додати» виглядала кнопкою, що нічого не робить (22.10.2026).
   const refused = ((env.data || {}).rows || []).filter((r) => !r.id && r.why)
@@ -210,47 +212,48 @@ Object.assign(ACTIONS, {
     const share = fd.share === '1';
     const env = await callOp('queue.add', { refs, share });
     if (env.ok) ev.target.reset();
-    await queueAfter(env);
+    const took = ((env.data || {}).rows || []).filter((r) => r.id).length;
+    await queueAfter(env, took ? t('toast.queue.added').replace('{n}', took) : '');
   },
 
   'queue.start': async () => {
-    await queueAfter(await callOp('queue.start', {}));
+    await queueAfter(await callOp('queue.start', {}), t('toast.queue.started'));
   },
 
   'queue.stop': async () => {
-    await queueAfter(await callOp('queue.stop', { now: false }));
+    await queueAfter(await callOp('queue.stop', { now: false }), t('toast.queue.stop'));
   },
 
   'queue.stopnow': async () => {
-    await queueAfter(await callOp('queue.stop', { now: true }));
+    await queueAfter(await callOp('queue.stop', { now: true }), t('toast.queue.stopnow'));
   },
 
   'queue.retry': async (_ev, elm) => {
     const ref = elm.dataset.ref;
-    await queueAfter(await callOp('queue.retry', { ref }));
+    await queueAfter(await callOp('queue.retry', { ref }), t('toast.queue.retry'));
   },
 
   'queue.drop': async (_ev, elm) => {
     const ref = elm.dataset.ref;
-    await queueAfter(await callOp('queue.drop', { ref }));
+    await queueAfter(await callOp('queue.drop', { ref }), t('toast.queue.drop'));
   },
 
   'queue.pool': async (_ev, elm) => {
     const ref = elm.dataset.ref;
     const pool = elm.dataset.arg;
-    await queueAfter(await callOp('queue.set', { ref, pool }));
+    await queueAfter(await callOp('queue.set', { ref, pool }), t('toast.saved'));
   },
 
   'queue.script': async (_ev, elm) => {
     const ref = elm.dataset.ref;
     const script = elm.dataset.arg;
-    await queueAfter(await callOp('queue.set', { ref, script }));
+    await queueAfter(await callOp('queue.set', { ref, script }), t('toast.saved'));
   },
 
   'queue.shifra': async (_ev, elm) => {
     const ref = elm.dataset.ref;
     const shifra_ok = true;
-    await queueAfter(await callOp('queue.set', { ref, shifra_ok }));
+    await queueAfter(await callOp('queue.set', { ref, shifra_ok }), t('toast.saved'));
   },
 
   'queue.partial': async (ev) => {
@@ -258,6 +261,6 @@ Object.assign(ACTIONS, {
     const fd = Object.fromEntries(new FormData(ev.target).entries());
     const ref = String(fd.ref || '');
     const partial = String(fd.partial || '').trim();
-    await queueAfter(await callOp('queue.set', { ref, partial }));
+    await queueAfter(await callOp('queue.set', { ref, partial }), t('toast.saved'));
   },
 });

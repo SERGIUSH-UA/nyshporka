@@ -270,8 +270,6 @@ def rekeyed(d: dict[str, Any]) -> dict[str, Any]:
 
 def get(d: dict[str, Any], key: str) -> Any:
     """Запис справи зі словника за будь-якою формою ключа; немає — `None`."""
-    from nyshporka.core import casekey
-
     if not d or not key:
         return None
     if key in d:
@@ -279,7 +277,24 @@ def get(d: dict[str, Any], key: str) -> Any:
     want = current_key(key)
     if want in d:
         return d[want]
-    for k, v in d.items():
-        if casekey.is_legacy(k) and current_key(k) == want:
-            return v
-    return None
+    return _legacy_index(d).get(want)
+
+
+def _legacy_index(d: dict[str, Any]) -> dict[str, Any]:
+    """Старі ключі словника, перекладені на нинішні: перший виграє, як у переборі.
+
+    Раз на виклик операції читання (`core.scope`) для того самого словника: «Віддати»
+    шукало картку кожної з 253 справ перебором усього словника — 320 тисяч
+    перевірок регексом (замір 23.10.2026). Поза рамкою рахується щоразу.
+    """
+    from nyshporka.core import casekey
+    from nyshporka.core.scope import once
+
+    def build() -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for k, v in d.items():
+            if casekey.is_legacy(k):
+                out.setdefault(current_key(k), v)
+        return out
+
+    return once(("legacy_key.index", id(d), len(d)), build)

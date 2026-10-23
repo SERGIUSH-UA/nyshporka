@@ -11,7 +11,7 @@
 
 import { t, tOr, tn, LANG } from '../core/strings.js';
 import { callOp } from '../core/net.js';
-import { esc, el, setView, busy, failure, boxError, renderWarnings, curGen, alive } from '../core/view.js';
+import { esc, el, setView, busy, failure, boxError, renderWarnings, curGen, alive, emptyMini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { goto } from '../core/nav.js';
 import { openModal, modalSeq, modalTitle } from '../core/modal.js';
@@ -133,7 +133,7 @@ async function cardsList() {
       <button data-act="canon.card" data-arg="${esc(r.id)}">${t('canon.open')}</button></div>`).join('');
   const more = d.found > (d.rows || []).length
     ? `<p class="muted">${esc(t('canon.more').replace('{n}', d.found))}</p>` : '';
-  el('cn-list').innerHTML = rows ? rows + more : `<p class="muted">${t('canon.none')}</p>`;
+  el('cn-list').innerHTML = rows ? rows + more : emptyMini('pechatka', t('canon.none'));
 }
 
 /** Значення поля картки як текст: дата-об'єкт, перелік, рядок. */

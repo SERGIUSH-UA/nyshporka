@@ -9,10 +9,11 @@
  * Довгі дії (нарізка, голоси, завдання) ідуть роботами в черзі демона, і їхній
  * поступ малюється тут, поруч із формою, а не лише на екрані «Роботи».
  */
+import { skelRows } from '/ui/dom.js';
 import { t } from '../core/strings.js';
-import { callOp } from '../core/net.js';
+import { callOp, staleThenFresh } from '../core/net.js';
 import { esc, el, setView, boxError, busyForm, renderWarnings,
-  curGen, alive } from '../core/view.js';
+  curGen, alive, emptyMini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { goto, onJob, jobChip, jobNotes } from '../core/nav.js';
 import { ST } from '../core/state.js';
@@ -27,7 +28,7 @@ SCREENS.sets = async () => {
   const gen = curGen();
   setView(`
     <p class="muted">${t('sets.why')}</p>
-    <div id="sets-list"></div>
+    <div id="sets-list"><table><tbody>${skelRows(5, 4)}</tbody></table></div>
     <div class="dash-two">
       <div class="dash-box">
         <h3>${t('sets.cut.title')}</h3>
@@ -94,17 +95,25 @@ SCREENS.sets = async () => {
 
 /** Таблиця наборів зі знаменниками — і селекти форм із тих самих імен. */
 async function setsList() {
+  // Набори рахуються з тисяч кропів (~1 с): спершу минула відповідь, потім свіжа.
+  await staleThenFresh('train.sets', { all: true }, (env) => paintSets(env));
+}
+
+function paintSets(env) {
   const box = el('sets-list');
-  const env = await callOp('train.sets', { all: true });
+  if (!box) return undefined;
   if (!env.ok) return boxError('sets-list', env);
   SETS = env.data.sets || [];
   const opts = SETS.map((s) => `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join('');
   for (const id of ['sets-v-name', 'sets-g-name', 'sets-a-name']) {
     const sel = el(id);
-    if (sel) sel.innerHTML = opts;
+    if (!sel) continue;
+    const was = sel.value;           // вибір у формі не губиться при оновленні
+    sel.innerHTML = opts;
+    if (was && SETS.some((x) => x.name === was)) sel.value = was;
   }
   if (!SETS.length) {
-    box.innerHTML = `<p class="muted">${t('sets.none')}</p>` + renderWarnings(env);
+    box.innerHTML = emptyMini('shukhliada', t('sets.none')) + renderWarnings(env);
     return undefined;
   }
   const rows = SETS.map((s) => {

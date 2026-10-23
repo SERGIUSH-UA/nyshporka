@@ -72,7 +72,22 @@ def snapshot() -> dict[str, Any]:
     if isinstance(raw, dict):
         out.update({"at": str(raw.get("at") or ""), "by": str(raw.get("by") or ""),
                     "what": str(raw.get("what") or "")})
+    # `by` — ім'я операції (`history.auto`); людині — її опис. Доти «Стан
+    # Майстерні» так і писав: «востаннє змінювали: … · history.auto».
+    out["by_label"] = _label(out["by"])
     return out
+
+
+def _label(by: str) -> str:
+    if not by:
+        return ""
+    try:
+        from nyshporka.core.ops import REGISTRY
+
+        op = REGISTRY.get(by)
+    except Exception:
+        return ""
+    return (op.summary if op is not None else "") or ""
 
 
 def beat(by: str, what: str = "") -> int:

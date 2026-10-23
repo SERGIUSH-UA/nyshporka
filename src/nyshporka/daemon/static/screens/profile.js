@@ -16,6 +16,7 @@
  * під «весь файл», і екран каже це прямо, а не вдає, ніби її можна вибрати.
  */
 
+import { toast } from '../core/bits.js';
 import { t, LANG } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
@@ -219,6 +220,7 @@ Object.assign(ACTIONS, {
     // записано, але шукається інший». Людина зберігала рід і не дізнавалась,
     // що ПОШУК НИМ НЕ КОРИСТУЄТЬСЯ, — і далі читала нулі як відповідь.
     const said = env.warnings && env.warnings.length ? renderWarnings(env) : '';
+    toast(t('toast.saved'), { tone: 'ok' });
     await show('profile');
     const box = el('prof-hits');
     if (box && said) box.innerHTML = said;
@@ -234,6 +236,7 @@ Object.assign(ACTIONS, {
       { text: String(fd.get('text') || '') });
     unlock();
     if (!env.ok) return boxError('prof-src', env);
+    toast(t('toast.saved'), { tone: 'ok' });
     return show('profile');
   },
 });

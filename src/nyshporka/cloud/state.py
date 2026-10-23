@@ -329,8 +329,22 @@ def load(run_id: str) -> RunState | None:
     return RunState(**{k: v for k, v in raw.items() if k in known})
 
 
+#: Розібрані записи заходів за файлом: (mtime_ns, розмір) → стан. Змінюються
+#: одиниці, а перелік читав усі 4685 щоразу — секунда на кожне відкриття Хмари
+#: (замір 23.10.2026). Відбиток файла береться з обходу теки, без зайвого `stat`.
+_ALL_CACHE: dict[str, tuple[int, int, RunState]] = {}
+
+
 def all_runs() -> list[RunState]:
-    """Усі заходи простору, новіші першими."""
+    """Усі заходи простору, новіші першими.
+
+    🔴 Віддаються КОПІЇ: перелік закриває завершені заходи на місці
+    (`supervised.settle_open` дописує нотатки й фазу), і правка спільного об'єкта
+    з кешу жила б далі навіть там, де запис так і не збережено.
+    """
+    import copy
+    import os
+
     try:
         d = runs_dir()
     except Exception:
@@ -338,13 +352,27 @@ def all_runs() -> list[RunState]:
     if not d.is_dir():
         return []
     out: list[RunState] = []
-    for p in d.glob("*.json"):
-        try:
-            st = load(p.stem)
-        except Exception:
-            continue
-        if st is not None:
-            out.append(st)
+    seen: set[str] = set()
+    with os.scandir(d) as it:
+        for e in it:
+            if not e.name.endswith(".json") or not e.is_file():
+                continue
+            seen.add(e.path)
+            try:
+                fst = e.stat()
+                hit = _ALL_CACHE.get(e.path)
+                if hit is not None and hit[0] == fst.st_mtime_ns and hit[1] == fst.st_size:
+                    st: RunState | None = hit[2]
+                else:
+                    st = load(e.name[:-5])
+                    if st is not None:
+                        _ALL_CACHE[e.path] = (fst.st_mtime_ns, fst.st_size, st)
+            except Exception:
+                continue
+            if st is not None:
+                out.append(copy.deepcopy(st))
+    for gone in set(_ALL_CACHE) - seen:
+        _ALL_CACHE.pop(gone, None)
     return sorted(out, key=lambda s: s.updated, reverse=True)
 
 

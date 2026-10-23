@@ -153,7 +153,7 @@ p = ACTIONS['hist.restore'](null, el('0', { dataset: { file: 'data/canonical/per
 await tick(); ACTIONS['modal.ok'](); await p;
 out.restoreBody = sent('history.restore');
 await ACTIONS['hist.save']();
-out.toasts = document.body.children.map((c) => c.textContent);
+out.toasts = [...document.body.children, ...document.getElementById('toasts').children].map((c) => c.textContent);
 
 await SCREENS.cloud();
 out.cloud = view();

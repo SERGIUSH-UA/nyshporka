@@ -342,6 +342,10 @@ def test_every_brand_image_the_pages_name_is_in_the_package() -> None:
     poses = re.findall(r"'?([\w-]+)'?: \[\d+, \d+\]", table)
     assert poses, "таблицю поз маскота не знайдено"
     names |= {f"maskot-{p}.webp" for p in poses}
+    # Мініатюри речей маскота — той самий закритий перелік (`MINI` у view.js).
+    minis = re.findall(r"'([\w-]+)'", view[view.index("const MINI = ["):view.index("];", view.index("const MINI = ["))])
+    assert minis, "перелік мініатюр не знайдено"
+    names |= {f"mini-{m}.webp" for m in minis}
     missing = sorted(n for n in names if not (img / n).is_file())
     assert not missing, f"сторінки називають картинки, яких у пакеті немає: {missing}"
 

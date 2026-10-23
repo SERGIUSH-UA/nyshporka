@@ -589,13 +589,18 @@ def share_suggest(a: ShareSuggestArgs) -> Envelope:
                     "справі: назвіть її (suggest <шифра> --title …) або "
                     "заздалегідь: nysh share card <шифра> --title …")
 
+    from nyshporka.core.scope import read_scope
     from nyshporka.share import pool
 
-    vsi = S.nepodileni()
+    # Перелік лише читає, і пакування (нижче) починається після нього, тож
+    # відбитки джерел тут рахуються раз на весь перелік, а не на кожну справу
+    # (`core.scope`; було 5–8 с на «Віддати», замір 23.10.2026).
+    with read_scope():
+        vsi = S.nepodileni()
+        zriz = pool.meta()
     # 🔴 `ready` звужує всю відповідь: `rows`, `count` і `summary` мусять
     # описувати той самий набір, інакше агент бере «без кадрів» за готову.
     rows = [r for r in vsi if r.get("status") in S.READY_STATUSES] if a.ready else vsi
-    zriz = pool.meta()
     data: dict[str, Any] = {"rows": rows, "count": len(rows), "total": len(vsi),
                             "summary": S.pidsumok(rows),
                             "pool_snapshot": str((zriz or {}).get("taken_at") or "")}

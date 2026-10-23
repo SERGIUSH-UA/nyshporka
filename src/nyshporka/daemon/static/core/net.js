@@ -73,4 +73,45 @@ function normErr(env, status) {
  */
 const SEQ = { search: 0, geog: 0, fond: 0, casecheck: 0 };
 
-export { TOKEN, PROJECT, FINAL_STATES, apiFetch, callOp, normErr, SEQ };
+/**
+ * ⚡ «Спершу відоме, потім свіже» для повільних переліків.
+ *
+ * `paint(env, stale)` кличеться до двох разів: одразу — з останньою відповіддю
+ * цієї ж операції з тими самими аргументами (якщо вона є в цій вкладці), і
+ * вдруге — зі свіжою, лише якщо та відрізняється. Поки на екрані старе, біля
+ * заголовка стоїть «Оновлюю…». Доти «Віддати» щоразу показувало 6 с скелетона,
+ * Набори — 2 с, хоча між двома відкриттями там зазвичай не змінюється нічого
+ * (замір 23.10.2026).
+ *
+ * ⚠ Пам'ять — на вкладку й до перезавантаження, ключ — проєкт + операція +
+ * аргументи. Відмова не запам'ятовується. Для того, що МУСИТЬ бути свіжим у
+ * момент рішення (план читання, кошторис хмари), не вживати.
+ */
+const MEMO = new Map();
+const MEMO_MAX = 40;
+function staleBadge(on) {
+  const head = document.getElementById('phead');
+  const old = document.getElementById('stale-badge');
+  if (!on) { if (old) old.remove(); return; }
+  if (old || !head) return;
+  head.insertAdjacentHTML('beforeend',
+    `<span id="stale-badge" class="tag stale-badge" role="status">${t('load.refreshing')}</span>`);
+}
+async function staleThenFresh(name, args, paint) {
+  const key = `${ASKED}|${name}|${JSON.stringify(args || {})}`;
+  const old = MEMO.get(key);
+  if (old) { paint(old, true); staleBadge(true); }
+  const env = await callOp(name, args);
+  staleBadge(false);
+  if (env.ok) {
+    MEMO.delete(key);
+    MEMO.set(key, env);
+    if (MEMO.size > MEMO_MAX) MEMO.delete(MEMO.keys().next().value);
+  }
+  const same = old && env.ok && JSON.stringify(old.data) === JSON.stringify(env.data)
+    && JSON.stringify(old.warnings || []) === JSON.stringify(env.warnings || []);
+  if (!same) paint(env, false);
+  return env;
+}
+
+export { TOKEN, PROJECT, FINAL_STATES, apiFetch, callOp, normErr, SEQ, staleThenFresh };

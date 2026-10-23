@@ -245,7 +245,12 @@ class Registry:
         # Тип винятку лишається у відповіді: проковтнути причину означало б
         # сховати ваду замість того, щоб її показати.
         try:
-            env = op.fn(args)
+            if op.mutates:
+                env = op.fn(args)
+            else:
+                from nyshporka.core.scope import read_scope
+                with read_scope():
+                    env = op.fn(args)
         except Exception as exc:
             return fail(f"{name}: {type(exc).__name__}: {exc}")
         # 💓 Пульс — тут і більше ніде. Це єдиний вхід для CLI і HTTP, тож

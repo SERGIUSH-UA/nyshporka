@@ -14,6 +14,7 @@
  * і те — показуються кадри: саме їх читатиме рушій, а сторінки PDF це інший
  * рендер того самого, з іншою нумерацією.
  */
+import { caseItem } from '../core/bits.js';
 import { t } from '../core/strings.js';
 import { callOp } from '../core/net.js';
 import { esc, el, setView, busy, failure, renderWarnings,
@@ -22,7 +23,7 @@ import { SCREENS, ACTIONS, KEYS } from '../core/registry.js';
 import { show } from '../core/nav.js';
 import { ST } from '../core/state.js';
 import { ic } from '/ui/icons.js';
-import { attachCombobox } from '/ui/combobox.js';
+import { attachCombobox, cbValue } from '/ui/combobox.js';
 import { pathField } from '../core/paths.js';
 import { lightbox } from '/ui/lightbox.js';
 
@@ -78,7 +79,7 @@ async function framesHints() {
   if (!input) return;
   const env = await callOp('library.list', { on_disk: true, page_size: 200 });
   if (!env.ok) return;
-  const items = ((env.data || {}).cases || []).map((c) => c.path).filter(Boolean);
+  const items = ((env.data || {}).cases || []).filter((c) => c.path).map(caseItem);
   if (items.length) _cb = attachCombobox(input, { items, empty: t('frames.none') });
 }
 
@@ -280,7 +281,8 @@ Object.assign(ACTIONS, {
   'frames.open': async (ev) => {
     ev.preventDefault();
     const fd = new FormData(ev.target);
-    await framesOpen(String(fd.get('case') || '').trim());
+    const input = ev.target.querySelector ? ev.target.querySelector('input[name="case"]') : null;
+    await framesOpen(String((input && cbValue(input)) || fd.get('case') || '').trim());
   },
 
   'frames.step': (_ev, elm) => framesShow(FS.i + Number(elm.dataset.arg || 0)),

@@ -498,7 +498,15 @@ def load(extra: Path | None = None) -> ArchivesPack:
 
 
 def _pack_stamp() -> tuple[tuple[Any, ...], ...]:
-    """Штамп усіх джерел паку: (шлях, mtime_ns, розмір). Відсутність — теж стан."""
+    """Штамп усіх джерел паку: (шлях, mtime_ns, розмір). Відсутність — теж стан.
+
+    Раз на виклик операції читання (`core.scope`): «Віддати» питало його на кожну справу.
+    """
+    from nyshporka.core.scope import once
+    return once("archives.pack_stamp", _pack_stamp_now)
+
+
+def _pack_stamp_now() -> tuple[tuple[Any, ...], ...]:
     out: list[tuple[Any, ...]] = []
     for p in [BUILTIN, *_overlay_paths()]:
         try:

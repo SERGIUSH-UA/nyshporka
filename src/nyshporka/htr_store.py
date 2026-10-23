@@ -637,6 +637,11 @@ def _runs_stamp() -> tuple[int, int, int, str]:
 
 
 def _library_stamp() -> str:
+    from nyshporka.core.scope import once
+    return once("htr.library_stamp", _library_stamp_now)
+
+
+def _library_stamp_now() -> str:
     try:
         from nyshporka.library import library_path
 
@@ -1287,6 +1292,12 @@ def _canon_case_key(value: str) -> str:
 
 
 def _canon_stamp() -> tuple[str, str]:
+    """Від чого залежить канонічний ключ — раз на виклик операції читання (`core.scope`)."""
+    from nyshporka.core.scope import once
+    return once("htr.canon_stamp", _canon_stamp_now)
+
+
+def _canon_stamp_now() -> tuple[str, str]:
     """Від чого залежить канонічний ключ: бібліотека й карта переїзду ключів.
 
     🔴 Кеш без штампа в довгоживучому процесі (в'ювер, демон) віддавав ключ,

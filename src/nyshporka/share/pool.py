@@ -116,7 +116,15 @@ def quad_key(repo: str, fond: str, opys: str, spr: str) -> str:
 
 
 def _stamp(p: Path) -> tuple[Any, ...]:
-    """Штамп файла, якого може не бути: відсутність — теж стан, і її кешуємо."""
+    """Штамп файла, якого може не бути: відсутність — теж стан, і її кешуємо.
+
+    Раз на виклик операції читання (`core.scope`).
+    """
+    from nyshporka.core.scope import once
+    return once(("pool.stamp", str(p)), lambda: _stamp_now(p))
+
+
+def _stamp_now(p: Path) -> tuple[Any, ...]:
     try:
         st = p.stat()
         return (str(p), st.st_mtime_ns, st.st_size)
@@ -162,7 +170,14 @@ def meta() -> dict[str, Any] | None:
     """Паспорт зрізу, або `None` — зрізу немає.
 
     Ключі: `base`, `taken_at`, `of` (скільки книг), `scope`, `via`, `schema`.
+    Раз на виклик операції читання (`core.scope`): перелік «Віддати» питав
+    його понад 20 тисяч разів.
     """
+    from nyshporka.core.scope import once
+    return once("pool.meta", _meta_now)
+
+
+def _meta_now() -> dict[str, Any] | None:
     global _META_CACHE
     stamp = _stamp(snapshot_path())
     if _META_CACHE is not None and _META_CACHE[0] == stamp:

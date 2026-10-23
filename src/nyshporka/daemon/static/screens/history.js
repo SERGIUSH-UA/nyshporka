@@ -11,11 +11,11 @@
 
 import { t } from '../core/strings.js';
 import { callOp } from '../core/net.js';
-import { esc, el, setView, busy, failure, boxError, curGen, alive } from '../core/view.js';
+import { esc, el, setView, busy, failure, boxError, curGen, alive, emptyMini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { openModal, confirmAct, modalSeq } from '../core/modal.js';
 import { ST } from '../core/state.js';
-import { pill, toast, fieldLabel, fieldValue } from '../core/bits.js';
+import { pill, toast, fieldLabel, fieldValue, noEmoji } from '../core/bits.js';
 
 /** Файл, журнал якого показано (з картки канону), — або весь проєкт. */
 let PATH = '';
@@ -52,6 +52,30 @@ function autoBox(d) {
     <b>${t('hist.auto')}</b></label><p class="muted">${t('hist.auto.why')}</p>`;
 }
 
+/**
+ * Що змінилось — видами, а не шляхами: «облік аркушів (6) · докази (1)».
+ * Доти під кожною зміною стояв хеш коміту й повні шляхи на диску
+ * (`…/data/pages/TEST/9-1-1.json`), які людині нічого не
+ * кажуть (прохід провтиків 22.10.2026). Сирий перелік — під «Подробицями».
+ */
+const AREAS = [
+  [/\/canonical\/persons\//, 'hist.area.persons'], [/\/canonical\/hypotheses\//, 'hist.area.hyp'],
+  [/\/canonical\//, 'hist.area.canon'], [/\/pages\//, 'hist.area.pages'], [/\/views\//, 'hist.area.views'],
+  [/\/citations\//, 'hist.area.evidence'], [/reports\/research\//, 'hist.area.research'],
+  [/clan_hunt\//, 'hist.area.hunt'], [/(^|\/)project\.toml$|nyshporka\.toml$/, 'hist.area.settings'],
+];
+function areaOf(path) {
+  const p = String(path || '').split('\\').join('/');
+  const hit = AREAS.find(([re]) => re.test(p));
+  return hit ? t(hit[1]) : t('hist.area.other');
+}
+function areasLine(files, more) {
+  const n = {};
+  files.forEach((f) => { const a = areaOf(f); n[a] = (n[a] || 0) + 1; });
+  const parts = Object.entries(n).sort((x, y) => y[1] - x[1]).map(([a, k]) => `${esc(a)} (${k})`);
+  return parts.join(' · ') + (more ? ` · ${esc(t('hist.more').replace('{n}', more))}` : '');
+}
+
 async function drawLog() {
   const env = await callOp('history.log', { path: PATH, limit: 30 });
   const box = el('hist-log');
@@ -60,13 +84,13 @@ async function drawLog() {
   ROWS = (env.data || {}).rows || [];
   box.innerHTML = ROWS.length ? ROWS.map((r, i) => {
     const files = r.files || (PATH ? [PATH] : []);
-    const tail = r.more ? ` ${esc(t('hist.more').replace('{n}', r.more))}` : '';
     return `<div class="lrow">
-      <div><b>${esc(r.subject)}</b>
-        <small class="muted"><span class="mono">${esc(r.rev)}</span> · ${esc(r.date)}</small>
-        ${files.length ? `<small class="muted mono">${esc(files.join(', '))}${tail}</small>` : ''}</div>
+      <div><b>${esc(noEmoji(r.subject))}</b>
+        <small class="muted" title="${esc(r.rev)}">${esc(r.date)}${files.length ? ` · ${areasLine(files, r.more)}` : ''}</small>
+        ${files.length ? `<details class="hist-files"><summary>${t('hist.files')}</summary>
+          <small class="muted mono">${esc(files.join(', '))}</small></details>` : ''}</div>
       ${files.length ? `<button data-act="hist.diff" data-arg="${i}">${t('hist.diff')}</button>` : ''}</div>`;
-  }).join('') : `<p class="muted">${t('hist.empty')}</p>`;
+  }).join('') : emptyMini('hodynnyk', t('hist.empty'));
 }
 
 /** Вікно «Що змінилось»: файл коміту → поля «було → стало» чи рядки. */

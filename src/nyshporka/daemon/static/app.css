@@ -1071,6 +1071,14 @@ button.pj-chip:hover { border-color: var(--accent); color: var(--fg); }
 .tools .tool { display: flex; align-items: flex-start; gap: .7rem; text-align: left; padding: .8rem .9rem;
   color: var(--fg); cursor: pointer; }
 .tool .ic { flex: none; margin-top: .15rem; color: var(--accent); }
+/* 🎒 мініатюра речі на картці інструмента й показника (`view.mini`) */
+.tool .mini { flex: none; margin: -.25rem 0 -.25rem -.2rem; filter: drop-shadow(0 2px 3px rgb(0 0 0 / .18)); }
+#view .ov-kpi { position: relative; padding-right: 4.4rem; }
+.ov-kpi .mini { position: absolute; right: .6rem; top: 50%; transform: translateY(-50%);
+  filter: drop-shadow(0 2px 3px rgb(0 0 0 / .18)); pointer-events: none; }
+.empty-mini { display: flex; align-items: center; gap: 1rem; padding: .6rem 0; }
+.empty-mini .mini { flex: none; filter: drop-shadow(0 2px 4px rgb(0 0 0 / .2)); }
+@media (max-width: 520px) { #view .ov-kpi { padding-right: 1rem; } .ov-kpi .mini { display: none; } }
 .tool span { display: grid; gap: .15rem; }
 .tool small { color: var(--fg-3); font-size: .8rem; }
 .dash-sec h3 .aside { margin-left: auto; }
@@ -1161,3 +1169,25 @@ details.pj-arch > summary { cursor: pointer; color: var(--fg-3); padding: .4rem 
 .hmenu-pop > button.hm-item small { white-space: normal; }
 .hmenu-pop .hm-link { gap: .6rem; align-items: center; color: var(--fg-2); }
 #me-menu { min-width: 19rem; }
+
+/* Читання: справи на диску, ще не прочитані — вибір одним кліком. */
+.read-picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: .7rem; }
+#view .read-picks .card { flex-direction: row; align-items: flex-start; gap: .7rem; }
+.read-picks .card span { display: grid; gap: .15rem; min-width: 0; }
+.read-picks .card small { font-size: .8rem; overflow: hidden; text-overflow: ellipsis; display: -webkit-box;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.sub-h { font-size: 1rem; margin: 1rem 0 .6rem; }
+
+/* 🧭 Майстер у формі: кроки відкриваються по черзі (Опис справи). Замкнений
+   крок видно — людина знає, що буде далі, — але він не приймає введення. */
+.wz-step { border: 0; padding: 0; margin: 0 0 1rem; min-width: 0; }
+.wz-step > legend { padding: 0; margin-bottom: .5rem; }
+.wz-step[data-locked] { opacity: .45; pointer-events: none; }
+.wz-step[data-locked] > legend .rd-n { background: var(--s-4); }
+
+/* Історія: сирий перелік файлів — тихим посиланням під рядком, а не карткою
+   на кожну зміну (головне вже сказано рядком «облік аркушів (7)»). */
+details.hist-files { border: 0; background: none; margin: .15rem 0 0; overflow: visible; }
+details.hist-files > summary { padding: 0; background: none; font-size: .8rem; font-weight: 400;
+  color: var(--fg-3); border: 0; }
+details.hist-files > summary:hover { color: var(--fg); }

@@ -9,8 +9,8 @@
  */
 
 import { t, tOr } from '../core/strings.js';
-import { callOp } from '../core/net.js';
-import { esc, el, setView, busy, failure, boxError, busyForm, renderWarnings, curGen, alive, fld } from '../core/view.js';
+import { callOp, staleThenFresh } from '../core/net.js';
+import { esc, el, setView, busy, failure, boxError, busyForm, renderWarnings, curGen, alive, fld, emptyMini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { openModal, confirmAct, closeModal, modalSeq } from '../core/modal.js';
 import { kv, pill, toast } from '../core/bits.js';
@@ -27,8 +27,25 @@ let GIVE = [];
 SCREENS.give = async () => {
   const gen = curGen();
   busy(6);
-  const env = await callOp('share.suggest', {});
-  if (!alive(gen)) return;
+  // Перелік рахується секундами, тож спершу — минула відповідь, потім свіжа
+  // (`staleThenFresh`). Галочки, поставлені поки йшло оновлення, лишаються.
+  let shown = false;
+  await staleThenFresh('share.suggest', {}, (env) => {
+    if (!alive(gen)) return;
+    const keep = shown ? new Set(picked().map((r) => r.case_key)) : null;
+    paintGive(env);
+    if (keep) {
+      document.querySelectorAll('[data-act="give.pick"]').forEach((b) => {
+        const r = GIVE[Number(b.dataset.arg)];
+        b.checked = !!r && keep.has(r.case_key);
+      });
+      countPicked();
+    }
+    shown = true;
+  });
+};
+
+function paintGive(env) {
   if (!env.ok) return failure(env);
   GIVE = (env.data || {}).rows || [];
   const rows = GIVE.map((r, i) => `<tr>
@@ -44,7 +61,7 @@ SCREENS.give = async () => {
       <th>${t('give.name')}</th><th>${t('give.pages')}</th><th>${t('give.state')}</th></tr></thead><tbody>${rows}</tbody></table>
       <p class="row"><button class="primary" data-act="give.go" id="give-go"></button>
         <span class="muted">${t('give.go.why')}</span></p>
-      <div id="give-box"></div>` : `<p class="muted">${t('give.none')}</p>`}</div>`);
+      <div id="give-box"></div>` : emptyMini('zshyvok', t('give.none'))}</div>`);
   countPicked();
 };
 
@@ -203,6 +220,7 @@ Object.assign(ACTIONS, {
     const env = await callOp('share.setup', { handle: String(fd.handle || '').trim(), consent: String(fd.consent || '') });
     done();
     if (!env.ok) { boxError('sp-box', env); return; }
+    toast(t('toast.saved'), { tone: 'ok' });
     closeModal(true);
   },
 });

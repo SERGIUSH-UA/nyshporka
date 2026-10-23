@@ -737,7 +737,8 @@ globalThis.__CASE_INFO = null;
   out.caseFieldsLabelled = form.includes('<span class="fld-l">Рік від</span>')
     && form.includes('<span class="fld-l">Рік до</span>')
     && form.includes('<span class="fld-l">Шифра</span>');
-  out.caseHeadingIsTab = /<h2>Опис справи<\/h2>/.test(form);
+  // Назва — у шапці сторінки чи вікна («Опис справи»), другого `<h2>` у формі немає.
+  out.caseHeadingIsTab = !/<h2>/.test(form);
   const read = document.getElementById('shifra-read').innerHTML || '';
   out.caseShifraParsed = read.includes('Державний архів Хмельницької області')
     && read.includes('<b>315</b>') && read.includes('<b>8433</b>');
@@ -1197,7 +1198,8 @@ def test_the_case_form_labels_every_field(probe) -> None:
 
     У формі, відкритій на правку, стояли «1854» і «1854» — котре «від», а котре
     «до», не казало ніщо. І заголовок «Змінити опис справи» стояв під вкладкою
-    «Завести справу»: тепер обидва — «Опис справи».
+    «Завести справу»; тепер назва одна — «Опис справи» у шапці, а форма
+    другого заголовка не має (він стояв двічі, 23.10.2026).
     """
     assert probe.get("caseFieldsLabelled"), "поля форми опису без підписів"
     assert probe.get("caseHeadingIsTab"), "заголовок форми не збігається з вкладкою"

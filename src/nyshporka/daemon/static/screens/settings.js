@@ -1,5 +1,6 @@
 /** ⚙ Налаштування секцій. */
 
+import { toast } from '../core/bits.js';
 import { t, tOr } from '../core/strings.js';
 import { TOKEN, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
@@ -152,18 +153,21 @@ Object.assign(ACTIONS, {
     // немає» — і бачить, що розділ «Корені справ» зник цілком. Це рівно те
     // «шукати дорогу назад», проти чого й писалась ця правка.
     if (!env.ok) return boxError('roots-hits', env);
+    toast(t('toast.root.added'), { tone: 'ok' });
     await renderRoots();
   },
 
   'roots.forget': async (_ev, elm) => {
     const env = await callOp('roots.remove', { path: elm.dataset.arg });
     if (!env.ok) return boxError('roots-hits', env);
+    toast(t('toast.root.removed'), { tone: 'ok' });
     await renderRoots();
   },
 
   'sections.preset': async (_ev, elm) => {
     const env = await callOp('sections.set', { preset: elm.dataset.arg });
     if (!env.ok) return failure(env);
+    toast(t('toast.sections'), { tone: 'ok' });
     setSections(env.data);
     renderNav();
     await show('settings');
@@ -175,6 +179,7 @@ Object.assign(ACTIONS, {
     const env = await callOp('sections.set',
       on ? { disable: [id] } : { enable: [id] });
     if (!env.ok) return failure(env);
+    toast(t('toast.sections'), { tone: 'ok' });
     setSections(env.data);
     renderNav();
     // 🔴 Повертаємось туди, заради чого вмикали. Кнопка стоїть не лише в

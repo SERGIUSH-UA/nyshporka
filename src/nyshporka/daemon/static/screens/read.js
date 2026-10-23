@@ -1,15 +1,17 @@
 /** 🖋 Читання справи рушієм. */
 
+import { skelCards } from '/ui/dom.js';
+import { toast, caseItem } from '../core/bits.js';
 import { t } from '../core/strings.js';
 import { callOp, FINAL_STATES, TOKEN, apiFetch } from '../core/net.js';
 import { esc, el, setView, boxError, busyForm,
-  renderWarnings, curGen, alive } from '../core/view.js';
+  renderWarnings, curGen, alive, mini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { confirmAct } from '../core/modal.js';
 import { show, goto, onJob, jobProgress } from '../core/nav.js';
 import { ST } from '../core/state.js';
 import { ic, eng } from '/ui/icons.js';
-import { attachCombobox } from '/ui/combobox.js';
+import { attachCombobox, cbValue } from '/ui/combobox.js';
 import { pathField } from '../core/paths.js';
 import { openCloudGo } from './cloud.js';
 import { loadProjects, projectsNow, currentPid, projectChip, projectInfo } from '../core/projects.js';
@@ -54,7 +56,29 @@ SCREENS.read = async () => {
   await readCases();
   if (!alive(gen)) return;
   if (RD.case_dir) await readCard();
+  else await readPicks(gen);
 };
+
+/**
+ * Порожня сторінка з одним полем нічого не підказувала: що тут читати? Тож
+ * поки справу не вибрано — картки справ, що лежать на диску й ще не прочитані:
+ * вибір одним кліком, з назвою, роками й кадрами.
+ */
+async function readPicks(gen) {
+  const box = el('card');
+  if (!box) return;
+  box.innerHTML = `<div class="read-picks">${skelCards(4)}</div>`;
+  const env = await callOp('library.list', { on_disk: true, htr: 'none', page_size: 12 });
+  if (!alive(gen) || RD.case_dir) return;
+  const cases = env.ok ? ((env.data || {}).cases || []).filter((c) => c.path) : [];
+  if (!cases.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `<h3 class="sub-h">${t('read.picks')}</h3><div class="read-picks">${cases.map((c) => {
+    const it = caseItem(c);
+    return `<button class="card" data-act="read.choose" data-arg="${esc(c.path)}">
+      ${mini('teka', 40)}<span><b>${esc(c.shifra || c.key || '')}</b>
+      <small>${esc(c.title || '')}</small><small class="muted">${esc(it.hint)}</small></span></button>`;
+  }).join('')}</div>`;
+}
 
 /**
  * Підказка тек: справи бібліотеки, які лежать на диску.
@@ -74,7 +98,7 @@ async function readCases() {
     const env = await callOp('library.list',
       { q, on_disk: true, page_size: 30 });
     return env.ok
-      ? ((env.data || {}).cases || []).map((c) => c.path).filter(Boolean)
+      ? ((env.data || {}).cases || []).filter((c) => c.path).map(caseItem)
       : [];
   };
   const box = attachCombobox(input, { items: await load(''),
@@ -463,9 +487,16 @@ Object.assign(ACTIONS, {
   },
   /** «Для кого» запам'ятовується до кінця роботи з цією справою. */
   'read.for': (_ev, elm) => { RD = { ...RD, forProject: elm.value }; },
+  'read.choose': (_ev, elm) => {
+    const input = el('view').querySelector('input[name="case_dir"]');
+    if (input) input.value = elm.dataset.arg;
+    RD = { case_dir: elm.dataset.arg, script: '', card: null };
+    return readCard();
+  },
   'read.pick': (ev) => {
     ev.preventDefault();
-    RD = { case_dir: String(new FormData(ev.target).get('case_dir') || ''),
+    const input = ev.target.querySelector ? ev.target.querySelector('input[name="case_dir"]') : null;
+    RD = { case_dir: String((input && cbValue(input)) || new FormData(ev.target).get('case_dir') || ''),
       script: '', card: null };
     return readCard();
   },
@@ -573,8 +604,15 @@ Object.assign(ACTIONS, {
       ? ((await res.json()).jobs || []).find((j) => j.id === elm.dataset.job) : null;
     const cfg = (job || {}).cfg || {};
     const voices = (cfg.voices || []).map(engineOf);
-    await apiFetch(`/api/jobs/${encodeURIComponent(elm.dataset.job)}/cancel`,
+    const stop = await apiFetch(`/api/jobs/${encodeURIComponent(elm.dataset.job)}/cancel`,
       { method: 'POST', headers: { 'X-Nysh-Token': TOKEN } });
+    // 🔴 Не спинилось — форму «змінити» не відкриваємо: друге читання поверх
+    // живого взяло б ту саму справу двічі.
+    if (!stop.ok) {
+      const why = stop.status === 401 ? t('err.access') : stop.status === 403 ? t('err.token') : `HTTP ${stop.status}`;
+      toast(`${t('common.error')}: ${why}`, { tone: 'err' });
+      return undefined;
+    }
     RD = { ...RD, script: cfg.script || RD.script,
       prev: { second: voices.includes('diak'),
         latin: cfg.script !== 'latin' && voices.includes('skryba') } };
