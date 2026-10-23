@@ -326,6 +326,23 @@ def _read_marker(path: Path) -> dict[str, Any]:
     return _read_toml(path).get("workspace") or {}
 
 
+def _stray_case_roots(path: Path) -> list[str]:
+    """`case_roots`, що лежить не в `[workspace]`, а в іншій таблиці маркера.
+
+    🔴 До 0.37 `add_case_root` дописував рядок у кінець файлу, а в просторі з
+    `nysh init` кінцем файлу є таблиця `[history]`. Консоль рапортувала «✓»,
+    але корінь не читався ніким: тека зі сканами на робочому столі лишалась
+    невидимою в Бібліотеці (прохід новачка 23.10.2026). В інших таблицях цей
+    ключ нічого не означає, тож читаємо його як свій, а наступне оголошення
+    переносить рядок на місце (`_place_case_roots`).
+    """
+    out: list[str] = []
+    for name, table in _read_toml(path).items():
+        if name != "workspace" and isinstance(table, dict):
+            out += [str(s) for s in table.get("case_roots") or []]
+    return out
+
+
 def read_project_table(root: Path) -> dict[str, Any] | None:
     """Таблиця `[project]` маркера теки — або `None`, якщо це не проєкт."""
     got = _read_toml(root / MARKER).get("project")
@@ -426,10 +443,9 @@ def _build_hub(root: Path, origin: str) -> Workspace:
     env_roots = _env_case_roots()
     if env_roots is not None:
         extra: tuple[Path, ...] = env_roots
-    elif cfg.get("case_roots"):
-        extra = tuple(Path(str(s)) for s in cfg["case_roots"])
     else:
-        extra = ()
+        listed_roots = [*(cfg.get("case_roots") or []), *_stray_case_roots(root / MARKER)]
+        extra = tuple(Path(str(s)) for s in listed_roots)
     preset, listed, problem = _read_sections(cfg)
     return Workspace(root=root, name=str(cfg.get("name") or ""),
                      extra_case_roots=extra, origin=origin,
@@ -785,14 +801,7 @@ def add_case_root(path: str | Path) -> Path:
     roots = [str(x).replace("\\", "/") for x in ws.extra_case_roots]
     roots.append(str(p).replace("\\", "/"))
     listed = ", ".join(f'"{r}"' for r in roots)
-    line = f"case_roots = [{listed}]"
-    # Рядок може бути закоментованим зразком із майстра, наявним значенням або
-    # відсутнім зовсім — усі три випадки трапляються на живому просторі.
-    if re.search(r"(?m)^\s*case_roots\s*=", text):
-        text = re.sub(r"(?m)^\s*case_roots\s*=.*$", line, text, count=1)
-    else:
-        text = text.rstrip("\n") + "\n" + line + "\n"
-    _write_marker(marker, text)
+    _write_marker(marker, _place_case_roots(text, f"case_roots = [{listed}]"))
 
     _replace_current(replace(ws, extra_case_roots=(*ws.extra_case_roots, p)))
     _cached.cache_clear()
@@ -824,8 +833,7 @@ def remove_case_root(path: str | Path) -> bool:
     # Порожній перелік знімається рядком, а не лишається `[]`: маркер читає
     # людина, і `case_roots = []` виглядає як налаштування, якого вона не
     # робила.
-    text = _marker_set(text, "case_roots",
-                       f"case_roots = [{listed}]" if kept else None)
+    text = _place_case_roots(text, f"case_roots = [{listed}]" if kept else None)
     _write_marker(marker, text)
 
     _replace_current(replace(ws, extra_case_roots=tuple(kept)))
@@ -833,18 +841,54 @@ def remove_case_root(path: str | Path) -> bool:
     return True
 
 
+def _table_span(text: str, table: str) -> tuple[int, int] | None:
+    """Межі тіла таблиці `[table]` у тексті маркера: від заголовка до наступної."""
+    head = re.search(rf"(?m)^\s*\[{re.escape(table)}\]\s*$", text)
+    if head is None:
+        return None
+    nxt = re.search(r"(?m)^\s*\[", text[head.end():])
+    return head.end(), head.end() + nxt.start() if nxt else len(text)
+
+
+def _place_case_roots(text: str, line: str | None) -> str:
+    """`case_roots` — у `[workspace]`, а застряглий в інших таблицях — геть.
+
+    Застряглі корені вже враховані в `extra_case_roots` (`_stray_case_roots`),
+    тож рядок, що пишеться, їх містить, і знести старий безпечно.
+    """
+    span = _table_span(text, "workspace")
+    if span is not None:
+        stray = re.compile(r"(?m)^[ \t]*case_roots[ \t]*=.*\n?")
+        text = text[:span[1]] + stray.sub("", text[span[1]:])
+    return _marker_set(text, "case_roots", line)
+
+
 def _marker_set(text: str, key: str, line: str | None,
                 table: str = "workspace") -> str:
-    """Вписати, замінити або зняти рядок `key = …` у тексті маркера.
+    """Вписати, замінити або зняти рядок `key = …` у таблиці маркера.
 
-    Той самий прийом, що й для `case_roots`: рядок може бути закоментованим
-    зразком із майстра, наявним значенням або відсутнім зовсім.
+    Рядок може бути закоментованим зразком із майстра, наявним значенням або
+    відсутнім зовсім.
+
+    🔴 Наявний рядок шукається У СВОЇЙ таблиці, а не по всьому файлу. Пошук по
+    всьому тексту переписував би однойменний ключ чужої таблиці (`auto` історії,
+    `case_roots`, що застряг у `[history]`), і запис знову лягав би не туди.
+    Таблиці у файлі немає — пошук по всьому тексту, як досі.
     """
-    pattern = rf"(?m)^\s*{re.escape(key)}\s*=.*$"
-    if re.search(pattern, text):
+    # `[ \t]*`, а не `\s*`: у тілі таблиці позиція 0 теж «початок рядка», і
+    # `\s*` з'їдав би перевід рядка після заголовка — `[project]name = …`.
+    pattern = rf"(?m)^[ \t]*{re.escape(key)}[ \t]*=.*$"
+    span = _table_span(text, table)
+    if span is not None:
+        body = text[span[0]:span[1]]
+        if re.search(pattern, body):
+            body = (re.sub(pattern + r"\n?", "", body, count=1) if line is None
+                    else re.sub(pattern, lambda _m: line, body, count=1))
+            return text[:span[0]] + body + text[span[1]:]
+    elif re.search(pattern, text):
         if line is None:
             return re.sub(pattern + r"\n?", "", text, count=1)
-        return re.sub(pattern, line, text, count=1)
+        return re.sub(pattern, lambda _m: line, text, count=1)
     if line is None:
         return text
     # 🔴 Новий ключ — усередину таблиці `[workspace]`, а не в кінець файлу.

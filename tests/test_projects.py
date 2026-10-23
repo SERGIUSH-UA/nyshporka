@@ -156,6 +156,66 @@ def test_case_root_written_to_hub_marker(tmp_path: Path) -> None:
     assert "scans" not in (alpha / W.MARKER).read_text(encoding="utf-8")
 
 
+#: Маркер, яким його лишає `nysh init` з історією: таблиця `[history]` — у хвості.
+_INIT_MARKER = ('[workspace]\nschema = 1\nkeys = 2\nname = "Нишпорка"\n\n'
+                '# Скани, що лежать поза простором (зовнішній диск, мережева теку):\n'
+                '# case_roots = ["D:/архів"]\n\n'
+                '# Історія простору (`nysh history`): локальний git,\n'
+                '[history]\n\nauto = true\n')
+
+
+def test_case_root_lands_in_workspace_table_after_init(tmp_path: Path) -> None:
+    """🔴 Свіжий простір закінчується таблицею `[history]`.
+
+    Рядок, дописаний у кінець файлу, лягав туди, і корінь не читав ніхто:
+    «У мене є скани» з текою на робочому столі давало «✓» над порожньою
+    Бібліотекою (прохід новачка 23.10.2026).
+    """
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    (hub / W.MARKER).write_text(_INIT_MARKER, encoding="utf-8")
+    scans = tmp_path / "Desktop" / "Скани"
+    scans.mkdir(parents=True)
+    W.use(W._build(hub, "test"))
+    W.add_case_root(scans)
+    got = W._read_toml(hub / W.MARKER)
+    assert got["workspace"]["case_roots"] == [str(scans).replace("\\", "/")]
+    assert "case_roots" not in got["history"]
+    assert got["history"]["auto"] is True
+    assert scans in W._build(hub, "test").extra_case_roots
+
+
+def test_case_root_stuck_in_history_is_read_and_moved(tmp_path: Path) -> None:
+    """Корінь, оголошений консоллю до 0.37, лежить у `[history]` — читається й так.
+
+    Наступне оголошення переносить його в `[workspace]`, а не губить.
+    """
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    old, new = tmp_path / "old", tmp_path / "new"
+    old.mkdir()
+    new.mkdir()
+    stuck = _INIT_MARKER + f'case_roots = ["{str(old).replace(chr(92), "/")}"]\n'
+    (hub / W.MARKER).write_text(stuck, encoding="utf-8")
+    assert old in W._build(hub, "test").extra_case_roots
+    W.use(W._build(hub, "test"))
+    W.add_case_root(new)
+    got = W._read_toml(hub / W.MARKER)
+    assert len(got["workspace"]["case_roots"]) == 2
+    assert "case_roots" not in got["history"]
+    W.use(W._build(hub, "test"))
+    assert W.remove_case_root(old)
+    assert W._read_toml(hub / W.MARKER)["workspace"]["case_roots"] == [
+        str(new).replace("\\", "/")]
+
+
+def test_marker_set_touches_only_its_table(tmp_path: Path) -> None:
+    text = '[workspace]\nname = "x"\n\n[history]\nauto = true\n'
+    out = W._marker_set(text, "auto", "auto = false")
+    assert W.tomllib.loads(out) == {"workspace": {"name": "x", "auto": False},
+                                    "history": {"auto": True}}
+
+
 def test_peek_counts_only(tmp_path: Path) -> None:
     hub = _hub(tmp_path)
     alpha, beta = _project(hub, "alpha"), _project(hub, "beta")
