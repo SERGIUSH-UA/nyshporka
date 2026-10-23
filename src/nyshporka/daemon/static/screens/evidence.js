@@ -47,7 +47,7 @@ export function openEvidence(seed = {}) {
           ${fld(t('ev.line'), `<input name="line" type="number" min="1" value="${v('line')}" size="4" required>`)}
         </div>
         <div class="row">
-          ${fld(t('ev.card'), `<input name="card" value="${v('card')}" placeholder="I…, F…" required>`)}
+          ${fld(t('ev.card'), `<input name="card" value="${v('card')}" placeholder="${esc(t('ev.card.ph'))}">`)}
           ${fld(t('ev.prov'), `<input name="provenance" value="${esc(provenanceOf(EV.case))}"
             pattern="[a-z][a-z0-9_\\-]*" required>`)}
         </div>
@@ -61,7 +61,10 @@ export function openEvidence(seed = {}) {
 
 /** Доручення агентові — тим самим текстом, що побачить людина. */
 export function agentTask({ card, what, path, case: c, page, line, quote }) {
-  return t('ev.task')
+  // 🔴 Картка необов'язкова: у порожньому каноні її ще нема як назвати, а поле
+  // було обов'язковим — і перший доказ не клався зовсім (прохід новачка
+  // 23.10.2026). Без картки доручення просить завести нову.
+  return t(card ? 'ev.task' : 'ev.task.new')
     .replace('{card}', card).replace('{what}', what).replace('{path}', path)
     .replace('{case}', c).replace('{page}', page).replace('{line}', line)
     .replace('{quote}', quote || '');

@@ -1323,3 +1323,20 @@ def test_crop_without_a_text_store_says_so_in_words(bare_space) -> None:
 
     assert not env.ok
     assert "прочитаного" in env.error and "FileNotFoundError" not in env.error
+
+
+def test_crop_without_a_text_store_indexes_just_that_case(space: Path) -> None:
+    """🔴 У свіжому просторі стору тексту немає, а пошук працює й без нього.
+
+    Кроп відмовляв «зберіть стор: nysh text index», і з консолі доказ не клався
+    ніколи (прохід новачка 23.10.2026). Тепер стор збирається на одну цю справу.
+    """
+    from nyshporka import ops as O
+    from nyshporka.search import store as ST
+
+    ST.path().unlink()
+    assert not ST.exists()
+    env = O.call("text.crop", {"case": "проба", "page": "4", "line": 3,
+                               "out": str(space / "c.png")})
+    assert env.ok, env.error
+    assert ST.exists()

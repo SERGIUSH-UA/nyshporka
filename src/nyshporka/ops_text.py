@@ -452,15 +452,27 @@ class TextCropArgs(BaseModel):
 def text_crop(a: TextCropArgs) -> Envelope:
     from nyshporka.search import textops as T
 
+    def cut() -> dict[str, Any]:
+        return T.crop(a.case, a.page, a.line, with_next=a.with_next, with_prev=a.with_prev,
+                      wide=a.wide, pad=a.pad, scale=a.scale, out=a.out or None)
+
     try:
-        res = T.crop(a.case, a.page, a.line, with_next=a.with_next, with_prev=a.with_prev,
-                     wide=a.wide, pad=a.pad, scale=a.scale, out=a.out or None)
+        try:
+            res = cut()
+        except FileNotFoundError:
+            # 🔴 Стору тексту ще немає — у свіжому просторі його ніхто не збирав,
+            # а пошук працює й без нього. Доти тут стояла відмова з командою
+            # терміналу, і людина з консоллю кропу не діставала ніколи (прохід
+            # новачка 23.10.2026). Вноситься лише ця справа — не весь корпус.
+            if not _index_case(a.case):
+                raise
+            res = cut()
     except ValueError as exc:
         return fail(str(exc))
     except FileNotFoundError:
         # Стору тексту ще немає: людина бачила сирий виняток зі шляхом до
         # sqlite у вікні гіпотези (прохід консолі 22.10.2026).
-        return fail("прочитаного в просторі ще немає — кропу нема з чого "
+        return fail("прочитаного цієї справи в просторі немає — кропу нема з чого "
                     "різати. Після прогону: nysh text index --case <справа>")
     if res.get("error"):
         return fail(str(res["error"]))
@@ -476,6 +488,22 @@ def text_crop(a: TextCropArgs) -> Envelope:
                  f"({res.get('frame')}): звірити рядок «скан:» перед вердиктом")
         env.suggest("text.ctx", "звірити текст рядка з тим, що видно на кропі")
     return env
+
+
+def _index_case(case: str) -> bool:
+    """Внести в стор тексту прогони однієї справи. `False` — вносити нічого."""
+    from nyshporka import htr_store as S
+    from nyshporka.search import store as ST
+
+    try:
+        runs = [r["name"] for r in S.runs_for_scope(case)["rows"]]
+    except ValueError:
+        return False
+    if not runs:
+        return False
+    for _ in ST.ensure_all(runs, optimize=False):
+        pass
+    return True
 
 
 class TextVoicesArgs(BaseModel):
