@@ -4323,6 +4323,10 @@ def project_adopt_cmd(name: str = typer.Argument(..., help="ім'я майбут
         console.print(d["report"], markup=False)
     elif rollback:
         console.print(f"↩ переїзд {d['stamp']} повернуто: {', '.join(d['restored']) or '—'}")
+        kept = d.get("kept") or {}
+        if kept.get("files"):
+            console.print(f"  з'явилось після переїзду й збережено (не видалено): "
+                          f"{len(kept['files'])} — {kept['dir']}", markup=False)
     else:
         console.print(f"🧳 рід переїхав у {d['project']} (журнал {d['stamp']}, "
                       f"архів {d['archive']['zip']})", markup=False)

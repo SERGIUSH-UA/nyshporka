@@ -911,6 +911,21 @@ def rollback(hub: Path, stamp: str | None = None) -> dict[str, Any]:
         made = {Path(p).resolve() for p in journal.get("created") or []}
         made.add((root / LEDGER).resolve())
         left = [f for f in _walk(root) if f.resolve() not in made]
+        # 🔴 Те, що з'явилось у проєкті вже після переїзду (журнал пошуку, нова
+        # нотатка), відкат НЕ видаляє: воно їде в журнал переїзду, і людина бачить
+        # куди. Доти такий файл тримав теку, і повторний переїзд відмовляв «тека
+        # projects/<ім'я> уже є» (проба міграції 23.10.2026). Видаляється лише те,
+        # що створив сам переїзд.
+        kept: list[str] = []
+        for f in left:
+            rel = f.relative_to(root).as_posix()
+            dst = home / "after-rollback" / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(f, dst)
+            kept.append(rel)
+        if kept:
+            journal["kept_after_rollback"] = {"dir": str(home / "after-rollback"), "files": kept}
+        left = [f for f in _walk(root) if f.resolve() not in made]
         if not left:
             shutil.rmtree(root)
             pdir = P.projects_dir(hub)
@@ -918,4 +933,5 @@ def rollback(hub: Path, stamp: str | None = None) -> dict[str, Any]:
                 pdir.rmdir()
     journal["rolled_back"] = datetime.now(UTC).isoformat(timespec="seconds")
     _journal(home, journal)
-    return {"stamp": home.name, "restored": moved}
+    return {"stamp": home.name, "restored": moved,
+            "kept": journal.get("kept_after_rollback") or {}}

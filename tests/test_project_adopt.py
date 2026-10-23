@@ -691,3 +691,31 @@ def test_move_by_the_console_sends_the_assistant_back_to_migration(
     rec = M.record(legacy)
     assert "0.37.0" not in rec["done"] and "0.36.0" in rec["done"]
     assert rec["history"][-1]["how"] == "reopened"
+
+
+def test_rollback_after_use_clears_the_project_and_allows_a_second_move(legacy: Path,
+                                                                        tmp_path: Path) -> None:
+    """Файл, що з'явився після переїзду, відкат зберігає в журналі й звільняє теку.
+
+    🔴 Проба міграції 23.10.2026: перший пошук у проєкті записав
+    `data/derived/search_log.json`, відкат лишив теку, і повторний переїзд
+    відмовляв «тека projects/<ім'я> уже є».
+    """
+    _age(legacy)
+    A.apply(legacy, "rid", archive=tmp_path / "arch")
+    rid = legacy / "projects" / "rid"
+    (rid / "data" / "derived").mkdir(parents=True, exist_ok=True)
+    (rid / "data" / "derived" / "search_log.json").write_text("[]", encoding="utf-8")
+    W.reset()
+    W.use(W._build(legacy, "test"))
+    got = A.rollback(legacy)
+    assert not rid.exists(), "тека проєкту звільнена"
+    kept = got["kept"]
+    assert kept["files"] == ["data/derived/search_log.json"]
+    assert (Path(kept["dir"]) / "data" / "derived" / "search_log.json").read_text(encoding="utf-8") == "[]",         "файл, що з'явився після переїзду, збережено, а не видалено"
+    W.reset()
+    W.use(W._build(legacy, "test"))
+    _age(legacy)
+    assert A.plan(legacy, "rid").problems == []
+    A.apply(legacy, "rid", archive=tmp_path / "arch2")
+    assert (rid / "data" / "canonical" / "persons" / "I9001.md").is_file()
