@@ -86,6 +86,19 @@ def test_check_now_works_even_when_off(state: Path, net: dict[str, int], monkeyp
     assert net["sup"] == 0, "без входу в Супрягу сповіщень не питаємо"
 
 
+def test_check_now_does_not_send_the_key_when_supriaha_is_off(
+        state: Path, net: dict[str, int], monkeypatch: pytest.MonkeyPatch) -> None:
+    """«Перевірити зараз» — про версію; сповіщення Супряги — лише з вимикачем."""
+    monkeypatch.setattr(N, "logged_in", lambda: True)
+    N.refresh(force=True)
+    assert net["pypi"] == 1 and net["sup"] == 0
+    from nyshporka.core.workspace import state_set
+
+    state_set(notices_cache={**N._cache(), "supriaha": {"unread": 5, "items": []}})
+    snap = N.snapshot()
+    assert snap["supriaha"] == {} and snap["badge"] == 1 + 1, "вимкнене не рахується на дзвіночку"
+
+
 def test_supriaha_needs_login_even_if_enabled(state: Path, net: dict[str, int], monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(N, "logged_in", lambda: False)
     N.set_settings(supriaha=True)

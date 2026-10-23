@@ -169,8 +169,11 @@ def refresh(*, force: bool = False, lang: str = "uk") -> dict[str, Any]:
             cache.pop("releases_why", None)
         except Exception as exc:
             cache["releases_why"] = f"{type(exc).__name__}: {exc}"[:200]
-    if (force or (s["supriaha"] and _due(cache.get("supriaha_at"), EVERY_SUPRIAHA))) \
-            and logged_in():
+    # 🔴 Сповіщення Супряги — лише з увімкненим вимикачем, і «Перевірити зараз»
+    # його не обходить: ключ Супряги їде на сервер, а людина цього не дозволяла.
+    # Доти «Перевірити» підтягувало сповіщення при вимкненому вимикачі, і
+    # дзвіночок показував «2» над попапом «Новин немає» (знімок 23.10.2026).
+    if s["supriaha"] and logged_in() and (force or _due(cache.get("supriaha_at"), EVERY_SUPRIAHA)):
         try:
             cache["supriaha"] = _notifications(lang)
             cache.pop("supriaha_why", None)
@@ -227,6 +230,8 @@ def snapshot() -> dict[str, Any]:
     releases = [r for r in cache.get("releases") or []
                 if _key(str(r.get("version") or "")) > _key(__version__)]
     sup = cache.get("supriaha") if isinstance(cache.get("supriaha"), dict) else {}
+    if not (settings()["supriaha"] and logged_in()):
+        sup = {}  # вимкнено чи вийшли — ні в переліку, ні в числі на дзвіночку
     models = new_models()
     badge = (1 if newer else 0) + (1 if models else 0) + int((sup or {}).get("unread") or 0)
     return {"installed": __version__, "latest": latest, "newer": newer,
