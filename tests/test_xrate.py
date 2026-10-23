@@ -105,7 +105,11 @@ def test_the_limit_holds_across_PROCESSES_not_just_threads(tmp_path: Path) -> No
     # приїхав би в конструктор рядком, а не шляхом.
     env = dict(os.environ, **{X.ENV_STATE_DIR: str(tmp_path)})
     code = ("from nyshporka.core.xrate import CrossProcessLimiter as L;"
-            "l=L('гурт',max_events=2,window=0.5,safety=1.0);"
+            # slack=0.75, а не типові 0.25: на зайнятому раннері CI процес
+            # прокидається після свого тікета й на 0.3 с пізніше (Windows,
+            # «Свіжі залежності», 23.10.2026 — 3 у вікні). Зламана міжпроцесна
+            # межа дала б 6 у вікні, тож запас тест не послаблює.
+            "l=L('гурт',max_events=2,window=0.5,safety=1.0,slack=0.75);"
             "[l.acquire('p') for _ in range(3)]")
     kids = [subprocess.Popen([sys.executable, "-c", code], env=env)
             for _ in range(3)]
