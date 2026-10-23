@@ -29,8 +29,28 @@ def _row(st: RunState, now: float) -> dict[str, Any]:
     d["incidents"] = d["incidents"][-INCIDENTS:]
     d.update(phase_human=st.human_phase(), price_usd_h=st.price_usd_h,
              rent_hours=round(st.rent_hours(now), 3), spent_usd=st.spent_usd(now),
-             needs_release=st.needs_release)
+             needs_release=st.needs_release, shifra=_shifra_of(st.case_key))
     return d
+
+
+def _shifra_of(key: str) -> str:
+    """Шифра справи з бібліотеки — людині, замість ключа.
+
+    Записи заходів несуть ключ у тій формі, яка була на мить запуску: новий
+    (`ARCH/1/2/3`) або давній без опису (`ARCH/1/3`). Екран «Хмара» показував
+    їх як є, двома форматами поруч (прохід провтиків 22.10.2026). Немає справи в
+    бібліотеці — порожньо, і екран лишає ключ.
+    """
+    if not key:
+        return ""
+    try:
+        from nyshporka.core.legacy_key import current_key
+        from nyshporka.library import library_lookup
+
+        row = library_lookup().by_key.get(current_key(key)) or library_lookup().by_key.get(key)
+    except Exception:
+        return ""
+    return str((row or {}).get("shifra") or "")
 
 
 class StateArgs(BaseModel):

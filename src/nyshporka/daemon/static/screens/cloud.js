@@ -83,7 +83,7 @@ function runRow(r) {
   const done = FINAL.includes(r.phase);
   const frames = r.frames_total ? ` · ${r.pages_done || 0} / ${r.frames_total}` : '';
   return `<div class="lrow">
-    <div><b class="mono">${esc(r.case_key || r.run_id)}</b>
+    <div><b class="mono" title="${esc(r.case_key || '')}">${esc(r.shifra || r.case_key || r.run_id)}</b>
       <small class="muted">${esc(r.phase_human || r.phase)}${frames} · ${money(r.spent_usd)}
         · ${esc(dayOf(r.started))}</small>
       ${projectCount() > 1 ? projectChip(r.project || '', { hubLabel: t('pj.hub') }) : ''}

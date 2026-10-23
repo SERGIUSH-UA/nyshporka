@@ -13,7 +13,7 @@ import { skelRows } from '/ui/dom.js';
 import { t } from '../core/strings.js';
 import { callOp, staleThenFresh } from '../core/net.js';
 import { esc, el, setView, boxError, busyForm, renderWarnings,
-  curGen, alive, emptyMini } from '../core/view.js';
+  curGen, alive, emptyMini, fld } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { goto, onJob, jobChip, jobNotes } from '../core/nav.js';
 import { ST } from '../core/state.js';
@@ -35,15 +35,15 @@ SCREENS.sets = async () => {
         <p class="muted">${t('sets.cut.why')}</p>
         <form data-act="sets.cut">
           <div class="row">
-            <input name="run" placeholder="${t('sets.cut.run')}" required>
-            <input name="name" placeholder="${t('sets.cut.name')}" required>
+            ${fld(t('sets.cut.run'), `<input name="run" required>`)}
+            ${fld(t('sets.cut.name'), `<input name="name" required>`)}
           </div>
           <div class="row">
-            <input name="pages" placeholder="${t('sets.cut.pages')}">
-            <input name="pick" type="number" min="0" value="6" placeholder="${t('sets.cut.pick')}">
+            ${fld(t('sets.cut.pages'), `<input name="pages">`)}
+            ${fld(t('sets.cut.pick'), `<input name="pick" type="number" min="0" value="6">`)}
           </div>
           <div class="row">
-            <input name="domain" placeholder="${t('sets.cut.domain')}">
+            ${fld(t('sets.cut.domain'), `<input name="domain">`)}
             <button type="submit">${t('sets.cut.go')}</button>
           </div>
           <div id="sets-cut-job"></div>
@@ -55,8 +55,8 @@ SCREENS.sets = async () => {
         <form data-act="sets.voices">
           <div class="row"><select name="name" id="sets-v-name"></select></div>
           <div class="row">
-            <input name="from_run" placeholder="${t('sets.voices.from_run')}">
-            <input name="models" placeholder="${t('sets.voices.models')}">
+            ${fld(t('sets.voices.from_run'), `<input name="from_run">`)}
+            ${fld(t('sets.voices.models'), `<input name="models">`)}
             <button type="submit">${t('sets.voices.go')}</button>
           </div>
           <div id="sets-voices-job"></div>
@@ -68,8 +68,8 @@ SCREENS.sets = async () => {
         <form data-act="sets.gloss">
           <div class="row"><select name="name" id="sets-g-name"></select></div>
           <div class="row">
-            <input name="add" placeholder="${t('sets.gloss.add')}" required>
-            <input name="why" placeholder="${t('sets.gloss.src')}">
+            ${fld(t('sets.gloss.add'), `<input name="add" required>`)}
+            ${fld(t('sets.gloss.src'), `<input name="why">`)}
             <button type="submit">${t('sets.gloss.go')}</button>
           </div>
           <div id="sets-gloss"></div>

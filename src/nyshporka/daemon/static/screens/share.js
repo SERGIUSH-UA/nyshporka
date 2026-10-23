@@ -51,7 +51,7 @@ function paintGive(env) {
   const rows = GIVE.map((r, i) => `<tr>
       <td><input type="checkbox" data-act="give.pick" data-arg="${i}"${READY.includes(r.status) ? ' checked' : ''}
         aria-label="${esc(r.shifra || r.case_key)}"></td>
-      <td class="mono">${esc(r.shifra || r.case_key)}</td><td>${esc(r.title || '')}</td>
+      <td class="mono">${shifraCell(r)}</td><td>${esc(r.title || '')}</td>
       <td class="num">${esc(r.pages || 0)} / ${esc(r.frames || '?')}</td>
       <td>${pill(READY.includes(r.status) ? 'ok' : 'neutral', stLabel(r.status))}</td></tr>`).join('');
   setView(`
@@ -64,6 +64,16 @@ function paintGive(env) {
       <div id="give-box"></div>` : emptyMini('zshyvok', t('give.none'))}</div>`);
   countPicked();
 };
+
+/**
+ * Шифра з невизначеним архівом приходить як «? 605-1-59». Знак питання людині
+ * нічого не пояснював — тепер це мітка «архів не визначено» поруч із номером.
+ */
+function shifraCell(r) {
+  const s = String(r.shifra || r.case_key || '');
+  if (!s.startsWith('? ')) return esc(s);
+  return `${esc(s.slice(2))} <span class="tag warn">${esc(t('give.norepo'))}</span>`;
+}
 
 function picked() {
   return [...document.querySelectorAll('[data-act="give.pick"]')]
