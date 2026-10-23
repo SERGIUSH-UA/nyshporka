@@ -259,13 +259,16 @@ def nepodileni_fast() -> tuple[list[dict[str, Any]], bool]:
 def _refresh_later() -> None:
     if not _REFRESH.acquire(blocking=False):
         return
+    from nyshporka.core.scope import read_scope
     from nyshporka.core.workspace import using, workspace
 
     ws = workspace()
 
     def run() -> None:
+        # Рамка `read_scope` — своя: потік не успадковує контексту запиту, а
+        # без неї перерахунок знову рахує відбитки на кожну справу (5–8 с).
         try:
-            with using(ws):
+            with using(ws), read_scope():
                 nepodileni()
         except Exception:
             pass

@@ -44,20 +44,29 @@ SCREENS.give = async () => {
     }
     shown = true;
   };
-  let env = await staleThenFresh('share.suggest', { fast: true }, (e, _stale, again) => paint(e, again));
+  const env = await staleThenFresh('share.suggest', { fast: true }, (e, _stale, again) => paint(e, again));
   // Сервер віддав МИНУЛИЙ перелік (дані змінились, свіжий рахується у фоні) —
   // перепитуємо, доки не прийде свіжий; «Оновлюю…» стоїть увесь цей час.
+  // 🔴 Без `await`: екран уже намальовано, а перехід на інший екран чекає,
+  // доки завершиться функція поточного, — з очікуванням опитування консоль
+  // «не пускала» з «Віддати» до 15 с (замір 23.10.2026).
+  giveLate(env, gen, paint);
+};
+
+/** Дотягнути свіжий перелік після `refreshing: true`; вихід з екрана — стоп. */
+export async function giveLate(first, gen, paint, wait = 2500) {
   const late = (e) => !!(e && e.ok && e.data && e.data.refreshing);
+  let env = first;
   if (!late(env)) return;
   staleBadge(true);
   for (let i = 0; late(env) && i < 6; i += 1) {
-    await new Promise((r) => setTimeout(r, 2500));
+    await new Promise((r) => setTimeout(r, wait));
     if (!alive(gen)) { staleBadge(false); return; }
     env = await callOp('share.suggest', { fast: true });
   }
   staleBadge(false);
   if (alive(gen) && env.ok) paint(env, true);
-};
+}
 
 function paintGive(env, again = false) {
   if (!env.ok) return failure(env);

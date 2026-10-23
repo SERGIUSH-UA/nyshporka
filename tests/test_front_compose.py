@@ -50,6 +50,7 @@ const DATA = {
   'htr.case_info': { shifra: 'ТЕСТ 1-1-1', title: 'Сповідка', frames: 9, script: 'cyrillic',
     script_trust: 'fixed', models: {}, engines: [], done: {}, gaps: [] },
   'queue.status': { items: [], runner: null, counts: {} },
+  'share.suggest': { rows: [], count: 0, total: 0, summary: {}, refreshing: true },
   'read.plan': { plan: { frames: 9, script: 'cyrillic', model: 'models/pysar_cyr_v19.pt',
     voices: [], out_dir: 'reports/htr/t1' } },
 };
@@ -117,6 +118,7 @@ out.forms = BT.fieldValue('name_variants', [{ form: 'Городківка' }, { 
 out.md = BT.mdLite(['Вступ', '', '| Справа | Сторінок |', '|---|---|', '| [[I9001]] | 12 |', '',
   'Кінець'].join(String.fromCharCode(10)), refs);
 const SH = await import('./screens/share.js');
+{ const t0 = Date.now(); await SCREENS.give(); out.giveMs = Date.now() - t0; }
 out.card = SH.cardRows({ title: 'Сповідка', years: [1801, 1803], places: ['Городківка', 'Липівка'],
   doc_type: 'confession', scans: { label: 'Зйомка М. Сидорука', url: 'https://example.org/x' } },
   { total: 120, source: 'бібліотека' });
@@ -265,3 +267,18 @@ def test_supriaha_card_shows_labelled_fields(hub) -> None:
     assert "doc_type" not in c and "{" not in c and "scans" not in c
     none = hub["cardNone"]
     assert "невідомо" in none and "опису немає" in none and "javascript" not in none
+
+
+def test_give_does_not_wait_for_the_fresh_list(hub) -> None:
+    """`refreshing: true` — екран повертається одразу, свіже дотягується без `await`.
+
+    Показ екрана чекає, доки його функція завершиться; з очікуванням опитування
+    «Віддати» не пускало на інший екран до 15 с (замір 23.10.2026).
+    """
+    assert hub["giveMs"] < 2000
+
+
+def test_hash_listener_is_set_before_the_first_screen() -> None:
+    """Слухач адреси — до першого показу: повільний перший екран не блокує «Назад»."""
+    app = (FRONT_DIR / "app.js").read_text(encoding="utf-8")
+    assert app.index("addEventListener('hashchange'") < app.index("await show(routeHash());")

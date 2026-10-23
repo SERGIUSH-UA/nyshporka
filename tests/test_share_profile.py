@@ -460,3 +460,19 @@ def test_shvydkyi_perelik_lyshe_na_prokhannia(space: Path, monkeypatch: Any) -> 
     assert calls == ["fresh"] and env.data["refreshing"] is False
     env = O.share_suggest(O.ShareSuggestArgs(fast=True))
     assert calls == ["fresh", "fast"] and env.data["refreshing"] is True
+
+
+def test_fonovyi_pererakhunok_u_ramtsi_chytannia(space: Path, monkeypatch: Any) -> None:
+    """Потік не успадковує рамки запиту — відкриває свою (без неї 5–8 с)."""
+    import time as _t
+
+    from nyshporka.core import scope
+
+    seen: list[bool] = []
+    monkeypatch.setattr(S, "nepodileni", lambda: seen.append(scope._SCOPE.get() is not None) or [])
+    S._refresh_later()
+    for _ in range(100):
+        if seen and not S._REFRESH.locked():
+            break
+        _t.sleep(0.02)
+    assert seen == [True]
