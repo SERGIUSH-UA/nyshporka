@@ -9,7 +9,7 @@
  */
 
 import { t, tOr } from '../core/strings.js';
-import { callOp, staleThenFresh } from '../core/net.js';
+import { callOp, staleThenFresh, staleBadge } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm, renderWarnings, curGen, alive, fld, emptyMini, mini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { openModal, confirmAct, closeModal, modalSeq } from '../core/modal.js';
@@ -31,7 +31,7 @@ SCREENS.give = async () => {
   // Перелік рахується секундами, тож спершу — минула відповідь, потім свіжа
   // (`staleThenFresh`). Галочки, поставлені поки йшло оновлення, лишаються.
   let shown = false;
-  await staleThenFresh('share.suggest', {}, (env, _stale, again) => {
+  const paint = (env, again) => {
     if (!alive(gen)) return;
     const keep = shown ? new Set(picked().map((r) => r.case_key)) : null;
     paintGive(env, again);
@@ -43,7 +43,20 @@ SCREENS.give = async () => {
       countPicked();
     }
     shown = true;
-  });
+  };
+  let env = await staleThenFresh('share.suggest', { fast: true }, (e, _stale, again) => paint(e, again));
+  // Сервер віддав МИНУЛИЙ перелік (дані змінились, свіжий рахується у фоні) —
+  // перепитуємо, доки не прийде свіжий; «Оновлюю…» стоїть увесь цей час.
+  const late = (e) => !!(e && e.ok && e.data && e.data.refreshing);
+  if (!late(env)) return;
+  staleBadge(true);
+  for (let i = 0; late(env) && i < 6; i += 1) {
+    await new Promise((r) => setTimeout(r, 2500));
+    if (!alive(gen)) { staleBadge(false); return; }
+    env = await callOp('share.suggest', { fast: true });
+  }
+  staleBadge(false);
+  if (alive(gen) && env.ok) paint(env, true);
 };
 
 function paintGive(env, again = false) {

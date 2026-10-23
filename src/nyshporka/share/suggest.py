@@ -20,6 +20,7 @@
 """
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -228,6 +229,50 @@ def nepodileni() -> list[dict[str, Any]]:
     rows = _nepodileni_now()
     _MEMO = (key, rows)
     return copy.deepcopy(rows)
+
+
+#: Фоновий перерахунок — не більше одного водночас.
+_REFRESH = threading.Lock()
+
+
+def nepodileni_fast() -> tuple[list[dict[str, Any]], bool]:
+    """Перелік без очікування: `(рядки, застарілі)`.
+
+    Дані змінились (новий прогін, віддача) — віддаємо МИНУЛИЙ перелік того самого
+    простору одразу й рахуємо свіжий у фоні; екран показує «Оновлюю…» і дотягує
+    свіже сам. Холодний перерахунок триває секунди, поки поруч іде читання, і
+    перше відкриття «Віддати» в новій вкладці чекало саме на нього.
+    Першого разу (пам'яті ще немає) — рахуємо як завжди.
+    """
+    import copy
+
+    key = _memo_key()
+    memo = _MEMO
+    if memo is not None and memo[0] == key:
+        return copy.deepcopy(memo[1]), False
+    if memo is not None and memo[0][0] == key[0]:
+        _refresh_later()
+        return copy.deepcopy(memo[1]), True
+    return nepodileni(), False
+
+
+def _refresh_later() -> None:
+    if not _REFRESH.acquire(blocking=False):
+        return
+    from nyshporka.core.workspace import using, workspace
+
+    ws = workspace()
+
+    def run() -> None:
+        try:
+            with using(ws):
+                nepodileni()
+        except Exception:
+            pass
+        finally:
+            _REFRESH.release()
+
+    threading.Thread(target=run, name="nysh-suggest-refresh", daemon=True).start()
 
 
 def _nepodileni_now() -> list[dict[str, Any]]:

@@ -418,3 +418,45 @@ def test_perelik_bez_dii_ne_byie_pulsu() -> None:
     assert not _only_shows(ShareSuggestArgs(take="ДАХмО 315-1-1"))
     assert not _only_shows(ShareSuggestArgs(all=True))
     assert not _only_shows(ShareSuggestArgs(skip="ДАХмО 315-1-1"))
+
+
+def test_perelik_bez_ochikuvannia_viddaie_mynulyi_i_rakhuie_u_foni(space: Path, monkeypatch: Any) -> None:
+    """Дані змінились — минулий перелік одразу (`stale`), свіжий рахується у фоні."""
+    import time as _t
+
+    monkeypatch.setattr(S, "_MEMO", None)
+    key = {"now": ("ws", 1)}
+    monkeypatch.setattr(S, "_memo_key", lambda: key["now"])
+    made = {"n": 0}
+
+    def fresh() -> list[dict[str, Any]]:
+        made["n"] += 1
+        return [{"n": made["n"]}]
+
+    monkeypatch.setattr(S, "_nepodileni_now", fresh)
+    rows, stale = S.nepodileni_fast()          # пам'яті немає — рахуємо як завжди
+    assert rows == [{"n": 1}] and stale is False
+    rows, stale = S.nepodileni_fast()          # ключ той самий — з пам'яті
+    assert rows == [{"n": 1}] and stale is False and made["n"] == 1
+    key["now"] = ("ws", 2)
+    rows, stale = S.nepodileni_fast()          # ключ змінився — минулий одразу
+    assert rows == [{"n": 1}] and stale is True
+    for _ in range(100):                       # фон дорахував
+        if made["n"] == 2 and not S._REFRESH.locked():
+            break
+        _t.sleep(0.02)
+    rows, stale = S.nepodileni_fast()
+    assert rows == [{"n": 2}] and stale is False
+
+
+def test_shvydkyi_perelik_lyshe_na_prokhannia(space: Path, monkeypatch: Any) -> None:
+    """Агент (без `fast`) завжди отримує свіжий перелік; консоль просить `fast`."""
+    from nyshporka import ops_share as O
+
+    calls: list[str] = []
+    monkeypatch.setattr(S, "nepodileni", lambda: calls.append("fresh") or [])
+    monkeypatch.setattr(S, "nepodileni_fast", lambda: (calls.append("fast") or [], True))
+    env = O.share_suggest(O.ShareSuggestArgs())
+    assert calls == ["fresh"] and env.data["refreshing"] is False
+    env = O.share_suggest(O.ShareSuggestArgs(fast=True))
+    assert calls == ["fresh", "fast"] and env.data["refreshing"] is True

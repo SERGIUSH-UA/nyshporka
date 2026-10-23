@@ -115,4 +115,4 @@ async function staleThenFresh(name, args, paint) {
   return env;
 }
 
-export { TOKEN, PROJECT, FINAL_STATES, apiFetch, callOp, normErr, SEQ, staleThenFresh };
+export { TOKEN, PROJECT, FINAL_STATES, apiFetch, callOp, normErr, SEQ, staleThenFresh, staleBadge };

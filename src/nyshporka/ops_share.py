@@ -550,6 +550,9 @@ class ShareSuggestArgs(_CardFields):
     all: bool = Field(default=False, description="спакувати все, що в переліку")
     ready: bool = Field(default=False, description="лише готові до віддачі й ті, де "
                                                    "в пулі бракує рамок")
+    fast: bool = Field(default=False, description="для консолі: коли дані змінились, "
+                                                  "віддати минулий перелік одразу "
+                                                  "(`refreshing: true`), свіжий рахувати у фоні")
 
     def only_shows(self) -> bool:
         """Перелік без `take`/`all`/`skip` нічого не пише — пульс не б'є.
@@ -603,15 +606,20 @@ def share_suggest(a: ShareSuggestArgs) -> Envelope:
     # Перелік лише читає, і пакування (нижче) починається після нього, тож
     # відбитки джерел тут рахуються раз на весь перелік, а не на кожну справу
     # (`core.scope`; було 5–8 с на «Віддати», замір 23.10.2026).
+    listing = not (a.take or a.all or a.skip)
     with read_scope():
-        vsi = S.nepodileni()
+        # `fast` — лише перелік для консолі: минулий одразу, свіжий у фоні. Агент
+        # і пакування беруть свіже завжди: рахувати чи пакувати за застарілим
+        # переліком не можна.
+        vsi, late = S.nepodileni_fast() if listing and a.fast else (S.nepodileni(), False)
         zriz = pool.meta()
     # 🔴 `ready` звужує всю відповідь: `rows`, `count` і `summary` мусять
     # описувати той самий набір, інакше агент бере «без кадрів» за готову.
     rows = [r for r in vsi if r.get("status") in S.READY_STATUSES] if a.ready else vsi
     data: dict[str, Any] = {"rows": rows, "count": len(rows), "total": len(vsi),
                             "summary": S.pidsumok(rows),
-                            "pool_snapshot": str((zriz or {}).get("taken_at") or "")}
+                            "pool_snapshot": str((zriz or {}).get("taken_at") or ""),
+                            "refreshing": late}
     env = ok(data)
     if not vsi:
         return env
