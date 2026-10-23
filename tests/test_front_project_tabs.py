@@ -387,7 +387,7 @@ def test_schema_form_builds_fields_and_typed_values(probe) -> None:
 
 def test_give_lists_unshared_cases(probe) -> None:
     g = probe["give"]
-    assert "TEST 1-1-1" in g and "готова" in g and 'id="give-go"' in g
+    assert ">TEST<" in g and "1-1-1" in g and "готова" in g and 'id="give-go"' in g, "група архіву й номер справи"
     assert 'data-act="lv.chip"' in g and 'data-act="lv.toggle"' in g, "плитки й перемикач"
 
 
