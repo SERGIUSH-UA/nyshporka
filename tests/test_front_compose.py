@@ -340,3 +340,10 @@ def test_runs_screen_paints_the_last_list_first() -> None:
     assert "await runsLoad(true)" in body
     load = src[src.index("async function runsLoad("):src.index("async function runsPaint(")]
     assert "staleThenFresh('runs.list', runsArgs()" in load
+
+
+def test_runs_screen_does_not_wait_for_the_case_list() -> None:
+    """Вибір справи для нічиїх дозаповнюється: екран не чекає `library.list` (1 с)."""
+    src = (FRONT_DIR / "screens/runs.js").read_text(encoding="utf-8")
+    paint = src[src.index("async function runsPaint("):src.index("function bindOptions(")]
+    assert "await callOp('library.list'" not in paint and "bindCasesLater(live)" in paint

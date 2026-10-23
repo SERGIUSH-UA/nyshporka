@@ -87,20 +87,10 @@ async function runsPaint(env, full, live) {
   const groups = d.groups || [];
   const extra = d.orphan_groups || [];
   // Справи для вибору тягнемо ЛИШЕ якщо нічиї на екрані є: на просторі, де все
-  // прив'язане, цей запит нічого не дає й тільки сповільнює екран.
-  if ((extra.length || groups.some((g) => !g.key)) && BIND_CASES === null) {
-    // 🔴 200 — це стеля СХЕМИ (`ops_library.LibraryArgs.page_size`, le=200).
-    // З 300 операція відмовляла цілком, `BIND_CASES` ставав `[]`, і
-    // `<datalist>` виходив порожній ЗАВЖДИ — тобто вибір справи, заради якого
-    // цей блок і зроблено, не працював у жодного користувача, і мовчки: жодна
-    // гілка не дивилась на `lib.ok`.
-    const lib = await callOp('library.list', { page_size: 200 });
-    if (!live()) return undefined;
-    // ⚠ Невдачу НЕ кешуємо: `null` означає «не питали», і наступний показ
-    // екрана спробує ще раз. Порожній масив у цій змінній назавжди пришив би
-    // одну випадкову відмову до всієї сесії.
-    if (lib.ok) BIND_CASES = (lib.data || {}).cases || [];
-  }
+  // прив'язане, цей запит нічого не дає й тільки сповільнює екран. І не
+  // чекаємо його: перелік справ — секунда, а екран малюється одразу, вибір
+  // справи дозаповнюється (`bindCasesLater`).
+  const needCases = (extra.length || groups.some((g) => !g.key)) && BIND_CASES === null;
   RUNS_PAGES = Math.max(1, d.pages || 1);
   RUNS.page = d.page || 0;
   const bar = pager({ page: RUNS.page, pages: RUNS_PAGES,
@@ -121,6 +111,7 @@ async function runsPaint(env, full, live) {
   if (!full) {
     const box = el('runs-body');
     if (box) swapHtml(box, body || runsEmptyHtml(env, d.everything || 0));
+    if (needCases) bindCasesLater(live);
     return undefined;
   }
 
@@ -150,7 +141,40 @@ async function runsPaint(env, full, live) {
       .replace('{c}', d.all_cases || 0))}</p>
     <div id="runs-body">${body || runsEmptyHtml(env, d.everything || 0)}</div>`);
   runsFocus();
+  if (needCases) bindCasesLater(live);
   return undefined;
+}
+
+/** Варіанти вибору справи для прив'язки нічийного прогону. */
+function bindOptions() {
+  return (BIND_CASES || []).map((c) => `<option value="${esc(c.key)}">${
+    esc([c.shifra, c.title].filter(Boolean).join(' — '))}</option>`).join('');
+}
+
+/** Запит переліку справ, що вже летить: два малювання не питають двічі. */
+let BIND_P = null;
+
+async function bindCasesLater(live) {
+  if (BIND_P) return BIND_P;
+  BIND_P = bindCasesFetch(live).finally(() => { BIND_P = null; });
+  return BIND_P;
+}
+
+async function bindCasesFetch(live) {
+  // 🔴 200 — це стеля СХЕМИ (`ops_library.LibraryArgs.page_size`, le=200).
+  // З 300 операція відмовляла цілком, `BIND_CASES` ставав `[]`, і
+  // `<datalist>` виходив порожній ЗАВЖДИ — тобто вибір справи, заради якого
+  // цей блок і зроблено, не працював у жодного користувача, і мовчки: жодна
+  // гілка не дивилась на `lib.ok`.
+  const lib = await callOp('library.list', { page_size: 200 });
+  // ⚠ Невдачу НЕ кешуємо: `null` означає «не питали», і наступний показ
+  // екрана спробує ще раз. Порожній масив у цій змінній назавжди пришив би
+  // одну випадкову відмову до всієї сесії.
+  if (!lib.ok) return;
+  BIND_CASES = (lib.data || {}).cases || [];
+  if (!live()) return;
+  const html = bindOptions();
+  document.querySelectorAll('datalist[id^="bind-"]').forEach((dl) => { dl.innerHTML = html; });
 }
 
 PAGERS.runs = (delta) => {
@@ -291,9 +315,7 @@ function runsOrphanHtml(g, gi = 0) {
   // «виберіть справу», або, гірше, чужий ключ, записаний у прив'язку. А
   // прив'язка — найсильніший канал резолвера, і помилка в ній тиха й довговічна.
   const uid = (name) => `bind-${gi}-${name}`;
-  const list = `<datalist id="${uid('cases')}">${
-    (BIND_CASES || []).map((c) => `<option value="${esc(c.key)}">${
-      esc([c.shifra, c.title].filter(Boolean).join(' — '))}</option>`).join('')}</datalist>`;
+  const list = `<datalist id="${uid('cases')}">${bindOptions()}</datalist>`;
   return `<section class="run-group orphan">
     <h3>${t('runs.orphan.title')}</h3>
     <p class="warn">${t('runs.orphan.why')}</p>
