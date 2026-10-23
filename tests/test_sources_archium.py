@@ -518,3 +518,39 @@ def test_obrizka_zhyvoho_poshuku_dokhodyt_do_poperedzhennia(
     assert env.ok, env
     assert any(w.code == "search_truncated" for w in env.warnings), env.warnings
     assert all("обрізано" in h["note"] for h in env.data["hits"])
+
+
+def test_a_case_gone_from_the_site_stops_offering_download(tmp_path: Path) -> None:
+    """🔴 Зріз 02.07.2026 пропонував «Завантажити» на книги, яких на сайті вже немає.
+
+    ДАХмО прибрав з переглядача книги ДРАЦС 1938–1948, і людина натискала одну за
+    одною, щоразу з тією самою відмовою (прохід новачка 23.10.2026). Перевірена
+    відмова запам'ятовується в просторі, і видача каже про неї замість кнопки.
+    """
+    from nyshporka.sources.base import SourceError
+
+    absent = (Path(__file__).parent / "fixtures" / "sources"
+              / "archium_viewer_absent.html").read_text(encoding="utf-8")
+
+    class _Home:
+        def get(self, url: str) -> object:
+            class R:
+                status_code = 200
+                text = absent
+
+                def raise_for_status(self) -> None:
+                    pass
+            return R()
+
+    probe = A.ArchiumSource(workspace=tmp_path)
+    hit = probe.search("Борсуківці", limit=1)[0]
+    assert hit.acquirable
+    src = A.ArchiumSource(workspace=tmp_path,
+                          fetcher=A.Fetcher(base=A.BASE, delay=0.0, client=_Home()))
+    with pytest.raises(SourceError) as exc:
+        src.manifest(hit.ref)
+    assert "Супрягу" in str(exc.value), "відмова не називає, де шукати далі"
+    again = A.ArchiumSource(workspace=tmp_path).search("Борсуківці", limit=1)[0]
+    assert again.ref == hit.ref
+    assert not again.acquirable
+    assert "на сайті вже немає" in again.note

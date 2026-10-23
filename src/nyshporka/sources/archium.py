@@ -454,6 +454,38 @@ class ArchiumSource:
     def state_rel(self) -> Path:
         return Path("data") / "raw" / self.slug / "_crawl" / "state.json"
 
+    # ── справи, яких на сайті вже немає ──────────────────────────────────────
+    #
+    # 🔴 Вкладений зріз старіє: ДАХмО прибрав із переглядача книги ДРАЦС
+    # 1938–1948 (id 20005…20029), а зріз 02.07.2026 далі пропонував
+    # «Завантажити» на кожну. Людина натискала одну за одною й щоразу діставала
+    # ту саму відмову (прохід новачка 23.10.2026). Перевірену відмову
+    # запам'ятовуємо в просторі, і видача показує її замість кнопки.
+
+    def _gone_path(self) -> Path | None:
+        return (self.workspace / "data" / "raw" / self.slug / "_crawl" / "gone.json"
+                if self.workspace else None)
+
+    def _gone(self) -> dict[str, str]:
+        p = self._gone_path()
+        if p is None or not p.is_file():
+            return {}
+        try:
+            got = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return {str(k): str(v) for k, v in got.items()} if isinstance(got, dict) else {}
+
+    def _mark_gone(self, ident: str) -> None:
+        p = self._gone_path()
+        if p is None:
+            return
+        gone = self._gone()
+        gone[str(ident)] = _dt.date.today().isoformat()
+        with contextlib.suppress(OSError):
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps(gone, ensure_ascii=False, indent=1), encoding="utf-8")
+
     # ── каталог ──────────────────────────────────────────────────────────────
 
     @property
@@ -647,10 +679,12 @@ class ArchiumSource:
         if kind == "bundled" and info.get("taken"):
             note_tail = f" · зріз каталогу від {info['taken']}"
         out: list[Hit] = []
+        gone = self._gone()
         for row in self._catalog_rows():
             hay = _norm(f"{row.get('description', '')} {row.get('case_no', '')}")
             if needle not in hay:
                 continue
+            when = gone.get(str(row.get("file_id") or ""))
             out.append(Hit(
                 source=self.id,
                 ref=f"file:{row.get('file_id', '')}",
@@ -664,8 +698,9 @@ class ArchiumSource:
                 archive=self.repo,
                 fond=str(row.get("fond_no") or ""),
                 frames=int(row["sheets"]) if (row.get("sheets") or "").isdigit() else None,
-                acquirable=True,
-                note=((row.get("fond_title") or "")[:110] + note_tail).strip()))
+                acquirable=not when,
+                note=(f"на сайті вже немає (перевірено {when}) · " if when else "")
+                     + ((row.get("fond_title") or "")[:110] + note_tail).strip()))
             if len(out) >= limit:
                 break
         if not out:
@@ -944,11 +979,14 @@ class ArchiumSource:
         статус, читає це як «справа є, кадри скінчились».
         """
         if not case_meta(html):
+            self._mark_gone(ident)
             return SourceError(
                 f"{self.label}: справи {ident} у переглядачі немає — сайт "
                 f"відповів головною сторінкою (і кодом 200, не 404). "
-                f"Або номер чужий, або справу не оцифровано; шукати її "
-                f"треба іншим каналом.")
+                f"Або справу прибрали з сайту після зрізу каталогу, або її не "
+                f"оцифровано. Спитайте за шифрою Супрягу («Взяти»: може, її вже "
+                f"прочитав хтось інший), покажчик Duck Inspector і дзеркало "
+                f"плівок FamilySearch на екрані «Каталоги».")
         return SourceError(
             f"справа {ident} у каталозі є, але оцифрованих кадрів у ній немає")
 
