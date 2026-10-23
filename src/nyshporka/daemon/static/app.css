@@ -1577,3 +1577,30 @@ th { font-family: var(--font-serif); letter-spacing: .1em; }
 #view .give-run.give-run-ok { border-left-color: var(--ok); }
 #view .give-run.give-run-bad { border-left-color: var(--warn); }
 .give-fails ul { margin: .4rem 0 0; padding-left: 1.2rem; display: grid; gap: .25rem; }
+/* 📮 Відгук: вид, текст, вкладення, перегляд перед відправкою. */
+.fb-form, .fb-preview { display: grid; gap: .8rem; }
+.fb-form > p, .fb-preview > p { margin: 0; }
+.fb-kinds { display: flex; flex-wrap: wrap; gap: .4rem; }
+.fb-kind { position: relative; cursor: pointer; }
+.fb-kind input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.fb-kind span { display: inline-block; padding: .3rem .8rem; border: 1px solid var(--line-2);
+  border-radius: 999px; color: var(--fg-2); transition: border-color var(--dur-1) var(--ease); }
+.fb-kind input:checked + span { border-color: var(--accent); background: var(--accent-fill);
+  color: var(--accent-ink); font-weight: 600; }
+.fb-kind input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fb-form textarea { width: 100%; min-height: 8rem; resize: vertical; }
+.fb-drop { display: grid; gap: .45rem; padding: .7rem .8rem; border: 1px dashed var(--line-3);
+  border-radius: var(--r-m); }
+.fb-drop .row { display: flex; flex-wrap: wrap; gap: .5rem; }
+.fb-drop .btn-like { display: inline-flex; align-items: center; gap: .35rem; cursor: pointer;
+  padding: .35rem .7rem; border: 1px solid var(--line-2); border-radius: var(--r-s); }
+.fb-files { list-style: none; margin: 0; padding: 0; display: grid; gap: .3rem; }
+.fb-files li { display: flex; align-items: center; gap: .45rem; min-width: 0; }
+.fb-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.fb-files .ic-btn { margin-left: auto; padding: .15rem .3rem; }
+.fb-body { margin: .3rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fb-diag { display: flex; gap: .5rem; align-items: center; }
+.fb-diag-list { margin: 0; padding-left: 1.2rem; color: var(--fg-2); font-size: .9rem; }
+.fb-done { display: grid; justify-items: center; text-align: center; gap: .5rem; padding: .5rem 0; }
+.fb-done h3 { margin: 0; }
+.fb-done .maskot { filter: drop-shadow(0 3px 5px rgb(0 0 0 / .18)); }

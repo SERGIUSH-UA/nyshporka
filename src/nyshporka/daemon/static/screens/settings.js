@@ -85,7 +85,8 @@ function renderVersion() {
   box.innerHTML = `<h3>${t('up.net')}</h3>
     <p class="muted">${t('net.why')}</p>
     <div id="net-box"></div>
-    <p><button data-act="nav" data-arg="update">${ic('arrow-up', 'ic-sm')} ${t('nav.update')}</button></p>`;
+    <p><button data-act="nav" data-arg="update">${ic('arrow-up', 'ic-sm')} ${t('nav.update')}</button>
+      <button data-act="nav" data-arg="feedback">${ic('envelope', 'ic-sm')} ${t('nav.feedback')}</button></p>`;
   callOp('notices.state', { lang: LANG }).then((env) => {
     const nb = el('net-box');
     if (nb && env.ok) nb.innerHTML = netBox((env.data || {}).settings || {}, (env.data || {}).logged_in);

@@ -158,6 +158,8 @@ SCREENS: dict[str, str] = {
     "projects": "core",
     "status": "core",
     "update": "core",
+    # Відгук про Нишпорку — вікно поверх будь-якого екрана, у меню не стоїть.
+    "feedback": "core",
     # Перенос роду з кореня в проєкт (0.37) — крок Огляду, у меню не стоїть.
     "adopt": "core",
     # 🔴 «Рід» у `core`, а не в «Дослідженні»: він вирішує, як працює пошук,
@@ -214,7 +216,7 @@ SCREENS: dict[str, str] = {
 #: 🔴 `settings` не має гейта навмисно: саме ним вмикають і вимикають секції.
 #: Замкнути його всередині секції означало б, що вимкнена секція неможливо
 #: увімкнути назад — і виглядало б це як поламаний застосунок, а не як вибір.
-UNGATED_SCREENS: frozenset[str] = frozenset({"settings", "update"})
+UNGATED_SCREENS: frozenset[str] = frozenset({"settings", "update", "feedback"})
 
 
 @dataclass(frozen=True)
@@ -280,7 +282,8 @@ LAYERS: dict[str, str] = {
     **dict.fromkeys(("projects", "status", "sources", "geog", "fonds", "cases", "newcase", "frames", "read",
                      "queue", "runs", "cloud", "view", "export", "give", "pull", "cards",
                      "sprofile"), "shared"),
-    **dict.fromkeys(("jobs", "sets", "label", "settings", "update", "newproject", "adopt"),
+    **dict.fromkeys(("jobs", "sets", "label", "settings", "update", "newproject", "adopt",
+                     "feedback"),
                     "service"),
 }
 
@@ -375,6 +378,7 @@ OP_SCREEN: dict[str, str] = {
     "settings.net": "settings",
     "notices.state": "update",
     "notices.check": "update",
+    "feedback.send": "feedback",
     "notices.read": "update",
     "models.get": "update",
     "sections.show": "settings",

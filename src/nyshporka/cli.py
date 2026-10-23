@@ -1126,6 +1126,53 @@ def doctor(
     raise typer.Exit(code=1 if bad else 0)
 
 
+@app.command("feedback")
+@route("feedback", op="feedback.send", mutates=True,
+       when="надіслати відгук про Нишпорку чи повідомити про ваду")
+def feedback_cmd(
+    text: str = typer.Argument(..., help="що сталося чи що пропонуєте"),
+    kind: str = typer.Option("vada", "--kind", help="vada (вада) | ideia (ідея) | pytannia (питання)"),
+    file: list[str] = typer.Option([], "--file", "-f",
+                                   help="знімок (PNG/JPEG/WebP) чи журнал (.txt/.log/.json), до 5"),
+    no_diag: bool = typer.Option(False, "--no-diag", help="без версії й системи"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="надіслати без запитання"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Надіслати відгук на портал: спершу показує, що саме піде, потім питає."""
+    from rich.markup import escape
+
+    from nyshporka import ops as O
+
+    args = {"text": text, "kind": kind, "files": list(file), "diag": not no_diag}
+    shown = O.call("feedback.send", args)
+    if not shown.ok:
+        _answer(shown, as_json)
+        return
+    d = shown.data
+    if not as_json:
+        console.print(f"[bold]Відгук ({escape(d['kind'])})[/bold] → {escape(d['to'])}")
+        console.print(escape(d["text"]))
+        for k, v in (d.get("diag") or {}).items():
+            console.print(f"   [muted]{escape(k)}: {escape(str(v))}[/muted]")
+        for f in d.get("files") or []:
+            console.print(f"   📎 {escape(f['name'])} · {f['size'] // 1024} КБ"
+                          + (f" · {escape(f['note'])}" if f.get("note") else ""))
+    if not d.get("logged_in"):
+        err_console.print("✗ щоб надіслати, потрібен вхід у Супрягу: nysh share login")
+        raise typer.Exit(1)
+    if not yes:
+        if not sys.stdin.isatty():
+            err_console.print("✗ без --yes надсилаю лише після запитання, а термінал не питає")
+            raise typer.Exit(1)
+        if not typer.confirm("Надіслати?", default=False):
+            raise typer.Exit(0)
+    sent = O.call("feedback.send", {**args, "confirm": True})
+    if _answer(sent, as_json):
+        return
+    console.print(f"✅ відгук №{sent.data['id']} надіслано · відповідь прийде в дзвіночок "
+                  f"консолі й на {sent.data['url']}")
+
+
 @app.command()
 @route("sample", op="sample.install", mutates=True)
 def sample(

@@ -51,7 +51,7 @@ const STEP_OF = { newcase: 'cases', newproject: 'home', sprofile: 'give', adopt:
  * дії. Модуль екрана той самий; його `setView` малює в тіло вікна
  * (`view.setViewTarget`), а екран під вікном лишається, де був.
  */
-const MODAL_SCREENS = ['newcase', 'newproject', 'settings', 'sprofile'];
+const MODAL_SCREENS = ['newcase', 'newproject', 'settings', 'sprofile', 'feedback'];
 
 /** Ключ i18n для кнопки екрана. Підпис «Завести справу» вже є в словнику. */
 const NAV_LABEL = {
@@ -61,7 +61,7 @@ const NAV_LABEL = {
   sets: 'nav.sets', label: 'nav.label', jobs: 'nav.jobs', queue: 'nav.queue', site: 'nav.site',
   newproject: 'nav.newproject', canon: 'nav.canon', hyp: 'nav.hyp', research: 'nav.research',
   history: 'nav.history', cloud: 'nav.cloud', give: 'nav.give', pull: 'nav.pull', cards: 'nav.cards',
-  sprofile: 'nav.sprofile', settings: 'nav.settings', projects: 'nav.projects', status: 'nav.status',
+  sprofile: 'nav.sprofile', feedback: 'nav.feedback', settings: 'nav.settings', projects: 'nav.projects', status: 'nav.status',
   update: 'nav.update', adopt: 'nav.adopt',
 };
 

@@ -82,7 +82,11 @@ def _parser(html: str) -> Any:
     # Рушій lexbor: Modest (`selectolax.parser`) у selectolax 1.0 прибрано —
     # свіжа установка падала на імпорті, хоч lock-файл CI тримав 0.4.
     try:
-        from selectolax.lexbor import LexborHTMLParser as HTMLParser
+        import importlib
+
+        # Через import_module: стаби selectolax 0.4 і 1.x описують модуль по-різному,
+        # і прямий імпорт імені mypy в одній із версій не бачить.
+        HTMLParser = importlib.import_module("selectolax.lexbor").LexborHTMLParser
     except ImportError as exc:  # pragma: no cover — extras `archives`
         raise SourceError(
             "для роботи з ARCHIUM потрібен розбирач HTML: "

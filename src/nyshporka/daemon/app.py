@@ -93,6 +93,9 @@ FAIL_DELAY_SEC = 1.0
 FAILS_TRACKED_MAX = 1024
 #: Найбільше тіло запиту допуску — у байтах, що реально прийшли.
 ACCESS_BODY_MAX = 4096
+#: Стеля тіла для операцій, що несуть вміст із браузера (знімки відгуку в
+#: base64). Решта `/api/op/*` — без змін: їхні аргументи малі й так.
+BODY_MAX = {"/api/op/feedback.send": 12 * 1024 * 1024}
 #: Фраза другого підтвердження для «усіх інтерфейсів» чи публічної адреси.
 PUBLIC_PHRASE = "відкрити всім"
 
@@ -621,6 +624,25 @@ def create_app(ws: Workspace | None = None, *, token: str = "",
                     _envelope(f"запит прийшов з чужої сторінки ({foreign}) — "
                               f"змінювати простір може лише сама консоль застосунку"),
                     status_code=403)
+        return await call_next(request)
+
+    @app.middleware("http")
+    async def body_ceiling(request, call_next):  # type: ignore[no-untyped-def]
+        """Тіло з вмістом браузера — лише з `Content-Length` і в межах `BODY_MAX`.
+
+        FastAPI розбирає JSON-тіло цілком ще до маршруту, тож межа — тут, до
+        читання, а не в операції: інакше вкладка з гігабайтним «знімком» з'їла б
+        пам'ять демона раніше, ніж будь-яка перевірка його побачила.
+        """
+        cap = BODY_MAX.get(request.url.path) if request.method == "POST" else None
+        if cap is not None:
+            given = request.headers.get("content-length") or ""
+            if not given.isdigit():
+                return JSONResponse(_envelope("потрібен Content-Length"), status_code=411)
+            if int(given) > cap:
+                return JSONResponse(
+                    _envelope(f"завеликий запит: до {cap // (1 << 20)} МБ разом зі знімками"),
+                    status_code=413)
         return await call_next(request)
 
     if network:

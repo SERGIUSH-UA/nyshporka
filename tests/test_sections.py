@@ -84,7 +84,8 @@ def test_every_tab_screen_has_one_place_in_the_side_menu() -> None:
     twice = {x for x in placed if placed.count(x) > 1}
     assert twice == {"home"}, f"екран у двох групах: {sorted(twice)}"
     # `adopt` — перенос роду з кореня в проєкт (0.37): до нього веде плашка Огляду.
-    no_tab = {"newcase", "newproject", "sprofile", "adopt"}
+    # `feedback` — вікно відгуку з меню Супряги й «Налаштувань».
+    no_tab = {"newcase", "newproject", "sprofile", "adopt", "feedback"}
     assert set(placed) == (set(S.SCREENS) | S.UNGATED_SCREENS) - no_tab, (
         f"поза меню: {sorted(set(S.SCREENS) - no_tab - set(placed))}; "
         f"невідомі: {sorted(set(placed) - set(S.SCREENS) - S.UNGATED_SCREENS)}")

@@ -155,6 +155,24 @@ out.md = BT.mdLite(['Вступ', '', '| Справа | Сторінок |', '|-
   UP.updating({ from: '0.36.1', to: '0.36.2', log: 'x.log' }, { every: 5 });
   await tick(1800);
   globalThis.fetch = f0; out.healthAsked = n; }
+{ const asked = []; const f0 = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).includes('feedback.send')) {
+      const b = JSON.parse(opts.body || '{}'); asked.push(b);
+      const data = b.confirm ? { id: 41, files: 0, url: 'https://nyshporka.online/kabinet/moi-vidhuky', sent: true }
+        : { kind: b.kind, text: b.text, diag: b.diag ? { version: '0.37.0', os: 'Windows 11' } : {},
+          files: [], logged_in: false, to: 'https://api.nyshporka.online/v1', sent: false };
+      return { ok: true, status: 200, json: async () => ({ ok: true, v: 1, data, warnings: [], error: '' }) };
+    }
+    return f0(url, opts);
+  };
+  await import('./screens/feedback.js'); await SCREENS.feedback(); await tick(20);
+  out.fbCompose = view();
+  document.getElementById('fb-text').value = 'Гортач не відкривається';
+  await ACTIONS['fb.preview'](); await tick(20);
+  out.fbPreview = view();
+  await ACTIONS['fb.send'](); await tick(20);
+  out.fbDone = view(); out.fbAsked = asked.slice(); globalThis.fetch = f0; }
 const SH = await import('./screens/share.js');
 { const t0 = Date.now(); await SCREENS.give(); out.giveMs = Date.now() - t0; }
 out.card = SH.cardRows({ title: 'Сповідка', years: [1801, 1803], places: ['Городківка', 'Липівка'],
@@ -419,6 +437,20 @@ def test_bell_counts_and_lists_the_news(hub) -> None:
     assert "Нові моделі: 1" in m and "Писар v28" in m
     assert 'data-act="bell.open"' in m and "Вийшла 0.37" in m and "unread" in m
     assert "Перевірка оновлень вимкнена" in m and 'data-arg="settings"' in m
+
+
+def test_feedback_window_previews_before_sending(hub) -> None:
+    """Відгук: форма з видом і вкладеннями; перегляд — без confirm; без входу кнопка неактивна."""
+    c = hub["fbCompose"]
+    assert 'data-act="fb.preview"' in c and 'name="kind"' in c and 'id="fb-file"' in c
+    assert ".txt,.log,.json" in c and "image/png" in c
+    p = hub["fbPreview"]
+    assert "Гортач не відкривається" in p and "nysh share login" in p
+    assert 'data-act="fb.send" disabled' in p, "без входу «Надіслати» неактивна"
+    first = hub["fbAsked"][0]
+    assert first["confirm"] is False and first["text"] == "Гортач не відкривається"
+    assert hub["fbAsked"][-1]["confirm"] is True
+    assert "maskot-poshta" in hub["fbDone"] and "41" in hub["fbDone"]
 
 
 def test_update_screen_shows_versions_notes_models_and_switches(hub) -> None:

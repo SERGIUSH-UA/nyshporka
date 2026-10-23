@@ -162,6 +162,7 @@ function meMenu() {
     ${item('cards', 'tag', 'nav.cards', 'me.cards.why')}
     <div class="sep"></div>
     ${item('sprofile', 'hand', 'nav.sprofile', 'me.profile.why')}
+    ${item('feedback', 'envelope', 'nav.feedback', 'me.feedback.why')}
     ${m.consent ? `<p class="hm-why">${esc(t('me.consent').replace('{c}', m.consent))}</p>` : ''}
     <a class="hm-link" href="https://nyshporka.online/" target="_blank" rel="noopener">${ic('link', 'ic-o')}<span>${
       t('me.portal')} ↗</span></a>`;

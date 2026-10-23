@@ -61,6 +61,7 @@ import './screens/label.js';
 import './screens/jobs.js';
 import './screens/settings.js';
 import './screens/update.js';
+import './screens/feedback.js';
 import './screens/adopt.js';
 import './screens/project.js';
 import './screens/canon.js';
