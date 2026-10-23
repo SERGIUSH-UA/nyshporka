@@ -14,6 +14,7 @@ import { esc, el, setView, busy, failure, boxError, busyForm, renderWarnings, cu
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { openModal, confirmAct, closeModal, modalSeq } from '../core/modal.js';
 import { kv, pill, toast, ratioBar, fmtDay } from '../core/bits.js';
+import { bars as chartBars } from '/ui/chart.js';
 
 /** Стан справи з `share.suggest` (рядок пакета) → ключ підпису. */
 const STATUS = { 'готова': 'ready', 'у пулі без рамок': 'noboxes', 'неповна': 'partial',
@@ -71,6 +72,13 @@ function paintGive(env, again = false) {
  */
 function shifraCell(r) {
   const s = String(r.shifra || r.case_key || '');
+  // Збірка (`ARCH/0/@slug`) шифри не має — архів і слово «збірка», ключ у підказці.
+  if (!r.shifra && s.includes('/@')) {
+    return `<span title="${esc(s)}">${esc(s.split('/')[0])} · ${esc(t('give.bundle'))}</span>`;
+  }
+  if (s.includes('@') && /\?-@|-@/.test(s)) {
+    return `<span title="${esc(s)}">${esc(s.split(' ')[0])} · ${esc(t('give.bundle'))}</span>`;
+  }
   if (!s.startsWith('? ')) return esc(s);
   return `${esc(s.slice(2))} <span class="tag warn">${esc(t('give.norepo'))}</span>`;
 }
@@ -96,8 +104,29 @@ SCREENS.pull = async () => {
       ${fld(t('pull.q'), `<input name="query" placeholder="${esc(t('pull.q.ph'))}" required autofocus>`)}
       <button type="submit">${t('pull.find')}</button>
     </form>
-    <div class="dash-box" id="pull-box"><p class="muted">${t('pull.hint')}</p></div>`);
+    <div class="dash-box" id="pull-box"><p class="muted">${t('pull.hint')}</p></div>
+    <div id="pull-stats"></div>`);
+  pullStats(curGen());
 };
+
+/**
+ * Що вже взято із Супряги й від кого — підсумком і стовпчиками, а не голим
+ * полем пошуку на порожній сторінці.
+ */
+async function pullStats(gen) {
+  const env = await callOp('share.stats', {});
+  const box = el('pull-stats');
+  if (!alive(gen) || !box || !env.ok) return;
+  const loc = (env.data || {}).local || {};
+  const imp = loc.imported || {};
+  const from = (loc.from || []).map((x) => ({ label: x.publisher, n: x.cases }));
+  if (!imp.cases) return;
+  box.innerHTML = `<div class="dash-box pull-stats">
+    <div class="cards-head">${mini('zshyvok', 52)}<div>
+      <b>${esc(t('pull.sum').replace('{n}', imp.cases).replace('{p}', from.length))}</b>
+      <small class="muted">${esc(t('pull.sum.pages').replace('{n}', Number(imp.pages || 0).toLocaleString('uk')))}</small></div></div>
+    ${from.length ? `<h4>${t('pull.from')}</h4>${chartBars(from, { rows: 8, restLabel: t('dash.rest') })}` : ''}</div>`;
+}
 
 let FOUND = [];
 

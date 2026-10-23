@@ -1,9 +1,10 @@
 /** 📤 Вивантаження. */
 
+import { caseItem } from '../core/bits.js';
 import { t, LANG } from '../core/strings.js';
 import { TOKEN, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm,
-  renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
+  renderWarnings, renderCoverage, curGen, alive, mini } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { SECTIONS, NAV_LABEL, show, renderNav,
   refreshJobs } from '../core/nav.js';
@@ -31,9 +32,37 @@ SCREENS.export = async () => {
       <button type="submit">${t('export.run')}</button>
     </form>
     <div id="hits"></div>`);
+  exportPicks(curGen());
 };
 
+/**
+ * Поле на порожній сторінці не підказувало, ЩО тут вивантажувати: тепер під
+ * ним — прочитані справи, вибір одним кліком (шифра лягає в поле).
+ */
+async function exportPicks(gen) {
+  const box = el('hits');
+  if (!box) return;
+  box.innerHTML = `<div class="read-picks">${skelCards(3)}</div>`;
+  const env = await callOp('library.list', { htr: 'any', page_size: 12 });
+  if (!alive(gen)) return;
+  const cases = env.ok ? ((env.data || {}).cases || []).filter((c) => c.shifra || c.key) : [];
+  if (!cases.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `<h3 class="sub-h">${t('export.picks')}</h3><div class="read-picks">${cases.map((c) => {
+    const it = caseItem(c);
+    return `<button class="card" data-act="export.pick" data-arg="${esc(c.shifra || c.key)}">
+      ${mini('viazka', 40)}<span><b>${esc(c.shifra || c.key || '')}</b>
+      <small>${esc(c.title || '')}</small><small class="muted">${esc(it.hint)}</small></span></button>`;
+  }).join('')}</div>`;
+}
+
 Object.assign(ACTIONS, {
+  'export.pick': (_ev, elm) => {
+    const form = el('view').querySelector('form[data-act="export.run"]');
+    const input = form && form.querySelector('input[name="case"]');
+    if (!input) return undefined;
+    input.value = elm.dataset.arg;
+    return ACTIONS['export.run']({ preventDefault() {}, target: form });
+  },
   'export.run': async (ev) => {
     ev.preventDefault();
     const fd = new FormData(ev.target);
