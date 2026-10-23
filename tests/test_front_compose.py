@@ -32,7 +32,7 @@ const PROJECTS = { projects: [
 const row = (key, stage, by) => ({ key, shifra: key, title: 'Сповідка', htr_stage: stage,
   searched_by: by, verdict: '', on_disk: true, frames: 9, path: 'data/raw/' + key, fond: '1' });
 const DATA = {
-  'home.pulse': { workspace: { root: 'X' }, registry: { built: true, cases: 3, frames: 9 },
+  'home.pulse': { workspace: { root: 'X' }, registry: { built: true, cases: 3, frames: 9, unfiled: 2, bundles: 1 },
     reading: { ok: true, runs: 1, pages: 5, by_engine: [], by_model: [],
       last: [{ shifra: 'ТЕСТ 1-1-1', pages: 5, frames: 9, state: 'done', model: 'm', updated: '2026-10-20T10:00:00' }] },
     search: {}, eye: {}, history: [], pulse: {}, machine: { ok: true, ready: true }, agent: { connected: true } },
@@ -116,6 +116,11 @@ out.day = [BT.fmtDay('2026-07-23T00:00:00Z'), BT.fmtDay('1993-08-28'), BT.fmtDay
 out.forms = BT.fieldValue('name_variants', [{ form: 'Городківка' }, { form: 'Городковка' }]);
 out.md = BT.mdLite(['Вступ', '', '| Справа | Сторінок |', '|---|---|', '| [[I9001]] | 12 |', '',
   'Кінець'].join(String.fromCharCode(10)), refs);
+const SH = await import('./screens/share.js');
+out.card = SH.cardRows({ title: 'Сповідка', years: [1801, 1803], places: ['Городківка', 'Липівка'],
+  doc_type: 'confession', scans: { label: 'Зйомка М. Сидорука', url: 'https://example.org/x' } },
+  { total: 120, source: 'бібліотека' });
+out.cardNone = SH.cardRows({ frames_unknown: 'опису немає', scans: { label: '', url: 'javascript:alert(1)' } }, {});
 console.log('@@' + JSON.stringify(out));
 process.exit(0);
 """
@@ -163,6 +168,8 @@ def test_hub_overview_is_about_continuing_work(hub) -> None:
     assert 'data-arg="status"' in home, "діагностика — посиланням на «Стан Майстерні»"
     assert "ТЕСТ 1-1-1" in home, "останні прогони видно"
     assert "dash.reading.engines" not in home and "Рушії" not in home
+    # Реєстр рахує ще нові теки й збірки — під плиткою «справ» видно, звідки різниця.
+    assert "+ нових тек: 2 · збірок: 1" in home
 
 
 def test_status_screen_carries_the_diagnostics(hub) -> None:
@@ -247,3 +254,14 @@ def test_report_tables_are_tables(hub) -> None:
     md = hub["md"]
     assert '<table class="md-table">' in md and "<th>Справа</th>" in md and "Іван Сидорук" in md
     assert "---" not in md and "<p>Кінець</p>" in md
+
+
+def test_supriaha_card_shows_labelled_fields(hub) -> None:
+    """Картка Супряги у вікні — підписи полів, не сирі ключі й JSON (провтик 22.10.2026)."""
+    c = hub["card"]
+    assert "<dt>Назва</dt>" in c and "<dt>Жанр</dt>" in c and "сповідний розпис" in c
+    assert "1801–1803" in c and "Городківка, Липівка" in c and "120" in c
+    assert 'href="https://example.org/x"' in c and "Зйомка М. Сидорука" in c
+    assert "doc_type" not in c and "{" not in c and "scans" not in c
+    none = hub["cardNone"]
+    assert "невідомо" in none and "опису немає" in none and "javascript" not in none

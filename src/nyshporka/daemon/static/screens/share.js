@@ -10,7 +10,7 @@
 
 import { t, tOr } from '../core/strings.js';
 import { callOp, staleThenFresh, staleBadge } from '../core/net.js';
-import { esc, el, setView, busy, failure, boxError, busyForm, renderWarnings, curGen, alive, fld, emptyMini, mini } from '../core/view.js';
+import { esc, el, setView, busy, failure, boxError, busyForm, renderWarnings, curGen, alive, fld, emptyMini, mini, safeHref } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
 import { openModal, confirmAct, closeModal, modalSeq } from '../core/modal.js';
 import { kv, pill, toast, ratioBar, fmtDay } from '../core/bits.js';
@@ -215,13 +215,38 @@ async function openCard(key) {
   const env = await callOp('share.card', { case: key });
   if (seq !== modalSeq()) return;
   if (!env.ok) { boxError('dlg-body', env); return; }
-  const c = (env.data || {}).card || {};
-  const rows = Object.entries(c).filter(([, v]) => v !== '' && v !== null && v !== undefined)
-    .map(([k, v]) => [k, esc(Array.isArray(v) ? v.join(', ') : typeof v === 'object' ? JSON.stringify(v) : String(v))]);
-  el('dlg-body').innerHTML = `${kv(rows) || `<p class="muted">${t('cards.empty')}</p>`}
+  const d = env.data || {};
+  const c = d.card || {};
+  if (d.shifra) el('dlg-title').textContent = d.shifra;
+  el('dlg-body').innerHTML = `${cardRows(c, d.frames) || `<p class="muted">${t('cards.empty')}</p>`}
     ${renderWarnings(env)}
     <p class="muted">${t('cards.edit')}</p>
     <div class="row dlg-acts"><button class="ghost" data-act="modal.close">${t('modal.close')}</button></div>`;
+}
+
+/**
+ * Картка справи полями: назва, роки, місця, жанр, кадри, «де кадри».
+ * Доти вікно показувало сирі ключі (`doc_type`, `scans`) і JSON посилання
+ * (прохід провтиків 22.10.2026). Перелік полів закритий (`share.card.FIELDS`).
+ */
+export function cardRows(c, frames) {
+  const years = Array.isArray(c.years) ? c.years.join(c.years.length === 2 ? '–' : ', ') : c.years;
+  const places = Array.isArray(c.places) ? c.places.join(', ') : c.places;
+  const f = frames || {};
+  const total = f.total || c.frames;
+  const kadry = total ? `<span title="${esc(f.source || '')}">${esc(total)}</span>`
+    : c.frames_unknown ? `${esc(t('cardf.frames.none'))} <small class="muted">${esc(c.frames_unknown)}</small>` : '';
+  const s = c.scans && typeof c.scans === 'object' ? c.scans : null;
+  const href = s ? safeHref(s.url) : '';
+  const scans = s && href ? `<a href="${esc(href)}" target="_blank" rel="noopener">${esc(s.label || s.url)}</a>` : '';
+  return kv([
+    [t('cardf.title'), c.title ? esc(c.title) : ''],
+    [t('cardf.years'), years ? esc(years) : ''],
+    [t('cardf.places'), places ? esc(places) : ''],
+    [t('cardf.doc_type'), c.doc_type ? esc(tOr(`ptype.${c.doc_type}`, c.doc_type)) : ''],
+    [t('cardf.frames'), kadry],
+    [t('cardf.scans'), scans],
+  ]);
 }
 
 // ── Профіль (вікно) ──────────────────────────────────────────────────────────

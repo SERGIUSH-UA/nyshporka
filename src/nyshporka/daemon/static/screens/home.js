@@ -428,8 +428,12 @@ function tiles(d) {
   const eye = d.eye || {};
   const out = [];
 
+  // Реєстр і Бібліотека рахують і нові теки без паспорта, і збірки, тож там
+  // число більше (6108 проти 5923). Під плиткою — з чого різниця, а не загадка.
+  const plus = [reg.unfiled ? t('dash.cases.unfiled').replace('{n}', num(reg.unfiled)) : '',
+    reg.bundles ? t('dash.cases.bundles').replace('{n}', num(reg.bundles)) : ''].filter(Boolean).join(' · ');
   out.push(tile('cases', 'drawers', t('dash.tile.cases'), reg.cases,
-    'library', { hist: 'cases' }));
+    'library', { hist: 'cases', note: plus ? `+ ${plus}` : '' }));
   out.push(tile('frames', 'image', t('dash.tile.frames'), reg.frames,
     'library', { hist: 'frames' }));
   if (screenOn('runs') && rd.ok) {
