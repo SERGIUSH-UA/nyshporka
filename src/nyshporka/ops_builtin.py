@@ -3147,7 +3147,12 @@ def case_register(a: CaseRegisterArgs) -> Envelope:
                        one_case=a.one_case, private=a.private)
     except RegisterError as exc:
         return fail(str(exc))
-    env = ok({"case_dir": a.case_dir, "sidecar": out})
+    from nyshporka.library import _mk_key
+
+    # Ключ — для кнопки «до Бібліотеки» після збереження: рядок справи там шукають за ним.
+    env = ok({"case_dir": a.case_dir, "sidecar": out,
+              "key": _mk_key(out.get("repo"), out.get("fond"), out.get("spr"),
+                             out.get("opys")) or ""})
     if out.get("private"):
         env.warn("private", "справа позначена private (нікуди з машини: Супряга, "
                             "відкритий сайт — лише рішенням автора). Зняти: "
@@ -3706,8 +3711,32 @@ def case_check(a: CaseCheckArgs) -> Envelope:
         d = case_path(a.case_dir)
         exists = d.is_dir()
         out["dir"] = {"path": str(d), "exists": exists,
-                      "outside": bool(exists and not reachable(d))}
+                      "outside": bool(exists and not reachable(d)),
+                      "described": _described(d) if exists else None}
     return ok(out)
+
+
+def _described(d: Path) -> dict[str, str] | None:
+    """Шифра й назва з паспорта теки, якщо її вже описували.
+
+    🔴 Форма, відкрита на вже описаній теці, була порожньою, ніби теку бачать
+    уперше: людина набирала шифру вдруге і не знала, що опис уже є і що
+    «Зберегти» його перепише (прохід новачка 23.10.2026).
+    """
+    import json
+
+    from nyshporka.cases.register import SIDECAR
+
+    f = d / SIDECAR
+    if not f.is_file():
+        return None
+    try:
+        m = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(m, dict) or not m.get("shifra"):
+        return None
+    return {"shifra": str(m.get("shifra") or ""), "title": str(m.get("title") or "")}
 
 
 # `agent=False` — це підживлення форми, а не дія дослідження: агент читає опис

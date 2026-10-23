@@ -425,6 +425,29 @@ def test_an_adopted_folder_outside_the_workspace_becomes_a_visible_case(
     assert found[0].frames == 4, "кадри порахувались не там"
 
 
+def test_form_says_folder_is_already_described_and_save_names_the_key(space: Path,
+                                                                      tmp_path: Path) -> None:
+    """🔴 Повторно вибрана тека відкривала порожню форму, ніби її бачать уперше.
+
+    `case.check` називає шифру з паспорта, а `case.register` — ключ справи, з яким
+    кнопка «До Бібліотеки» відкриває саме її рядок (прохід новачка 23.10.2026).
+    """
+    from nyshporka import ops as O
+
+    d = tmp_path / "Скани ревізія"
+    d.mkdir()
+    (d / "0001.jpg").write_bytes(b"x")
+    fresh = O.call("case.check", {"case_dir": str(d)})
+    assert fresh.ok and fresh.data["dir"]["described"] is None
+    env = O.call("case.register", {"case_dir": str(d), "shifra": "ANRM 134-2-100",
+                                   "title": "Ревізька казка", "reindex": False})
+    assert env.ok, env.error
+    assert env.data["key"] == "ANRM/134/2/100"
+    again = O.call("case.check", {"case_dir": str(d)})
+    assert again.data["dir"]["described"] == {"shifra": "ANRM 134-2-100",
+                                              "title": "Ревізька казка"}
+
+
 def test_paths_inside_the_workspace_stay_relative(space: Path) -> None:
     """🔴 Простір переносять на інший диск і віддають колезі.
 

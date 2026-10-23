@@ -6,6 +6,7 @@ import { TOKEN, callOp, SEQ } from '../core/net.js';
 import { esc, el, setView, busy, failure, boxError, busyForm, fld,
   renderWarnings, renderCoverage, curGen, alive } from '../core/view.js';
 import { SCREENS, ACTIONS } from '../core/registry.js';
+import { closeModal } from '../core/modal.js';
 import { SECTIONS, NAV_LABEL, show, renderNav, goto,
   refreshJobs, onJob, jobChip, currentScreen } from '../core/nav.js';
 import { ST } from '../core/state.js';
@@ -25,6 +26,8 @@ import { pathField } from '../core/paths.js';
  * попереднього разу. Тому правка починається з показу записаного.
  */
 let EDIT = null;
+/** Форма відкрита на правку наявного опису — підказка «уже описано» зайва. */
+let EDITING = false;
 
 /**
  * 📥 Нові теки — матеріал на диску, якого Нишпорка ще не знає як справу.
@@ -211,12 +214,23 @@ async function checkForm() {
   // Позначка «показувати там, де лежить» — лише для теки поза простором.
   const box = el('adopt-box');
   if (box) box.hidden = !(d.dir && d.dir.outside);
+  // Теку вже описували — сказати це, поки людина не набрала шифру вдруге.
+  const said = el('dir-described');
+  const was = d.dir && d.dir.described;
+  if (said) {
+    said.hidden = !(was && !EDITING);
+    said.innerHTML = was ? `${esc(t('case.described').replace('{shifra}', was.shifra))}${
+      was.title ? ` — ${esc(was.title)}` : ''}
+      <button type="button" class="fld-btn" data-act="case.edit" data-arg="${esc(d.dir.path)}">${
+      t('case.described.edit')}</button>` : '';
+  }
 }
 
 SCREENS.newcase = async () => {
   const sc = (EDIT && EDIT.sidecar) || {};
   const v = (k) => esc(sc[k] === null || sc[k] === undefined ? '' : sc[k]);
   const dir = EDIT ? esc(EDIT.case_dir) : '';
+  EDITING = !!EDIT;
   // 🔴 Валідатор шифри вимагає назву архіву зі свого переліку, а показати цей
   // перелік не було де: людина читала «архів невідомий» і не мала як довідатись,
   // що взагалі приймається, ані чим це поповнити (звіт 29.08.2026).
@@ -261,6 +275,7 @@ SCREENS.newcase = async () => {
         <button type="button" class="fld-btn" data-act="case.repo.toggle">${t('case.repo.add')}</button>
       </div>
       <p id="shifra-read" class="muted fld-hint"></p>
+      <p id="dir-described" class="fld-hint" hidden></p>
       <div id="repo-add" hidden>
         <p class="muted">${t('case.repo.add.why')}</p>
         <div class="row">
@@ -288,7 +303,7 @@ SCREENS.newcase = async () => {
       <div class="row">${fld(t('case.note'), `<input name="note"
         placeholder="${t('case.note.ph')}" value="${v('note')}">`)}</div>`, !!EDIT)}
       <div id="adopt-box" hidden>
-        <div class="warn"><label><input type="checkbox" name="adopt" value="1">
+        <div class="warn"><label><input type="checkbox" name="adopt" value="1" checked>
           ${t('case.adopt')}</label><br>
           <span class="muted">${t('case.adopt.why')}</span></div>
       </div>
@@ -296,7 +311,7 @@ SCREENS.newcase = async () => {
         ${EDIT ? `<button type="button" data-act="case.fresh">${t('case.fresh')}</button>`
     : ''}</div>
     </form>
-    <div id="hits"></div>`);
+    <div id="case-hits"></div>`);
   watchForm();
   EDIT = null;
 };
@@ -380,9 +395,13 @@ Object.assign(ACTIONS, {
     EDIT = env.data;
     await show('newcase');
     if (env.warnings && env.warnings.length) {
-      el('hits').innerHTML = renderWarnings(env);
+      el('case-hits').innerHTML = renderWarnings(env);
     }
   },
+
+  /** 🧭 Після збереження: одразу до читання цієї теки або до її рядка в Бібліотеці. */
+  'case.next.read': (_ev, elm) => { closeModal(); goto('read', { case_dir: elm.dataset.arg }); },
+  'case.next.lib': (_ev, elm) => { closeModal(); goto('library', { key: elm.dataset.arg }); },
 
   'case.fresh': async () => {
     EDIT = null;
@@ -440,11 +459,18 @@ Object.assign(ACTIONS, {
     fd.adopt = fd.adopt === '1';
     const env = await callOp('case.register', fd);
     if (!env.ok) {
-      el('hits').innerHTML = `<div class="warn err">${esc(env.error)}</div>`;
+      el('case-hits').innerHTML = `<div class="warn err">${esc(env.error)}</div>`;
       return;
     }
     const sc = env.data.sidecar;
-    el('hits').innerHTML = `${renderWarnings(env)}
-      <div class="warn">${ic('check-circle', 'ic-sm')} <b>${esc(sc.shifra)}</b> — ${esc(sc.title || 'без назви')}</div>`;
+    // 🧭 Після «Зберегти» — куди далі. Доти вікно лишалось відкритим з однією
+    // галочкою, і що робити зі щойно заведеною справою, не казало ніщо.
+    const dir = esc(env.data.case_dir || fd.case_dir || '');
+    el('case-hits').innerHTML = `${renderWarnings(env)}
+      <div class="warn">${ic('check-circle', 'ic-sm')} <b>${esc(sc.shifra)}</b> — ${esc(sc.title || t('case.untitled'))}</div>
+      <div class="row">
+        <button type="button" data-act="case.next.read" data-arg="${dir}">${t('case.next.read')}</button>
+        <button type="button" data-act="case.next.lib" data-arg="${esc(env.data.key || '')}">${t('case.next.lib')}</button>
+      </div>`;
   },
 });

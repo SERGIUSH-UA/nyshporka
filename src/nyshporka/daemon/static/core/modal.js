@@ -50,7 +50,17 @@ export function openModal({ title = '', body = '', narrow = false, onClose = nul
   // підтвердження — відповідь), лишився б чекати назавжди.
   if (!d.dataset.wired && d.addEventListener) {
     d.dataset.wired = '1';
-    d.addEventListener('close', () => settle(false));
+    d.addEventListener('close', () => {
+      // 🔴 Esc і ✕ закривають вікно в обхід `closeModal`, і вміст лишався в
+      // `dlg-body`. Вузол вікна стоїть у документі ПЕРЕД екраном, тож
+      // закрите вікно далі затіняло вузли екрана з тим самим `id`: після
+      // «Опис справи» план читання й помилка писались у сховане `#hits`, і
+      // «Що робитимемо» мовчало (прохід новачка 23.10.2026). Вікно, відкрите
+      // знову до цієї події, вже відкрите — його вміст не чіпаємо.
+      const box = el('dlg-body');
+      if (box && !modalOpen()) box.innerHTML = '';
+      settle(false);
+    });
   }
   if (!d.open) {
     if (typeof d.showModal === 'function') {
