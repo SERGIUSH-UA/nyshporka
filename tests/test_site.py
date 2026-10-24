@@ -368,6 +368,7 @@ def test_public_build_drops_hypotheses_about_the_hidden(space: Path) -> None:
 
 
 def test_wikilink_to_a_person_is_labelled_with_the_name(tmp_path: Path) -> None:
+    pytest.importorskip("mkdocs")  # хуки сайту — лише з набором `site`
     from nyshporka.site import hooks as H
     docs = tmp_path / "docs"
     (docs / "persons").mkdir(parents=True)

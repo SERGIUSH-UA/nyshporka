@@ -435,7 +435,7 @@ def test_portal_take_brings_patches(owner: W.Workspace, tmp_path: Path,
     monkeypatch.setattr(P, "_call", _call)
     monkeypatch.setattr(P, "_download", _download)
     base = tmp_path / "helper" / "zvid"
-    f, patches = P.take(base=base)
+    _, patches = P.take(base=base)
     assert [p.name for p in patches] == [f"{rep.id}.r2.zvidpatch"]
     # Продовження: пакет і доповнення вже лежать — удруге не качаються.
     P.take(pack_id=rep.id, base=base)
