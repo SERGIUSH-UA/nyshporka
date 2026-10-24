@@ -212,6 +212,8 @@ def export_cmd(
     no_sheets: bool = typer.Option(False, "--no-sheets", help="без аркушів із рамками"),
     no_hints: bool = typer.Option(False, "--no-hints",
                                   help="без стороннього прочитання (контроль для порівняння)"),
+    procedure: str = typer.Option("arbiter", "--procedure",
+                                  help="arbiter | crop-read (кожен рядок по кропу)"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Завдання арбітрам: голоси по сторінках + аркуші з рамками.
@@ -225,7 +227,7 @@ def export_cmd(
                                   "pages_per_file": pages_per_file,
                                   "only_missing": only_missing, "drafts": drafts,
                                   "out": out, "no_sheets": no_sheets,
-                                  "no_hints": no_hints})
+                                  "no_hints": no_hints, "procedure": procedure})
     if _answer(env, as_json):
         return
     d = env.data

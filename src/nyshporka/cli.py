@@ -2166,6 +2166,12 @@ from nyshporka.train.cli import app as train_app  # noqa: E402
 
 app.add_typer(train_app, name="train")
 
+# 📜 Звід: зведення рядків на іншій машині. Пакувати й приймати — лабораторія
+# власника; взяти й віддати — будь-яка установка, навіть без простору.
+from nyshporka.zvid.cli import app as zvid_app  # noqa: E402
+
+app.add_typer(zvid_app, name="zvid")
+
 # 🤝 Обмін прочитаним між дослідниками (Супряга). Секція та сама, що й у
 # читання: пакет несе рівно те, що дав рушій, і без прочитаного тут нема чого
 # віддавати.

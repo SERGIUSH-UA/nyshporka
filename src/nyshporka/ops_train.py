@@ -366,6 +366,9 @@ class ExportArgs(BaseModel):
     no_sheets: bool = Field(default=False, description="без аркушів із рамками")
     no_hints: bool = Field(default=False, description="без стороннього прочитання сторінок "
                                                       "(контрольний захід для порівняння)")
+    procedure: str = Field(default="arbiter",
+                           description="arbiter — обрати між голосами; crop-read — читати "
+                                       "кожен рядок по кропу з людським джерелом поруч")
 
 
 @op("train.export", summary="Завдання арбітрам: голоси по сторінках + аркуші з рамками",
@@ -384,7 +387,8 @@ def train_export(a: ExportArgs) -> Envelope:
     try:
         rep = T.export_tasks(a.name, pages=_csv(a.pages), pages_per_file=a.pages_per_file,
                              only_missing=a.only_missing, drafts=_csv(a.drafts) or None,
-                             out=Path(a.out) if a.out else None, sheets=not a.no_sheets, hints=not a.no_hints)
+                             out=Path(a.out) if a.out else None, sheets=not a.no_sheets,
+                             hints=not a.no_hints, procedure=a.procedure)
     except (S.SetError, T.TaskError) as exc:
         return fail(str(exc))
     env = ok({"set": a.name, "out": str(rep.out), "files": [str(f) for f in rep.files],
