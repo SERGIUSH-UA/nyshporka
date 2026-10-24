@@ -17,6 +17,8 @@
 
 ## [Unreleased]
 
+## [0.37.2] — 2026-10-24
+
 ### Додано
 - **Звід через портал** — черга пакетів на nyshporka.online: власник
   `nysh zvid publish/queue/fetch`, помічник `nysh zvid take` без файла бере
