@@ -50,17 +50,19 @@ def pack_cmd(
 
 @app.command("take")
 def take_cmd(
-    file: str = typer.Argument(..., metavar="ПАКЕТ.zvid"),
+    file: str = typer.Argument("", metavar="[ПАКЕТ.zvid]"),
+    pack_id: str = typer.Option("", "--id", help="з порталу: саме цей пакет"),
     fresh: bool = typer.Option(False, "--fresh", help="розпакувати наново, ЗАТЕРТИ зведене"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
-    """Взяти пакет: розпакувати в пісочницю й зробити завдання.
+    """Взяти пакет: з файла або, без файла, наступний із черги порталу.
 
-    Повторний виклик продовжує, а не перезаписує.
+    Розпаковує в пісочницю й робить завдання. Повторний виклик продовжує, а не
+    перезаписує.
     """
     from nyshporka import ops as O
 
-    env = O.call("zvid.take", {"file": file, "fresh": fresh})
+    env = O.call("zvid.take", {"file": file, "id": pack_id, "fresh": fresh})
     if _answer(env, as_json):
         return
     d = env.data
@@ -107,20 +109,24 @@ def give_cmd(
     note: str = typer.Option("", "--note", help="примітка власникові"),
     out: str = typer.Option("", "--out", metavar="ТЕКА", help="куди покласти .answer.zvid"),
     partial: bool = typer.Option(False, "--partial", help="віддати, хоч зведено не все"),
+    no_upload: bool = typer.Option(False, "--no-upload",
+                                   help="пакет із порталу, але відповідь лише файлом"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
-    """Перевірити відповіді й зібрати .answer.zvid для власника."""
+    """Перевірити відповіді й зібрати .answer.zvid; пакет із порталу — й залити."""
     from nyshporka import ops as O
 
     env = O.call("zvid.give", {"id": pack_id, "model": model, "agents": agents,
-                               "note": note, "out": out, "partial": partial})
+                               "note": note, "out": out, "partial": partial,
+                               "no_upload": no_upload})
     if _answer(env, as_json):
         return
     d = env.data
     c = d["conf"]
     console.print(f"📤 {d['file']}")
     console.print(f"зведено {d['answered']} з {d['rows']} (h{c['high']}/m{c['med']}/l{c['low']})"
-                  " — передай файл власникові")
+                  + (" — залито на портал, власник забере сам" if d["uploaded"]
+                     else " — передай файл власникові"))
     _notes(env)
 
 
@@ -144,4 +150,80 @@ def collect_cmd(
     for n, v in d["control"].items():
         console.print(f"  🎯 контрольний {n}: CER {v['cer']:.1%} на {v['lines']} з {v['of']} "
                       "рядків еталона")
+    _notes(env)
+
+
+@app.command("publish")
+def publish_cmd(
+    file: str = typer.Argument(..., metavar="ПАКЕТ.zvid"),
+    kind: str = typer.Option("", "--kind", help="клас пакета; типово — за голосами"),
+    note: str = typer.Option("", "--note", help="примітка для помічника"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Покласти пакет у чергу порталу (власник)."""
+    from nyshporka import ops as O
+
+    env = O.call("zvid.publish", {"file": file, "kind": kind, "note": note})
+    if _answer(env, as_json):
+        return
+    d = env.data
+    # `\\[`: інакше rich читає «[regent]» як свою розмітку й ковтає клас пакета.
+    console.print(f"📮 {d['id']} \\[{d['kind']}] — {d['status']}, {d['size'] / 2**20:.1f} МБ")
+    _notes(env)
+
+
+@app.command("queue")
+def queue_cmd(
+    status: str = typer.Option("", "--status", help="vilnyi | vzhato | povernuto | pryiniato"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Черга порталу: пакети, у кого вони, помічники (власник)."""
+    from nyshporka import ops as O
+
+    env = O.call("zvid.queue", {"status": status})
+    if _answer(env, as_json):
+        return
+    for h in env.data.get("helpers") or []:
+        console.print(f"{'✓' if h['active'] else '✗'} {h['email']}: {', '.join(h['kinds'])} "
+                      f"· до {h['max_open']}")
+    for p in env.data.get("packs") or []:
+        until = f" до {p['lease_until'][:16]}" if p.get("lease_until") else ""
+        console.print(f"  {p['id']} \\[{p['kind']}] {p['status']}{until} · "
+                      f"{(p.get('opys') or {}).get('pages', '?')} стор.")
+    _notes(env)
+
+
+@app.command("fetch")
+def fetch_cmd(
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Забрати всі повернуті відповіді з порталу в набори (власник)."""
+    from nyshporka import ops as O
+
+    env = O.call("zvid.fetch", {})
+    if _answer(env, as_json):
+        return
+    if not env.data["accepted"]:
+        console.print("[muted]повернутих відповідей немає[/muted]")
+    for g in env.data["accepted"]:
+        rows = sum(g["imported"].values())
+        console.print(f"📥 {g['id']} ({g['model'] or '—'}): {rows} рядків у "
+                      f"{len(g['imported'])} наборах, підозрілих {g['suspects']}")
+        for n, v in g["control"].items():
+            console.print(f"   🎯 контрольний {n}: CER {v['cer']:.1%} на {v['lines']} рядках")
+    _notes(env)
+
+
+@app.command("drop")
+def drop_cmd(
+    pack_id: str = typer.Argument(..., metavar="ID"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Повернути взятий пакет у чергу порталу, не зводячи."""
+    from nyshporka import ops as O
+
+    env = O.call("zvid.drop", {"id": pack_id})
+    if _answer(env, as_json):
+        return
+    console.print(f"↩ {env.data['id']} повернуто в чергу")
     _notes(env)

@@ -259,3 +259,92 @@ def test_literal_source_grounds_label_for_suspects(owner: W.Workspace) -> None:
     assert any(i == 0 for i, _ in g.suspects)
     g2 = G.gate_page("0001", list(merged), weak, dict(conf), support=support)
     assert not any(i == 0 for i, _ in g2.suspects)
+
+
+# ── портал ───────────────────────────────────────────────────────────────────
+class _FakePortal:
+    """Сервер черги в пам'яті: той самий порядок викликів, що в `app/routers/zvid.py`."""
+
+    def __init__(self) -> None:
+        self.bytes: dict[str, bytes] = {}
+        self.packs: dict[str, dict] = {}
+        self.accepted: dict[str, dict] = {}
+
+    def call(self, method: str, path: str, body: object = None) -> dict:
+        import hashlib
+
+        b = body if isinstance(body, dict) else {}
+        if path == "/packs" and method == "POST":
+            self.packs[b["id"]] = {**b, "status": "nove"}
+            return {"id": b["id"], "status": "nove", "upload": f"put:{b['id']}"}
+        if path.endswith("/ready"):
+            pid = path.split("/")[2]
+            p = self.packs[pid]
+            assert hashlib.sha256(self.bytes[pid]).hexdigest() == p["sha256"]
+            p["status"] = "vilnyi"
+            return {"id": pid, "kind": p["kind"], "status": "vilnyi", "size": p["size"]}
+        if path == "/take":
+            pid = next(k for k, v in self.packs.items() if v["status"] == "vilnyi")
+            self.packs[pid]["status"] = "vzhato"
+            p = self.packs[pid]
+            return {"id": pid, "size": p["size"], "sha256": p["sha256"], "download": f"get:{pid}"}
+        if path.endswith("/answer") and method == "POST":
+            pid = path.split("/")[2]
+            self.packs[pid]["answer"] = b
+            return {"upload": f"put:{pid}.answer"}
+        if path.endswith("/done"):
+            pid = path.split("/")[2]
+            self.packs[pid]["status"], self.packs[pid]["meta"] = "povernuto", b["meta"]
+            return {"id": pid, "status": "povernuto"}
+        if path.startswith("/packs?status=povernuto"):
+            return {"packs": [{"id": k} for k, v in self.packs.items() if v["status"] == "povernuto"]}
+        if path.endswith("/answer") and method == "GET":
+            pid = path.split("/")[2]
+            a = self.packs[pid]["answer"]
+            return {"download": f"get:{pid}.answer", "answer_sha256": a["sha256"],
+                    "answer_size": a["size"]}
+        if path.endswith("/accepted"):
+            pid = path.split("/")[2]
+            self.accepted[pid] = b["pidsumok"]
+            self.packs[pid]["status"] = "pryiniato"
+            return {"id": pid}
+        raise AssertionError(f"неочікуваний виклик {method} {path}")
+
+
+def test_portal_round_trip(owner: W.Workspace, tmp_path: Path,
+                           monkeypatch: pytest.MonkeyPatch) -> None:
+    from nyshporka.zvid import portal as P
+
+    fake = _FakePortal()
+    monkeypatch.setattr(P, "_call", fake.call)
+    monkeypatch.setattr(P, "_put", lambda url, blob: fake.bytes.__setitem__(url[4:], blob))
+    monkeypatch.setattr(P, "_download", lambda url, sha, size: fake.bytes[url[4:]])
+
+    rep = _pack(owner, tmp_path)
+    got = P.publish(rep.file)
+    assert got["status"] == "vilnyi" and fake.packs[rep.id]["kind"] == "regent", \
+        "голос Регента робить пакет класом regent, а не public"
+    assert "x17-" not in json.dumps(fake.packs[rep.id]["opys"])
+
+    base = tmp_path / "helper" / "zvid"
+    f = P.take(base=base)
+    took = H.take(f, base=base)
+    P.mark_portal(took.root)
+    _answer_all(took.root)
+    given = H.give(rep.id, model="claude-test", base=base)
+    P.upload_answer(rep.id, given.file)
+    assert fake.packs[rep.id]["status"] == "povernuto"
+    assert fake.packs[rep.id]["meta"]["model"] == "claude-test"
+
+    out = P.fetch(ws=owner)
+    assert [o["id"] for o in out] == [rep.id]
+    assert fake.accepted[rep.id]["imported"] == {"x17-z4-0006L": 5}
+    assert "x17-z5-0015R" in fake.accepted[rep.id]["control"]
+
+
+def test_kind_of_names_the_specialist() -> None:
+    from nyshporka.zvid.portal import kind_of
+
+    assert kind_of({"voices": ["regent_v2", "kdiak7_crops"]}) == "regent"
+    assert kind_of({"voices": ["pysar_x18_v1"]}) == "pysar_x18"
+    assert kind_of({"voices": ["pysar_cyr_v28", "diak_cyr_v7"]}) == "public"
