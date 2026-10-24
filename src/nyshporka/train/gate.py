@@ -295,6 +295,24 @@ def dense_why(r: float) -> str:
             f"з-поза рамки слово, два рядки в кропі або кроп боком")
 
 
+#: Наскільки мітка мусить бути схожа на голоси рушія, щоб збіг із людським
+#: виданням знімав з неї підозру. Без цієї умови мітка, списана з підказки,
+#: що лягла на чужий рядок, збігалась би з виданням і йшла б мовчки — а саме
+#: такий рядок і є хибна навчальна мітка (зауваження помічника, 24.10.2026).
+#: Заміряно на 3701 рядку паку 6 Регента, звіреному на кропі: найгірший 1%
+#: схожий на голоси на 70; рядок з тієї самої сторінки, але на 3 рядки далі
+#: (зсунута підказка), — медіана 37, найгірший 1% — 54. Поріг 55 між ними.
+SUPPORT_VOICE_MIN = 55.0
+
+
+def supported(text: str, voices: list[str], support: list[str] | None) -> bool:
+    """Мітку тримає дослівне людське джерело — і вона не чужа голосам рушія."""
+    if not support or grounded(text, support) < GROUNDED_MIN:
+        return False
+    live = [v for v in voices if v.strip()]
+    return not live or grounded(text, live) >= SUPPORT_VOICE_MIN
+
+
 def gate_page(page: str, merged: list[str], voices: list[list[str]],
               conf: dict[int, str], *, ink_of: Any = None,
               crop_of: Any = None, support: dict[int, list[str]] | None = None) -> PageGate:
@@ -329,7 +347,7 @@ def gate_page(page: str, merged: list[str], voices: list[list[str]],
                 g.demoted.append(i)
             conf[i] = "low"
             continue
-        if support.get(i) and grounded(text, support[i]) >= GROUNDED_MIN:
+        if supported(text, vs, support.get(i)):
             continue
         if suspect(sig, text):
             g.suspects.append((i, "голоси розходяться: " + ", ".join(sig)))

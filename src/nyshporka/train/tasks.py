@@ -548,11 +548,16 @@ def literal_support(reg: S.Registry, spec: S.SetSpec, page: str) -> dict[int, li
     """Дослівний людський текст рядків сторінки — опора для воріт.
 
     Лише `kind=literal`: переклад чи нормалізоване прочитання з міткою не
-    збігаються за побудовою, і «опора» на них нічого б не доводила.
+    збігаються за побудовою, і «опора» на них нічого б не доводила. І лише
+    без сумніву (`doubt`): підказку, позначену як можливо зсунуту, мітка не
+    може «підтвердити», збігаючись із нею.
     """
-    return {i: [v["text"] for src, v in got if src.kind == "literal"]
-            for i, got in reg.line_hints(spec, page).items()
-            if any(src.kind == "literal" for src, _ in got)}
+    out: dict[int, list[str]] = {}
+    for i, got in reg.line_hints(spec, page).items():
+        texts = [v["text"] for src, v in got if src.kind == "literal" and not v.get("doubt")]
+        if texts:
+            out[i] = texts
+    return out
 
 
 def suspects_of(name: str, ws: Workspace | None = None) -> list[dict[str, Any]]:
@@ -587,7 +592,7 @@ def suspects_of(name: str, ws: Workspace | None = None) -> list[dict[str, Any]]:
             why = ""
             if ratios.get(i, 0) >= G.DENSITY_SUSPECT:
                 why = G.dense_why(ratios[i])
-            elif support.get(i) and G.grounded(text, support[i]) >= G.GROUNDED_MIN:
+            elif G.supported(text, vs, support.get(i)):
                 continue
             elif G.suspect(sig, text):
                 why = "голоси розходяться"

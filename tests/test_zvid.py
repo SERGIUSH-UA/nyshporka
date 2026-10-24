@@ -255,7 +255,7 @@ def test_literal_source_grounds_label_for_suspects(owner: W.Workspace) -> None:
     reg = S.registry(owner)
     spec = reg.load("x17-z4-0006L")
     support = T.literal_support(reg, spec, "0001")
-    assert support == {0: ["Николай Ивановъ сынъ"], 1: ["Марѳа Васильева Петровна"]}
+    assert support == {0: ["Николай Ивановъ сынъ"]}, "рядок 1 має ⚠ — не опора"
     from nyshporka.train import gate as G
 
     merged = ["Николай Ивановъ сынъ", "", ""]
@@ -265,6 +265,11 @@ def test_literal_source_grounds_label_for_suspects(owner: W.Workspace) -> None:
     assert any(i == 0 for i, _ in g.suspects)
     g2 = G.gate_page("0001", list(merged), weak, dict(conf), support=support)
     assert not any(i == 0 for i, _ in g2.suspects)
+    # Мітка, дослівно списана з підказки, що лягла на чужий рядок: збігається з
+    # виданням, але голосам чужа — мусить іти людині, а не мовчки в корпус.
+    foreign = [["Село Ходъ на межи", "", ""], ["Село Ход на межи", "", ""]]
+    g3 = G.gate_page("0001", list(merged), foreign, dict(conf), support=support)
+    assert any(i == 0 for i, _ in g3.suspects), "списаний зсунутий рядок має бути підозрілим"
 
 
 # ── портал ───────────────────────────────────────────────────────────────────
