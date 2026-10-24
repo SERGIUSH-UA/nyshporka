@@ -287,7 +287,8 @@ class _FakePortal:
             pid = next(k for k, v in self.packs.items() if v["status"] == "vilnyi")
             self.packs[pid]["status"] = "vzhato"
             p = self.packs[pid]
-            return {"id": pid, "size": p["size"], "sha256": p["sha256"], "download": f"get:{pid}"}
+            return {"id": pid, "size": p["size"], "sha256": p["sha256"], "download": f"get:{pid}",
+                    "patches": []}
         if path.endswith("/answer") and method == "POST":
             pid = path.split("/")[2]
             self.packs[pid]["answer"] = b
@@ -327,7 +328,8 @@ def test_portal_round_trip(owner: W.Workspace, tmp_path: Path,
     assert "x17-" not in json.dumps(fake.packs[rep.id]["opys"])
 
     base = tmp_path / "helper" / "zvid"
-    f = P.take(base=base)
+    f, patches = P.take(base=base)
+    assert patches == []
     took = H.take(f, base=base)
     P.mark_portal(took.root)
     _answer_all(took.root)
@@ -348,3 +350,93 @@ def test_kind_of_names_the_specialist() -> None:
     assert kind_of({"voices": ["regent_v2", "kdiak7_crops"]}) == "regent"
     assert kind_of({"voices": ["pysar_x18_v1"]}) == "pysar_x18"
     assert kind_of({"voices": ["pysar_cyr_v28", "diak_cyr_v7"]}) == "public"
+
+
+# ── доповнення ───────────────────────────────────────────────────────────────
+def _add_voice(owner: W.Workspace, name: str, vid: str) -> None:
+    reg = S.registry(owner)
+    spec = reg.load(name)
+    for pg in reg.crop_pages(spec):
+        n = len(reg.draft_lines(spec, spec.voices()[0], pg) or [])
+        f = reg.set_dir(name) / "drafts" / vid / f"{pg}.txt"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("\n".join(f"нова модель {i}" for i in range(n)) + "\n", encoding="utf-8")
+    spec.drafts.append(S.Draft(id=vid, dir=f"drafts/{vid}"))
+    reg.save(spec)
+
+
+def test_patch_adds_a_voice_to_a_pack_in_progress(owner: W.Workspace, tmp_path: Path) -> None:
+    from nyshporka.zvid import patch as PT
+
+    rep = _pack(owner, tmp_path)
+    base = tmp_path / "helper" / "zvid"
+    took = H.take(rep.file, base=base)
+    first = sorted((took.root / C.TASKS).glob("*.txt"))[0]
+    ids = H._task_ids(first)
+    ans = first.with_name(first.stem + ".answer.json")
+    ans.write_text(json.dumps({ids[0]: {"m": "зведене до доповнення", "c": "med"}},
+                              ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(C.ZvidError, match="немає голосу"):
+        PT.build(rep.id, voices=["regent_v3"], out=tmp_path / "out", ws=owner)
+    for name in rep.sets.values():
+        _add_voice(owner, name, "regent_v3")
+    built = PT.build(rep.id, voices=["regent_v3"], out=tmp_path / "out", ws=owner)
+    assert built.rev == 2 and built.bytes < 50_000, "доповнення — кілобайти, не пакет"
+    with zipfile.ZipFile(built.file) as zf:
+        assert not any(n.endswith((".jpg", ".png")) for n in zf.namelist())
+        assert not any("x17-" in n for n in zf.namelist())
+
+    got = PT.apply(built.file, base=base)
+    assert got.voices == ["regent_v3"] and not got.skipped
+    task = first.read_text(encoding="utf-8")
+    assert "  C: нова модель" in task, "новий голос — третім рядком кожного рядка"
+    assert json.loads(ans.read_text(encoding="utf-8"))[ids[0]]["m"] == "зведене до доповнення"
+    assert PT.apply(built.file, base=base).skipped, "повтор не застосовується вдруге"
+    # Наступне доповнення — наступна ревізія; рамки перерізаного набору — відмова.
+    reg = S.registry(owner)
+    spec = reg.load("x17-z4-0006L")
+    cm = reg.crops_of(spec) / S.CUT_META_FILE
+    meta = json.loads(cm.read_text(encoding="utf-8"))
+    meta["pages"]["0001"]["boxes"][0][1] += 5
+    cm.write_text(json.dumps(meta), encoding="utf-8")
+    with pytest.raises(C.ZvidError, match="рамки змінились"):
+        PT.build(rep.id, voices=["regent_v3"], out=tmp_path / "out", ws=owner)
+
+
+def test_portal_take_brings_patches(owner: W.Workspace, tmp_path: Path,
+                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    import hashlib
+
+    from nyshporka.zvid import patch as PT
+    from nyshporka.zvid import portal as P
+
+    rep = _pack(owner, tmp_path)
+    for name in rep.sets.values():
+        _add_voice(owner, name, "regent_v3")
+    built = PT.build(rep.id, voices=["regent_v3"], out=tmp_path / "out", ws=owner)
+    store = {f"get:{rep.id}": rep.file.read_bytes(), f"get:{rep.id}.r2": built.file.read_bytes()}
+    calls: list[str] = []
+
+    def _call(method: str, path: str, body: object = None) -> dict:
+        calls.append(path)
+        return {"id": rep.id, "size": len(store[f"get:{rep.id}"]),
+                "sha256": hashlib.sha256(store[f"get:{rep.id}"]).hexdigest(),
+                "download": f"get:{rep.id}",
+                "patches": [{"rev": 2, "size": len(store[f"get:{rep.id}.r2"]),
+                             "sha256": hashlib.sha256(store[f"get:{rep.id}.r2"]).hexdigest(),
+                             "download": f"get:{rep.id}.r2"}]}
+
+    downloads: list[str] = []
+
+    def _download(url: str, sha: str, size: int) -> bytes:
+        downloads.append(url)
+        return store[url]
+
+    monkeypatch.setattr(P, "_call", _call)
+    monkeypatch.setattr(P, "_download", _download)
+    base = tmp_path / "helper" / "zvid"
+    f, patches = P.take(base=base)
+    assert [p.name for p in patches] == [f"{rep.id}.r2.zvidpatch"]
+    # Продовження: пакет і доповнення вже лежать — удруге не качаються.
+    P.take(pack_id=rep.id, base=base)
+    assert downloads == [f"get:{rep.id}", f"get:{rep.id}.r2"]

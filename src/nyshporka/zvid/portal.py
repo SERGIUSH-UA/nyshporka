@@ -81,7 +81,15 @@ def _download(url: str, sha256: str, size: int) -> bytes:
 
 # ── власник ─────────────────────────────────────────────────────────────────
 def publish(path: Path, *, kind: str = "", note: str = "") -> dict[str, Any]:
-    """Пакет → черга порталу. Повторний виклик доливає незалите, не дублює."""
+    """Пакет → черга порталу. Повторний виклик доливає незалите, не дублює.
+
+    Доповнення (`.zvidpatch`) іде до свого пакета: 20 МБ пакета не
+    перезаливаються, новий голос — кілька десятків КБ.
+    """
+    from nyshporka.zvid import patch as PT
+
+    if path.name.endswith(PT.PATCH_SUFFIX):
+        return publish_patch(path)
     with C.open_zip(path) as zf:
         manifest = C.read_json_member(zf, C.MANIFEST)
     C.check_manifest(manifest)
@@ -96,6 +104,21 @@ def publish(path: Path, *, kind: str = "", note: str = "") -> dict[str, Any]:
     if got.get("status") == "nove":
         _put(got["upload"], raw)
     return _call("POST", f"/packs/{manifest['id']}/ready")
+
+
+def publish_patch(path: Path) -> dict[str, Any]:
+    from nyshporka.zvid import patch as PT
+
+    meta = PT.read_patch(path)
+    raw = path.read_bytes()
+    pid, rev = meta["pack"], int(meta["rev"])
+    voices = sorted({v for i in meta.get("items") or [] for v in i.get("voices") or []})
+    got = _call("POST", f"/packs/{pid}/patches",
+                {"rev": rev, "size": len(raw), "sha256": hashlib.sha256(raw).hexdigest(),
+                 "opys": {"voices": voices, "note": meta.get("note") or ""}})
+    if not got.get("ready"):
+        _put(got["upload"], raw)
+    return _call("POST", f"/packs/{pid}/patches/{rev}/ready")
 
 
 def queue(status: str = "") -> dict[str, Any]:
@@ -126,15 +149,27 @@ def fetch(*, ws: Any = None) -> list[dict[str, Any]]:
 
 
 # ── помічник ────────────────────────────────────────────────────────────────
-def take(*, pack_id: str = "", base: Path | None = None) -> Path:
-    """Наступний пакет із черги (або свій узятий — продовження) → файл у теці Зводу."""
+def _cached(f: Path, sha256: str, size: int) -> bool:
+    """Файл уже лежить і той самий — продовження не качає 20 МБ удруге."""
+    return (f.is_file() and f.stat().st_size == size
+            and hashlib.sha256(f.read_bytes()).hexdigest() == sha256)
+
+
+def take(*, pack_id: str = "", base: Path | None = None) -> tuple[Path, list[Path]]:
+    """Наступний пакет із черги (або свій узятий — продовження) і його доповнення."""
     got = _call("POST", "/take", {"id": pack_id} if pack_id else {})
-    raw = _download(got["download"], got["sha256"], int(got["size"]))
     inbox = (base or C.base_dir()) / "_inbox"
     inbox.mkdir(parents=True, exist_ok=True)
     f = inbox / f"{got['id']}{C.SUFFIX}"
-    f.write_bytes(raw)
-    return f
+    if not _cached(f, got["sha256"], int(got["size"])):
+        f.write_bytes(_download(got["download"], got["sha256"], int(got["size"])))
+    patches = []
+    for p in sorted(got.get("patches") or [], key=lambda x: int(x["rev"])):
+        pf = inbox / f"{got['id']}.r{int(p['rev'])}.zvidpatch"
+        if not _cached(pf, p["sha256"], int(p["size"])):
+            pf.write_bytes(_download(p["download"], p["sha256"], int(p["size"])))
+        patches.append(pf)
+    return f, patches
 
 
 def mark_portal(root: Path) -> None:

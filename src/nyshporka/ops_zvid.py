@@ -80,17 +80,31 @@ def zvid_take(a: TakeArgs) -> Envelope:
     from nyshporka.zvid import helper, portal
 
     try:
+        applied: list[int] = []
         if a.file:
             rep = helper.take(Path(a.file), fresh=a.fresh)
         else:
-            rep = helper.take(portal.take(pack_id=a.id), fresh=a.fresh)
+            from nyshporka.zvid import patch as PT
+
+            pack_file, patch_files = portal.take(pack_id=a.id)
+            rep = helper.take(pack_file, fresh=a.fresh)
             portal.mark_portal(rep.root)
+            # Доповнення — і на свіжому пакеті, і на продовженні: нові голоси
+            # стають рядками завдань, зведене лишається.
+            for pf in patch_files:
+                got = PT.apply(pf)
+                if not got.skipped:
+                    applied.append(got.rev)
+                    rep.tasks = got.tasks or rep.tasks
     except (C.ZvidError, T.TaskError, OSError) as exc:
         return fail(str(exc))
     env = ok({"id": rep.id, "root": str(rep.root), "procedure": rep.procedure,
               "resumed": rep.resumed, "tasks": [str(f) for f in rep.tasks],
               "rows": rep.rows, "context": str(rep.root / C.CONTEXT) if rep.context else "",
-              "commands": rep.commands})
+              "commands": rep.commands, "patches": applied})
+    if applied:
+        env.warn("patched", f"застосовано доповнення пакета: r{', r'.join(map(str, applied))} — "
+                            "у завданнях новий голос; зведене не змінено")
     for w in rep.warnings:
         env.warn("take", w)
     if not rep.context:
@@ -263,3 +277,52 @@ def zvid_drop(a: DropArgs) -> Envelope:
         return ok(portal.drop(a.id))
     except C.ZvidError as exc:
         return fail(str(exc))
+
+
+# ── доповнення ───────────────────────────────────────────────────────────────
+class PatchArgs(BaseModel):
+    pack: str = Field(description="id пакета з книги пакетів")
+    voices: str = Field(default="", description="кома-список голосів наборів, що додаються")
+    hints: str = Field(default="", description="кома-список людських джерел, що додаються")
+    out: str = Field(description="тека для .zvidpatch")
+    note: str = Field(default="", description="примітка")
+
+
+@op("zvid.patch", summary="Доповнення пакета Зводу: новий голос чи підказка без перепакування",
+    args=PatchArgs, mutates=True, section="lab", tier="rare", skill="zvid",
+    when="натренували нову модель — додати її голос до вже нарізаних пакетів")
+def zvid_patch(a: PatchArgs) -> Envelope:
+    """Голос — спершу в набори (`nysh train voices` / інфер по кропах), тоді сюди."""
+    from nyshporka.train import sets as S
+    from nyshporka.zvid import common as C
+    from nyshporka.zvid import patch as PT
+
+    try:
+        rep = PT.build(a.pack, voices=_csv(a.voices), hints=_csv(a.hints), out=Path(a.out),
+                       note=a.note)
+    except (C.ZvidError, S.SetError, OSError) as exc:
+        return fail(str(exc))
+    env = ok({"pack": rep.pack, "rev": rep.rev, "file": str(rep.file), "voices": rep.voices,
+              "hints": rep.hints, "sets": rep.sets, "kb": round(rep.bytes / 1024, 1)})
+    env.suggest("zvid.publish", "покласти доповнення до пакета в черзі порталу")
+    return env
+
+
+class ApplyArgs(BaseModel):
+    file: str = Field(description="доповнення .zvidpatch")
+
+
+@op("zvid.apply", summary="Застосувати доповнення до взятого пакета Зводу",
+    args=ApplyArgs, mutates=True, section="core", tier="situational", skill="zvid",
+    when="отримав доповнення .zvidpatch до пакета Зводу файлом")
+def zvid_apply(a: ApplyArgs) -> Envelope:
+    from nyshporka.train import tasks as T
+    from nyshporka.zvid import common as C
+    from nyshporka.zvid import patch as PT
+
+    try:
+        rep = PT.apply(Path(a.file))
+    except (C.ZvidError, T.TaskError, OSError) as exc:
+        return fail(str(exc))
+    return ok({"pack": rep.pack, "rev": rep.rev, "skipped": rep.skipped, "voices": rep.voices,
+               "tasks": [str(f) for f in rep.tasks]})

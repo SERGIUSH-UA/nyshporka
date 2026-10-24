@@ -227,3 +227,45 @@ def drop_cmd(
         return
     console.print(f"↩ {env.data['id']} повернуто в чергу")
     _notes(env)
+
+
+@app.command("patch")
+def patch_cmd(
+    pack: str = typer.Option(..., "--pack", metavar="ID", help="id пакета з книги пакетів"),
+    voices: str = typer.Option("", "--voices", help="кома-список голосів, що додаються"),
+    hints: str = typer.Option("", "--hints", help="кома-список людських джерел"),
+    out: str = typer.Option(..., "--out", metavar="ТЕКА", help="куди покласти .zvidpatch"),
+    note: str = typer.Option("", "--note", help="примітка"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Доповнення пакета: новий голос чи підказка без перепакування (власник)."""
+    from nyshporka import ops as O
+
+    env = O.call("zvid.patch", {"pack": pack, "voices": voices, "hints": hints, "out": out,
+                                "note": note})
+    if _answer(env, as_json):
+        return
+    d = env.data
+    console.print(f"🧩 {d['file']}  (r{d['rev']}, {d['kb']} КБ, {d['sets']} наборів, "
+                  f"+ {', '.join(d['voices'] + d['hints'])})")
+    _notes(env)
+
+
+@app.command("apply")
+def apply_cmd(
+    file: str = typer.Argument(..., metavar="ДОПОВНЕННЯ.zvidpatch"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Застосувати доповнення до взятого пакета: зведене не змінюється."""
+    from nyshporka import ops as O
+
+    env = O.call("zvid.apply", {"file": file})
+    if _answer(env, as_json):
+        return
+    d = env.data
+    if d["skipped"]:
+        console.print(f"r{d['rev']} уже застосовано до {d['pack']}")
+    else:
+        console.print(f"🧩 {d['pack']} r{d['rev']}: + {', '.join(d['voices']) or '—'}, "
+                      f"завдань перебудовано {len(d['tasks'])}")
+    _notes(env)
