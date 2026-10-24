@@ -329,6 +329,26 @@ def test_no_state_is_an_error_not_an_empty_answer(space: Path) -> None:
         FX.by_run(["verbiscinskii"])
 
 
+def test_text_state_shows_an_index_that_fell_behind(space: Path) -> None:
+    """🔴 Відставання індексу пошук не бреше, але й не показує: його каже `text.state`."""
+    from nyshporka.ops_text import TextStateArgs, text_state
+    from nyshporka.search import fastidx as FX
+
+    _build()
+    env = text_state(TextStateArgs())
+    assert env.data["fast"] == {"schema": FX.SCHEMA, "fresh": True, "runs": 2,
+                                "covered": 2, "behind": False}
+    assert "fast_behind" not in [w.code for w in env.warnings]
+    # Перерваний догін: позначка прогону в стані вже не та, що в сторі.
+    st = json.loads((FX.path() / FX.STATE).read_text(encoding="utf-8"))
+    first = next(iter(st["runs"]))
+    st["runs"][first] = "застаріла|позначка"
+    (FX.path() / FX.STATE).write_text(json.dumps(st), encoding="utf-8")
+    env = text_state(TextStateArgs())
+    assert env.data["fast"]["covered"] == 1 and env.data["fast"]["behind"]
+    assert "fast_behind" in [w.code for w in env.warnings]
+
+
 def test_parallel_build_gives_the_same_index(space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Текст полів воркерами — ті самі кандидати, що й збірка в одному процесі."""
     import concurrent.futures as CF

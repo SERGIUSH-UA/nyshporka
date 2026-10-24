@@ -74,7 +74,14 @@ def text_state(a: TextStateArgs) -> Envelope:
             st["verify"] = ST.verify(runs, sample=a.sample)
         except Exception as exc:
             return fail(f"звірка блобів не вдалась ({type(exc).__name__}: {exc})")
+    if (fast := _fast_state()) is not None:
+        st["fast"] = fast
     env = ok(st)
+    if fast and fast["behind"]:
+        env.warn("fast_behind",
+                 f"швидкий індекс охоплює {fast['covered']} прогонів із {fast['runs']}: "
+                 f"решта шукається свіпом — повільніше, але без утрат; догнати — "
+                 f"nysh text index")
     if a.verify:
         _warn_verify(env, st["verify"])
     if st["stale"]:
@@ -207,6 +214,31 @@ def text_index(a: TextIndexArgs) -> Envelope:
                  f"{st['stale']} прогонів лишились поза стором — найчастіше це "
                  f"теки без жодного `.txt`")
     return env
+
+
+def _fast_state() -> dict[str, Any] | None:
+    """Скільки прогонів стору несе швидкий індекс; None — індексу немає.
+
+    🔴 Відставання індексу пошук не бреше (неохоплене йде свіпом), але й не
+    показує: 23.10.2026 перерваний догін лишив 4714 прогонів із 16 373 без
+    документів, і корпусний пошук день мовчки ходив по них свіпом.
+    """
+    from nyshporka.search import fastidx as FX
+    from nyshporka.search import store as ST
+
+    if not FX.available() or not (FX.path() / FX.STATE).is_file():
+        return None
+    try:
+        conn = ST.connect(readonly=True)
+    except Exception:
+        return None
+    try:
+        runs = [r for (r,) in conn.execute("select id from runs")]
+        covered = len(FX.covered(conn, runs))
+    finally:
+        conn.close()
+    return {"schema": FX.SCHEMA, "fresh": FX.exists(), "runs": len(runs),
+            "covered": covered, "behind": covered < len(runs)}
 
 
 def _fast_sync(wanted: bool) -> dict[str, Any] | Envelope | None:
