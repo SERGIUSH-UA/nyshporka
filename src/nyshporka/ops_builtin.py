@@ -3595,7 +3595,7 @@ class CasesJoinArgs(BaseModel):
 def cases_join(a: CasesJoinArgs) -> Envelope:
     """Справа на двох котушках («CONTINUED ON / FROM ANOTHER ROLL»): частини з
     тек плівок лягають в одну теку справи жорсткими посиланнями з іменами
-    `<плівка>_<кадр>`. Паспорт — далі `nysh case <тека>`.
+    `<№>_<плівка>_<кадр>` (номер — за порядком частин). Паспорт — далі `nysh case <тека>`.
     """
     from nyshporka.cases import join as J
 
