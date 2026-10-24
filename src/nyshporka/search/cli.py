@@ -115,6 +115,9 @@ def grep_cmd(
                               help="decode | canon | opys | notes | pages (сховище сторінок і нотатник справи) | all, або через кому"),
     extra: list[str] = typer.Option([], "--dir",
                                     help="ще тека або файл — окремим шаром «dir»"),
+    fold: bool = typer.Option(False, "--fold",
+                              help="регекс по НОРМАЛІЗОВАНОМУ рядку (ѳ=ф, ъ/ь відкинуто, і=и; "
+                                   "норма індексу), вивід — сирий рядок; без регістру, нечіткіше"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Регекс по прочитаному, канону, описах і нотатках — один запит замість
@@ -122,12 +125,16 @@ def grep_cmd(
 
     Декод іде через стор (літерали регексу звужують корпус через індекс); канон,
     описи й нотатки — файлами, їх сотні. Нуль друкується зі знаменником.
+
+    За замовчуванням регекс іде по СИРОМУ тексту: «Тимофей Петров» не знайде
+    «Тимоѳей Петровъ». `--fold` ганяє той самий регекс по нормалізованому рядку
+    (літерали й класи нормалізуються, метасимволи лишаються), а показує сирий.
     """
     from nyshporka import ops as O
 
     env = O.call("text.grep", {"pattern": pattern, "case": _scope(case), "context": context,
                                "limit": limit, "ignore_case": not case_sensitive,
-                               "where": where, "extra": ";".join(extra)})
+                               "where": where, "extra": ";".join(extra), "fold": fold})
     if _answer(env, as_json):
         return
     layered = env.data.get("layers")

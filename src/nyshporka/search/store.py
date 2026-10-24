@@ -2748,23 +2748,179 @@ def _line_gate_safe(pattern: str) -> bool:
     return not re.search(r"(?<!\\)(?:[*+?]|\})\+", pattern)
 
 
+_FOLD_GROUP_HEAD = re.compile(r"\(\?(?:P<[^>]*>|P=[^)]*\)|#[^)]*\)|<[=!]|[:=!]|[a-zA-Z-]+[:)])")
+_FOLD_QUANT = re.compile(r"[*+?]|\{\d*,?\d*\}")
+_FOLD_META = set("\\[](){}|*+?.^$")
+
+
+def _fold_lit(text: str) -> str:
+    """Літерал регексу після тієї самої норми, що й рядок (`normalize_archival`)."""
+    from nyshporka.utils.translit import normalize_archival
+
+    # `normalize_archival` стискає й обрізає пробіли, а на межі літерала пробіл
+    # у регексі значущий («(а|б) Петров») — тож крайні пробіли переносяться.
+    core = text.strip()
+    lead = " " if text[:1].isspace() else ""
+    tail = " " if len(text) > len(core) and text[-1:].isspace() and core else ""
+    if not core:
+        return " " if text else ""
+    return lead + re.escape(normalize_archival(core)) + tail
+
+
+def _fold_class(body: str, negated: bool) -> str:
+    """Клас `[...]` у нормі: кожен член нормалізується, діапазони розгортаються.
+
+    Член, що став кількома літерами (щ → sc), виходить альтернативою; член, що
+    зник (ъ, ь), робить клас необов'язковим. Керівні послідовності (`\\d`) лишаються.
+    """
+    from nyshporka.utils.translit import normalize_archival
+
+    singles: set[str] = set()
+    multis: set[str] = set()
+    keep: list[str] = []
+    optional = False
+    items: list[str] = []
+    i = 0
+    while i < len(body):
+        if body[i] == "\\" and i + 1 < len(body):
+            keep.append(body[i:i + 2])
+            i += 2
+            continue
+        if i + 2 < len(body) and body[i + 1] == "-":
+            lo, hi = ord(body[i]), ord(body[i + 2])
+            if hi < lo or hi - lo > 1024:
+                raise ValueError(f"діапазон [{body[i]}-{body[i + 2]}] не розгортається для --fold")
+            items.extend(chr(c) for c in range(lo, hi + 1))
+            i += 3
+            continue
+        items.append(body[i])
+        i += 1
+    for ch in items:
+        n = normalize_archival(ch)
+        if not n:
+            optional = True
+        elif len(n) == 1:
+            singles.add(n)
+        else:
+            multis.add(n)
+    cls = "".join(re.escape(c) for c in sorted(singles)) + "".join(keep)
+    if negated:
+        # «Не sc» класом не виразити: багатолітерний член у запереченому класі випадає.
+        return f"[^{cls}]" if cls else "."
+    parts = [f"[{cls}]"] if cls else []
+    parts.extend(re.escape(m) for m in sorted(multis))
+    if not parts:
+        return ""
+    if optional:
+        # Порожня гілка, а не «?» ззовні: далі може стояти власний квантифікатор.
+        return "(?:" + "|".join(parts) + "|)"
+    return parts[0] if len(parts) == 1 else "(?:" + "|".join(parts) + ")"
+
+
+def fold_pattern(pattern: str) -> str:
+    """Регекс, переписаний під НОРМАЛІЗОВАНИЙ рядок (той, за яким ходить індекс).
+
+    Нормалізуються лише літерали й члени класів; метасимволи (групи, `|`,
+    квантифікатори, `\\d`, `\\b`, прив'язки) лишаються. Літерал перед
+    квантифікатором нормалізується окремо від решти, а його образ береться в
+    `(?:…)`, бо норма може змінити довжину («ъ» зникає, «щ» стає «sc»): інакше
+    `?` чи `+` прилипли б до однієї літери з кількох. Довжина впливає лише на
+    пошук, вивід бере сирі рядки.
+
+    ⚠ `\\xNN`/`\\uNNNN` не розбираються (лишаються як є); `ValueError` — на
+    діапазоні, який не розгорнути, і на незакритому класі.
+    """
+    out: list[str] = []
+    lit: list[str] = []
+
+    def flush(quantified: bool = False) -> None:
+        if not lit:
+            return
+        text = "".join(lit)
+        lit.clear()
+        if quantified:
+            out.append(_fold_lit(text[:-1]))
+            out.append("(?:" + _fold_lit(text[-1]) + ")")
+        else:
+            out.append(_fold_lit(text))
+
+    i = 0
+    n = len(pattern)
+    while i < n:
+        ch = pattern[i]
+        if ch == "\\":
+            flush()
+            nxt = pattern[i + 1:i + 2]
+            width = {"x": 4, "u": 6, "U": 10}.get(nxt, 2) if nxt.isalnum() and nxt.isascii() else 2
+            out.append(pattern[i:i + width])
+            i += width
+            continue
+        if ch == "[":
+            flush()
+            j = i + 1
+            neg = pattern[j:j + 1] == "^"
+            if neg:
+                j += 1
+            k = j + 1 if j < n and pattern[j] == "]" else j
+            while k < n and pattern[k] != "]":
+                k += 2 if pattern[k] == "\\" else 1
+            if k >= n:
+                raise ValueError("клас «[» не закрито")
+            out.append(_fold_class(pattern[j:k], neg))
+            i = k + 1
+            continue
+        if ch == "(":
+            flush()
+            m = _FOLD_GROUP_HEAD.match(pattern, i)
+            head = m.group(0) if m else "("
+            out.append(head)
+            i += len(head)
+            continue
+        if ch in _FOLD_META:
+            q = _FOLD_QUANT.match(pattern, i)
+            if q:
+                flush(quantified=True)
+                out.append(q.group(0))
+                i = q.end()
+                continue
+            flush()
+            out.append(ch)
+            i += 1
+            continue
+        lit.append(ch)
+        i += 1
+    flush()
+    return "".join(out)
+
+
 def grep(pattern: str, runs: list[str], *, ignore_case: bool = True,
-         limit: int = 200, context: int = 0) -> dict[str, Any]:
+         limit: int = 200, context: int = 0, fold: bool = False) -> dict[str, Any]:
     """Регекс по сирому тексту прогонів — те, що робив `rg --no-ignore`, але
     без обходу дерева й без сліпоти `.gitignore`.
 
     Літерали регексу звужують корпус через FTS (нормалізовані, як фрази), далі
     сам регекс іде по сирих рядках лише тих сторінок. Регекс без літерала ≥ 3
     літер сканує всі рядки області, і відповідь про це каже.
+
+    `fold=True`: регекс (`fold_pattern`) іде по НОРМАЛІЗОВАНОМУ рядку, тією самою
+    нормою, що й індекс («Тимофей Петров» знаходить «Тимоѳей Петровъ»); у хітах
+    лишається сирий рядок. Норма знімає регістр, тож `fold` завжди нечутливий до
+    регістру.
     """
-    flags = re.IGNORECASE if ignore_case else 0
+    flags = re.IGNORECASE if (ignore_case or fold) else 0
     try:
         rx = re.compile(pattern, flags)
+        if fold:
+            pattern_run = fold_pattern(pattern)
+            rx = re.compile(pattern_run, flags)
     except re.error as exc:
         return {"hits": [], "error": f"регекс не розбирається: {exc}"}
-    # Відсів сторінки одним пошуком по її тексту — див. `_line_gate_safe`.
-    gate = (re.compile(pattern, flags | re.MULTILINE) if _line_gate_safe(pattern)
-            else None)
+    except ValueError as exc:
+        return {"hits": [], "error": f"--fold: {exc}"}
+    # Відсів сторінки одним пошуком по її тексту — див. `_line_gate_safe`. У
+    # нормі сирий текст сторінки для відсіву не годиться.
+    gate = (re.compile(pattern, flags | re.MULTILINE)
+            if not fold and _line_gate_safe(pattern) else None)
     conn = connect(readonly=True)
     try:
         ids = _run_ids(conn, runs, fresh_only=True)
@@ -2790,12 +2946,13 @@ def grep(pattern: str, runs: list[str], *, ignore_case: bool = True,
             if _pages_of_runs(conn, list(ids.values())) >= GREP_PARALLEL_PAGES:
                 pids = _scope_pids(conn, list(ids.values()))
         if pids is not None and len(pids) >= GREP_PARALLEL_PAGES:
-            found, total, scanned_pages = _grep_parallel(pattern, flags, pids, run_set,
-                                                         limit, context)
+            found, total, scanned_pages = _grep_parallel(pattern_run if fold else pattern,
+                                                         flags, pids, run_set,
+                                                         limit, context, fold)
         else:
             source = (_page_texts(conn, pids, run_set) if pids is not None
                       else _run_texts(conn, list(ids.values())))
-            found, total, scanned_pages = _grep_scan(source, rx, gate, limit, context)
+            found, total, scanned_pages = _grep_scan(source, rx, gate, limit, context, fold)
         hits = [{"name": by_id[h.pop("run_id")], **h} for h in found]
         literal_pages: int | None = None
         if not prefiltered:
@@ -2830,9 +2987,15 @@ GREP_WORKER_GB = 0.3
 
 
 def _grep_scan(source: Iterable[tuple[int, str, bytes | None]], rx: re.Pattern[str],
-               gate: re.Pattern[str] | None, limit: int, context: int,
+               gate: re.Pattern[str] | None, limit: int, context: int, fold: bool = False,
                ) -> tuple[list[dict[str, Any]], int, int]:
-    """(перші `limit` хітів із `run_id`, усього збігів, прочесано сторінок)."""
+    """(перші `limit` хітів із `run_id`, усього збігів, прочесано сторінок).
+
+    `fold`: `rx` уже складено для норми — шукається в нормалізованому рядку, а в
+    хіт іде сирий.
+    """
+    from nyshporka.utils.translit import normalize_archival
+
     hits: list[dict[str, Any]] = []
     total = 0
     scanned = 0
@@ -2845,7 +3008,7 @@ def _grep_scan(source: Iterable[tuple[int, str, bytes | None]], rx: re.Pattern[s
             continue
         raw = text.split("\n")
         for i, ln in enumerate(raw, 1):
-            if not rx.search(ln):
+            if not rx.search(normalize_archival(ln) if fold else ln):
                 continue
             total += 1
             if len(hits) >= limit:
@@ -2870,18 +3033,20 @@ def _scope_pids(conn: sqlite3.Connection, run_ids: list[int]) -> list[int]:
 
 
 def _grep_job(pattern: str, flags: int, pids: list[int], run_set: set[int], limit: int,
-              context: int) -> tuple[list[dict[str, Any]], int, int]:
+              context: int, fold: bool = False) -> tuple[list[dict[str, Any]], int, int]:
+    """`pattern` при `fold` — уже складений `fold_pattern`."""
     rx = re.compile(pattern, flags)
-    gate = re.compile(pattern, flags | re.MULTILINE) if _line_gate_safe(pattern) else None
+    gate = (re.compile(pattern, flags | re.MULTILINE)
+            if not fold and _line_gate_safe(pattern) else None)
     conn = connect(readonly=True)
     try:
-        return _grep_scan(_page_texts(conn, pids, run_set), rx, gate, limit, context)
+        return _grep_scan(_page_texts(conn, pids, run_set), rx, gate, limit, context, fold)
     finally:
         conn.close()
 
 
 def _grep_parallel(pattern: str, flags: int, pids: list[int], run_set: set[int],
-                   limit: int, context: int) -> tuple[list[dict[str, Any]], int, int]:
+                   limit: int, context: int, fold: bool = False) -> tuple[list[dict[str, Any]], int, int]:
     """Той самий прохід пачками в процесах — від заліза (`sweep_workers`).
 
     🔴 Пачки — відрізки сторінок за зростанням номера, і складаються вони в
@@ -2896,7 +3061,7 @@ def _grep_parallel(pattern: str, flags: int, pids: list[int], run_set: set[int],
     ex: Any = None
     if workers <= 1:
         parts: Iterable[tuple[list[dict[str, Any]], int, int]] = (
-            _grep_job(pattern, flags, ch, run_set, limit, context) for ch in chunks)
+            _grep_job(pattern, flags, ch, run_set, limit, context, fold) for ch in chunks)
     else:
         import multiprocessing as mp
         from concurrent.futures import ProcessPoolExecutor
@@ -2907,7 +3072,7 @@ def _grep_parallel(pattern: str, flags: int, pids: list[int], run_set: set[int],
                                  initializer=_block_init, initargs=(workspace(),))
         n = len(chunks)
         parts = ex.map(_grep_job, [pattern] * n, [flags] * n, chunks, [run_set] * n,
-                       [limit] * n, [context] * n)
+                       [limit] * n, [context] * n, [fold] * n)
     try:
         for got, t, sc in parts:
             total += t

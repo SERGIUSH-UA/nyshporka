@@ -328,6 +328,11 @@ class TextGrepArgs(BaseModel):
     where: str = Field(default="decode",
                        description="decode | canon | opys | notes | pages | all — або кілька через кому")
     extra: str = Field(default="", description="ще теки/файли окремим шаром «dir», через «;»")
+    fold: bool = Field(default=False,
+                       description="регекс по НОРМАЛІЗОВАНОМУ рядку (ѳ=ф, ъ/ь відкинуто, і=и тощо — "
+                                   "та сама норма, що в індексі); показується сирий рядок. "
+                                   "Нечутливий до регістру; збіг нечіткіший, ніж по сирому. "
+                                   "Лише для шару decode")
 
 
 @op("text.grep", summary="Регекс по сирому тексту прочитаного — замість rg по теці прогонів",
@@ -380,7 +385,7 @@ def text_grep(a: TextGrepArgs) -> Envelope:
         return fail(str(exc))
     runs = [r["name"] for r in scope["rows"]]
     res = ST.grep(a.pattern, runs, ignore_case=a.ignore_case, limit=a.limit,
-                  context=a.context)
+                  context=a.context, fold=a.fold)
     if res.get("error"):
         return fail(str(res["error"]))
     by_run = {r["name"]: r for r in scope["rows"]}
@@ -394,6 +399,7 @@ def text_grep(a: TextGrepArgs) -> Envelope:
                      "unindexed": res["unindexed"], "pages": res["pages"],
                      "pages_scanned": res["pages_scanned"],
                      "prefiltered": res["prefiltered"], "literals": res["literals"],
+                     "fold": a.fold,
                      "scope": scope["kind"], "case": scope["key"],
                      "shifra": scope["shifra"]}}
     if scope["kind"] == "all" or not res["hits"]:
@@ -416,6 +422,11 @@ def text_grep(a: TextGrepArgs) -> Envelope:
     if not res["prefiltered"]:
         env.warn("full_scan", "у регексі немає літерала з трьох літер — прочесано "
                               "кожен рядок області, а не звужений корпус")
+    if a.fold:
+        env.warn("folded",
+                 "--fold: збіг шукали в нормалізованому рядку (ѳ=ф, ѣ=е, і=и, ъ/ь відкинуто, "
+                 "Kraken-плутанини зведено), регістр не розрізнявся; показано сирий рядок. "
+                 "Збіг нечіткіший, ніж по сирому тексту: звіряти кропом.")
     if not res["hits"]:
         env.warn("zero_with_denominator",
                  f"не знайшлось — прочесано прогонів: {res['runs']}, "
@@ -427,7 +438,8 @@ def text_grep(a: TextGrepArgs) -> Envelope:
             env.warn("literal_in_norm",
                      f"літерал регексу є в нормалізованому тексті на "
                      f"{res['literal_pages']} стор., але сам регекс по сирому рядку не "
-                     f"збігся — перевірте написання (ь/ъ/і/ѣ) або шукайте `nysh search`")
+                     f"збігся — перевірте написання (ь/ъ/і/ѣ): `--fold` ганяє регекс по нормалізованому "
+                     f"рядку, нечітке по словах — `nysh search`")
     return env
 
 

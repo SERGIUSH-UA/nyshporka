@@ -663,3 +663,76 @@ def test_meta_only_change_restamps_without_reindexing(space: Path,
     (run / "_htr_meta.json").write_text(json.dumps(meta), encoding="utf-8")
     list(ST.ensure_all(["проба"]))
     assert dropped, "змінений текст переіндексовано"
+
+
+def _add_fold_page(space: Path) -> None:
+    run = space / "reports" / "htr" / "проба"
+    (run / "0003.txt").write_text(
+        "сынъ Тимоѳей Петровъ\nщелкунъ Иванъ\nсвященникъ Петръ\n", encoding="utf-8")
+    meta = json.loads((run / "_htr_meta.json").read_text(encoding="utf-8"))
+    meta["pages"]["0003.jpg"] = {"lines": 3}
+    (run / "_htr_meta.json").write_text(json.dumps(meta), encoding="utf-8")
+
+
+def test_grep_fold_matches_normalized_line_and_shows_raw(space: Path) -> None:
+    """--fold: «Тимофей Петров» знаходить «Тимоѳей Петровъ», без нього — ні."""
+    from nyshporka.search import store as ST
+
+    _add_fold_page(space)
+    list(ST.ensure_all(["проба"]))
+    plain = ST.grep("Тимофей Петров", ["проба"])
+    assert plain["total"] == 0 and plain["literal_pages"], "норма бачить кандидата, сирий — ні"
+    got = ST.grep("Тимофей Петров", ["проба"], fold=True, context=1)
+    assert got["total"] == 1
+    h = got["hits"][0]
+    assert h["line"] == "сынъ Тимоѳей Петровъ", "у виводі сирий рядок"
+    assert h["after"] == ["щелкунъ Иванъ"]
+    # великі літери в регексі: норма знімає регістр
+    assert ST.grep("ТИМОФЕЙ", ["проба"], fold=True, ignore_case=False)["total"] == 1
+
+
+def test_grep_fold_keeps_classes_groups_and_quantifiers(space: Path) -> None:
+    from nyshporka.search import store as ST
+
+    _add_fold_page(space)
+    list(ST.ensure_all(["проба"]))
+    # клас і діапазон (ѳ→f у класі), група з альтернативою, ъ перед квантифікатором
+    assert ST.grep("Тимо[фѳ]ей", ["проба"], fold=True)["total"] == 1
+    assert ST.grep("(Тимофей|Іоаннъ) Петровъ?$", ["проба"], fold=True)["total"] == 1
+    assert ST.grep(r"Петр[а-я]*\b", ["проба"], fold=True)["total"] == 2
+    assert ST.grep(r"^щелк\w+ Иван", ["проба"], fold=True)["total"] == 1
+    # щ → «sc»: квантифікатор не липне до однієї літери
+    assert ST.grep(r"щ?елкун", ["проба"], fold=True)["total"] == 1
+    # те, чого нема, не з'являється
+    assert ST.grep("Тимофей Петров[ы]", ["проба"], fold=True)["total"] == 0
+    assert ST.grep("Петров(", ["проба"], fold=True).get("error")
+
+
+def test_fold_pattern_leaves_metacharacters_alone() -> None:
+    import re
+
+    from nyshporka.search.store import fold_pattern
+
+    assert fold_pattern(r"\d+\s\bіван") == r"\d+\s\bivan"
+    assert fold_pattern("(?:Тимоѳей|Петр)+") == "(?:timofei|petr)+"
+    assert fold_pattern("а.*б{2}") == "a.*(?:b){2}"
+    for pat in ["Липовень?к", "[^ъь]ка", "ъ+а", "(?P<n>иван)(?=ъ)"]:
+        re.compile(fold_pattern(pat))
+
+
+def test_cli_grep_fold_flag(space: Path) -> None:
+    from nyshporka.cli import app
+    from nyshporka.search import store as ST
+
+    _add_fold_page(space)
+    list(ST.ensure_all(["проба"]))
+    res = runner.invoke(app, ["text", "grep", "Тимофей Петров", "--case", "проба", "--json"])
+    got = json.loads(res.output)
+    assert got["data"]["total"] == 0
+    assert any(w["code"] == "literal_in_norm" and "--fold" in w["text"]
+               for w in got["warnings"]), got["warnings"]
+    res = runner.invoke(app, ["text", "grep", "Тимофей Петров", "--case", "проба",
+                              "--fold", "--json"])
+    got = json.loads(res.output)
+    assert got["data"]["total"] == 1 and got["data"]["coverage"]["fold"] is True
+    assert any(w["code"] == "folded" for w in got["warnings"])
