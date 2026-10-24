@@ -167,7 +167,8 @@ def publish_cmd(
     if _answer(env, as_json):
         return
     d = env.data
-    console.print(f"📮 {d['id']} [{d['kind']}] — {d['status']}, {d['size'] / 2**20:.1f} МБ")
+    # `\\[`: інакше rich читає «[regent]» як свою розмітку й ковтає клас пакета.
+    console.print(f"📮 {d['id']} \\[{d['kind']}] — {d['status']}, {d['size'] / 2**20:.1f} МБ")
     _notes(env)
 
 
@@ -187,7 +188,7 @@ def queue_cmd(
                       f"· до {h['max_open']}")
     for p in env.data.get("packs") or []:
         until = f" до {p['lease_until'][:16]}" if p.get("lease_until") else ""
-        console.print(f"  {p['id']} [{p['kind']}] {p['status']}{until} · "
+        console.print(f"  {p['id']} \\[{p['kind']}] {p['status']}{until} · "
                       f"{(p.get('opys') or {}).get('pages', '?')} стор.")
     _notes(env)
 
