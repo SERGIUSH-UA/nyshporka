@@ -174,6 +174,10 @@ def test_round_trip_imports_work_sets_and_only_measures_control(owner: W.Workspa
     reg = S.registry(owner)
     merged = (reg.merge_dir(reg.load("x17-z4-0006L")) / "0001.txt").read_text(encoding="utf-8")
     assert merged.splitlines()[0] == "Николай Ивановъ сынъ"
+    meta = json.loads((reg.merge_dir(reg.load("x17-z4-0006L")) / S.META_FILE).read_text(encoding="utf-8"))
+    src = meta["pages"]["0001"]["source"]
+    assert src["zvid"] == rep.id and src["model"] == "claude-test" and src["agents"] == 2, (
+        "походження рядків мусить лежати в самому наборі, а не лише в книзі пакетів")
     # контрольна в злиття не потрапила
     cm = (reg.merge_dir(reg.load("x17-z5-0015R")) / "0002.txt").read_text(encoding="utf-8")
     assert "дочь" not in cm
@@ -300,7 +304,8 @@ class _FakePortal:
             self.packs[pid]["status"], self.packs[pid]["meta"] = "povernuto", b["meta"]
             return {"id": pid, "status": "povernuto"}
         if path.startswith("/packs?status=povernuto"):
-            return {"packs": [{"id": k} for k, v in self.packs.items() if v["status"] == "povernuto"]}
+            return {"packs": [{"id": k, "person_id": 184} for k, v in self.packs.items()
+                              if v["status"] == "povernuto"]}
         if path.endswith("/answer") and method == "GET":
             pid = path.split("/")[2]
             a = self.packs[pid]["answer"]
@@ -344,6 +349,9 @@ def test_portal_round_trip(owner: W.Workspace, tmp_path: Path,
     assert [o["id"] for o in out] == [rep.id]
     assert fake.accepted[rep.id]["imported"] == {"x17-z4-0006L": 5}
     assert "x17-z5-0015R" in fake.accepted[rep.id]["control"]
+    reg = S.registry(owner)
+    meta = json.loads((reg.merge_dir(reg.load("x17-z4-0006L")) / S.META_FILE).read_text(encoding="utf-8"))
+    assert meta["pages"]["0002"]["source"]["helper"] == "portal:184"
 
 
 def test_kind_of_names_the_specialist() -> None:

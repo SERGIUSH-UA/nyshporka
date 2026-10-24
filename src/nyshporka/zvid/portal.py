@@ -139,7 +139,8 @@ def fetch(*, ws: Any = None) -> list[dict[str, Any]]:
         inbox.mkdir(parents=True, exist_ok=True)
         f = inbox / f"{p['id']}{C.ANSWER_SUFFIX}"
         f.write_bytes(raw)
-        rep = owner.collect(f, ws=ws)
+        rep = owner.collect(f, ws=ws,
+                            helper=f"portal:{p['person_id']}" if p.get("person_id") else "")
         pidsumok = {"imported": {k: v["rows"] for k, v in rep.imported.items()},
                     "control": rep.control, "refused": rep.refused, "model": rep.model}
         _call("POST", f"/packs/{p['id']}/accepted", {"pidsumok": pidsumok})

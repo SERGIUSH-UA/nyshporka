@@ -419,8 +419,15 @@ class ImportReport:
 
 
 def import_answers(name: str, *, tasks_dir: Path | None = None, keep_old: bool = False,
-                   ws: Workspace | None = None) -> ImportReport:
-    """Забрати `*.answer.json` у `drafts/merge/` і прогнати ворота."""
+                   ws: Workspace | None = None,
+                   source: dict[str, Any] | None = None) -> ImportReport:
+    """Забрати `*.answer.json` у `drafts/merge/` і прогнати ворота.
+
+    `source` — звідки ці рядки (пакет Зводу, модель, помічник): лягає в мету
+    злиття кожної зачепленої сторінки (`pages.<стор>.source`). Без нього
+    походження рядків знала лише книга пакетів власника, а не сам набір, і
+    збирач корпусу не міг відрізнити зведене чужою моделлю від свого.
+    """
     w = ws if ws is not None else workspace()
     reg = S.registry(w)
     spec = reg.load(name)
@@ -497,6 +504,8 @@ def import_answers(name: str, *, tasks_dir: Path | None = None, keep_old: bool =
         rep.gates.append(gate)
         f.write_text("\n".join(cur) + "\n", encoding="utf-8")
         page_meta["conf"] = {str(k): v for k, v in sorted(conf_all.items())}
+        if source:
+            page_meta["source"] = dict(source)
         if gate.shift_blocks:
             page_meta["shift_blocks"] = [list(b) for b in gate.shift_blocks]
         rep.pages.append(pg)

@@ -218,7 +218,7 @@ def _reference(reg: S.Registry, spec: S.SetSpec) -> dict[str, str]:
     return ref
 
 
-def collect(path: Path, *, ws: Workspace | None = None) -> CollectReport:
+def collect(path: Path, *, ws: Workspace | None = None, helper: str = "") -> CollectReport:
     """Прийняти відповідь помічника: робочі набори — у злиття, контрольні — у замір."""
     from nyshporka.train.metrics import measure
 
@@ -241,6 +241,11 @@ def collect(path: Path, *, ws: Workspace | None = None) -> CollectReport:
                 a = p.name[: -len(".answer.json")].rsplit("_part", 1)[0]
                 answers.setdefault(a, {})[p.name] = zf.read(info)
     rep = CollectReport(id=pack_id, model=str(meta.get("model") or ""))
+    # Походження рядків — у мету злиття кожної сторінки (`import_answers`):
+    # модель і агенти — самозвіт помічника з `give`, помічник — з порталу.
+    source = {"zvid": pack_id, "model": rep.model, "agents": meta.get("agents"),
+              "client": meta.get("client"), "at": meta.get("at"),
+              **({"helper": helper} if helper else {})}
     amap: dict[str, str] = ledger.get("map") or {}
     control = set(ledger.get("control") or [])
     for a, files in sorted(answers.items()):
@@ -269,7 +274,7 @@ def collect(path: Path, *, ws: Workspace | None = None) -> CollectReport:
         dest.mkdir(parents=True, exist_ok=True)
         for fname, raw in files.items():
             (dest / fname.replace(a, name, 1)).write_bytes(raw)
-        imp = T.import_answers(name, tasks_dir=dest, ws=w)
+        imp = T.import_answers(name, tasks_dir=dest, ws=w, source=source)
         rep.imported[name] = {"alias": a, "rows": imp.rows, "conf": imp.conf,
                               "suspects": sum(len(g.suspects) for g in imp.gates),
                               "rejected": len(imp.rejected)}
