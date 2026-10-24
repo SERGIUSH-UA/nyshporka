@@ -35,8 +35,10 @@
 from __future__ import annotations
 
 import contextlib
+import itertools
 import json
 import os
+import re
 import shutil
 import sqlite3
 import zlib
@@ -49,7 +51,11 @@ DIR = "fastidx"
 #: Які прогони індекс уже несе і під яким штампом стору.
 STATE = "runs.json"
 #: Версія схеми індексу; інша — індекс збирається наново.
-SCHEMA = 2
+SCHEMA = 3
+#: Токенайзер полів: слово ділиться ЛИШЕ пробілом (див. `_analyzer`).
+TOKENIZER = "ws"
+#: Терм довший за стільки байтів відкидається — як у `default` Tantivy.
+TERM_MAX = 40
 #: Хвости сирих слів від такої довжини — для прізвища посередині зліпленого слова.
 SFX_MIN = 10
 #: Хвіст коротший за стільки літер не індексується: він збігається з усім.
@@ -60,7 +66,9 @@ SHORT_FROM = 9
 SHORT_HEAD = 5
 #: Пам'ять письменника індексу; Tantivy ділить її між потоками.
 WRITER_HEAP = 400_000_000
-WRITER_THREADS = 2
+#: Від скількох сторінок збірка рахує текст полів воркерами: старт процесу —
+#: секунди, на справі він дорожчий за саму роботу.
+PARALLEL_PAGES = 20_000
 #: Скільки рядків між комітами під час збірки: обрив не губить зроблене.
 COMMIT_EVERY = 2_000_000
 
@@ -90,10 +98,28 @@ def _schema() -> Any:
     sb.add_integer_field("pid", stored=False, indexed=True, fast=True)
     sb.add_integer_field("ln", stored=False, indexed=False, fast=True)
     sb.add_integer_field("run", stored=False, indexed=True, fast=True)
-    sb.add_text_field("c", stored=False, tokenizer_name="default", index_option="basic")
-    sb.add_text_field("x", stored=False, tokenizer_name="default", index_option="basic")
-    sb.add_text_field("y", stored=False, tokenizer_name="default", index_option="basic")
+    for field in ("c", "x", "y"):
+        sb.add_text_field(field, stored=False, tokenizer_name=TOKENIZER, index_option="basic")
     return sb.build()
+
+
+def _analyzer() -> Any:
+    """Пробіл — єдиний роздільник: слово в індексі те саме, що оцінює свіп.
+
+    🔴 `default` Tantivy ріже слово на кожному не-літерно-цифровому знаку, а
+    кандидати стору (`htr_store._TOKEN_RE` + `_norm`) їх лишають: `=` Скриби
+    на місці `z` (`Siemas=ko` = Siemaszko), `_ + * ~ ^`, титло й наголос
+    (`dol҃inskii`). Розірване слово давало терми `siemas` і `ko`, і жоден не
+    доходив до стему за дві правки — справжня згадка з балом 88 зникала з
+    корпусного пошуку (відгук порталу №2, 24.10.2026). Цілим словом `siemas=ko`
+    за одну заміну від `siemaszko`, тож автомат його бере.
+    """
+    import tantivy
+
+    return (tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.whitespace())
+            .filter(tantivy.Filter.remove_long(TERM_MAX))
+            .filter(tantivy.Filter.lowercase())
+            .build())
 
 
 def _open(create: bool) -> Any:
@@ -102,7 +128,11 @@ def _open(create: bool) -> Any:
     d = path()
     if create:
         d.mkdir(parents=True, exist_ok=True)
-    return tantivy.Index(_schema(), path=str(d), reuse=True)
+    index = tantivy.Index(_schema(), path=str(d), reuse=True)
+    # Токенайзер не зберігається в індексі: без реєстрації на КОЖНОМУ відкритті
+    # письменник упаде на невідомому імені.
+    index.register_tokenizer(TOKENIZER, _analyzer())
+    return index
 
 
 def _read_state() -> dict[str, Any]:
@@ -129,6 +159,30 @@ def _save_state(st: dict[int, str]) -> None:
                                 "runs": {str(k): v for k, v in sorted(st.items())}}, indent=0)
 
 
+#: Знак, що не є літерою чи цифрою, — там, де `default` Tantivy різав слово.
+_NON_ALNUM = re.compile(r"(?:[^\w]|_)+")
+#: Те саме, але пробіл не рахується: один пошук на весь рядок замість слова.
+_ODD = re.compile(r"[^\w ]|_")
+
+
+def _with_parts(text: str) -> str:
+    """Слова цілими і, якщо в слові є не-літерний знак, ще й його частини.
+
+    🔴 Ціле слово ловить згадку зі знаком усередині (`siemas=ko`), частини —
+    прізвище ПІСЛЯ знака (`x=kowalski`) і шматки задовгої склейки, яку
+    `TERM_MAX` відкидає цілою. Лише разом вони не губять нічого з того, що
+    бачив `default` (замір 24.10.2026 на 120 тис. сторінок: без частин — мінус
+    643 хіти «Коваля» з тих, що бачив старий індекс).
+    """
+    if not _ODD.search(text):        # звичайний рядок: частин немає
+        return text
+    out = text.split(" ")
+    for t in text.split(" "):
+        if _NON_ALNUM.search(t):
+            out.extend(p for p in _NON_ALNUM.split(t) if p)
+    return " ".join(out)
+
+
 def _suffixes(raw: str) -> str:
     from nyshporka import htr_store as S
 
@@ -137,23 +191,98 @@ def _suffixes(raw: str) -> str:
         n = S._norm(tok)
         if len(n) >= SFX_MIN:
             out.extend(n[k:] for k in range(2, len(n) - SFX_TAIL + 1))
-    return " ".join(out)
+    return _with_parts(" ".join(out))
 
 
-def _docs(pid: int, run_id: int, cands: bytes, raw: bytes | None) -> Iterator[Any]:
-    """Документи рядків сторінки: кандидати, вони ж задом наперед, хвости сирих слів."""
-    import tantivy
+#: Рядок індексу до `Document`: (pid, рядок, c, x, y) — те, що вміє передати воркер.
+Fields = tuple[int, int, str, str, str]
 
+
+def _fields(pid: int, cands: bytes, raw: bytes | None) -> Iterator[Fields]:
+    """Поля рядків сторінки: кандидати, вони ж задом наперед, хвости сирих слів."""
     raws = zlib.decompress(raw).decode("utf-8").split("\n") if raw is not None else []
     for line in zlib.decompress(cands).decode("utf-8").split("\n"):
         no_s, _sep, rest = line.partition("\t")
         if not rest:
             continue
         no = int(no_s)
-        toks = rest.split(" ")
+        c = _with_parts(rest)
         src = raws[no - 1] if 0 < no <= len(raws) else ""
-        yield tantivy.Document(pid=int(pid), ln=no, run=int(run_id), c=rest,
-                               x=" ".join(t[::-1] for t in toks), y=_suffixes(src))
+        yield int(pid), no, c, " ".join(t[::-1] for t in c.split(" ")), _suffixes(src)
+
+
+def _docs(pid: int, run_id: int, cands: bytes, raw: bytes | None) -> Iterator[Any]:
+    """Документи рядків сторінки."""
+    import tantivy
+
+    for p, no, c, x, y in _fields(pid, cands, raw):
+        yield tantivy.Document(pid=p, ln=no, run=int(run_id), c=c, x=x, y=y)
+
+
+_PAGES_SQL = "select id, cands, raw from pages where run_id=? and cands is not null"
+
+
+def _run_fields(rid: int) -> tuple[int, list[Fields]]:
+    """Воркер: поля всіх рядків одного прогону (стор — лише читання)."""
+    from nyshporka.search import store as ST
+
+    conn = ST.connect(readonly=True)
+    try:
+        return rid, [f for pid, cands, raw in conn.execute(_PAGES_SQL, (rid,))
+                     for f in _fields(pid, cands, raw)]
+    finally:
+        conn.close()
+
+
+def _writer_threads() -> int:
+    """Потоки письменника від ядер: з двома `add_document` чекав на індексацію
+    (замір 24.10.2026, 1,5 млн рядків: 2 потоки — 17,7 с, 8 — 12,8 с)."""
+    from nyshporka.core.cpu import usable_cores
+
+    return min(8, max(2, usable_cores() // 3))
+
+
+def _by_run(conn: sqlite3.Connection, todo: list[int], threads: int
+            ) -> Iterator[tuple[int, list[Fields]]]:
+    """(прогін, його поля): воркерами, коли збірка велика, інакше в цьому процесі.
+
+    🔴 Текст полів — чистий Python і майже половина часу збірки (той самий замір:
+    21,7 с із 48), тож без процесів він сидів на одному ядрі. Документи й запис
+    лишаються тут, бо письменник у Tantivy один. У польоті не більше двох прогонів
+    на воркер: відповіді, яких головний ще не записав, не накопичуються в пам'яті.
+    """
+    from nyshporka.core.cpu import usable_cores
+    from nyshporka.search import store as ST
+
+    marks = ",".join("?" * len(todo))
+    pages = conn.execute(f"select coalesce(sum(pages), 0) from runs where id in ({marks})",
+                         todo).fetchone()[0] if todo else 0
+    workers = min(ST.sweep_workers(len(todo), worker_gb=ST.FAST_WORKER_GB),
+                  max(1, usable_cores() - threads - 1))
+    if pages < PARALLEL_PAGES or workers < 2:
+        for rid in todo:
+            yield rid, [f for pid, cands, raw in conn.execute(_PAGES_SQL, (rid,))
+                        for f in _fields(pid, cands, raw)]
+        return
+    import multiprocessing as mp
+    from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+
+    from nyshporka.core.workspace import workspace
+
+    ex = ProcessPoolExecutor(max_workers=workers, mp_context=mp.get_context("spawn"),
+                             initializer=ST._block_init, initargs=(workspace(),))
+    try:
+        queue = iter(todo)
+        pending = {ex.submit(_run_fields, rid) for rid in itertools.islice(queue, 2 * workers)}
+        while pending:
+            done, pending = wait(pending, return_when=FIRST_COMPLETED)
+            for fut in done:
+                nxt = next(queue, None)
+                if nxt is not None:
+                    pending.add(ex.submit(_run_fields, nxt))
+                yield fut.result()
+    finally:
+        ex.shutdown(wait=True, cancel_futures=True)
 
 
 def _store_marks(conn: sqlite3.Connection) -> dict[int, tuple[str, str]]:
@@ -216,24 +345,24 @@ def sync(conn: sqlite3.Connection, *,
         if moved:
             _save_state(st)
         return {"added": 0, "removed": 0, "lines": 0, "busy": False}
+    threads = _writer_threads()
     try:
-        w = index.writer(WRITER_HEAP, WRITER_THREADS)
+        w = index.writer(WRITER_HEAP, threads)
     except ValueError:
         return {"added": 0, "removed": 0, "lines": 0, "busy": True}
     lines = since = 0
     try:
         for rid in [*gone, *todo]:
             w.delete_documents_by_term("run", rid)
-        for i, rid in enumerate(todo, 1):
+        import tantivy
+
+        for i, (rid, fields) in enumerate(_by_run(conn, todo, threads), 1):
             if progress:
                 progress(i, len(todo), "індекс Tantivy")
-            for pid, cands, raw in conn.execute(
-                    "select id, cands, raw from pages where run_id=? and cands is not null",
-                    (rid,)):
-                for doc in _docs(pid, rid, cands, raw):
-                    w.add_document(doc)
-                    lines += 1
-                    since += 1
+            for p, no, c, x, y in fields:
+                w.add_document(tantivy.Document(pid=p, ln=no, run=rid, c=c, x=x, y=y))
+            lines += len(fields)
+            since += len(fields)
             st[rid] = now[rid][0]
             if since >= COMMIT_EVERY:
                 w.commit()
