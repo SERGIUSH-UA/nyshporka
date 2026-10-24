@@ -1669,7 +1669,9 @@ def _match_cdist(order: list[str], stems: list[str], thresh: int
     # 🔴 `ratio` рахується з НИЗЬКИМ порогом: він і хіт, і передфільтр для
     # `partial_ratio`, який коштував 60 % зіставлення (27.6 млн пар на 16 тис.
     # сторінок), — див. `_partial_bound`. Той самий результат до бала.
-    lmax = int(lens.max()) if len(lens) else 0
+    # `np.max`, а не метод: заглушки numpy 2.5 не мають перевантаження `ndarray.max()`
+    # без осі (ні порожнього, ні з `axis=None`).
+    lmax = int(np.max(lens)) if len(lens) else 0
     cutoff = 0
     if stems:
         cutoff = max(0, int(min(float(_partial_bound(len(s), np.int32(lmax), thresh))
