@@ -147,7 +147,8 @@ def test_round_trip_imports_work_sets_and_only_measures_control(owner: W.Workspa
     task = next(f.read_text(encoding="utf-8") for f in took.tasks
                 if f.name.startswith(work) and "0001" in f.read_text(encoding="utf-8"))
     assert "Ти читаєш КОЖЕН рядок сам" in task
-    assert "сумнів тільки в обірваному слові на краю смужки" in task.lower(), \n        "правило впевненості crop-read мусить доходити до помічника"
+    assert "сумнів тільки в обірваному слові на краю смужки" in task.lower(), (
+        "правило впевненості crop-read мусить доходити до помічника")
     assert "★ ДЖЕРЕЛА" in task and "ВИД — «Ділова мова 1981», видавці" in task
     assert "  ВИД: Марѳа Васильева Петровна  ⚠ межа рядка сумнівна" in task
     assert "ТЕКСТ ДЖЕРЕЛА ДО СТОРІНКИ 0001" in task
