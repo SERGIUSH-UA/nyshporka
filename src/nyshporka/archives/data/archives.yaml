@@ -385,7 +385,22 @@ repositories:
       старим поділом) — саме через нього архів і знадобився першим.
 
   # ── центральні ──────────────────────────────────────────────────────────────
-  CDIAL: {label: ЦДІАЛ, name: "Центральний державний історичний архів України, м. Львів", country: UA, sites: {web: {url: https://tsdial.archives.gov.ua}}}
+  CDIAL:
+    label: ЦДІАЛ
+    name: Центральний державний історичний архів України, м. Львів
+    country: UA
+    sites:
+      web:
+        url: https://tsdial.archives.gov.ua
+      archium:
+        url: https://archium.tsdial.archives.gov.ua
+        # Перевірено 25.10.2026: `nysh get archium-cdial file:143179` дав 116
+        # кадрів ЦДІАЛ 201-4а-5904. Груп фондів, як і в ЦДІАК, не показуємо:
+        # чуже дерево сусіднього архіву під іменем цього.
+        fond_groups: false
+    codes:
+      duck: ЦДІАЛ
+      commons: ЦДІАЛ
   CDAVO:
     label: ЦДАВО
     name: Центральний державний архів вищих органів влади та управління України

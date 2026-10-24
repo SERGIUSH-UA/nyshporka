@@ -168,3 +168,15 @@ def test_search_title_keeps_spaces_around_the_highlighted_match() -> None:
             '<p class="date">1736, 90 аркушів</p></div></div>')
     rows = A.parse_search(html)
     assert rows and rows[0].title == "Метрична книга м-ка Меджибіж Летичівського повіту"
+
+
+def test_cdial_site_is_its_own_archium_source() -> None:
+    """ЦДІАЛ: той самий рушій, свій хост і своє `id` (`archium-cdial`)."""
+    site = active().site("CDIAL", "archium")
+    assert site is not None, "майданчик ЦДІАЛ зник із паку"
+    src = A.ArchiumSource(site=site, repo="CDIAL")
+
+    assert src.id == "archium-cdial"
+    assert "tsdial" in src.base and src.base != A.BASE
+    assert "ЦДІАЛ" in src.label
+    assert active().site("CDIAL", "web") is not None, "звичайний сайт має лишитись"
