@@ -297,12 +297,17 @@ def dense_why(r: float) -> str:
 
 def gate_page(page: str, merged: list[str], voices: list[list[str]],
               conf: dict[int, str], *, ink_of: Any = None,
-              crop_of: Any = None) -> PageGate:
+              crop_of: Any = None, support: dict[int, list[str]] | None = None) -> PageGate:
     """Прогнати ворота по сторінці злиття; ПРАВИТЬ `merged` і `conf` на місці.
 
     `ink_of(idx)` — частка чорнила кропа або `None`, коли кропа немає;
-    `crop_of(idx)` — шлях до кропа (для щільності мітки) або `None`.
+    `crop_of(idx)` — шлях до кропа (для щільності мітки) або `None`;
+    `support` — дослівний людський текст рядка (видання). Мітка, що на нього
+    спирається, не йде людині як «домисел» лише через слабкі голоси: на руці,
+    якої рушій не знає, голоси дають 30–50% CER, і без цього підозрілим ставав
+    кожен рядок (`PLAN_PYSAR_XVII`, 12.10.2026). Понижень це не скасовує.
     """
+    support = support or {}
     g = PageGate(page=page)
     for i, text in enumerate(merged):
         if not text.strip():
@@ -323,6 +328,8 @@ def gate_page(page: str, merged: list[str], voices: list[list[str]],
             if conf.get(i) != "low":
                 g.demoted.append(i)
             conf[i] = "low"
+            continue
+        if support.get(i) and grounded(text, support[i]) >= GROUNDED_MIN:
             continue
         if suspect(sig, text):
             g.suspects.append((i, "голоси розходяться: " + ", ".join(sig)))

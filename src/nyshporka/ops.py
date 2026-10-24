@@ -32,6 +32,7 @@ from nyshporka import ops_site as _site  # noqa: F401  (те саме: реєс�
 from nyshporka import ops_text as _text  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_train as _train  # noqa: F401  (те саме: реєстрація)
 from nyshporka import ops_train_run as _train_run  # noqa: F401  (те саме: реєстрація)
+from nyshporka import ops_zvid as _zvid  # noqa: F401  (те саме: реєстрація)
 from nyshporka.cloud import ops as _cloud  # noqa: F401  (те саме: реєстрація)
 from nyshporka.core.envelope import Envelope
 from nyshporka.core.ops import REGISTRY, Op, Registry

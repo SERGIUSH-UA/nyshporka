@@ -46,6 +46,9 @@ MARKS_FILE = "lines.jsonl"
 DRAFTS_DIR = "drafts"
 META_FILE = "_meta.json"
 CUT_META_FILE = "_cut_meta.json"
+#: Дані людських джерел (`HintSource.file`) — поруч із голосами, у git.
+HINTS_DIR = "hints"
+HINT_LEVELS = ("line", "page")
 
 #: Тека злиття арбітрів усередині `drafts/`. Див. докстрінг модуля.
 MERGE_ID = "merge"
@@ -124,6 +127,56 @@ class Draft:
 
 
 @dataclass
+class HintSource:
+    """Текст рядка чи сторінки не від рушія: видання, переклад, читання фахівця.
+
+    🔴 Не голос і не мітка. Голос — незалежне машинне спостереження, і арбітр
+    рахує, скільки голосів згодні; людське видання так рахувати не можна: воно
+    розкриває скорочення, нормалізує правопис, а його межу рядка ставить
+    автоматичне вирівнювання (у гродських книгах XVII ст. слово з сусіднього
+    рядка — у кожному третьому рядку з `nll ≥ 1`, заміряно 12.10.2026). Тому
+    джерело йде в завдання з власною міткою (`label`) і з текстом «як цим
+    користуватись» (`how`, `caveats`): агент на чужій машині іншого контексту
+    про нього не має.
+
+    Дані — `<набір>/<file>`: для `level=line` ключ `"<сторінка>:<індекс>"`,
+    для `level=page` — `"<сторінка>"`; значення `{"text", "doubt"?}`.
+    """
+
+    id: str
+    kind: str = "literal"
+    level: str = "line"
+    label: str = ""
+    title: str = ""
+    by: str = ""
+    trust: str = "single"
+    how: str = ""
+    caveats: list[str] = field(default_factory=list)
+    file: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"id": self.id, "kind": self.kind, "level": self.level,
+                               "label": self.label, "title": self.title, "by": self.by,
+                               "trust": self.trust, "how": self.how,
+                               "caveats": list(self.caveats), "file": self.file}
+        return {k: v for k, v in out.items() if v or k in ("id", "kind", "level")}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> HintSource:
+        return cls(id=str(d.get("id") or ""), kind=str(d.get("kind") or "literal"),
+                   level=str(d.get("level") or "line"), label=str(d.get("label") or ""),
+                   title=str(d.get("title") or ""), by=str(d.get("by") or ""),
+                   trust=str(d.get("trust") or "single"), how=str(d.get("how") or ""),
+                   caveats=[str(x) for x in (d.get("caveats") or [])],
+                   file=str(d.get("file") or ""))
+
+    @property
+    def tag(self) -> str:
+        """Мітка в рядку завдання — не літера: «C» читалась би як третій голос."""
+        return self.label or self.id.upper()[:6]
+
+
+@dataclass
 class SetSpec:
     name: str
     title: str = ""
@@ -149,6 +202,11 @@ class SetSpec:
     #: Стороннє прочитання сторінки (людина, форум, опис) — контекст арбітрові,
     #: НЕ мітка: `{сторінка: [{"text", "part", "kind", "trust", "source"}]}`.
     page_hints: dict[str, list[dict[str, str]]] = field(default_factory=dict)
+    #: Людські й інші не-рушійні джерела тексту з описом, як ними користуватись.
+    hint_sources: list[HintSource] = field(default_factory=list)
+    #: Не виходить за межі цієї машини: платне замовлення, дані родини клієнта.
+    #: `nysh zvid pack` такий набір не пакує — перевірка в коді, а не на совісті.
+    private: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -164,6 +222,9 @@ class SetSpec:
             **({"cursor": self.cursor} if self.cursor else {}),
             **({"pack": self.pack} if self.pack else {}),
             **({"page_hints": self.page_hints} if self.page_hints else {}),
+            **({"hint_sources": [h.as_dict() for h in self.hint_sources]}
+               if self.hint_sources else {}),
+            **({"private": True} if self.private else {}),
         }
 
     @classmethod
@@ -188,6 +249,9 @@ class SetSpec:
             page_hints={str(k): [dict(h) for h in v if isinstance(h, dict)]
                         for k, v in (d.get("page_hints") or {}).items()
                         if isinstance(v, list)},
+            hint_sources=[HintSource.from_dict(x) for x in (d.get("hint_sources") or [])
+                          if isinstance(x, dict) and x.get("id")],
+            private=bool(d.get("private", False)),
         )
 
     def voices(self) -> list[Draft]:
@@ -360,6 +424,28 @@ class Registry:
         if not f.is_file():
             return None
         return f.read_text(encoding="utf-8", errors="replace").splitlines()
+
+    def hint_data(self, spec: SetSpec, src: HintSource) -> dict[str, dict[str, str]]:
+        """Дані джерела: `{ключ: {"text", "doubt"?}}`; файла немає — порожньо."""
+        if not src.file or src.file.startswith(("/", "\\")) or ".." in Path(src.file).parts:
+            return {}
+        got = read_json(self.set_dir(spec.name) / src.file, default={})
+        if not isinstance(got, dict):
+            return {}
+        return {str(k): {"text": str(v.get("text") or ""), "doubt": str(v.get("doubt") or "")}
+                for k, v in got.items() if isinstance(v, dict) and v.get("text")}
+
+    def line_hints(self, spec: SetSpec, page: str) -> dict[int, list[tuple[HintSource, dict[str, str]]]]:
+        """{індекс: [(джерело, {"text", "doubt"})]} — лише джерела рівня рядка."""
+        out: dict[int, list[tuple[HintSource, dict[str, str]]]] = {}
+        for src in spec.hint_sources:
+            if src.level != "line":
+                continue
+            for key, v in self.hint_data(spec, src).items():
+                pg, _, idx = key.rpartition(":")
+                if pg == page and idx.isdigit():
+                    out.setdefault(int(idx), []).append((src, v))
+        return out
 
     def draft_meta(self, spec: SetSpec, draft: Draft) -> dict[str, Any]:
         if not draft.dir:

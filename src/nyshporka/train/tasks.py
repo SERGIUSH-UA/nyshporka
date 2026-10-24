@@ -48,9 +48,16 @@ DEFAULT_DOMAIN = "архівний рукопис XIX — початку XX ст
 
 HEAD = """<!-- ЗАВДАННЯ {n} з {total} · набір {set} · рядків {rows} · сторінки {pages} -->
 Відповідь — файл {stem}.answer.json поруч із цим. Пиши його порціями (кожні 25 рядків),
-щоразу цілком тим, що вже зведено. Далі: nysh train import --set {set}
+щоразу цілком тим, що вже зведено. Далі: {next_cmd}
 ─────────────────────────────────────────────────────────────────────────────
 """
+
+#: Як зводиться рядок. `arbiter` — голоси сильні, арбітр обирає між ними й
+#: дивиться кроп на власних назвах. `crop-read` — голоси слабкі (рука, якої
+#: модель не знає): сліпий арбітр на скорописі XVII ст. дав CER 32% проти
+#: палеографа, а читання кожного рядка по кропу з людським виданням поруч —
+#: 693 рядки med (пак 6 Регента, 12.10.2026). Формат відповіді той самий.
+PROCEDURES = ("arbiter", "crop-read")
 
 RULES = """Ти зводиш {k} машинних транскрипцій ОДНОГО рукописного рядка в один найкращий варіант.
 
@@ -66,6 +73,34 @@ RULES = """Ти зводиш {k} машинних транскрипцій ОД�
 7. 🔴🔴 НІЧОГО НЕ ВИКИДАЙ. Довжина відповіді ≈ як у найдовшого голосу. Якщо початок або середина нерозбірливі — все одно дай найкращий здогад і постав "c":"low". Пропуск гірший за помилку: спотворене слово знайдеться нечітким пошуком, відсутнє — ніколи.
 8. Смужка без тексту (лінійка графи, згин, просвічування) → "m": "" — порожня мітка, а не найкоротший здогад.
 9. Впевненість: "high" — практично певен, "med" — основа зрозуміла або власна назва не звірена на збільшенні, "low" — здогад. Збіг більшості голосів — доказ, але не механічне правило: моделі споріднені й помиляються схоже.
+"""
+
+CROP_RULES = """Ти читаєш КОЖЕН рядок сам, на його кропі. Голоси {voices} — машинні прочитання цього рядка ({k} шт.), рушій цієї руки знає погано. Рядки з позначкою джерела (див. ★ ДЖЕРЕЛА) — людський текст. Усе це підказки; мітка — те, що написано на кропі.
+
+Джерело: {domain}
+
+Правила:
+1. Мітка — рівно те, що видно на смужці, в орфографії рукопису. Умовності правопису (як писати виносні, ъ/ь, скорочення) — з розділу контексту справи й з опису джерела; без них — як у рукописі.
+2. Людське джерело дає ПРОЧИТАННЯ СЛІВ, але не межі й не написання: видання розкриває скорочення, нормалізує, ставить свою пунктуацію, а межа рядка в ньому підібрана автоматично і буває зсунута на слово-два (позначка ⚠ — дивись першими). Що з джерела не видно на кропі — у мітку НЕ вписуй; що видно на кропі, а в джерелі немає — вписуй.
+3. Джерело розходиться з кропом (інший варіант акту, пропуск видавця, інше ім'я) — вирішує кроп. Імена й числа звіряй на збільшенні (`zoom`): ширина слова в пікселях на літеру проти сусідніх слів — об'єктивний арбітр.
+4. Ініціал чи розчерк великої літери, що стоїть на полі ПОЗА кропом, у мітку не входить: мітка — те, що всередині смужки.
+5. 🔴 РЯДОК — ЦЕ СМУЖКА, А НЕ РЕЧЕННЯ. Обірване слово лишай обірваним, навіть якщо джерело дає його повністю.
+6. 🔴 МАРКЕРІВ РОЗБІЖНОСТІ НЕ СТАВ. Жодних ‹A|B›, дужок, слешів, знаків питання. Не впевнений — обери найправдоподібніше і постав "c":"low".
+7. Рядок іншим письмом (латинка в кириличній книзі) чи нечитабельний без людського тексту — найкращий здогад і "c":"low". Смужка без тексту → "m": "".
+8. Впевненість: "high" — кожне слово звірене на кропі й збігається з людським джерелом або очевидне; "med" — текст певний, окремі літери чи виносні не звірені на збільшенні; "low" — здогад.
+"""
+
+SOURCES_NOTE = """
+★ ДЖЕРЕЛА — людський текст поруч із голосами. Позначка в рядку — ліворуч:
+{items}
+   🔴 Джерело — не голос рушія і не готова мітка: скільки б разів воно не
+   збіглося з голосом, мітку вирішує смужка.
+"""
+
+PAGE_SOURCE_NOTE = """
+★ ТЕКСТ ДЖЕРЕЛА ДО СТОРІНКИ {page} — {tag} («{title}»), ширше за рядки сторінки.
+   Для контексту: звідки почався акт, хто сторони, де зсунулась межа рядка.
+   «{text}»
 """
 
 FOLD_NOTE = """
@@ -109,9 +144,38 @@ HINTS_NOTE = """
 
 HINT_KINDS = {"literal": "дослівно", "normalized": "нормалізовано",
               "translation": "переклад", "interpretation": "тлумачення"}
-HINT_TRUST = {"confirmed": "підтверджено власником документа",
+HINT_TRUST = {"published": "друковане наукове видання",
+              "confirmed": "підтверджено власником документа",
               "agreed": "кілька людей згодні", "single": "одна відповідь",
               "disputed": "є суперечка"}
+
+
+def source_items(spec: S.SetSpec) -> list[str]:
+    """Опис кожного людського джерела — щоб агент знав, ЩО це і як ним брати."""
+    out = []
+    for h in spec.hint_sources:
+        tags = [HINT_KINDS.get(h.kind, h.kind), HINT_TRUST.get(h.trust, h.trust),
+                "по рядках" if h.level == "line" else "до сторінки"]
+        head = f"   {h.tag} — «{h.title or h.id}»" + (f", {h.by}" if h.by else "")
+        out.append(head + f" [{', '.join(t for t in tags if t)}]")
+        if h.how:
+            out.append(f"      як брати: {h.how}")
+        out += [f"      ⚠ {c}" for c in h.caveats]
+    return out
+
+
+def page_source_blocks(reg: S.Registry, spec: S.SetSpec, pages: list[str]) -> list[str]:
+    out = []
+    for src in spec.hint_sources:
+        if src.level != "page":
+            continue
+        data = reg.hint_data(spec, src)
+        for pg in pages:
+            v = data.get(pg)
+            if v:
+                out.append(PAGE_SOURCE_NOTE.format(page=pg, tag=src.tag,
+                                                   title=src.title or src.id, text=v["text"]))
+    return out
 
 
 def hint_lines(spec: S.SetSpec, pages: list[str]) -> list[str]:
@@ -146,20 +210,25 @@ def page_rows(reg: S.Registry, spec: S.SetSpec, page: str,
               voices: list[S.Draft]) -> list[dict[str, Any]]:
     """Рядки сторінки як N паралельних прочитань; порожні смужки пропущено."""
     cols = [reg.draft_lines(spec, d, page) or [] for d in voices]
+    hints = reg.line_hints(spec, page) if spec.hint_sources else {}
     rows: list[dict[str, Any]] = []
     for i in range(max((len(c) for c in cols), default=0)):
         vals = [(c[i].strip() if i < len(c) else "") for c in cols]
-        if all(len(v) < 3 for v in vals):
+        h = [(src.tag, v["text"], v.get("doubt", "")) for src, v in hints.get(i, [])]
+        # Рядок, якого рушії не прочитали, а людина прочитала, — не порожній.
+        if all(len(v) < 3 for v in vals) and not h:
             continue
-        rows.append({"id": f"{page}:{i}", "page": page, "idx": i, "v": vals})
+        rows.append({"id": f"{page}:{i}", "page": page, "idx": i, "v": vals, "h": h})
     return rows
 
 
 def row_block(r: dict[str, Any], fold: bool) -> str:
     vs = r["v"]
+    tail = [f"  {tag}: {text}" + (f"  ⚠ {doubt}" if doubt else "")
+            for tag, text, doubt in r.get("h", [])]
     if fold and all(vs) and len(set(vs)) == 1:
-        return f'{r["id"]}\n  = {vs[0]}'
-    return "\n".join([r["id"]] + [f"  {VOICES[k]}: {v}" for k, v in enumerate(vs)])
+        return "\n".join([f'{r["id"]}\n  = {vs[0]}', *tail])
+    return "\n".join([r["id"]] + [f"  {VOICES[k]}: {v}" for k, v in enumerate(vs)] + tail)
 
 
 def chunk_by_pages(rows: list[dict[str, Any]], pages_per_file: int) -> list[list[dict[str, Any]]]:
@@ -193,7 +262,10 @@ def export_tasks(name: str, *, pages: list[str] | None = None, pages_per_file: i
                  only_missing: bool = False, drafts: list[str] | None = None,
                  out: Path | None = None, sheets: bool = True, fold: bool = True,
                  skip_blank: bool = True, hints: bool = True, ws: Workspace | None = None,
-                 image_of: Any = None) -> ExportReport:
+                 image_of: Any = None, procedure: str = "arbiter",
+                 next_cmd: str = "") -> ExportReport:
+    if procedure not in PROCEDURES:
+        raise TaskError(f"процедура «{procedure}» невідома: {' | '.join(PROCEDURES)}")
     w = ws if ws is not None else workspace()
     reg = S.registry(w)
     spec = reg.load(name)
@@ -255,12 +327,18 @@ def export_tasks(name: str, *, pages: list[str] | None = None, pages_per_file: i
             rep.warnings.append(f"аркуші не зроблено: {exc}")
     domain = spec.domain or DEFAULT_DOMAIN
     k = len(voices)
+    rules = CROP_RULES if procedure == "crop-read" else RULES
+    sources = source_items(spec) if hints else []
     for n, ch in enumerate(chunks, 1):
         stem = f"{name}_part{n:02d}"
         ch_pages = sorted({r["page"] for r in ch})
         txt = HEAD.format(n=n, total=len(chunks), set=name, rows=len(ch), stem=stem,
-                          pages=", ".join(ch_pages))
-        txt += RULES.format(k=k, domain=domain, voices=", ".join(VOICES[:k]))
+                          pages=", ".join(ch_pages),
+                          next_cmd=next_cmd or f"nysh train import --set {name}")
+        txt += rules.format(k=k, domain=domain, voices=", ".join(VOICES[:k]))
+        if sources:
+            txt += SOURCES_NOTE.format(items="\n".join(sources))
+            txt += "".join(page_source_blocks(reg, spec, ch_pages))
         if rep.sheets:
             have_sh = [p for p in ch_pages if rep.sheets.get(p)]
             gap = [p for p in ch_pages if not rep.sheets.get(p)]
@@ -397,7 +475,8 @@ def import_answers(name: str, *, tasks_dir: Path | None = None, keep_old: bool =
             return G.ink_fraction(p) if p is not None else None
 
         gate = G.gate_page(pg, cur, vlines, conf_all, ink_of=_ink,
-                           crop_of=lambda i, _pg=pg: reg.crop_path(spec, _pg, i))
+                           crop_of=lambda i, _pg=pg: reg.crop_path(spec, _pg, i),
+                           support=literal_support(reg, spec, pg))
         rep.gates.append(gate)
         f.write_text("\n".join(cur) + "\n", encoding="utf-8")
         page_meta["conf"] = {str(k): v for k, v in sorted(conf_all.items())}
@@ -439,6 +518,17 @@ def import_answers(name: str, *, tasks_dir: Path | None = None, keep_old: bool =
     return rep
 
 
+def literal_support(reg: S.Registry, spec: S.SetSpec, page: str) -> dict[int, list[str]]:
+    """Дослівний людський текст рядків сторінки — опора для воріт.
+
+    Лише `kind=literal`: переклад чи нормалізоване прочитання з міткою не
+    збігаються за побудовою, і «опора» на них нічого б не доводила.
+    """
+    return {i: [v["text"] for src, v in got if src.kind == "literal"]
+            for i, got in reg.line_hints(spec, page).items()
+            if any(src.kind == "literal" for src, _ in got)}
+
+
 def suspects_of(name: str, ws: Workspace | None = None) -> list[dict[str, Any]]:
     """Рядки злиття на очі людині: розбіжність голосів або неопертість."""
     w = ws if ws is not None else workspace()
@@ -462,6 +552,7 @@ def suspects_of(name: str, ws: Workspace | None = None) -> list[dict[str, Any]]:
             if d is not None:
                 dens[i] = d
         ratios = G.density_ratios(dens)
+        support = literal_support(reg, spec, pg)
         for i, text in enumerate(merged):
             if not text.strip() or conf.get(str(i)) == "low":
                 continue
@@ -470,6 +561,8 @@ def suspects_of(name: str, ws: Workspace | None = None) -> list[dict[str, Any]]:
             why = ""
             if ratios.get(i, 0) >= G.DENSITY_SUSPECT:
                 why = G.dense_why(ratios[i])
+            elif support.get(i) and G.grounded(text, support[i]) >= G.GROUNDED_MIN:
+                continue
             elif G.suspect(sig, text):
                 why = "голоси розходяться"
             elif G.grounded(text, vs) < G.GROUNDED_MIN and len(text) >= 6:
