@@ -179,6 +179,8 @@ def test_the_prefix_mode_of_tantivy_is_narrower_than_the_model(tmp_path: Path) -
     "Григорiймакiймелникъ",    # прізвище в КІНЦІ зліпленого слова — поле x
     "инанасаМелникаМи",        # посередині зліпленого слова — поле y
     "Хмелникъ",                # скалічений початок — x з обрізаним стемом
+    "Мел=никъ",                # знак усередині слова (`=` Скриби) — не роздільник
+    "Мел҃никъ",           # титло всередині слова — теж
 ])
 def test_the_three_shapes_of_a_mangled_surname_are_found(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, word: str) -> None:
@@ -325,6 +327,39 @@ def test_no_state_is_an_error_not_an_empty_answer(space: Path) -> None:
 
     with pytest.raises(OSError):
         FX.by_run(["verbiscinskii"])
+
+
+def test_parallel_build_gives_the_same_index(space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Текст полів воркерами — ті самі кандидати, що й збірка в одному процесі."""
+    import concurrent.futures as CF
+    import shutil
+
+    from nyshporka import htr_store as S
+    from nyshporka.core import cpu
+    from nyshporka.search import fastidx as FX
+
+    stems = [S._norm("Вербищинскій"), S._norm("Шевчук")]
+    _build()
+    one = sorted(FX.candidates(stems))
+    shutil.rmtree(FX.path())
+    FX._ANSWERS.clear()
+    pools: list[int] = []
+    real = CF.ProcessPoolExecutor
+
+    class Spy(real):  # type: ignore[misc, valid-type]
+        def __init__(self, *a, **kw):
+            pools.append(kw.get("max_workers") or 0)
+            super().__init__(*a, **kw)
+
+    monkeypatch.setattr(FX, "PARALLEL_PAGES", 0)
+    monkeypatch.setattr(cpu, "usable_cores", lambda: 8)
+    monkeypatch.setenv("NYSH_SWEEP_WORKERS", "2")
+    monkeypatch.setattr(CF, "ProcessPoolExecutor", Spy)
+    got = _build()
+    assert pools == [2], "воркери не стартували — тест міряв би послідовний шлях"
+    assert got["added"] == 2
+    assert len(one) >= 2, "перевірка беззмістовна: замало кандидатів"
+    assert sorted(FX.candidates(stems)) == one
 
 
 def test_parallel_rerank_gives_the_same_rows(space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
