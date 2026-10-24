@@ -256,6 +256,67 @@ def last_page(view_html: str) -> int:
     return max(pages) if pages else 1
 
 
+#: Адреса переглядача, як її копіюють із браузера: `https://<хост>/file-viewer/<id>`,
+#: зі слешем наприкінці чи з `?page=…`/`#…` — усе це та сама справа.
+_VIEWER_URL_RE = re.compile(
+    r"^(https?)://([^/\s?#]+)/file-viewer/(\d+)/?(?:[?#].*)?$", re.IGNORECASE)
+
+
+def parse_viewer_url(ref: str) -> tuple[str, str, str] | None:
+    """`(схема, хост, id справи)` з адреси переглядача; не адреса — `None`."""
+    m = _VIEWER_URL_RE.match((ref or "").strip())
+    return (m.group(1).lower(), m.group(2).lower(), m.group(3)) if m else None
+
+
+def route_viewer_url(registry: Any, source_id: str, ref: str, *,
+                     fetcher: Fetcher | None = None) -> tuple[Any, str, str] | None:
+    """Адреса переглядача → `(джерело, ref `file:<id>`, примітка)`.
+
+    🔴 Хост — знання про архів, а людина копіює з браузера адресу, а не id
+    джерела: «archium» у команді й хост ЦДІАЛ у посиланні — звичайна комбінація, і
+    відмовляти на ній означало б змушувати знати внутрішній пристрій паку.
+    Тому джерело обирається за ХОСТОМ, а вказане людиною лише звужує
+    застосування: чужі джерела (`commons`, `fsfilm`) не чіпаємо.
+
+    Невідомий хост, що відповідає як ARCHIUM, береться на це завантаження
+    тимчасовим майданчиком. У накладку пак не пишеться: майданчик лежить під
+    архівом (`repositories.<КОД>.sites`), а код архіву з адреси не взяти —
+    вгадана назва осіла б у шифрах і теках назавжди. Примітка каже, що вписати.
+    Не схоже на ARCHIUM — `SourceError`, а не туманне «не справа».
+    """
+    parsed = parse_viewer_url(ref)
+    if parsed is None or not (source_id == "archium"
+                              or source_id.startswith("archium-")):
+        return None
+    scheme, host, ident = parsed
+    known = [s for s in registry.all() if isinstance(s, ArchiumSource)]
+    for s in known:
+        if _host(s.base) == host:
+            return s, f"file:{ident}", ""
+
+    base = f"{scheme}://{host}"
+    short = host.removeprefix("archium.")
+    site = Site(engine="archium", url=base, fond_groups=False,
+                source_id="archium-" + re.sub(r"[^a-z0-9]+", "-", short).strip("-"))
+    adhoc = ArchiumSource(known[0].workspace if known else None, site=site,
+                          repo=re.sub(r"[^A-Za-z0-9]+", "_", short).strip("_") or "ADHOC",
+                          fetcher=fetcher)
+    html = adhoc.http.get(f"/file-viewer/{ident}").text
+    if not (viewer_pages(html) or case_meta(html)):
+        raise SourceError(
+            f"{host} не схожий на ARCHIUM: сторінка /file-viewer/{ident} не "
+            f"має ні кадрів, ні шифри справи. Відомі майданчики: "
+            + ", ".join(s.id for s in known))
+    note = (f"майданчик {host} у паку не описано — взято на це завантаження. "
+            f"Щоб був постійним, впишіть в archives.yaml під його архівом: "
+            f"sites: {{archium: {{url: {base}}}}}")
+    return adhoc, f"file:{ident}", note
+
+
+def _host(url: str) -> str:
+    return re.sub(r"^https?://", "", url.strip().lower()).split("/")[0]
+
+
 def viewer_pages(html: str) -> list[tuple[int, int]]:
     """[(id зображення, номер сторінки)] у правильному порядку.
 
@@ -951,10 +1012,25 @@ class ArchiumSource:
                         row.get("description") or "") if x)
         return ""
 
-    def manifest(self, ref: str) -> Manifest:
+    def _ident(self, ref: str) -> str:
+        """id справи з `file:<id>` або з адреси переглядача цього ж майданчика."""
         kind, _, ident = ref.partition(":")
-        if kind != "file":
+        if kind == "file":
+            return ident
+        parsed = parse_viewer_url(ref)
+        if parsed is None:
             raise SourceError(f"завантажувати можна лише справу, а не {ref!r}")
+        # 🔴 Чужий хост — відмова, а не тихе качання з власного: id справ на
+        # різних майданчиках збігаються, і той самий номер означав би чужу справу.
+        if parsed[1] != _host(self.base):
+            raise SourceError(
+                f"адреса з {parsed[1]}, а джерело {self.id} працює з "
+                f"{_host(self.base)}; `nysh get` сам обирає джерело за хостом")
+        return parsed[2]
+
+    def manifest(self, ref: str) -> Manifest:
+        ident = self._ident(ref)
+        ref = f"file:{ident}"
         html = self.http.get(f"/file-viewer/{ident}").text
         pages = viewer_pages(html)
         if not pages:
@@ -996,9 +1072,7 @@ class ArchiumSource:
     def fetch(self, ref: str, dest: Path, *,
               frames: tuple[int, int] | None = None,
               on_progress: ProgressFn | None = None) -> FetchResult:
-        kind, _, ident = ref.partition(":")
-        if kind != "file":
-            raise SourceError(f"завантажувати можна лише справу, а не {ref!r}")
+        ident = self._ident(ref)
         dest = Path(dest)
         html = self.http.get(f"/file-viewer/{ident}").text
         pages = viewer_pages(html)

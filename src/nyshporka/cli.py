@@ -540,7 +540,24 @@ def get(source: str = typer.Argument(..., help="id джерела"),
 
     _need("material")
     ref = ref.strip()       # адреса з файла CRLF несе `\r` — див. `provenance`
-    src = _pick(source)
+    src = None
+    # Адреса переглядача (`https://<хост>/file-viewer/<id>`) → джерело за хостом.
+    from nyshporka.sources.archium import route_viewer_url
+    try:
+        routed = route_viewer_url(_sources_registry(), source, ref)
+    except SourceError as exc:
+        console.print(f"[err]{exc}[/err]")
+        raise typer.Exit(code=1) from None
+    except HttpError as exc:
+        console.print(f"[err]{escape(explain(exc))}[/err]")
+        raise typer.Exit(code=1) from None
+    if routed:
+        src, ref, note = routed
+        if src.id != source:
+            console.print(f"[muted]джерело за хостом адреси: {src.id}[/muted]")
+        if note:
+            console.print(f"[warn]{escape(note)}[/warn]")
+    src = src or _pick(source)
     import inspect
 
     # Різ розвороту вміє не кожне джерело: прапорець без дії гірший за відмову —
