@@ -12,7 +12,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from nyshporka.core.envelope import Envelope, fail, ok
-from nyshporka.core.ops import op
+from nyshporka.core.ops import NoArgs, op
 
 
 def _csv(s: str) -> list[str]:
@@ -62,7 +62,8 @@ def zvid_pack(a: PackArgs) -> Envelope:
 
 
 class TakeArgs(BaseModel):
-    file: str = Field(description="пакет .zvid")
+    file: str = Field(default="", description="пакет .zvid; порожньо — наступний із черги порталу")
+    id: str = Field(default="", description="з порталу: саме цей пакет (свій узятий — продовжити)")
     fresh: bool = Field(default=False, description="розпакувати наново, ЗАТЕРТИ зведене")
 
 
@@ -76,10 +77,14 @@ def zvid_take(a: TakeArgs) -> Envelope:
     """
     from nyshporka.train import tasks as T
     from nyshporka.zvid import common as C
-    from nyshporka.zvid import helper
+    from nyshporka.zvid import helper, portal
 
     try:
-        rep = helper.take(Path(a.file), fresh=a.fresh)
+        if a.file:
+            rep = helper.take(Path(a.file), fresh=a.fresh)
+        else:
+            rep = helper.take(portal.take(pack_id=a.id), fresh=a.fresh)
+            portal.mark_portal(rep.root)
     except (C.ZvidError, T.TaskError, OSError) as exc:
         return fail(str(exc))
     env = ok({"id": rep.id, "root": str(rep.root), "procedure": rep.procedure,
@@ -119,6 +124,8 @@ class GiveArgs(BaseModel):
     note: str = Field(default="", description="примітка власникові")
     out: str = Field(default="", description="тека для .answer.zvid; порожньо — пісочниця")
     partial: bool = Field(default=False, description="віддати, хоч зведено не все")
+    no_upload: bool = Field(default=False, description="пакет із порталу, але відповідь "
+                                                       "лише файлом (не заливати)")
 
 
 @op("zvid.give", summary="Віддати зведене: перевірити відповіді й зібрати .answer.zvid",
@@ -126,16 +133,23 @@ class GiveArgs(BaseModel):
     skill="zvid", when="зведення пакета Зводу закінчено — віддати власникові")
 def zvid_give(a: GiveArgs) -> Envelope:
     """Перевірка тут, а не в власника: агент ще поруч і може виправити."""
+    import json
+
     from nyshporka.zvid import common as C
-    from nyshporka.zvid import helper
+    from nyshporka.zvid import helper, portal
 
     try:
         rep = helper.give(a.id, model=a.model, agents=a.agents, note=a.note,
                           out=Path(a.out) if a.out else None, partial=a.partial)
+        state = json.loads((helper.root_of(a.id) / C.STATE).read_text(encoding="utf-8"))
+        uploaded = bool(state.get("portal")) and not a.no_upload
+        if uploaded:
+            portal.upload_answer(a.id, rep.file)
     except C.ZvidError as exc:
         return fail(str(exc))
     env = ok({"id": rep.id, "file": str(rep.file), "rows": rep.rows,
-              "answered": rep.answered, "missing": rep.missing, "conf": rep.conf})
+              "answered": rep.answered, "missing": rep.missing, "conf": rep.conf,
+              "uploaded": uploaded})
     if rep.missing:
         env.warn("partial", f"не зведено {rep.missing} рядків з {rep.rows}")
     return env
@@ -170,3 +184,82 @@ def zvid_collect(a: CollectArgs) -> Envelope:
         env.warn("suspects", f"{n_susp} рядків на очі людині: nysh train gates --set <набір> "
                              "--suspects")
     return env
+
+
+# ── портал ───────────────────────────────────────────────────────────────────
+class PublishArgs(BaseModel):
+    file: str = Field(description="пакет .zvid")
+    kind: str = Field(default="", description="клас пакета; порожньо — за голосами "
+                                              "(regent, pysar_x18, logofet, інакше public)")
+    note: str = Field(default="", description="примітка для помічника")
+
+
+@op("zvid.publish", summary="Покласти пакет Зводу в чергу порталу",
+    args=PublishArgs, mutates=True, long=True, section="lab", tier="rare",
+    skill="zvid", when="віддати пакет Зводу помічникам через портал, а не файлом")
+def zvid_publish(a: PublishArgs) -> Envelope:
+    """Байти — у сховище підписаним посиланням; сервер звіряє sha256 сам."""
+    from nyshporka.zvid import common as C
+    from nyshporka.zvid import portal
+
+    try:
+        got = portal.publish(Path(a.file), kind=a.kind, note=a.note)
+    except (C.ZvidError, OSError) as exc:
+        return fail(str(exc))
+    return ok(got)
+
+
+class QueueArgs(BaseModel):
+    status: str = Field(default="", description="vilnyi | vzhato | povernuto | pryiniato")
+
+
+@op("zvid.queue", summary="Черга Зводу на порталі: пакети, у кого, помічники",
+    args=QueueArgs, section="lab", tier="rare", skill="zvid",
+    when="що з пакетами Зводу на порталі: хто взяв, що повернуто")
+def zvid_queue(a: QueueArgs) -> Envelope:
+    from nyshporka.zvid import common as C
+    from nyshporka.zvid import portal
+
+    try:
+        return ok(portal.queue(a.status))
+    except C.ZvidError as exc:
+        return fail(str(exc))
+
+
+@op("zvid.fetch", summary="Забрати повернуті відповіді Зводу з порталу в набори",
+    args=NoArgs, mutates=True, long=True, section="lab", tier="rare", skill="zvid",
+    when="помічники повернули пакети Зводу через портал — прийняти всі")
+def zvid_fetch(_: NoArgs) -> Envelope:
+    """Кожна повернута відповідь → `collect` (ті самі ворота) → «прийнято» на порталі."""
+    from nyshporka.train import sets as S
+    from nyshporka.train import tasks as T
+    from nyshporka.zvid import common as C
+    from nyshporka.zvid import portal
+
+    try:
+        got = portal.fetch()
+    except (C.ZvidError, S.SetError, T.TaskError) as exc:
+        return fail(str(exc))
+    env = ok({"accepted": got})
+    n = sum(g["suspects"] for g in got)
+    if n:
+        env.warn("suspects", f"{n} рядків на очі людині: nysh train gates --set <набір> "
+                             "--suspects")
+    return env
+
+
+class DropArgs(BaseModel):
+    id: str = Field(description="id пакета")
+
+
+@op("zvid.drop", summary="Повернути взятий пакет Зводу в чергу порталу, не зводячи",
+    args=DropArgs, mutates=True, section="core", tier="situational", skill="zvid",
+    when="пакет Зводу не вийде довести — віддати його іншому")
+def zvid_drop(a: DropArgs) -> Envelope:
+    from nyshporka.zvid import common as C
+    from nyshporka.zvid import portal
+
+    try:
+        return ok(portal.drop(a.id))
+    except C.ZvidError as exc:
+        return fail(str(exc))
