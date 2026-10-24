@@ -120,6 +120,16 @@ SHEETS_NOTE = """
    НАЗВАХ — сторінковий масштаб їх систематично псує.{gap}
 """
 
+#: Для `crop-read` аркуш — лише карта: правило «кроп тільки на власних назвах»
+#: суперечило б «кожен рядок на кропі» в тому самому завданні (сухий прогін Зводу 24.10).
+SHEETS_NOTE_CROP = """
+★ АРКУШІ З РАМКАМИ — `{path}`, сторінки: {pages}. Там зображення, де КОЖЕН
+   рядок обведено рамкою з його номером (тим самим, що в id). Це КАРТА: де
+   який акт, заголовок, поле, які рядки йдуть не по порядку. Читаєш кожен
+   рядок на його кропі (`{crops}/<скан>/line_<NNN>.png` або `train view strip`
+   по 6–8 рядків), імена й числа — на збільшенні (`train view zoom`).{gap}
+"""
+
 GAP_NOTE = """
    ⚠ Для сторінок {gap_pages} аркуша НЕМА — там працюй із кропами."""
 
@@ -343,7 +353,8 @@ def export_tasks(name: str, *, pages: list[str] | None = None, pages_per_file: i
             have_sh = [p for p in ch_pages if rep.sheets.get(p)]
             gap = [p for p in ch_pages if not rep.sheets.get(p)]
             if have_sh:
-                txt += SHEETS_NOTE.format(
+                note = SHEETS_NOTE_CROP if procedure == "crop-read" else SHEETS_NOTE
+                txt += note.format(
                     path=sheet_dir, pages=", ".join(have_sh), crops=reg.crops_of(spec),
                     gap=GAP_NOTE.format(gap_pages=", ".join(gap)) if gap else "")
         if fold:
