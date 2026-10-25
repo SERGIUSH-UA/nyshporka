@@ -87,7 +87,7 @@ export function createView(svgEl, { onTap, onActivate }) {
 
   function draw(result, nodes, { selectedId, animate = true } = {}) {
     last = result;
-    const t = svg.transition().duration(animate ? 420 : 0).ease(d3.easeCubicOut);
+    const tr = svg.transition().duration(animate ? 420 : 0).ease(d3.easeCubicOut);
 
     // Лінії: прості ламані, без анімації позицій — лише поява.
     const path = (pts) => pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join('');
@@ -97,11 +97,11 @@ export function createView(svgEl, { onTap, onActivate }) {
       .attr('class', (l) => `link link--${l.kind}${l.hyp ? ' is-hyp' : ''}`)
       .attr('d', (l) => path(l.pts))
       .attr('opacity', 0)
-      .transition(t)
+      .transition(tr)
       .attr('opacity', 1);
 
     const sel = gCards.selectAll('g.card').data(result.cards, (c) => c.key);
-    sel.exit().transition(t).attr('opacity', 0).remove();
+    sel.exit().transition(tr).attr('opacity', 0).remove();
 
     const enter = sel.enter().append('g')
       .attr('class', 'card')
@@ -154,11 +154,11 @@ export function createView(svgEl, { onTap, onActivate }) {
         if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onActivate(c); }
       });
 
-    all.transition(t)
+    all.transition(tr)
       .attr('opacity', 1)
       .attr('transform', (c) => `translate(${c.x - CARD.w / 2},${c.y})`);
 
-    svg.transition(t).call(zoom.transform, transformFor(result));
+    svg.transition(tr).call(zoom.transform, transformFor(result));
   }
 
   function setSelected(id) {

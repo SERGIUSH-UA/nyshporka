@@ -69,11 +69,11 @@ async function main() {
 
   function draw() {
     const { w, h, dpr } = dims;
-    const t = state.t;
+    const tf = state.t;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
-    ctx.translate(t.x, t.y);
-    ctx.scale(t.k, t.k);
+    ctx.translate(tf.x, tf.y);
+    ctx.scale(tf.k, tf.k);
     const sel = state.selected;
     const near = sel ? neighbours.get(sel) : null;
     const ink = css('--nysh-ink-2', '#6b5d4a');
@@ -85,8 +85,8 @@ async function main() {
       const hot = sel && (a.id === sel || b.id === sel);
       ctx.globalAlpha = hot ? 0.95 : on ? (sel ? 0.18 : 0.5) : 0.06;
       ctx.strokeStyle = hot ? css('--nysh-accent', '#8b2c20') : ink;
-      ctx.lineWidth = (hot ? 2 : l.type === 'spouse' ? 1.6 : 1) / Math.sqrt(t.k);
-      ctx.setLineDash(l.hypothetical ? [4 / t.k, 3 / t.k] : []);
+      ctx.lineWidth = (hot ? 2 : l.type === 'spouse' ? 1.6 : 1) / Math.sqrt(tf.k);
+      ctx.setLineDash(l.hypothetical ? [4 / tf.k, 3 / tf.k] : []);
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
@@ -102,23 +102,23 @@ async function main() {
       ctx.arc(n.x, n.y, n.id === sel ? 7 : 4.5, 0, Math.PI * 2);
       ctx.fill();
       if (n.id === sel) {
-        ctx.lineWidth = 2 / t.k;
+        ctx.lineWidth = 2 / tf.k;
         ctx.strokeStyle = css('--nysh-accent', '#8b2c20');
         ctx.stroke();
       }
     }
     // Підписи: усі — коли наблизили, інакше лише вибрана особа й її найближчі.
     ctx.globalAlpha = 1;
-    ctx.font = `${12 / t.k}px Inter, system-ui, sans-serif`;
+    ctx.font = `${12 / tf.k}px Inter, system-ui, sans-serif`;
     ctx.fillStyle = css('--nysh-ink', '#2a211a');
     ctx.strokeStyle = css('--nysh-bg', '#faf7f1');
-    ctx.lineWidth = 3 / t.k;
+    ctx.lineWidth = 3 / tf.k;
     for (const n of nodes) {
       const hot = n.id === sel || (near && near.has(n.id));
-      if (!(hot || (t.k > 1.6 && alive(n))) || isAnon(n)) continue;
+      if (!(hot || (tf.k > 1.6 && alive(n))) || isAnon(n)) continue;
       const label = n.name;
-      ctx.strokeText(label, n.x + 8 / t.k, n.y + 4 / t.k);
-      ctx.fillText(label, n.x + 8 / t.k, n.y + 4 / t.k);
+      ctx.strokeText(label, n.x + 8 / tf.k, n.y + 4 / tf.k);
+      ctx.fillText(label, n.x + 8 / tf.k, n.y + 4 / tf.k);
     }
   }
 
@@ -130,8 +130,8 @@ async function main() {
     const ys = nodes.map((n) => n.y);
     const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
     const k = Math.min(2, 0.92 * Math.min(dims.w / (x1 - x0 + 40), dims.h / (y1 - y0 + 40)));
-    const t = d3.zoomIdentity.translate(dims.w / 2 - ((x0 + x1) / 2) * k, dims.h / 2 - ((y0 + y1) / 2) * k).scale(k);
-    (animate ? sel.transition().duration(400) : sel).call(zoom.transform, t);
+    const tf = d3.zoomIdentity.translate(dims.w / 2 - ((x0 + x1) / 2) * k, dims.h / 2 - ((y0 + y1) / 2) * k).scale(k);
+    (animate ? sel.transition().duration(400) : sel).call(zoom.transform, tf);
   }
 
   // ---- вибір ---------------------------------------------------------------------
