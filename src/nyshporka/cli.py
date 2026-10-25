@@ -409,7 +409,7 @@ def _print_address(addr: Any) -> None:
 def find(q: str = typer.Argument(..., help="село, прізвище, слово із заголовка "
                                            "або шифра справи"),
          source: str = typer.Option("", "--source", help=(
-             "лише це джерело; іменні бази (martyrolog) — тільки так")),
+             "лише це джерело; іменні бази (martyrolog, reabilitovani) — тільки так")),
          text: bool = typer.Option(False, "--text",
                                    help="шукати текстом, навіть якщо запит "
                                         "схожий на шифру"),

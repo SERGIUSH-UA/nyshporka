@@ -58,6 +58,7 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     from nyshporka.sources.ia import IaSource
     from nyshporka.sources.inventarium import InventariumSource
     from nyshporka.sources.martyrolog import MartyrologSource
+    from nyshporka.sources.reabilitovani import ReabilitovaniSource
     from nyshporka.sources.ridni import RidniSource
     from nyshporka.sources.skanoteka import SkanotekaSource
     from nyshporka.sources.sks import SksPersonsSource, SksPlacesSource
@@ -123,6 +124,10 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     # 1920–1950-х із шифрою архівно-слідчої справи. База ОСІБ, тож загальний
     # пошук по каталогах її не питає — лише `--source martyrolog`.
     out.append(cast("Source", MartyrologSource(workspace)))
+    # 🕯 «Реабілітовані історією»: статті на репресованих із томів серії на
+    # Internet Archive (OCR) — місце, арешт, вирок, номер справи, том і лист.
+    # Теж база ОСІБ: лише `--source reabilitovani`.
+    out.append(cast("Source", ReabilitovaniSource(workspace)))
     # 📜 «Staropolskie Księgi Sądowe»: покажчики осіб і місць гродських книг
     # XVII–XVIII ст. (ЦДІАК ф.44, ф.40 і загублені книги KAC) з адресою акта.
     # Шукає по паку `courtbooks`; особи — лише `--source sks-osoby`.
