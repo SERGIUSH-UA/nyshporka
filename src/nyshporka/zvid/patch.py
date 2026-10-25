@@ -52,11 +52,17 @@ class PatchReport:
 
 # ── власник ─────────────────────────────────────────────────────────────────
 def build(pack_id: str, *, voices: list[str], hints: list[str] | None = None,
-          out: Path, note: str = "", ws: Workspace | None = None) -> PatchReport:
+          out: Path, note: str = "", ws: Workspace | None = None,
+          skip_control: bool = False) -> PatchReport:
     """Нові голоси й підказки з наборів власника → доповнення пакета.
 
     Голос спершу додається до наборів звичайним шляхом (`nysh train voices`
     чи інфер по кропах); тут він лише збирається для пакета.
+
+    `skip_control` — голоси не йдуть на контрольні набори пакета. Потрібно,
+    коли модель училась на контрольних сторінках (вони звірені, тож лежать у
+    корпусі): її голос там майже дослівно мітка, і CER контрольної перестав би
+    міряти помічника. Підказки (`hints`) ідуть усім наборам, як і раніше.
     """
     from nyshporka.zvid import owner
 
@@ -73,6 +79,7 @@ def build(pack_id: str, *, voices: list[str], hints: list[str] | None = None,
     if not isinstance(ledger, dict):
         raise C.ZvidError(f"пакета {pack_id} немає в книзі пакетів цього простору")
     rev = 2 + len(ledger.get("patches") or [])
+    control = set(ledger.get("control") or [])
     out.mkdir(parents=True, exist_ok=True)
     path = out / f"{pack_id}.r{rev}{PATCH_SUFFIX}"
     rep = PatchReport(pack=pack_id, rev=rev, file=path, voices=voices, hints=hints)
@@ -87,7 +94,7 @@ def build(pack_id: str, *, voices: list[str], hints: list[str] | None = None,
                                   "лягло б на чужі кропи; потрібен новий пакет")
             by_id = {d.id: d for d in spec.voices()}
             item: dict[str, Any] = {"set": alias, "frames": frames, "voices": [], "hints": []}
-            for vid in voices:
+            for vid in ([] if skip_control and alias in control else voices):
                 d = by_id.get(vid)
                 if d is None:
                     raise C.ZvidError(f"у наборі {name} немає голосу {vid} — спершу додайте "
@@ -115,7 +122,8 @@ def build(pack_id: str, *, voices: list[str], hints: list[str] | None = None,
             "created": _now(), "note": note, "items": items}, ensure_ascii=False, indent=1))
     rep.sets, rep.bytes = len(items), path.stat().st_size
     ledger.setdefault("patches", []).append({"rev": rev, "file": str(path), "voices": voices,
-                                             "hints": hints, "at": _now(), "note": note})
+                                             "hints": hints, "at": _now(), "note": note,
+                                             **({"skip_control": True} if skip_control else {})})
     write_json(ledger_path, ledger)
     return rep
 

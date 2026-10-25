@@ -286,6 +286,7 @@ class PatchArgs(BaseModel):
     hints: str = Field(default="", description="кома-список людських джерел, що додаються")
     out: str = Field(description="тека для .zvidpatch")
     note: str = Field(default="", description="примітка")
+    skip_control: bool = Field(default=False, description="голоси не на контрольні набори: модель на них училась")
 
 
 @op("zvid.patch", summary="Доповнення пакета Зводу: новий голос чи підказка без перепакування",
@@ -299,7 +300,7 @@ def zvid_patch(a: PatchArgs) -> Envelope:
 
     try:
         rep = PT.build(a.pack, voices=_csv(a.voices), hints=_csv(a.hints), out=Path(a.out),
-                       note=a.note)
+                       note=a.note, skip_control=a.skip_control)
     except (C.ZvidError, S.SetError, OSError) as exc:
         return fail(str(exc))
     env = ok({"pack": rep.pack, "rev": rep.rev, "file": str(rep.file), "voices": rep.voices,

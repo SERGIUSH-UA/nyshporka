@@ -236,13 +236,15 @@ def patch_cmd(
     hints: str = typer.Option("", "--hints", help="кома-список людських джерел"),
     out: str = typer.Option(..., "--out", metavar="ТЕКА", help="куди покласти .zvidpatch"),
     note: str = typer.Option("", "--note", help="примітка"),
+    skip_control: bool = typer.Option(False, "--skip-control",
+                                      help="голоси не на контрольні набори (модель на них училась)"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Доповнення пакета: новий голос чи підказка без перепакування (власник)."""
     from nyshporka import ops as O
 
     env = O.call("zvid.patch", {"pack": pack, "voices": voices, "hints": hints, "out": out,
-                                "note": note})
+                                "note": note, "skip_control": skip_control})
     if _answer(env, as_json):
         return
     d = env.data

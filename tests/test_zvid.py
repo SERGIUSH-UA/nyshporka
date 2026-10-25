@@ -418,6 +418,26 @@ def test_patch_adds_a_voice_to_a_pack_in_progress(owner: W.Workspace, tmp_path: 
         PT.build(rep.id, voices=["regent_v3"], out=tmp_path / "out", ws=owner)
 
 
+def test_patch_can_spare_the_control(owner: W.Workspace, tmp_path: Path) -> None:
+    """Модель, що вчилась на контрольній сторінці, читає її майже дослівно міткою: голос туди не йде."""
+    from nyshporka.zvid import patch as PT
+
+    rep = _pack(owner, tmp_path)
+    base = tmp_path / "helper" / "zvid"
+    H.take(rep.file, base=base)
+    for name in rep.sets.values():
+        _add_voice(owner, name, "regent_v3")
+    built = PT.build(rep.id, voices=["regent_v3"], out=tmp_path / "out", ws=owner, skip_control=True)
+    with zipfile.ZipFile(built.file) as zf:
+        items = {i["set"]: i["voices"] for i in json.loads(zf.read(PT.PATCH_FILE))["items"]}
+        voiced = {n.split("/")[1] for n in zf.namelist() if n.startswith("sets/")}
+    assert items == {a: ([] if a in rep.control else ["regent_v3"]) for a in rep.sets}
+    assert voiced == set(rep.sets) - set(rep.control)
+    led = json.loads((OW.ledger_dir(owner) / f"{rep.id}.json").read_text(encoding="utf-8"))
+    assert led["patches"][-1]["skip_control"] is True
+    assert PT.apply(built.file, base=base).voices == ["regent_v3"]
+
+
 def test_portal_take_brings_patches(owner: W.Workspace, tmp_path: Path,
                                     monkeypatch: pytest.MonkeyPatch) -> None:
     import hashlib
