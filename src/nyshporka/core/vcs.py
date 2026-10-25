@@ -245,6 +245,41 @@ def _top(ws: W.Workspace) -> Path:
     return top
 
 
+def _scope(ws: W.Workspace, top: Path) -> str | None:
+    """Корінь проєкту від кореня git (`projects/<ім'я>`), якщо простір — проєкт.
+
+    🔴 Репозиторій один на Майстерню, а проєктів у ній кілька: журнал, що
+    дивиться на облік сторінок і реєстр доказів (спільні для всіх), показував би
+    у проєкті А коміти проєкту Б — з їхніми поясненнями. `None` — корінь
+    Майстерні й простір старого типу: там журнал як був.
+    """
+    if ws.project is None or ws.hub_root is None:
+        return None
+    try:
+        rel = ws.root.resolve().relative_to(top).as_posix()
+    except ValueError:
+        return None
+    return rel if rel not in ("", ".") else None
+
+
+def _under(rel: str, scope: str) -> bool:
+    return rel == scope or rel.startswith(scope + "/")
+
+
+def _own_path(ws: W.Workspace, top: Path, path: Path) -> str:
+    """Шлях файла від кореня git; у проєкті — лише власний (інакше `VcsError`).
+
+    Для `diff`/`restore`: файл Майстерні (облік сторінок, маніфест доказів) один
+    на всі проєкти, і показ чи повернення його з проєкту А зачепило б Б.
+    """
+    rel = path.resolve().relative_to(top).as_posix()
+    scope = _scope(ws, top)
+    if scope is not None and not _under(rel, scope):
+        raise VcsError("файл поза проєктом — спільний для всієї Майстерні; його "
+                       "зміст і повернення з проєкту не показують")
+    return rel
+
+
 def check_rev(rev: str) -> str:
     if not _REV.fullmatch(rev or ""):
         raise ValueError(f"мітка коміту «{rev}» — лише шістнадцяткова, з `history log`")
@@ -255,26 +290,44 @@ def log(ws: W.Workspace, path: Path | None = None,
         limit: int = 20) -> list[dict[str, Any]]:
     """Журнал файла чи теки; без шляху — усього проєктного шару зі зміненими файлами."""
     top = _top(ws)
+    scope = _scope(ws, top)
+    out: list[dict[str, Any]] = []
     if path is not None:
         rel = path.resolve().relative_to(top).as_posix()
+        if scope is not None and not _under(rel, scope):
+            # Файл Майстерні: лише коміти, що зачепили й цей проєкт. Файл
+            # іншого проєкту — відмова, а не порожній журнал.
+            if rel.startswith(W.PROJECTS_DIR + "/"):
+                raise VcsError("файл іншого проєкту Майстерні")
+            mine = set(_git(top, "log", "--format=%H", "--", scope).split())
+            raw = _git(top, "log", "-n2000", "--follow", "--date=short",
+                       "--format=%H%x09%h%x09%ad%x09%s", "--", rel)
+            for line in raw.splitlines():
+                full, rev, day, subj = [*line.split("\t", 3), "", "", ""][:4]
+                if full in mine and len(out) < limit:
+                    out.append({"rev": rev, "date": day, "subject": subj})
+            return out
         raw = _git(top, "log", f"-n{limit}", "--follow", "--date=short",
                    "--format=%h%x09%ad%x09%s", "--", rel)
-        out: list[dict[str, Any]] = []
         for line in raw.splitlines():
             rev, day, subj = [*line.split("\t", 2), "", ""][:3]
             out.append({"rev": rev, "date": day, "subject": subj})
         return out
     rels = []
-    for p in _layer(ws):
-        try:
-            rels.append(p.resolve().relative_to(top).as_posix())
-        except ValueError:
-            continue
+    if scope is not None:
+        # Лише власний шар проєкту: коміт, що зачепив самі спільні файли
+        # Майстерні, до проєкту не належить, і його пояснення тут не показують.
+        rels.append(scope)
+    else:
+        for p in _layer(ws):
+            try:
+                rels.append(p.resolve().relative_to(top).as_posix())
+            except ValueError:
+                continue
     if not rels:
         return []
     raw = _git(top, "log", f"-n{limit}", "--date=short", "--name-only",
                "--format=%x1e%h%x09%ad%x09%s", "--", *rels)
-    out = []
     for chunk in raw.split("\x1e")[1:]:
         head, _, body = chunk.partition("\n")
         rev, day, subj = [*head.split("\t", 2), "", ""][:3]
@@ -306,7 +359,7 @@ def _from_proot(ws: W.Workspace, top: Path, rel: str) -> str:
 def restore(ws: W.Workspace, path: Path, rev: str) -> str | None:
     """Повернути файл чи теку до стану `rev` — і зберегти це як новий коміт."""
     top = _top(ws)
-    rel = path.resolve().relative_to(top).as_posix()
+    rel = _own_path(ws, top, path)
     _git(top, "checkout", check_rev(rev), "--", rel)
     return save(ws, f"Повернуто {path.name} до {rev}", paths=[path])
 
@@ -340,7 +393,7 @@ def diff(ws: W.Workspace, path: Path, rev: str) -> dict[str, Any]:
     import difflib
 
     top = _top(ws)
-    rel = path.resolve().relative_to(top).as_posix()
+    rel = _own_path(ws, top, path)
     check_rev(rev)
     after = _show(top, f"{rev}:{rel}")
     before = _show(top, f"{rev}^:{rel}")

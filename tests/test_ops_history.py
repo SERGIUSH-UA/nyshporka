@@ -75,11 +75,12 @@ def test_log_files_are_from_the_project_root_not_the_git_root(space: Path) -> No
     assert d.ok and d.data["added"]
 
 
-def test_log_file_outside_the_project_is_absolute_and_diffable(space: Path) -> None:
-    """Облік сторінок і реєстр лежать у Майстерні, поза `projects/<ім'я>`.
+def test_shared_hub_file_is_not_in_the_project_journal(space: Path) -> None:
+    """Облік сторінок і реєстр лежать у Майстерні й спільні для всіх проєктів.
 
-    Шлях від кореня git для них не годився б: `history.diff` читає шлях від
-    кореня проєкту. Тож поза проєктом журнал віддає абсолютний.
+    🔴 Коміт, що зачепив лише їх, до проєкту не належить: його пояснення могло б
+    бути чужого проєкту. Журнал, показ і повернення такого файла з проєкту
+    відмовляють; детально — `test_vcs_project_scope`.
     """
     assert O.call("project.new", {"name": "sydoruk"}).ok
     proj = space / "projects" / "sydoruk"
@@ -87,16 +88,13 @@ def test_log_file_outside_the_project_is_absolute_and_diffable(space: Path) -> N
     shared = space / "data" / "pages" / "TEST" / "1-1-1.json"
     shared.parent.mkdir(parents=True, exist_ok=True)
     shared.write_text('{"pages": {}}', encoding="utf-8")
-    V.save(W.workspace(), "облік", paths=[shared])
-    rows = V.log(W.workspace(), shared, 1)
-    assert rows
+    rev = V.save(W.workspace(), "облік", paths=[shared])
+    assert rev
+    assert V.log(W.workspace(), shared, 1) == []
     whole = O.call("history.log", {}).data["rows"]
-    files = [f for r in whole for f in r["files"]]
-    hit = [f for f in files if f.endswith("TEST/1-1-1.json")]
-    assert hit, f"облік сторінок Майстерні не потрапив у журнал проєкту: {files}"
-    assert Path(hit[0]).is_absolute() and Path(hit[0]).resolve() == shared.resolve()
-    d = O.call("history.diff", {"path": hit[0], "rev": whole[0]["rev"]})
-    assert d.ok and d.data["kind"] == "text"
+    assert "облік" not in [r["subject"] for r in whole]
+    assert not any(f.endswith("TEST/1-1-1.json") for r in whole for f in r["files"])
+    assert not O.call("history.diff", {"path": str(shared), "rev": rev}).ok
     assert V._from_proot(W.workspace(), space, "data/pages/TEST/1-1-1.json") == shared.resolve().as_posix()
     assert V._from_proot(W.workspace(), space, "projects/sydoruk/x.md") == "x.md"
 
