@@ -410,6 +410,29 @@ def test_a_book_packs_with_the_book_genre(ws: Any, book: Path) -> None:
     assert env.data["skipped"] == [] and len(env.data["packs"]) == 1
 
 
+def test_a_locally_read_book_keeps_its_own_model(ws: Any, book: Path) -> None:
+    """🔴 25.10.2026: книга, прочитана Писарем на своїй машині, лягла б у пул
+    з підписом «PaddleOCR-VL, хмарний прогін»."""
+    from nyshporka import print_edition as PE
+    from nyshporka.cloud import printed as PR
+
+    out = _read(PR.out_root(), "izbir_ekat_1912", book)
+    (out / "_htr_meta.json").write_text(json.dumps(
+        {"model": "pysar_cyr_v28.pt", "engine": "parseq", "script": "cyrillic",
+         "device": "cuda:0"}), encoding="utf-8")
+    PE.record("IZBIR_EKAT", title="Список городских избирателей", city="Катеринослав",
+              issues=[("izbir_ekat_1912", book, out)], book=1912)
+
+    (y,) = PE.assemble("IZBIR_EKAT")
+    meta = json.loads((y.run_dir / "_htr_meta.json").read_text(encoding="utf-8"))
+    assert (meta["model"], meta["engine"]) == ("pysar_cyr_v28.pt", "parseq")
+    assert PE.ocr_by(meta) == "pysar_cyr_v28.pt (Нишпорка, рушій parseq)"
+    note = PE.year_note(PE.load_record("IZBIR_EKAT"), 1912, [], 3, meta)
+    assert "pysar_cyr_v28.pt" in note and "PaddleOCR" not in note
+    # Хмарний друк мети в теку номера не кладе — підпис лишається старим.
+    assert PE.ocr_by({"model": "PaddleOCR-VL-1.6-0.9B"}) == PE.OCR_BY
+
+
 def test_a_book_and_issues_never_share_a_code(ws: Any, book: Path, edition: Path) -> None:
     from nyshporka import print_edition as PE
     from nyshporka.cloud import printed as PR

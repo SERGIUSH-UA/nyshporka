@@ -231,15 +231,19 @@ def print_pack(a: PrintPackArgs) -> Envelope:
             rows = json.loads(rows_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             rows = []
+        try:
+            meta = json.loads((y.run_dir / "_htr_meta.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            meta = {}
         got = O.call("share.pack_print", {
             "src": str(y.run_dir), "vydannia": code, "year": y.year,
-            "title": rec["title"], "ocr_by": PE.OCR_BY, "ocr_layer": "ocr",
+            "title": rec["title"], "ocr_by": PE.ocr_by(meta), "ocr_layer": "ocr",
             "page_unit": "page", "publisher_place": rec["city"],
             "place": PE.places_for(rec, y.year), "doc_type": rec["doc_type"],
             "scans_url": str(rec.get("scans_url") or ""),
             "scans_label": str(rec.get("scans_label") or ""),
             "source_terms": str(rec.get("source_terms") or ""),
-            "note": PE.year_note(rec, y.year, rows, y.pages),
+            "note": PE.year_note(rec, y.year, rows, y.pages, meta),
             "issues": str(rows_path),
             "out": str(Path(a.out) / f"vyd_{code.lower()}_{y.year}.nyshtext") if a.out else "",
             "dry_run": a.dry_run})

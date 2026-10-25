@@ -25,8 +25,13 @@ from nyshporka import vydannia
 from nyshporka import vydannia_issues as VI
 
 #: Чим прочитано — так і пишеться в пакет (`ocr_by`): ворота пулу вимагають
-#: назвати джерело тексту.
+#: назвати джерело тексту. Це підпис хмарного друку; номер, прочитаний
+#: іншим рушієм, несе його в `_htr_meta.json` своєї теки (`reader_of`).
 OCR_BY = "PaddleOCR-VL 1.6 (Нишпорка, хмарний прогін)"
+#: Модель хмарного друку в меті року — `cloud.printed.MODEL`.
+PRINT_READER = {"model": "PaddleOCR-VL-1.6-0.9B", "engine": "print", "script": "print",
+                "device": "vllm"}
+_READER_KEYS = tuple(PRINT_READER)
 
 
 def editions_dir() -> Path:
@@ -394,11 +399,11 @@ def _sentence(text: str) -> str:
 
 
 def year_note(rec: dict[str, Any], year: int, rows: list[dict[str, Any]],
-              pages: int) -> str:
+              pages: int, meta: dict[str, Any] | None = None) -> str:
     """Опис року для картки в пулі: сайт показує нотатку текстом, а перелік
     номерів (`extra.publication.issues`) не показує ніде."""
     if rec.get("kind") == "book":
-        return _book_note(rec, year, pages)
+        return _book_note(rec, year, pages, meta)
     out: list[str] = []
     organ = organ_for(rec, year)
     if organ:
@@ -422,14 +427,49 @@ def year_note(rec: dict[str, Any], year: int, rows: list[dict[str, Any]],
                + f", {_n(pages, 'сторінка', 'сторінки', 'сторінок')}{span}.")
     if rec.get("holder"):
         out.append(f"Підшивка: {rec['holder']}.")
-    out.append("Текст — PaddleOCR-VL 1.6, хмарний прогін Нишпорки; номери й дати взято "
+    out.append(f"Текст — {_ocr_sentence(meta or {})}; номери й дати взято "
                "з назв тек сканів, а не з розпізнаного тексту.")
     if rec.get("note"):
         out.append(_sentence(str(rec["note"])))
     return " ".join(out)
 
 
-def _book_note(rec: dict[str, Any], year: int, pages: int) -> str:
+def ocr_by(meta: dict[str, Any]) -> str:
+    """Підпис тексту для пакета з мети зібраного року.
+
+    🔴 Не сталий рядок: 25.10.2026 перепис Молдови, прочитаний локально
+    Писарем, ліг би в пул з підписом «PaddleOCR-VL, хмарний прогін».
+    """
+    model = str(meta.get("model") or "")
+    if not model or model == PRINT_READER["model"]:
+        return OCR_BY
+    engine = str(meta.get("engine") or "")
+    return f"{model} (Нишпорка" + (f", рушій {engine}" if engine else "") + ")"
+
+
+def _ocr_sentence(meta: dict[str, Any]) -> str:
+    by = ocr_by(meta)
+    return "PaddleOCR-VL 1.6, хмарний прогін Нишпорки" if by == OCR_BY else by
+
+
+def reader_of(text_dir: Path | None) -> dict[str, Any]:
+    """Чим прочитано номер: з `_htr_meta.json` його теки, інакше — хмарний друк.
+
+    Хмарний прогін друку мети з моделлю в теку номера не кладе, тож порожнеча
+    означає саме його, як і було до 25.10.2026.
+    """
+    if text_dir is not None:
+        try:
+            meta = json.loads((text_dir / "_htr_meta.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            meta = {}
+        if isinstance(meta, dict) and meta.get("model"):
+            return {k: meta.get(k) or "" for k in _READER_KEYS}
+    return dict(PRINT_READER)
+
+
+def _book_note(rec: dict[str, Any], year: int, pages: int,
+               meta: dict[str, Any] | None = None) -> str:
     """Опис книги: без «номерів» і дат випуску — у книги їх немає."""
     out = [f"Друкована книга, {year} р."]
     if rec.get("city"):
@@ -437,7 +477,7 @@ def _book_note(rec: dict[str, Any], year: int, pages: int) -> str:
     out.append(f"У пулі {_n(pages, 'сторінка', 'сторінки', 'сторінок')}.")
     if rec.get("holder"):
         out.append(f"Примірник: {rec['holder']}.")
-    out.append("Текст — PaddleOCR-VL 1.6, хмарний прогін Нишпорки.")
+    out.append(f"Текст — {_ocr_sentence(meta or {})}.")
     if rec.get("note"):
         out.append(_sentence(str(rec["note"])))
     return " ".join(out)
@@ -670,10 +710,14 @@ def _assemble_year(rec: dict[str, Any], ed: VI.Edition, by_dir: dict[str, Path],
     pages_meta: dict[str, Any] = {}
     source: list[dict[str, Any]] = []
     missing: list[str] = []
+    readers: list[dict[str, Any]] = []
     k = 0
     issues = ed.of_year(year)
     for iss in issues:
         text_dir = by_dir.get(_norm(iss.path))
+        reader = reader_of(text_dir)
+        if reader not in readers:
+            readers.append(reader)
         for frame in iss.pages:
             k += 1
             name = f"{k:04d}"
@@ -691,10 +735,13 @@ def _assemble_year(rec: dict[str, Any], ed: VI.Edition, by_dir: dict[str, Path],
             else:
                 missing.append(f"{_label(iss)} {frame.name}")
             source.append(row)
+    # Рік з номерів, прочитаних різними рушіями, — рідкість (дочитали
+    # локально хвіст хмарної підшивки); у меті тоді обидві моделі через «+».
+    reader = {k_: " + ".join(dict.fromkeys(str(r[k_]) for r in readers if r[k_]))
+              for k_ in _READER_KEYS} if readers else dict(PRINT_READER)
     meta = {"version": 1, "case_dir": str(ed.root / str(year)),
             "case_key": vydannia.key(code, year), "frames_total": k,
-            "model": "PaddleOCR-VL-1.6-0.9B", "engine": "print", "script": "print",
-            "device": "vllm", "done": not missing, "failed": [], "missing": missing,
+            **reader, "done": not missing, "failed": [], "missing": missing,
             "pages": pages_meta, "updated": time.strftime("%Y-%m-%dT%H:%M:%S")}
     (tmp / "_htr_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1),
                                         encoding="utf-8")
