@@ -91,6 +91,49 @@ def test_the_private_build_shows_the_living_by_decade(space: Path) -> None:
     assert "дзвонила" not in page, "нотатки живих не друкуються й у приватній версії"
 
 
+def test_the_private_build_tree_and_graph_show_the_living_by_decade(space: Path) -> None:
+    import json
+
+    rep = B.build(space, public=False, html=False)
+    for fname in ("tree.json", "graph.json"):
+        data = json.loads((rep.out / "docs" / "assets" / fname).read_text(encoding="utf-8"))
+        node = next(n for n in data["nodes"] if n["id"] == "I9004")
+        assert node["name"] == "Оксана Тестова" and node["sex"] == "F", fname
+        assert node.get("anon") is not True and node["private"] is True
+        assert node["birth"] == "1970s" and node.get("photo_url") is None, fname
+        assert "1975" not in json.dumps(node) and "lived_from" not in node, fname
+
+
+def test_the_public_build_tree_and_graph_keep_the_living_anonymous(space: Path) -> None:
+    import json
+
+    rep = B.build(space, public=True, html=False)
+    assets = rep.out / "docs" / "assets"
+    for fname in ("tree.json", "graph.json"):
+        data = json.loads((assets / fname).read_text(encoding="utf-8"))
+        node = next(n for n in data["nodes"] if n["id"] == "I9004")
+        assert node["name"] == "(приватна особа)" and node["anon"] is True, fname
+    assert "Оксана" not in (assets / "tree.json").read_text(encoding="utf-8")
+
+
+def test_a_hidden_person_stays_anonymous_in_a_private_build(space: Path) -> None:
+    from nyshporka.site import render as R
+
+    raw = {"nodes": [{"id": "I9004", "name": "Оксана Тестова", "private": True, "sex": "F",
+                      "birth": 1975, "birth_decade": 1970, "death": None, "death_decade": None,
+                      "parent_ids": []},
+                     {"id": "I9003", "name": "Петро Тестовий", "private": False, "sex": "M",
+                      "birth": 1880, "birth_decade": 1880}],
+           "links": [], "families": [], "events": []}
+    out = R._redact_tree_graph(raw, {"I9004"}, public=False)
+    hid = next(n for n in out["nodes"] if n["id"] == "I9004")
+    assert hid["name"] == "(приватна особа)" and hid["birth"] is None
+    out = R._redact_graph(raw, {"I9004"}, public=False)
+    assert next(n for n in out["nodes"] if n["id"] == "I9004")["birth"] is None
+    open_ = R._redact_tree_graph(raw, set(), public=False)
+    assert next(n for n in open_["nodes"] if n["id"] == "I9004")["name"] == "Оксана Тестова"
+
+
 def test_config_groups_places_and_rejects_unknown_fields(space: Path) -> None:
     cfg_path = space / CFG.CONFIG
     cfg_path.parent.mkdir(parents=True)

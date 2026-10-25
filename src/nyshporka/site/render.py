@@ -630,7 +630,7 @@ def _build(
     if graph_src.exists():
         assets_dir.mkdir(parents=True, exist_ok=True)
         raw_graph = json.loads(graph_src.read_text(encoding="utf-8"))
-        safe = _redact_graph(raw_graph, hidden)
+        safe = _redact_graph(raw_graph, hidden, public=public)
         (assets_dir / "graph.json").write_text(
             json.dumps(safe, ensure_ascii=False), encoding="utf-8"
         )
@@ -645,7 +645,7 @@ def _build(
         assets_dir.mkdir(parents=True, exist_ok=True)
         raw_tree = json.loads(tree_src.read_text(encoding="utf-8"))
         _site_photos(raw_tree, project_root, assets_dir, public)
-        safe_tree = _redact_tree_graph(raw_tree, hidden)
+        safe_tree = _redact_tree_graph(raw_tree, hidden, public=public)
         (assets_dir / "tree.json").write_text(
             json.dumps(safe_tree, ensure_ascii=False), encoding="utf-8"
         )
@@ -1303,21 +1303,44 @@ def _anon(n: dict[str, Any], hidden: set[str] | frozenset[str]) -> dict[str, Any
     return out
 
 
-def _redact_graph(raw: dict[str, Any], hidden: set[str] | frozenset[str] = frozenset()) -> dict[str, Any]:
-    """graph.json для сайту: приватні й приховані — вузли без імені й років."""
+def _decade_view(n: dict[str, Any]) -> dict[str, Any]:
+    """Приватний у приватній збірці: ім'я, стать, зв'язки, роки до десятиліття.
+
+    Білий перелік, як і в `_anon`: нове поле вузла саме не потрапить на сайт.
+    Без фото й без кількості фактів."""
+    out = {k: v for k, v in n.items() if k in _NODE_KEEP | {"name", "sex", "initials"}}
+    out.update({"photo_url": None, "has_photo": False, "photo_stale_risk": False,
+                "fact_count": 0, "birth": n.get("birth_decade"), "death": n.get("death_decade"),
+                "birth_decade": n.get("birth_decade"), "death_decade": n.get("death_decade")})
+    return out
+
+
+def _redact_node(n: dict[str, Any], hidden: set[str] | frozenset[str], public: bool) -> dict[str, Any]:
+    """Прихований — завжди анонім; приватний — анонім у відкритій збірці, а в
+    приватній видимий з десятиліттями (контракт приватної версії)."""
+    if n.get("id") in hidden or (public and n.get("private")):
+        return _anon(n, hidden)
+    return _decade_view(n) if n.get("private") else n
+
+
+def _redact_graph(raw: dict[str, Any], hidden: set[str] | frozenset[str] = frozenset(),
+                  public: bool = True) -> dict[str, Any]:
+    """graph.json для сайту: у відкритій збірці приватні й приховані — вузли без
+    імені й років; у приватній — лише приховані (приватні з десятиліттями)."""
     private = {n["id"] for n in raw.get("nodes", []) if n.get("private")} | set(hidden)
-    nodes = [_anon(n, hidden) if n.get("id") in private else n for n in raw.get("nodes", [])]
+    nodes = [_redact_node(n, hidden, public) for n in raw.get("nodes", [])]
     events = [e for e in raw.get("events", [])
               if not (isinstance(e, dict) and e.get("person_id") in private)]
     return {"nodes": nodes, "links": raw.get("links", []), "events": events}
 
 
-def _redact_tree_graph(raw: dict[str, Any], hidden: set[str] | frozenset[str] = frozenset()) -> dict[str, Any]:
+def _redact_tree_graph(raw: dict[str, Any], hidden: set[str] | frozenset[str] = frozenset(),
+                       public: bool = True) -> dict[str, Any]:
     """tree.json для сайту: приватні й приховані — вузли без імені й років,
     родини з ними — без року шлюбу, їхні події — геть. Топологія лишається,
     інакше дерево розривається."""
     private = {n["id"] for n in raw.get("nodes", []) if n.get("private")} | set(hidden)
-    nodes = [_anon(n, hidden) if n["id"] in private else n for n in raw.get("nodes", [])]
+    nodes = [_redact_node(n, hidden, public) for n in raw.get("nodes", [])]
     families = []
     for f in raw.get("families", []):
         members = {f.get(k) for k in ("husband_id", "wife_id", "hypothetical_husband_id",
