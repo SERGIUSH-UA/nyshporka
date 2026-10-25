@@ -15,7 +15,6 @@ from nyshporka.sources.base import SourceError
 from nyshporka.sources.http import Fetcher
 
 
-
 class _Resp:
     status_code = 200
 

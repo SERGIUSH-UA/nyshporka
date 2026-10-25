@@ -24,7 +24,7 @@ def _key(rel: str):
 def test_opys_letter_from_folder(folder: str, opys: str):
     got = _key(f"data/raw/cdial_201/{folder}")
     assert got is not None
-    repo, fond, got_opys, spr = got
+    _repo, fond, got_opys, spr = got
     assert (fond, got_opys, spr) == ("201", opys, "5904")
 
 

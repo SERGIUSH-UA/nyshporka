@@ -341,7 +341,8 @@ def _same_text(have: str | None, mark: str, legacy: str) -> bool:
     Покоління записів: `at:<t>` (чинне), `at:<t>|<правила>` (24–25.10.2026,
     правила в позначці) і `<штамп>|<правила>` (до 0.37).
     """
-    return bool(have) and (have in (mark, legacy) or have.startswith(mark + "|"))
+    return have is not None and have != "" and (
+        have in (mark, legacy) or have.startswith(mark + "|"))
 
 
 def covered(conn: sqlite3.Connection, run_ids: list[int]) -> list[int]:
