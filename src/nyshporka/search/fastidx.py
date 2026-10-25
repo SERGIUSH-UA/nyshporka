@@ -71,6 +71,27 @@ WRITER_HEAP = 400_000_000
 PARALLEL_PAGES = 20_000
 #: Скільки рядків між комітами під час збірки: обрив не губить зроблене.
 COMMIT_EVERY = 2_000_000
+#: Точковий догін: скільки секунд чекати письменника, якого тримає інший процес.
+#: Чужий точковий догін — секунди; довше тримає лише повна збірка, а її чекати
+#: даремно (наглядачі хмари після кожного забору кличуть `text index --case`).
+LOCK_WAIT_SEC = 20.0
+#: Точковий догін: скільки рядків інших, ще неохоплених прогонів (їх пропустив
+#: `busy` чужого процесу) доганяється разом із названими; найменші — першими.
+CATCHUP_LINES = 600_000
+#: Рядків на один потік письменника в точковому догоні: кожен потік кладе
+#: свій сегмент, і малій справі вісім сегментів на коміт — зайве.
+LINES_PER_THREAD = 100_000
+#: Політика злиття Tantivy — типова `LogMergePolicy`; tantivy-py не вміє її ні
+#: змінити, ні злити вибрані сегменти. Тут її цифри, щоб порахувати наперед,
+#: скільки рядків перепише злиття (перевіряє `test_merge_plan_matches_tantivy`).
+MERGE_MIN_SEGMENTS = 8
+MERGE_LEVEL_LOG = 0.75
+MERGE_MIN_LAYER = 10_000
+MERGE_MAX_DOCS = 10_000_000
+#: Точковий догін чекає злиття, лише якщо воно перепише не більше стількох
+#: рядків (замір на живому сторі — у `merge_cost`); більше лишається повному
+#: догону (`text index --fast`).
+MERGE_WAIT_DOCS = 4_000_000
 
 
 def available() -> bool:
@@ -234,6 +255,13 @@ def _run_fields(rid: int) -> tuple[int, list[Fields]]:
         conn.close()
 
 
+def _point_threads(lines: int) -> int:
+    """Потоки письменника для точкового догону: не більше, ніж по `LINES_PER_THREAD`
+    рядків на потік, бо кожен потік, що встиг узяти документи, лишає свій сегмент
+    (замір 25.10.2026: 3 тис. рядків на 2 потоки — 2 сегменти на коміт)."""
+    return max(1, min(_writer_threads(), lines // LINES_PER_THREAD))
+
+
 def _writer_threads() -> int:
     """Потоки письменника від ядер: з двома `add_document` чекав на індексацію
     (замір 24.10.2026, 1,5 млн рядків: 2 потоки — 17,7 с, 8 — 12,8 с)."""
@@ -288,17 +316,32 @@ def _by_run(conn: sqlite3.Connection, todo: list[int], threads: int
 def _store_marks(conn: sqlite3.Connection) -> dict[int, tuple[str, str]]:
     """run_id → (позначка тексту, давня позначка штампом).
 
-    Позначка тексту — коли стор зібрав прогін і яким правилом склейки
-    (`at:<indexed_at>|<rules>`). 🔴 Не штамп мети: штамп стор оновлює й тоді, коли
+    Позначка тексту — коли стор зібрав прогін (`at:<indexed_at>`, з
+    мікросекундами). 🔴 Не штамп мети: штамп стор оновлює й тоді, коли
     змінилась лише мета (позначка проєкту, тека справи), а текст той самий. Доти
     така правка 9 361 прогону змушувала індекс перебудовувати їх усі — години й
     гігабайти пам'яті (23.10.2026).
 
+    🔴 І не відбиток правил. Він входив у позначку до 25.10.2026, і
+    `nysh text index --accept-rules` («правила не мінялись») міняв його на всіх
+    16 тис. прогонів — тобто «приймав» правила ціною перебудови 33 ГБ індексу.
+    Прогін, який стор справді зібрав наново, дістає новий `indexed_at`, тож
+    перебудова правилом від позначки не залежить.
+
     Давня позначка (`<штамп>|<правила>`) — те, що індекс писав до цього: запис,
     що з нею збігається, той самий текст, і переводиться без перебудови.
     """
-    return {int(r[0]): (f"at:{r[3] or ''}|{r[2] or ''}", f"{r[1]}|{r[2] or ''}")
+    return {int(r[0]): (f"at:{r[3] or ''}", f"{r[1]}|{r[2] or ''}")
             for r in conn.execute("select id, stamp, rules, indexed_at from runs")}
+
+
+def _same_text(have: str | None, mark: str, legacy: str) -> bool:
+    """Чи запис індексу `have` несе той самий текст, що позначка стору.
+
+    Покоління записів: `at:<t>` (чинне), `at:<t>|<правила>` (24–25.10.2026,
+    правила в позначці) і `<штамп>|<правила>` (до 0.37).
+    """
+    return bool(have) and (have in (mark, legacy) or have.startswith(mark + "|"))
 
 
 def covered(conn: sqlite3.Connection, run_ids: list[int]) -> list[int]:
@@ -309,59 +352,181 @@ def covered(conn: sqlite3.Connection, run_ids: list[int]) -> list[int]:
     if not st:
         return []
     now = _store_marks(conn)
-    return [rid for rid in run_ids if rid in st and st[rid] in now.get(rid, ())]
+    return [rid for rid in run_ids
+            if rid in st and rid in now and _same_text(st[rid], *now[rid])]
+
+
+def segment_docs() -> list[tuple[int, int]]:
+    """(max_doc, живих документів) кожного закоміченого сегмента; читає `meta.json`."""
+    try:
+        meta = json.loads((path() / "meta.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    out: list[tuple[int, int]] = []
+    for seg in meta.get("segments") or []:
+        top = int(seg.get("max_doc") or 0)
+        gone = int((seg.get("deletes") or {}).get("num_deleted_docs") or 0)
+        out.append((top, top - gone))
+    return out
+
+
+def merge_plan(segments: list[tuple[int, int]]) -> list[list[int]]:
+    """Що злила б типова політика Tantivy: розміри сегментів кожної групи, каскадом.
+
+    Політика: сегменти до `MERGE_MAX_DOCS` живих документів сортуються за
+    розміром і діляться на рівні (різниця log2 розміру менша за
+    `MERGE_LEVEL_LOG`; менші за `MERGE_MIN_LAYER` — один рівень); рівень від
+    `MERGE_MIN_SEGMENTS` сегментів зливається в один. Злитий сегмент може
+    набрати новий рівень, тож рахується каскад до спокою.
+    """
+    import math
+
+    pool = list(segments)
+    plan: list[list[int]] = []
+    for _ in range(64):
+        small = sorted((sg for sg in pool if sg[1] <= MERGE_MAX_DOCS),
+                       key=lambda sg: -sg[0])
+        levels: list[list[tuple[int, int]]] = []
+        top = math.inf
+        for sg in small:
+            size = math.log2(max(sg[1], MERGE_MIN_LAYER))
+            if size < top - MERGE_LEVEL_LOG:
+                top = size
+                levels.append([])
+            levels[-1].append(sg)
+        merging = [lv for lv in levels if len(lv) >= MERGE_MIN_SEGMENTS]
+        if not merging:
+            break
+        for lv in merging:
+            plan.append([sg[1] for sg in lv])
+            for sg in lv:
+                pool.remove(sg)
+            pool.append((sum(sg[0] for sg in lv), sum(sg[1] for sg in lv)))
+    return plan
+
+
+def merge_cost(segments: list[tuple[int, int]] | None = None) -> int:
+    """Скільки документів перепише злиття, яке Tantivy захоче зробити зараз.
+
+    Це число, а не кількість сегментів, бо рівні з 8 малих сегментів зливаються
+    за секунди, а рівень із 8 сегментів по 6–10 млн рядків — десятки гігабайтів і
+    години. Перше точковий догін чекає, друге лишає повному (`MERGE_WAIT_DOCS`).
+    """
+    plan = merge_plan(segment_docs() if segments is None else segments)
+    return sum(sum(group) for group in plan)
+
+
+def segments_state() -> dict[str, int]:
+    """Скільки сегментів в індексі і скільки рядків перепише чекаюче злиття."""
+    segs = segment_docs()
+    return {"segments": len(segs), "merge_pending_docs": merge_cost(segs)}
+
+
+def _lines_of(conn: sqlite3.Connection, ids: list[int]) -> dict[int, int]:
+    """Скільки рядків у прогонах за станом стору (для вибору потоків і догону)."""
+    out: dict[int, int] = {}
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        marks = ",".join("?" * len(chunk))
+        out.update({int(r): int(n or 0) for r, n in conn.execute(
+            f"select id, lines from runs where id in ({marks})", chunk)})
+    return out
+
+
+def _open_writer(index: Any, threads: int, wait: float) -> Any | None:
+    """Письменник або `None`, якщо його тримає інший процес довше за `wait` секунд."""
+    import time
+
+    deadline = time.monotonic() + wait
+    while True:
+        try:
+            return index.writer(WRITER_HEAP, threads)
+        except ValueError:
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(0.5)
 
 
 def sync(conn: sqlite3.Connection, *,
          progress: Callable[[int, int, str], None] | None = None,
-         only: set[int] | None = None) -> dict[str, Any]:
+         only: set[int] | None = None,
+         lock_wait: float = 0.0) -> dict[str, Any]:
     """Догнати індекс до стору: нові й змінені прогони — заново, зниклі — геть.
 
-    Письменник у Tantivy один на індекс; якщо його тримає інший процес, догін
-    пропускається (`busy`) — пошук тоді бере неохоплені прогони старим шляхом.
-    Індекс іншої схеми стирається й збирається з нуля.
+    Письменник у Tantivy один на індекс; якщо його тримає інший процес довше за
+    `lock_wait` секунд, догін пропускається (`busy`) — пошук тоді бере
+    неохоплені прогони старим шляхом. Індекс іншої схеми стирається й
+    збирається з нуля (лише повним догоном).
 
-    `only` — точковий догін: лише ці прогони, і БЕЗ чекання на злиття сегментів.
+    `only` — точковий догін: названі прогони плюс до `CATCHUP_LINES` рядків
+    інших неохоплених (їх пропустив чужий `busy`), і БЕЗ чекання на злиття,
+    крім дешевого (`MERGE_WAIT_DOCS`).
     🔴 Доти `text index --case <справа>` доганяв увесь корпус і чекав, поки
     Tantivy зіллє багатогігабайтні сегменти (33 ГБ, 54 сегменти): 2 хв 54 с на
     справу, що вже була в сторі, а п'ять таких викликів наглядачів разом — години
-    й переповнений диск (25.10.2026). Злиття — лише оптимізація пошуку; закомічені
-    сегменти цілі й без нього, а зливає їх повний догін (`text index` без справи,
-    `--fast`).
+    й переповнений диск (25.10.2026). Але й зовсім без злиття сегменти ростуть
+    без меж: кожен коміт — від 1 до 8 нових (по потоку письменника), і після
+    сотень справ пошук ходив би по тисячах. Тож малий каскад (`merge_cost`)
+    зливається тут же, а великий лишається повному догону (`text index --fast`)
+    і названий у відповіді (`merge_pending_docs`).
     """
     # Стирається лише індекс, який СКАЗАВ, що він іншої схеми (є `runs.json`).
     # Тека без стану — це, найпевніше, перша збірка в іншому процесі, яка ще не
     # дійшла до коміту: стерти її означало б вирвати теку з-під живого
     # письменника (рецензія 20.10.2026). Тут вирішує замок письменника нижче.
     if (path() / STATE).is_file() and _read_state().get("schema") != SCHEMA:
+        if only is not None:
+            # 🔴 Точковий догін не зносить 33 ГБ заради однієї справи: індекс
+            # лише з нею виглядав би повним, а решту корпусу пошук мовчки брав би
+            # свіпом. Стирає й збирає наново повний догін.
+            return {"added": 0, "removed": 0, "lines": 0, "busy": False, "schema_old": True}
         shutil.rmtree(path())
     index = _open(create=True)
     st = state()
     now = _store_marks(conn)
     gone = [rid for rid in st if rid not in now and (only is None or rid in only)]
     todo: list[int] = []
+    behind: list[int] = []         # неохоплене, чого точковий догін не просили
     moved = False
     for rid, (mark, legacy) in now.items():
-        if only is not None and rid not in only:
-            continue
         have = st.get(rid)
         if have == mark:
             continue
-        if have == legacy:             # давній запис, текст той самий — лише нова позначка
-            st[rid] = mark
-            moved = True
-            continue
-        todo.append(rid)
+        named = only is None or rid in only
+        if _same_text(have, mark, legacy):     # давній запис, текст той самий — лише нова позначка
+            if named:
+                st[rid] = mark
+                moved = True
+        elif named:
+            todo.append(rid)
+        else:
+            behind.append(rid)
+    catchup = 0
+    if behind:
+        sizes = _lines_of(conn, behind)
+        budget = CATCHUP_LINES
+        for rid in sorted(behind, key=lambda r: (sizes.get(r, 0), r)):
+            if sizes.get(rid, 0) > budget:
+                break
+            budget -= sizes.get(rid, 0)
+            todo.append(rid)
+            catchup += 1
     if not gone and not todo:
         if moved:
             _save_state(st)
-        return {"added": 0, "removed": 0, "lines": 0, "busy": False}
+        out: dict[str, Any] = {"added": 0, "removed": 0, "lines": 0, "busy": False}
+        if only is None and merge_cost():
+            # Догін нічого не додав, але злиття чекає: повний догін його й робить.
+            out["merged"] = _merge_now(index, lock_wait)
+        return out
     threads = _writer_threads()
-    try:
-        w = index.writer(WRITER_HEAP, threads)
-    except ValueError:
+    if only is not None:
+        threads = _point_threads(sum(_lines_of(conn, todo).values()))
+    w = _open_writer(index, threads, lock_wait)
+    if w is None:
         return {"added": 0, "removed": 0, "lines": 0, "busy": True}
     lines = since = 0
+    cheap = True
     try:
         for rid in [*gone, *todo]:
             w.delete_documents_by_term("run", rid)
@@ -382,7 +547,9 @@ def sync(conn: sqlite3.Connection, *,
         for rid in gone:
             st.pop(rid, None)
         w.commit()
-        if only is None:
+        _save_state(st)
+        cheap = only is None or merge_cost() <= MERGE_WAIT_DOCS
+        if cheap:
             w.wait_merging_threads()
         else:
             del w               # відпустити замок письменника одразу, злиття не чекаючи
@@ -390,8 +557,21 @@ def sync(conn: sqlite3.Connection, *,
         with contextlib.suppress(Exception):
             w.rollback()
         raise
-    _save_state(st)
-    return {"added": len(todo), "removed": len(gone), "lines": lines, "busy": False}
+    out = {"added": len(todo), "removed": len(gone), "lines": lines, "busy": False,
+           "catchup": catchup}
+    if not cheap:
+        out["merge_pending_docs"] = merge_cost()
+    return out
+
+
+def _merge_now(index: Any, lock_wait: float) -> bool:
+    """Порожній коміт, щоб Tantivy взявся за чекаючі злиття, і чекання на них."""
+    w = _open_writer(index, 1, lock_wait)
+    if w is None:
+        return False
+    w.commit()
+    w.wait_merging_threads()
+    return True
 
 
 def query_terms(stems: list[str]) -> list[tuple[str, str, int]]:
@@ -596,4 +776,4 @@ def candidates(stems: list[str], run_ids: list[int] | None = None
 
 
 __all__ = ["SCHEMA", "TooBroad", "available", "by_run", "candidates", "covered", "exists", "known",
-           "path", "query_terms", "state", "sync"]
+           "merge_cost", "merge_plan", "path", "query_terms", "segments_state", "state", "sync"]

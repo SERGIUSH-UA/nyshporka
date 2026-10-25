@@ -97,7 +97,8 @@ def index_cmd(
                   f"{d['runs']} · сторінок {d['pages']} · {_mb(d['bytes'])}")
     fx = d.get("fast")
     if fx and not fx.get("busy") and not fx.get("error"):
-        console.print(f"⚡ швидкий індекс: додано прогонів {fx['added']}, прибрано "
+        extra = f" (з них {fx['catchup']} — доганяння пропущених)" if fx.get("catchup") else ""
+        console.print(f"⚡ швидкий індекс: додано прогонів {fx['added']}{extra}, прибрано "
                       f"{fx['removed']}, рядків {fx['lines']}")
     _notes(env)
 

@@ -157,8 +157,10 @@ class TextIndexArgs(BaseModel):
                                description="прийняти чинний відбиток правил без перебудови "
                                            "(правила не мінялись)")
     fast: bool = Field(default=False,
-                       description="зібрати або догнати швидкий індекс Tantivy (nyshporka[fast]); "
-                                   "наявний індекс доганяється й без прапорця")
+                       description="зібрати або догнати ВЕСЬ швидкий індекс Tantivy "
+                                   "(nyshporka[fast]) і злити його сегменти; зі справою "
+                                   "(`--case`) індекс і так доганяється точково, без "
+                                   "злиття великих сегментів")
 
 
 @op("text.index", summary="Зібрати текстовий стор — один раз довго, далі швидко",
@@ -189,8 +191,13 @@ def text_index(a: TextIndexArgs) -> Envelope:
             return fail(str(exc))
     else:
         runs = [c["name"] for c in S.list_cases()]
-    built = sum(1 for _ in ST.ensure_all(runs, force=a.rebuild, reset_rules=not a.case))
-    st = ST.stats()
+    # 🔴 Для названої справи FTS не оптимізується ніколи: `optimize` зливає ВСІ
+    # сегменти стору під замком на запис, і `--rebuild --case X` на сторі в 52 ГБ
+    # висів понад дві хвилини (убито), тримаючи замок для наглядачів хмари
+    # (25.10.2026). Те саме чекало б будь-яку справу від 50 прогонів.
+    built = sum(1 for _ in ST.ensure_all(runs, force=a.rebuild, reset_rules=not a.case,
+                                         optimize=False if a.case else None))
+    st = ST.stats(runs if a.case else None)
     # Справа названа й `--fast` не просили — догнати швидкий індекс лише для неї
     # (`fastidx.sync`, параметр `only`): повний догін і злиття — без справи.
     fast = _fast_sync(a.fast, runs if a.case and not a.fast else None)
@@ -199,7 +206,18 @@ def text_index(a: TextIndexArgs) -> Envelope:
     env = ok({"built": built, "asked": len(runs), **st, "fast": fast})
     if fast and fast.get("busy"):
         env.warn("fast_busy", "швидкий індекс зараз доганяє інша сесія — цього разу "
-                              "не доганявся; неохоплені прогони пошук бере свіпом")
+                              "не доганявся; неохоплені прогони пошук бере свіпом, а "
+                              "наступний `text index --case …` (будь-якої справи) їх доганяє")
+    if fast and fast.get("schema_old"):
+        env.warn("fast_schema_old", "швидкий індекс іншої схеми: точково його не оновити — "
+                                    "`nysh text index --fast` збере його наново (години); "
+                                    "до того пошук іде свіпом")
+    if fast and fast.get("merge_pending_docs"):
+        env.warn("fast_merge_due",
+                 f"у швидкому індексі чекає злиття сегментів ({fast['merge_pending_docs']:_} "
+                 f"рядків) — точковий догін його не чекає; зливає `nysh text index --fast`, "
+                 f"коли ніхто не шукає (хвилини-години, потрібне вільне місце на диску "
+                 f"під копії сегментів)".replace("_", " "))
     if fast and fast.get("error"):
         env.warn("fast_failed", f"швидкий індекс не догнано ({fast['error']}); пошук "
                                 f"неохоплені прогони бере свіпом")
@@ -240,7 +258,7 @@ def _fast_state() -> dict[str, Any] | None:
     finally:
         conn.close()
     return {"schema": FX.SCHEMA, "fresh": FX.exists(), "runs": len(runs),
-            "covered": covered, "behind": covered < len(runs)}
+            "covered": covered, "behind": covered < len(runs), **FX.segments_state()}
 
 
 def _fast_sync(wanted: bool, runs: list[str] | None = None) -> dict[str, Any] | Envelope | None:
@@ -269,7 +287,7 @@ def _fast_sync(wanted: bool, runs: list[str] | None = None) -> dict[str, Any] | 
             marks = ",".join("?" * len(runs))
             only = {int(r) for (r,) in conn.execute(
                 f"select id from runs where run in ({marks})", runs)} if runs else set()
-        return FX.sync(conn, only=only)
+        return FX.sync(conn, only=only, lock_wait=FX.LOCK_WAIT_SEC)
     except Exception as exc:  # стор зібрано; індекс лише прискорює
         # Збій індексу не губить зробленого стором: результат `text index` іде
         # далі, а про індекс — попередження (рецензія 20.10.2026).

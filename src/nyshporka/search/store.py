@@ -973,14 +973,22 @@ def stale_count(runs: list[str], conn: sqlite3.Connection | None = None) -> int:
     return sum(1 for r in runs if not st[r] or known.get(r) != st[r])
 
 
-def stats() -> dict[str, Any]:
-    """Скільки прогонів у сторі, скільки застаріло, скільки важить."""
+def stats(only: list[str] | None = None) -> dict[str, Any]:
+    """Скільки прогонів у сторі, скільки застаріло, скільки важить.
+
+    `only` — лише ці прогони (`text index --case`): перелік корпусу й штампи
+    16 тис. прогонів коштували ~0,7 с із 2,5 на справу, що вже в сторі.
+    Розмір, сторінки й рядки лишаються стору цілого.
+    """
     from nyshporka import htr_store as S
 
-    try:
-        runs = [c["name"] for c in S.list_cases()]
-    except Exception:
-        runs = []
+    if only is not None:
+        runs = list(only)
+    else:
+        try:
+            runs = [c["name"] for c in S.list_cases()]
+        except Exception:
+            runs = []
     p = path()
     if not p.is_file():
         return {"runs": len(runs), "indexed": 0, "stale": len(runs), "bytes": 0,
