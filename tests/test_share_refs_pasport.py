@@ -101,6 +101,36 @@ def test_agad_z_pasporta_fetched_url(tmp_path: Path) -> None:
         {"source": "agad", "ref": "mk:183", "url": AGAD_DIR}]
 
 
+ZES_DIR = "http://agadd2.home.net.pl/metrykalia/999/sygn.%2042/indeks.htm"
+
+
+def test_agad_metrychnyi_zespil_perelik_i_kadr() -> None:
+    """Метричний зеспіл: перелік, кадр і обидва хости дають одну зйомку."""
+    want = {"source": "agad", "ref": "zespol:999:42", "url": ZES_DIR}
+    assert _ref_z_adresy(ZES_DIR) == want
+    assert _ref_z_adresy("http://agadd.home.net.pl/metrykalia/999/sygn.%2042/indeks.htm") == want
+    assert _ref_z_adresy("http://agadd2.home.net.pl/metrykalia/999/sygn. 42/") == want
+    assert _ref_z_adresy(
+        "http://agadd2.home.net.pl/metrykalia/999/sygn.%2042/0001.jpg") == want
+    assert _refs_from_links([{"url": ZES_DIR, "role": "scans"}]) == [want]
+
+
+def test_agad_metrychnyi_zespil_chuzhe_ne_chipaie() -> None:
+    assert _ref_z_adresy("http://agadd2.home.net.pl/metrykalia/999/") is None
+    assert _ref_z_adresy("https://agad.gov.pl/metrykalia/999/sygn.%2042/indeks.htm") is None
+    # Метрика Коронна лишається своєю гілкою.
+    assert _ref_z_adresy(AGAD_DIR)["ref"] == "mk:183"  # type: ignore[index]
+
+
+def test_agad_zespil_ref_nazad() -> None:
+    from nyshporka.core import agad
+
+    assert agad.zespol_from_ref("zespol:999:42").url == ZES_DIR  # type: ignore[union-attr]
+    assert agad.zespol_from_ref("agad:zespol:999:42") == agad.Zespol(999, "42")
+    assert agad.zespol_from_ref("zespol:0:42") is None
+    assert agad.zespol_from_ref("mk:183") is None
+
+
 def test_agad_ref_nazad() -> None:
     from nyshporka.core import agad
 

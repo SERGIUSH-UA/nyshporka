@@ -372,6 +372,10 @@ def _ref_z_adresy(url: str) -> dict[str, str] | None:
     book = agad.from_url(url)
     if book is not None:
         return {"source": agad.SOURCE, "ref": book.ref, "url": book.url}
+    # Той самий сервер, метричні зеспіли: зйомка — одиниця зеспілу.
+    zes = agad.zespol_from_url(url)
+    if zes is not None:
+        return {"source": agad.SOURCE, "ref": zes.ref, "url": zes.url}
     # Hungaricana: зйомка — том бібліотеки порталу (переглядач чи тека на CDN).
     from nyshporka.core import hungaricana
 
