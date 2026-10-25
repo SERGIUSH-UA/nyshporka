@@ -1029,8 +1029,16 @@ def _frames_removed(d: Path, dirs: tuple[str, ...] = ()) -> bool:
     паспорт каже оп.1, дістали ключ з `_`, а цитування замовнику
     (`_split.json` лежить при паспорті) вело в теку без нього.
     Порожня тека-картка опису такою не є: позначка мусить бути явною.
+
+    Так само явна — маніфест кадрів у бакеті (`_r2_frames.json`): справу взяли
+    «лише прогнати», кадри лягли архівами хмари й на диск не приходили. Без
+    цього її прогін лишався нерозв'язаним — текст є, а справа «не прочитана».
     """
+    from nyshporka.cloud.verify import REMOTE_FRAMES
+
     if (d / _OFFLOAD_MARKER).is_file() or any((d / s / _OFFLOAD_MARKER).is_file() for s in dirs):
+        return True
+    if (d / REMOTE_FRAMES).is_file():
         return True
     for name in ("_source.json", "meta.json"):
         f = d / name

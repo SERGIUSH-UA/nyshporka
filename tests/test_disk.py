@@ -280,6 +280,19 @@ def test_vse_prochytane_sprava_staie_zniatoiu(ws: W.Workspace, svit: dict[str, A
     assert _frames_removed(d), "бібліотека бачить справу як «знято», а не як зниклу"
 
 
+def test_sprava_kadry_v_bakheti_ye_spravoiu(ws: W.Workspace) -> None:
+    """Ціль «прогнати»: кадри в бакеті, у теці лише маніфест і паспорт — справа не зникає."""
+    from nyshporka.cloud.verify import REMOTE_FRAMES
+    from nyshporka.library import _frames_removed
+
+    (ws.root / REL).mkdir(parents=True, exist_ok=True)
+    d = _sprava(ws.root, ())
+    assert not _frames_removed(d), "порожня тека з паспортом — ще не справа без кадрів"
+    (d / REMOTE_FRAMES).write_text(json.dumps({"frames": [{"name": "0001.jpg"}], "parts": []}),
+                                   encoding="utf-8")
+    assert _frames_removed(d), "тека з маніфестом бакета — справа, кадри якої в хмарі"
+
+
 def test_jpeg_u_tetsi_jpg_u_prohoni_znimaietsia(ws: W.Workspace, svit: dict[str, Any]) -> None:
     """Розпакований ZIP лишив `.jpeg`, стискання перед хмарою записало `.jpg`."""
     d = _sprava(ws.root, ("0001.jpeg", "0002.jpeg", "0003.png"))
