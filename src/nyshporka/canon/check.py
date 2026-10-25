@@ -677,15 +677,46 @@ def _evidence(c: Canon, r: Report, hash_evidence: bool) -> None:
             continue
         target = rec.get("secured_to") or key
         f = resolve(target)
+        cited = rec.get("cited_by") or []
+        foreign = _foreign_owners(root, cited)
         if not f.is_file():
-            r.add("ERROR", "manifest_missing", target,
-                  f"у маніфесті є, на диску немає (cited_by {rec.get('cited_by') or []})")
+            if foreign:
+                r.add("WARN", "manifest_missing_foreign", target,
+                      f"чужий доказ: цитує лише проєкт {', '.join(foreign)} — "
+                      f"ця перевірка його не лагодить (cited_by {cited})",
+                      say="Доказ чужого проєкту Майстерні відсутній на диску")
+            else:
+                r.add("ERROR", "manifest_missing", target,
+                      f"у маніфесті є, на диску немає (cited_by {cited})")
             continue
         if hash_evidence and rec.get("sha256"):
             got = hashlib.sha256(f.read_bytes()).hexdigest()
             if got != rec["sha256"]:
-                r.add("ERROR", "manifest_hash", target,
-                      f"sha256 у маніфесті {rec['sha256'][:12]}…, на диску {got[:12]}…")
+                msg = f"sha256 у маніфесті {rec['sha256'][:12]}…, на диску {got[:12]}…"
+                if foreign:
+                    r.add("WARN", "manifest_hash_foreign", target,
+                          f"чужий доказ: цитує лише проєкт {', '.join(foreign)} — "
+                          f"ця перевірка його не лагодить ({msg})",
+                          say="Хеш доказу чужого проєкту Майстерні розійшовся з диском")
+                else:
+                    r.add("ERROR", "manifest_hash", target, msg)
+
+
+def _foreign_owners(root: Path, cited: list[object]) -> list[str]:
+    """Проєкти з `cited_by`, якщо доказ цитують ЛИШЕ вони, а не цей проєкт.
+
+    Маніфест один на Майстерню: чужий зламаний доказ не мусить валити перевірку
+    (і збірку сайту) цього проєкту. Порожній `cited_by` (власник невідомий) і
+    корінь старого типу без проєктів — як раніше, ERROR: тоді повертається `[]`.
+    """
+    from nyshporka.canon import refs as R
+
+    if R.project_id(root) is None or not cited:
+        return []
+    entries = [x for x in cited if isinstance(x, str)]
+    if not entries or any(R.owns(root, x) for x in entries):
+        return []
+    return sorted({x.split(":", 1)[0] if ":" in x else x for x in entries})
 
 
 def _orphans(c: Canon, r: Report) -> None:

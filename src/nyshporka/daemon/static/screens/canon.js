@@ -59,6 +59,7 @@ const ISSUE_KIND = {
   chronology: 'dates', conflict: 'dup', duplicate_fact: 'dup', duplicate_id: 'dup',
   maybe_living: 'living', uncited: 'proof', weak_confirmed: 'proof', evidence_missing: 'proof',
   not_a_path: 'proof', manifest: 'proof', manifest_missing: 'proof', manifest_hash: 'proof',
+  manifest_missing_foreign: 'proof', manifest_hash_foreign: 'proof',
   hypothetical_unlinked: 'hyp', disputed_unlinked: 'hyp', wikilink: 'ref', sex: 'sex',
   schema: 'file', unreadable: 'file', file_name: 'file', regions: 'file',
 };

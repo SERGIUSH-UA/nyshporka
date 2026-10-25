@@ -518,3 +518,62 @@ def test_search_hit_cut_into_canon_is_marked(space: Path) -> None:
     assert res["hits"][0]["in_canon"] == [{"project": "kovalchuk", "name": "kovalchuk",
                                            "card": "I9002"}]
     assert "in_canon" not in res["hits"][1] and "in_canon" not in res["hits"][2]
+
+
+def _hub_project(tmp_path: Path, cited_by: list[str]) -> tuple[Path, Path]:
+    """Майстерня з проєктом `rid-nash`; у спільному маніфесті — один зниклий файл."""
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    (hub / W.MARKER).write_text('[workspace]\nschema = 1\nname = "h"\n', encoding="utf-8")
+    root = hub / W.PROJECTS_DIR / "rid-nash"
+    root.mkdir(parents=True)
+    (root / W.MARKER).write_text('[project]\nname = "Ткачів"\nkind = "family"\n',
+                                 encoding="utf-8")
+    man = C.manifest_path(root)
+    man.parent.mkdir(parents=True, exist_ok=True)
+    gone = "data/source/citations/test/gone.pdf"
+    man.write_text(json.dumps({gone: {"secured_to": gone, "cited_by": cited_by}}),
+                   encoding="utf-8")
+    return hub, root
+
+
+def test_foreign_only_missing_evidence_is_a_warning(tmp_path: Path) -> None:
+    _, root = _hub_project(tmp_path, ["rid-sosidy:I9037.md"])
+    rep = C.check(root)
+    assert "manifest_missing" not in _codes(rep, "ERROR")
+    assert _codes(rep, "WARN") == ["manifest_missing_foreign"]
+    assert "rid-sosidy" in next(i.text for i in rep.issues
+                                   if i.code == "manifest_missing_foreign")
+
+
+def test_own_cited_missing_evidence_stays_an_error(tmp_path: Path) -> None:
+    _, root = _hub_project(tmp_path, ["rid-sosidy:I9037.md", "rid-nash:I9001.md"])
+    assert "manifest_missing" in _codes(C.check(root), "ERROR")
+
+
+def test_unknown_owner_missing_evidence_stays_an_error(tmp_path: Path) -> None:
+    _, root = _hub_project(tmp_path, [])
+    assert "manifest_missing" in _codes(C.check(root), "ERROR")
+
+
+def test_foreign_hash_mismatch_is_a_warning(tmp_path: Path) -> None:
+    hub, root = _hub_project(tmp_path, ["rid-sosidy:I9037.md"])
+    f = hub / "data/source/citations/test/gone.pdf"
+    f.parent.mkdir(parents=True)
+    f.write_bytes(b"x")
+    man = C.manifest_path(root)
+    rec = json.loads(man.read_text(encoding="utf-8"))
+    rec["data/source/citations/test/gone.pdf"]["sha256"] = "0" * 64
+    man.write_text(json.dumps(rec), encoding="utf-8")
+    rep = C.check(root, hash_evidence=True)
+    assert "manifest_hash" not in _codes(rep, "ERROR")
+    assert "manifest_hash_foreign" in _codes(rep, "WARN")
+
+
+def test_no_project_workspace_keeps_error_for_foreign_looking_cited_by(family: Path) -> None:
+    E.manifest_path(family).parent.mkdir(parents=True, exist_ok=True)
+    E.manifest_path(family).write_text(json.dumps({
+        "data/source/citations/test/gone.pdf": {
+            "secured_to": "data/source/citations/test/gone.pdf",
+            "cited_by": ["rid-sosidy:I9037.md"]}}), encoding="utf-8")
+    assert "manifest_missing" in _codes(C.check(family), "ERROR")
