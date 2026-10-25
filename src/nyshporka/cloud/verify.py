@@ -91,7 +91,7 @@ class Completeness:
 REMOTE_FRAMES = "_r2_frames.json"
 
 
-def remote_frames(case_dir: Path) -> list[dict]:
+def remote_frames(case_dir: Path) -> list[dict[str, Any]]:
     """Кадри з маніфесту — лише коли самих кадрів у теці немає; інакше `[]`."""
     case_dir = Path(case_dir)
     path = case_dir / REMOTE_FRAMES
