@@ -574,3 +574,40 @@ def test_entries_written_with_stamps_move_to_the_text_mark_without_a_rebuild(spa
         assert all(v.startswith("at:") for v in FX.state().values())
     finally:
         conn.close()
+
+
+def test_a_scoped_sync_takes_only_the_named_runs(space: Path) -> None:
+    """`text index --case X` доганяє швидкий індекс лише для X: доти він доганяв
+    увесь корпус і чекав на злиття сегментів — хвилини на кожну справу
+    (25.10.2026). Решта прогонів лишається неохопленою до повного догону."""
+    from nyshporka.search import fastidx as FX
+    from nyshporka.search import store as ST
+
+    assert list(ST.ensure_all(["проба", "чужий"])) == ["проба", "чужий"]
+    conn = ST.connect()
+    try:
+        ids = {r: int(i) for i, r in conn.execute("select id, run from runs")}
+        got = FX.sync(conn, only={ids["проба"]})
+        assert got["added"] == 1
+        assert FX.covered(conn, list(ids.values())) == [ids["проба"]]
+        full = FX.sync(conn)
+        assert full["added"] == 1, "повний догін бере те, що точковий лишив"
+        assert sorted(FX.covered(conn, list(ids.values()))) == sorted(ids.values())
+    finally:
+        conn.close()
+
+
+def test_text_index_for_a_case_does_not_touch_other_runs(space: Path) -> None:
+    from nyshporka.ops_text import _fast_sync
+    from nyshporka.search import fastidx as FX
+    from nyshporka.search import store as ST
+
+    list(ST.ensure_all(["проба", "чужий"]))
+    got = _fast_sync(True, ["чужий"])
+    assert got["added"] == 1 and not got.get("error")
+    conn = ST.connect()
+    try:
+        ids = {r: int(i) for i, r in conn.execute("select id, run from runs")}
+        assert FX.covered(conn, list(ids.values())) == [ids["чужий"]]
+    finally:
+        conn.close()

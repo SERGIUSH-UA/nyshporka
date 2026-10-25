@@ -313,12 +313,21 @@ def covered(conn: sqlite3.Connection, run_ids: list[int]) -> list[int]:
 
 
 def sync(conn: sqlite3.Connection, *,
-         progress: Callable[[int, int, str], None] | None = None) -> dict[str, Any]:
+         progress: Callable[[int, int, str], None] | None = None,
+         only: set[int] | None = None) -> dict[str, Any]:
     """Догнати індекс до стору: нові й змінені прогони — заново, зниклі — геть.
 
     Письменник у Tantivy один на індекс; якщо його тримає інший процес, догін
     пропускається (`busy`) — пошук тоді бере неохоплені прогони старим шляхом.
     Індекс іншої схеми стирається й збирається з нуля.
+
+    `only` — точковий догін: лише ці прогони, і БЕЗ чекання на злиття сегментів.
+    🔴 Доти `text index --case <справа>` доганяв увесь корпус і чекав, поки
+    Tantivy зіллє багатогігабайтні сегменти (33 ГБ, 54 сегменти): 2 хв 54 с на
+    справу, що вже була в сторі, а п'ять таких викликів наглядачів разом — години
+    й переповнений диск (25.10.2026). Злиття — лише оптимізація пошуку; закомічені
+    сегменти цілі й без нього, а зливає їх повний догін (`text index` без справи,
+    `--fast`).
     """
     # Стирається лише індекс, який СКАЗАВ, що він іншої схеми (є `runs.json`).
     # Тека без стану — це, найпевніше, перша збірка в іншому процесі, яка ще не
@@ -329,10 +338,12 @@ def sync(conn: sqlite3.Connection, *,
     index = _open(create=True)
     st = state()
     now = _store_marks(conn)
-    gone = [rid for rid in st if rid not in now]
+    gone = [rid for rid in st if rid not in now and (only is None or rid in only)]
     todo: list[int] = []
     moved = False
     for rid, (mark, legacy) in now.items():
+        if only is not None and rid not in only:
+            continue
         have = st.get(rid)
         if have == mark:
             continue
@@ -371,7 +382,10 @@ def sync(conn: sqlite3.Connection, *,
         for rid in gone:
             st.pop(rid, None)
         w.commit()
-        w.wait_merging_threads()
+        if only is None:
+            w.wait_merging_threads()
+        else:
+            del w               # відпустити замок письменника одразу, злиття не чекаючи
     except BaseException:
         with contextlib.suppress(Exception):
             w.rollback()

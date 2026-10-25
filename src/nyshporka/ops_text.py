@@ -191,7 +191,9 @@ def text_index(a: TextIndexArgs) -> Envelope:
         runs = [c["name"] for c in S.list_cases()]
     built = sum(1 for _ in ST.ensure_all(runs, force=a.rebuild, reset_rules=not a.case))
     st = ST.stats()
-    fast = _fast_sync(a.fast)
+    # Справа названа й `--fast` не просили — догнати швидкий індекс лише для неї
+    # (`fastidx.sync`, параметр `only`): повний догін і злиття — без справи.
+    fast = _fast_sync(a.fast, runs if a.case and not a.fast else None)
     if isinstance(fast, Envelope):
         return fast
     env = ok({"built": built, "asked": len(runs), **st, "fast": fast})
@@ -241,7 +243,7 @@ def _fast_state() -> dict[str, Any] | None:
             "covered": covered, "behind": covered < len(runs)}
 
 
-def _fast_sync(wanted: bool) -> dict[str, Any] | Envelope | None:
+def _fast_sync(wanted: bool, runs: list[str] | None = None) -> dict[str, Any] | Envelope | None:
     """Догнати швидкий індекс: на прохання (`--fast`) або коли він уже є.
 
     🔴 Наявний індекс доганяється завжди, а не лише з прапорцем: індекс, що
@@ -262,7 +264,12 @@ def _fast_sync(wanted: bool) -> dict[str, Any] | Envelope | None:
                     + how_to_update(add=("fast",)))
     conn = ST.connect()
     try:
-        return FX.sync(conn)
+        only = None
+        if runs is not None:
+            marks = ",".join("?" * len(runs))
+            only = {int(r) for (r,) in conn.execute(
+                f"select id from runs where run in ({marks})", runs)} if runs else set()
+        return FX.sync(conn, only=only)
     except Exception as exc:  # стор зібрано; індекс лише прискорює
         # Збій індексу не губить зробленого стором: результат `text index` іде
         # далі, а про індекс — попередження (рецензія 20.10.2026).
