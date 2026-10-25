@@ -938,7 +938,8 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
                             "їх не поверне; докачайте кадри в теку або поверніть до заливки")
     say("frames", f"{rep.n} кадрів · {rep.total_mb:.0f} МБ "
                   f"(медіана {rep.median_mb:.1f} МБ)", **rep.as_dict())
-    if rep.bad:
+    # кадри в бакеті: записи `_fs_meta.json` без файлів на диску — норма, не биті кадри
+    if rep.bad and not remote:
         raise GoRefused(
             f"битих кадрів {len(rep.bad)}: " + "; ".join(rep.bad[:5])
             + (" …" if len(rep.bad) > 5 else "") + ". Докачайте їх і повторіть.")
