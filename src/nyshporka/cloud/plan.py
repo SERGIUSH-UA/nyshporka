@@ -249,6 +249,9 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
     if not case.is_dir():
         raise PlanError(f"теки немає: {case}")
     frames = frames_in(case)
+    from nyshporka.cloud.verify import remote_frames
+
+    remote = [] if frames else remote_frames(case)
     bokom = ""
     if frames:
         # Кадри, які версія до 0.27 розгорнула з повернутих сторінок PDF боком:
@@ -256,7 +259,7 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
         from nyshporka.htr import bokovi
 
         bokom = bokovi.rozvernuty(case, plan=True).message()
-    if not frames:
+    if not frames and not remote:
         # Та сама справа-PDF, що й у локальному читанні (`htr/run.py:plan`):
         # розгортаємо в кадри тут, у доведеній нумерації. Вбудовані JPEG
         # важать стільки ж, скільки сам PDF, тож заливка не роздувається.
@@ -265,7 +268,7 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
         if pdfpage.case_pdfs(case):
             pdfpage.vytiahnuty_kadry(case)
             frames = frames_in(case)
-    if not frames:
+    if not frames and not remote:
         nested = [d.name for d in case.iterdir()
                   if d.is_dir() and any(x.is_file() for x in d.iterdir())]
         if nested:
@@ -435,7 +438,10 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
         run_id=run_id_for(case, model=weights.name, script=scr, backend=backend),
         case_dir=case, out_dir=out, model=weights, voice=voice, extra_voices=extra,
         script=scr,
-        frames=len(frames), bytes_in=_bytes_of(frames), backend=backend,
+        # кадри в бакеті (маніфест): обсяг і число — з нього
+        frames=len(frames) or len(remote),
+        bytes_in=_bytes_of(frames) or sum(int(f.get("size") or 0) for f in remote),
+        backend=backend,
         fresh_machine=_rents(backend),
         target=target, case_key=key, case_key_why=why, warnings=warnings,
         budget_usd=budget_usd, max_hours=max_hours,

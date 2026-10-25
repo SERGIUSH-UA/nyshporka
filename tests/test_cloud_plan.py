@@ -664,3 +664,47 @@ def test_keyless_folder_gets_the_previous_run_as_a_segmentation_seed(
     assert (got.base_out is not None) == sibling
     found = SEG.inspect(case, SEG.frames_of(case), base_out=got.base_out or got.out_dir)
     assert found.usable and found.covered == 3, found.why
+
+
+# ── кадри вже в бакеті (маніфест замість кадрів) ────────────────────────────
+def _remote_case(space: Path, monkeypatch, n: int = 4) -> Path:
+    """Тека справи без кадрів, лише з маніфестом `REMOTE_FRAMES`."""
+    import json
+
+    from nyshporka.cloud.verify import REMOTE_FRAMES
+
+    case = _wire_case(space, monkeypatch, name="spr-remote")
+    for f in case.glob("*.jpg"):
+        f.unlink()
+    frames = [{"name": f"{i:04d}.jpg", "size": 900_000, "w": 2300, "h": 3100} for i in range(1, n + 1)]
+    (case / REMOTE_FRAMES).write_text(json.dumps(
+        {"frames": frames, "parts": [{"key": "cases/spr-remote.tar",
+                                      "frames": [f["name"] for f in frames]}]}), encoding="utf-8")
+    return case
+
+
+def test_plan_takes_frames_in_the_bucket_from_the_manifest(space: Path, monkeypatch) -> None:
+    from nyshporka.cloud import plan as PL
+    from nyshporka.cloud.verify import remote_frames
+
+    case = _remote_case(space, monkeypatch)
+    assert len(remote_frames(case)) == 4
+    got = PL.build(case, script="cyrillic")
+    assert (got.frames, got.bytes_in) == (4, 3_600_000)
+
+
+def test_local_frames_win_over_the_manifest(space: Path, monkeypatch) -> None:
+    from nyshporka.cloud.verify import remote_frames
+
+    case = _remote_case(space, monkeypatch)
+    (case / "0001.jpg").write_bytes(b"\0" * 10)
+    assert remote_frames(case) == []
+
+
+def test_library_counts_frames_of_a_case_whose_frames_are_in_the_bucket(space: Path,
+                                                                        monkeypatch) -> None:
+    from nyshporka.cases import collect
+
+    case = _remote_case(space, monkeypatch, n=7)
+    monkeypatch.setattr(collect, "case_base", lambda: space)
+    assert collect._count_frames_exact(case.name) == (7, True)

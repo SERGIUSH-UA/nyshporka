@@ -71,7 +71,8 @@ class Leg:
         from nyshporka.cloud.verify import frames_in
 
         if self.pack == self.source:
-            return self.frames.total_mb
+            # кадри в бакеті (маніфест): локально 0, обсяг — з плану
+            return self.frames.total_mb or self.plan.bytes_in / 1e6
         return sum(f.stat().st_size for f in frames_in(self.pack)) / 1e6
 
 

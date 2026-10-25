@@ -84,6 +84,27 @@ class Completeness:
                 f"({self.source}){tail}{q}")
 
 
+#: Кадри справи вже в бакеті: їх туди поклав той, хто їх качав (наприклад,
+#: завантажувач на сервері), щоб вони не йшли через домашній канал. У теці справи
+#: лишається цей маніфест — імена, розміри, ширина й висота кадрів і ключі
+#: архівів. Формат і план без пакування — `gpurunner.htr.plan_build.REMOTE_FRAMES`.
+REMOTE_FRAMES = "_r2_frames.json"
+
+
+def remote_frames(case_dir: Path) -> list[dict]:
+    """Кадри з маніфесту — лише коли самих кадрів у теці немає; інакше `[]`."""
+    case_dir = Path(case_dir)
+    path = case_dir / REMOTE_FRAMES
+    if not path.is_file() or frames_in(case_dir):
+        return []
+    import json
+
+    try:
+        return list(json.loads(path.read_text(encoding="utf-8")).get("frames") or [])
+    except (OSError, ValueError):
+        return []
+
+
 def frames_in(case_dir: Path) -> list[Path]:
     """Кадри прямо в теці. Підтеки не рахуються — їх не бачить і раннер."""
     case_dir = Path(case_dir)

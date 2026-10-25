@@ -386,8 +386,19 @@ def _frames_index(scans: list[Any]) -> dict[str, tuple[int, bool]]:
             rel = str(s.path.relative_to(case_base())).replace("\\", "/")
         except ValueError:
             continue
-        out[os.path.normcase(rel)] = _material_frames(s.n_frames, list(s.pdf_paths))
+        got = _material_frames(s.n_frames, list(s.pdf_paths))
+        out[os.path.normcase(rel)] = got if got[0] else (_remote_count(s.path), True)
     return out
+
+
+def _remote_count(path: Any) -> int:
+    """Кадри справи, що лежать у бакеті (маніфест `_r2_frames.json`) — для теки без кадрів."""
+    from nyshporka.cloud.verify import remote_frames
+
+    try:
+        return len(remote_frames(Path(path)))
+    except OSError:
+        return 0
 
 
 def _count_frames_exact(rel: str | None) -> tuple[int, bool]:
@@ -429,7 +440,8 @@ def _count_frames_exact(rel: str | None) -> tuple[int, bool]:
     # 🔴 Те саме правило, що в обході (`frame_names`): тут стояв свій набір
     # розширень, і одна справа мала два знаменники — з індексу обходу (з
     # TIFF) і з прямого читання (без них), залежно від того, де лежить тека.
-    return _material_frames(len(frame_names(names)), pdfs)
+    got = _material_frames(len(frame_names(names)), pdfs)
+    return got if got[0] else (_remote_count(p), True)
 
 
 def _count_frames(rel: str | None) -> int:

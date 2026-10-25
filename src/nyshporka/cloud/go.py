@@ -346,7 +346,7 @@ def resolve_case(arg: str, on_line: Any = None, *, dry: bool = False) -> CaseRef
 
     `dry` (`--dry-run`): бокові кадри PDF лише назвати, не розгортати.
     """
-    from nyshporka.cloud.verify import frames_in
+    from nyshporka.cloud.verify import frames_in, remote_frames
 
     given = Path(arg).expanduser()
     if given.is_dir():
@@ -401,7 +401,8 @@ def resolve_case(arg: str, on_line: Any = None, *, dry: bool = False) -> CaseRef
         for d in (base, base / "pages"):
             if d.is_dir():
                 _kadry_z_pdf(d, on_line, dry=dry)
-                n = len(frames_in(d))
+                # кадри в бакеті — тека з маніфестом `_r2_frames.json` теж справа
+                n = len(frames_in(d)) or len(remote_frames(d))
                 # Найбільша тека, а не перша: зменшені копії та уривки лежать
                 # під тією самою шифрою, і читати треба повну.
                 if n and (best is None or n > best[0]):
@@ -926,6 +927,15 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
 
     # 3. кадри
     rep = F.check_frames(ref.frames_dir)
+    remote = V.remote_frames(ref.frames_dir)
+    if remote:
+        # Кадри вже в бакеті: їх перевірив і стиснув той, хто пакував; тут їх немає.
+        # Повороту на місці не зробити — його мусив зробити той, хто пакував.
+        say("frames", f"{len(remote)} кадрів у бакеті (маніфест) — локальної перевірки "
+                      f"й стискання немає")
+        if rotate_landscape:
+            raise GoRefused("кадри лежать у бакеті (`_r2_frames.json`) — `--rotate-landscape` "
+                            "їх не поверне; докачайте кадри в теку або поверніть до заливки")
     say("frames", f"{rep.n} кадрів · {rep.total_mb:.0f} МБ "
                   f"(медіана {rep.median_mb:.1f} МБ)", **rep.as_dict())
     if rep.bad:
@@ -937,7 +947,7 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
             f"останній кадр записано {rep.still_writing_min} хв тому — тека ще "
             f"качається. Дочекайтесь кінця завантаження (частину справи — "
             f"лише з `--allow-partial`).")
-    if ref.frames_expected and rep.n < ref.frames_expected and not allow_partial:
+    if ref.frames_expected and (rep.n or len(remote)) < ref.frames_expected and not allow_partial:
         raise GoRefused(
             f"кадрів {rep.n}, а бібліотека знає {ref.frames_expected} — "
             f"завантаження не дійшло? Або книгу перерізали після завантаження, а "
