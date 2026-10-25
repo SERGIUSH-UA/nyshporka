@@ -1233,6 +1233,14 @@ def catalog_search(a: CatalogSearchArgs) -> Envelope:
         answered = _address_answer(a, addr)
         if answered is not None:
             return answered
+    if a.source and picked and picked[0] is not None and not supports(picked[0], "search"):
+        # 🔴 Назване явно джерело без пошуку не питалось би взагалі, а відповідь
+        # «знайдено 0 · шукали в: —» читалась би як нуль. Тут відмова з тим, що
+        # джерело вміє (прогін 25.10.2026: `find "Cerkowna" --source skanoteka`).
+        caps = ", ".join(sorted(getattr(picked[0], "caps", ()))) or "нічого"
+        return fail(f"джерело «{a.source}» не вміє пошук за текстом (уміє: {caps}) — "
+                    f"питати його нічим, і нуль тут не відповідь; шукати можна в: "
+                    + ", ".join(s.id for s in reg.with_cap("search")))
     hits: list[dict[str, object]] = []
     searched: list[str] = []
     unavailable: list[dict[str, str]] = []
@@ -1379,6 +1387,10 @@ def _interleave(hits: list[dict[str, object]]) -> list[dict[str, object]]:
     return out
 
 
+#: Скільки секунд пошук чекає на найповільніше джерело, перш ніж віддати решту.
+SEARCH_DEADLINE_S = 90.0
+
+
 def _ask_sources(srcs: list[Any], q: str,
                  limit: int) -> list[tuple[Any, BaseException | None] | None]:
     """Спитати всі джерела ОДНОЧАСНО; відповіді — у порядку `srcs`.
@@ -1402,11 +1414,14 @@ def _ask_sources(srcs: list[Any], q: str,
     """
     import concurrent.futures as cf
     import contextvars
+    import time
 
     from nyshporka.core import progress as P
+    from nyshporka.sources.base import SourceError
 
     if not srcs:
         return []
+    t0 = time.monotonic()
     out: list[tuple[Any, BaseException | None] | None] = [None] * len(srcs)
     pool = cf.ThreadPoolExecutor(max_workers=len(srcs),
                                  thread_name_prefix="catalog-search")
@@ -1429,6 +1444,16 @@ def _ask_sources(srcs: list[Any], q: str,
                 P.report(len(srcs) - len(pending), len(srcs),
                          "чекаємо: " + ", ".join(waiting))
                 if P.stopped():
+                    break
+                if time.monotonic() - t0 > SEARCH_DEADLINE_S:
+                    # 🔴 Лежачий хост (Cloudflare 522 на ridni.org 25.10.2026) тримав
+                    # увесь пошук хвилинами без жодного рядка виводу. Не дочекане
+                    # джерело — «не відповіло», а не нуль: воно йде в `unavailable`.
+                    for f in pending:
+                        i = futs[f]
+                        out[i] = (None, SourceError(
+                            f"не відповіло за {SEARCH_DEADLINE_S:.0f} с — пошук його не "
+                            f"дочекався; його нуля тут немає"))
                     break
     finally:
         # Не чекати недоопитаних: спинене джерело доробить у фоні, і його
@@ -1747,10 +1772,11 @@ class BrowseArgs(BaseModel):
     skill="start-research",
     when="погортати фонд, опис, теку дзеркала архіву")
 def catalog_browse(a: BrowseArgs) -> Envelope:
-    from nyshporka.sources.base import SourceError
+    from nyshporka.sources.base import SourceError, need
 
     try:
         src = _source(a.source)
+        need(src, "browse")
         nodes = src.browse(a.ref or None)
     except SourceError as exc:
         return fail(str(exc))
@@ -1770,10 +1796,12 @@ class ManifestArgs(BaseModel):
     skill="start-research",
     when="що саме принесе завантаження — до того, як воно почалось")
 def catalog_manifest(a: ManifestArgs) -> Envelope:
-    from nyshporka.sources.base import SourceError
+    from nyshporka.sources.base import SourceError, need
 
     try:
-        m = _source(a.source).manifest(a.ref)
+        src = _source(a.source)
+        need(src, "manifest")
+        m = src.manifest(a.ref)
     except SourceError as exc:
         return fail(str(exc))
     env = ok({"source": m.source, "ref": m.ref, "title": m.title,

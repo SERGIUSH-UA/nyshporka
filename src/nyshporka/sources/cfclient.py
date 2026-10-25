@@ -88,6 +88,8 @@ class Response:
     content: bytes
     url: str = ""
     encoding: str = "utf-8"
+    #: Заголовки відповіді (регістр не важить — `Content-Range`, `Content-Length`).
+    headers: Any = field(default_factory=dict)
 
     @property
     def text(self) -> str:
@@ -275,3 +277,131 @@ class CfClient:
         if self._tmp is not None:
             self._tmp.cleanup()
             self._tmp = None
+
+
+# ── явний режим «TLS браузера» ───────────────────────────────────────────────
+
+#: Заголовки навігації без `User-Agent`: його ставить сам `impersonate`, і чужий
+#: рядок поверх нього розходився б із відбитком (UA Chrome 126 при рукостисканні
+#: Chrome 131 — саме та розбіжність, яку фільтри й шукають).
+TLS_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.8",
+}
+
+#: Ознаки сторінки відсічі Akamai (`errors.edgesuite.net`). Приходить з 403, але
+#: тіло перевіряється окремо: проксі може віддати її й зі 200.
+AKAMAI_MARKS = ("Access Denied", "errors.edgesuite.net")
+
+
+def akamai_denied(body: str) -> bool:
+    """Чи це відсіч Akamai, а не відповідь сайту."""
+    head = (body or "")[:3000]
+    return any(m in head for m in AKAMAI_MARKS)
+
+
+class _TlsStream:
+    """Потокова відповідь у формі, яку читає `Fetcher.download` (як `httpx`)."""
+
+    def __init__(self, resp: Any, url: str) -> None:
+        self._r = resp
+        self.status_code = int(resp.status_code)
+        self.headers = resp.headers
+        self.url = url
+        self._body: bytes | None = None
+
+    def read(self) -> bytes:
+        if self._body is None:
+            self._body = b"".join(self._r.iter_content(chunk_size=1 << 16))
+        return self._body
+
+    @property
+    def text(self) -> str:
+        return (self._body or b"").decode("utf-8", errors="replace")
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            body = self._body or b""
+            raise httpx.HTTPStatusError(
+                f"HTTP {self.status_code}", request=httpx.Request("GET", self.url),
+                response=httpx.Response(self.status_code, content=body))
+
+    def iter_bytes(self, chunk: int = 1 << 20) -> Any:
+        yield from self._r.iter_content(chunk_size=chunk)
+
+    def close(self) -> None:
+        close = getattr(self._r, "close", None)
+        if callable(close):
+            close()
+
+
+class TlsClient:
+    """Клієнт, що вдає TLS-рукостискання Chrome — і НІЧОГО ІНШОГО не вміє.
+
+    🔴 Окремо від `CfClient` навмисно. Той має запасний шлях через системний
+    `curl`, а Akamai (`tsdial.archives.gov.ua`, `archives.gov.ua/um.php`) ріже
+    по відбитку саме `curl` і `httpx`: запасний шлях тут гарантовано дав би 403
+    і приховав справжню причину. Тому без `curl_cffi` — відмова вголос із
+    підказкою, а не тихий перехід на клієнта, який однаково не пройде.
+
+    Вмикається явно: `Fetcher(tls=True)` для хоста, якого так описано в паку
+    (`sites.<рушій>.shield: tls`) чи в конфігурації джерела, а не здогадом на
+    кожну 403.
+
+    Інтерфейс — підмножина `httpx.Client`, яку читає `Fetcher`: `get`, `stream`,
+    `close`. Помилка транспорту виходить як `httpx.TransportError`, щоб повтори
+    й відступ лишились у `Fetcher`.
+    """
+
+    def __init__(self, *, proxy: str | None = None, timeout: float = 60.0,
+                 headers: dict[str, str] | None = None) -> None:
+        if not have_curl_cffi():
+            raise ShieldError(
+                "цей сайт відсікає клієнта по TLS-відбитку (Akamai), і пройти його "
+                "вміє лише `curl_cffi`, що вдає рукостискання Chrome: "
+                "`pip install nyshporka[cfshield]`. Системний curl і httpx тут "
+                "дістають 403 «Access Denied» на кожну адресу — тому запасного "
+                "шляху немає.")
+        from curl_cffi import requests as _cr
+
+        self.via = "curl_cffi"
+        self.headers = {**TLS_HEADERS, **(headers or {})}
+        self._session: Any = _cr.Session(
+            impersonate=IMPERSONATE, headers=self.headers, timeout=timeout,
+            proxies={"https": proxy, "http": proxy} if proxy else None)
+
+    def _errors(self) -> Any:
+        from curl_cffi import requests as _cr
+
+        return _cr.errors.RequestsError
+
+    def get(self, url: str, headers: dict[str, str] | None = None) -> Response:
+        try:
+            r = self._session.get(url, headers=headers)
+        except self._errors() as exc:
+            raise httpx.TransportError(f"curl_cffi: {exc}") from exc
+        return Response(status_code=r.status_code, content=r.content, url=url,
+                        headers=r.headers)
+
+    def stream(self, method: str, url: str,
+               headers: dict[str, str] | None = None) -> Any:
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _ctx() -> Any:
+            try:
+                r = self._session.request(method, url, headers=headers, stream=True)
+            except self._errors() as exc:
+                raise httpx.TransportError(f"curl_cffi: {exc}") from exc
+            st = _TlsStream(r, url)
+            try:
+                yield st
+            finally:
+                st.close()
+
+        return _ctx()
+
+    def close(self) -> None:
+        close = getattr(self._session, "close", None)
+        if callable(close):
+            close()

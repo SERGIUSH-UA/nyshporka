@@ -76,6 +76,13 @@ class Site:
     fond_groups: bool = True        # чи є в цього майданчика дерево груп фондів
     groups: tuple[tuple[str, str], ...] = ()   # (id, назва) — лише якщо є
     bundled: str = ""               # ім'я вкладеного зрізу каталогу, якщо він є
+    #: Як з цим хостом говорити: `tls` — він ріже клієнта по TLS-відбитку
+    #: (Akamai), тож потрібен `curl_cffi` (`nyshporka[cfshield]`). Порожньо —
+    #: звичайний `httpx`. 🔴 Вказується явно: гадати «це Akamai» по кожній 403
+    #: означало б вмикати обхід там, де 403 — справжня відмова.
+    shield: str = ""
+    #: Сторінка-каталог на хості (відносно `url`), якщо джерело читає її: `index5.html`.
+    page: str = ""
 
 
 @dataclass(frozen=True)
@@ -439,7 +446,8 @@ def _build(raw: dict[str, Any], sources: tuple[Path, ...]) -> ArchivesPack:
                 fond_groups=bool(sb.get("fond_groups", True)),
                 groups=tuple((str(g.get("id")), str(g.get("label") or ""))
                              for g in (sb.get("groups") or [])),
-                bundled=str(sb.get("bundled") or ""))
+                bundled=str(sb.get("bundled") or ""),
+                shield=str(sb.get("shield") or ""), page=str(sb.get("page") or ""))
         codes = {}
         for system, val in (b.get("codes") or {}).items():
             listed = val if isinstance(val, list) else [val]

@@ -233,7 +233,7 @@ class RidniSource:
         # Публічний волонтерський каталог: називаємось своїм ім'ям і не б'ємо
         # чергою. Один пошук — один запит, тож окремої черги, як у покажчика,
         # тут не заводимо; темп тримає стандартна пауза `Fetcher`.
-        return Fetcher(base=HOST, headers={"User-Agent": app_ua()})
+        return Fetcher(base=HOST, headers={"User-Agent": app_ua()}, attempts=2)
 
     @staticmethod
     def _our_repo(archive_code: str) -> str:

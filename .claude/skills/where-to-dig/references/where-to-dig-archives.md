@@ -20,7 +20,7 @@
 |---|---|---|---|
 | ЦДІАК | `archium.cdiak.archives.gov.ua` | `/fonds/<фонд>/`, `/inventories/<id опису>/` | ф.26 оп.1 спр.26–81 (Луцький земський суд); ф.27 оп.1 спр.1–49 (Володимирський земський суд) |
 | ЦДІАК, описи PDF | `cdiak.archives.gov.ua/files/` | `f.<фонд 4 цифри>op.<опис 4 цифри>.pdf` | — (сайт віддає 403 не-браузеру; обхід — «Маршрути доступу» нижче) |
-| ЦДІАЛ | `archium.tsdial.archives.gov.ua`; перелік описів `tsdial.archives.gov.ua/index5.html` | `/inventories/<id опису>/` (ф.1 оп.1 = id 1; ф.344 оп.1 = id 866); PDF описів — `tsdial.archives.gov.ua/pdf/F. <фонд> op. <опис>.pdf`, оновлені — з « (2026)» у назві, тож адресу брати з `index5.html` *(звірено 11.10.2026)* | ф.166 «Крайова Табуля» описи 80–95; ф.1 оп.1 (Белзький гродський суд) 40 справ; ф.344 оп.1 спр.301–400 |
+| ЦДІАЛ | `archium.tsdial.archives.gov.ua`; перелік описів `tsdial.archives.gov.ua/index5.html` | `/inventories/<id опису>/` (ф.1 оп.1 = id 1; ф.344 оп.1 = id 866); PDF описів — `tsdial.archives.gov.ua/pdf/…`, але імена нерегулярні (`F. 20 op. 16.pdf`, `F. 20, op. XVI.pdf`, `F. 146 op.4-1.pdf`, кирилична `Ф. 19, оп. 16.pdf`; з ASCII-«F.» сервер дає 500), тож адресу брати з `index5.html` (windows-1251), а не складати: `nysh get cdial-opysy 19/16 --out <тека>` *(звірено 25.10.2026)* | ф.166 «Крайова Табуля» описи 80–95; ф.1 оп.1 (Белзький гродський суд) 40 справ; ф.344 оп.1 спр.301–400 |
 | ЦДАВО | `e-resource.tsdavo.gov.ua` | `/fonds/<фонд>/` | 1716 справ ф.1, 24, 166, 2581, 2582, 3528, 4061, 4648, 4906 |
 | ЦДАГО | `e.tsdahou.archives.gov.ua`; описи — `tsdahou.archives.gov.ua/poslugy/oczyfrovani-opysy/` | — | ф.263 (позасудові справи реабілітованих) 74 томи; ф.419 «Метричні книги та пом'яники Пряшівщини XVIII–XX ст.» 8 справ і 2 повнотекстові описи |
 | ЦДАЕА | `tsdaea.archives.gov.ua`; фотокаталог — `avd.archives.gov.ua` | — | фото- й відеодобірки, 1229 записів е-каталогу |
@@ -141,7 +141,7 @@
 | academia.edu | 403 | ✅ сторінка; PDF лише з обліковим записом | — |
 | dir.icm.edu.pl (Słownik geograficzny) | 403 | не пробувано | текст — з `wikisource.org` |
 | Google Drive, публічні теки | лістинг ріже на ~180 файлах | — | обхід — CDN мініатюр |
-| tsdial.archives.gov.ua (перелік і PDF описів ЦДІАЛ) | 403 | ✅ headless Edge; PDF — `fetch()` усередині сторінки після `index5.html` (11.10.2026) | — |
+| tsdial.archives.gov.ua (перелік і PDF описів ЦДІАЛ) | 403 Akamai (`errors.edgesuite.net`) для `httpx`, `curl` і headless-браузера; ріже TLS-відбиток | ✅ `curl_cffi` з відбитком Chrome і `Referer: …/index5.html` — джерело `cdial-opysy` (25.10.2026); раніше — headless Edge, `fetch()` усередині сторінки (11.10.2026) | — |
 | genbaza.pl | 403 | ✅ headless Edge (11.10.2026) | — |
 | agad.gov.pl | веб-інструмент агента: сертифікат не збігається з іменем (`*.home.pl`); ✅ `curl -k` (11.10.2026) | — | — |
 | Google My Maps (`google.com/maps/d/viewer?mid=…`) | переглядач віддає лише назву карти; ✅ `curl` KML-експорту `google.com/maps/d/kml?mid=<id>&forcekml=1` — усі точки з описами (11.10.2026) | — | — |

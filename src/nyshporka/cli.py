@@ -452,6 +452,12 @@ def find(q: str = typer.Argument(..., help="село, прізвище, слов
     basis = "; ".join(
         f"{b['source']}: {b['kind']}" + (f" від {b['taken']}" if b.get("taken") else "")
         for b in (cov.get("basis") or []))
+    if not cov.get("searched"):
+        # 🔴 «знайдено 0 · шукали в: —» без жодного запиту читалось б як нуль.
+        console.print("\n[warn]нічого не питали: жоден каталог не відповів на пошук — "
+                      "нуль тут не результат[/warn]")
+        for u in cov.get("unavailable") or []:
+            console.print(f"[muted]  {escape(u['source'])}: {escape(u['why'])}[/muted]")
     console.print(f"\n[muted]знайдено {len(hits)} · шукали в: "
                   + escape(f"{', '.join(cov.get('searched') or []) or '—'}"
                            + (f" ({basis})" if basis else "")) + "[/muted]")
@@ -488,18 +494,19 @@ def find(q: str = typer.Argument(..., help="село, прізвище, слов
 def browse(source: str = typer.Argument(..., help="id джерела (`nysh sources`)"),
            ref: str = typer.Argument("", help="вузол; порожньо = верхній рівень")) -> None:
     """Що лежить у фонді, описі, теці дзеркала."""
-    from nyshporka.sources.base import SourceError
+    from nyshporka.sources.base import SourceError, need
 
     _need("material")
     src = _pick(source)
     try:
+        need(src, "browse")
         nodes = src.browse(ref or None)
     except SourceError as exc:
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=1) from None
     for n in nodes:
         frames = f"{n.frames:>7} кадрів" if n.frames else " " * 14
-        mark = "📄" if n.kind == "case" else "📁"
+        mark = "📄" if n.kind in ("case", "file") else "📁"
         console.print(f"  {mark} {frames}  {n.label}")
         console.print(f"     [muted]{n.ref}[/muted]")
     console.print(f"\n[muted]{len(nodes)} вузлів[/muted]")
@@ -535,7 +542,7 @@ def get(source: str = typer.Argument(..., help="id джерела"),
     """
     from rich.markup import escape
 
-    from nyshporka.sources.base import SourceError
+    from nyshporka.sources.base import SourceError, need
     from nyshporka.sources.http import HttpError, explain
 
     _need("material")
@@ -585,6 +592,8 @@ def get(source: str = typer.Argument(..., help="id джерела"),
             console.print("[err]--frames очікує «12-80»[/err]")
             raise typer.Exit(code=2) from None
     try:
+        need(src, "manifest")
+        need(src, "fetch")
         man = (src.manifest(ref, from_zip=from_zip) if from_zip is not None
                else src.manifest(ref))
     except SourceError as exc:

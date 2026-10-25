@@ -392,6 +392,15 @@ repositories:
     sites:
       web:
         url: https://tsdial.archives.gov.ua
+      # Описи фондів у PDF — скани без текстового шару. Каталог — сама сторінка
+      # `index5.html` (кодування windows-1251). Хост за Akamai: `httpx`, `curl` і
+      # headless-браузер дістають 403 «Access Denied»; пройшов `curl_cffi` із
+      # відбитком Chrome (перевірено 25.10.2026, PDF на 11 МБ) — тому `shield: tls`.
+      opysy:
+        url: https://tsdial.archives.gov.ua
+        page: index5.html
+        shield: tls
+        source_id: cdial-opysy
       archium:
         url: https://archium.tsdial.archives.gov.ua
         # Перевірено 25.10.2026: `nysh get archium-cdial file:143179` дав 116

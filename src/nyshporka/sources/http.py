@@ -324,7 +324,8 @@ class Fetcher:
                  timeout: float = DEFAULT_TIMEOUT, headers: dict[str, str] | None = None,
                  client: Any = None,
                  limiter: CrossProcessLimiter | None = None,
-                 attempts: int = MAX_ATTEMPTS, retry_429: bool = True) -> None:
+                 attempts: int = MAX_ATTEMPTS, retry_429: bool = True,
+                 tls: bool = False) -> None:
         self.base = base.rstrip("/")
         self.delay = delay
         self.timeout = timeout
@@ -334,6 +335,12 @@ class Fetcher:
         # прогоном; тому число спроб і повтор на 429 — ручки виклику.
         self.attempts = max(1, int(attempts))
         self.retry_429 = retry_429
+        # 🔴 `tls=True` — явний режим «вдавати TLS-рукостискання Chrome» для хоста,
+        # який ріже клієнта по відбитку (Akamai: `tsdial.archives.gov.ua`).
+        # Вмикається джерелом за описом хоста в паку, а не здогадом на кожну
+        # 403. Без `curl_cffi` — `ShieldError` із підказкою, без тихого переходу
+        # на `httpx`, який такий хост однаково відсікає.
+        self.tls = bool(tls)
         self._headers = {"User-Agent": UA, "Accept": "*/*", **(headers or {})}
         if base:
             self._headers.setdefault("Referer", f"{self.base}/")
@@ -354,6 +361,17 @@ class Fetcher:
     def client(self) -> Iterator[Any]:
         if self._client is not None:
             yield self._client
+            return
+        if self.tls:
+            from nyshporka.sources.cfclient import TlsClient
+
+            tc = TlsClient(proxy=proxy_url(), timeout=self.timeout,
+                           headers={k: v for k, v in self._headers.items()
+                                    if k.lower() == "referer"})
+            try:
+                yield tc
+            finally:
+                tc.close()
             return
         import httpx
 

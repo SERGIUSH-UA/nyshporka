@@ -376,6 +376,19 @@ def supports(src: object, cap: Capability) -> bool:
     return cap in getattr(src, "caps", frozenset())
 
 
+def need(src: object, cap: Capability) -> None:
+    """Відмова, а не `AttributeError`, коли джерело цієї здатності не має.
+
+    🔴 `nysh browse skanoteka` падав трасуванням `no attribute 'browse'`:
+    здатності оголошені в `caps`, але виклик ішов напряму в метод. Тут людина
+    дістає те, що джерело ВМІЄ, і куди йти по решту.
+    """
+    if cap in getattr(src, "caps", frozenset()):
+        return
+    have = ", ".join(sorted(getattr(src, "caps", ()))) or "нічого"
+    raise SourceError(f"джерело «{getattr(src, 'id', '?')}» не вміє {cap} (уміє: {have})")
+
+
 #: На чому джерело шукає збіг.
 #:
 #:     title        заголовок справи чи назва альбому

@@ -58,6 +58,7 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     from nyshporka.sources.ia import IaSource
     from nyshporka.sources.inventarium import InventariumSource
     from nyshporka.sources.martyrolog import MartyrologSource
+    from nyshporka.sources.opysy import OpysySource
     from nyshporka.sources.reabilitovani import ReabilitovaniSource
     from nyshporka.sources.ridni import RidniSource
     from nyshporka.sources.skanoteka import SkanotekaSource
@@ -131,6 +132,11 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     # 📜 «Staropolskie Księgi Sądowe»: покажчики осіб і місць гродських книг
     # XVII–XVIII ст. (ЦДІАК ф.44, ф.40 і загублені книги KAC) з адресою акта.
     # Шукає по паку `courtbooks`; особи — лише `--source sks-osoby`.
+    # 📑 Описи фондів у PDF зі сторінки-каталогу архіву (ЦДІАЛ): шифра «фонд +
+    # опис» розв'язується через сторінку, а не складається з імені. Хост за
+    # Akamai — HTTP-шар вдає TLS Chrome (`sites.opysy.shield: tls`, `curl_cffi`).
+    out += [cast("Source", OpysySource(workspace, site=site, repo=repo))
+            for repo, site in active().sites("opysy")]
     out.append(cast("Source", SksPlacesSource(workspace)))
     out.append(cast("Source", SksPersonsSource(workspace)))
     return out
