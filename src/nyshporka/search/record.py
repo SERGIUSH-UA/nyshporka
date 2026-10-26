@@ -96,6 +96,10 @@ class Terms:
     terms: tuple[Term, ...] = ()
     #: Слова `--with`, які не стали ознакою: закороткі для порівняння (< MIN_TOK).
     ignored: tuple[str, ...] = ()
+    #: Слова `--with`, яких немає в довіднику імен: вони пішли прізвищем, без
+    #: гнізда написань. Ім'я, якого довідник не знає, інакше мовчки шукається
+    #: як прізвище й ловить схожі слова («Матвій» ↔ «Martii» з назви місяця).
+    as_surname: tuple[str, ...] = ()
     #: Скільки людей роду розглянуто і скільки з них без дат.
     people: int = 0
     undated: int = 0
@@ -169,6 +173,7 @@ def terms(prof: Any, q: str = "", y1: int | None = None, y2: int | None = None,
             seen.add(("surname", sn))
             out.append(Term(label=p.surname, kind="surname", keys=(sn,), source=p.origin))
     ignored: list[str] = []
+    as_surname: list[str] = []
     for word in with_terms:
         for w in _TOKEN.findall(word or ""):
             t = _with_term(w, sur, seen)
@@ -176,9 +181,11 @@ def terms(prof: Any, q: str = "", y1: int | None = None, y2: int | None = None,
                 ignored.append(w)
             elif t.label:
                 out.append(t)
+                if t.kind == "surname":
+                    as_surname.append(w)
     win = (y1, y2) if y1 is not None and y2 is not None else None
     return Terms(terms=tuple(out), people=len(folk), undated=undated, years=win,
-                 ignored=tuple(ignored))
+                 ignored=tuple(ignored), as_surname=tuple(as_surname))
 
 
 def _with_term(word: str, sur: set[str], seen: set[tuple[str, str]]) -> Term | None:
@@ -561,7 +568,7 @@ def scan(rows: list[dict[str, Any]], ts: Terms, *, limit: int = 40) -> dict[str,
     if ts.empty or not ST.exists():
         return {"on": not ts.empty, "hits": [], "total": 0, "pages": 0,
                 "terms": [], "common": [], "geo_pages": 0,
-                "ignored": list(ts.ignored)}
+                "ignored": list(ts.ignored), "as_surname": list(ts.as_surname)}
     words = 0
     count: dict[int, int] = defaultdict(int)
     line_words: list[int] = []
@@ -621,7 +628,8 @@ def scan(rows: list[dict[str, Any]], ts: Terms, *, limit: int = 40) -> dict[str,
                        "per_1000": round(1000 * freq[i], 2),
                        "weight": round(weigh(i, typical), 2)}
                       for i, t in enumerate(ts.terms)],
-            "common": common, "ignored": list(ts.ignored)}
+            "common": common, "ignored": list(ts.ignored),
+            "as_surname": list(ts.as_surname)}
 
 
 def _frame_key(page: str) -> str:

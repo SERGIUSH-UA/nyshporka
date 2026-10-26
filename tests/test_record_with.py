@@ -138,6 +138,20 @@ def test_a_word_that_is_not_a_given_name_is_a_surname_sign(space: Path) -> None:
     ts = R.terms(None, "Мирончук", None, None, with_terms=["Дзвінка", "Ян"])
     assert [t.kind for t in ts.terms] == ["surname", "surname"]
     assert ts.ignored == ("Ян",), "коротке слово не порівнюється, але про нього сказано"
+    assert ts.as_surname == ("Дзвінка",), "слово поза довідником імен пішло прізвищем — про це сказано"
+
+
+def test_an_unknown_word_taken_as_surname_is_a_warning(space: Path) -> None:
+    """Ім'я, якого довідник не знає, без попередження шукалося б як прізвище
+    й ловило схожі слова; людина мусить це бачити."""
+    from nyshporka.ops_text import TextFindArgs, text_find
+
+    env = text_find(TextFindArgs(q="Мирончук", case="метрика", with_terms=["Юрко", "Дзвінка"]))
+    assert env.ok, env.error
+    w = [x for x in env.warnings if x.code == "with_as_surname"]
+    assert len(w) == 1 and "«Дзвінка»" in w[0].text and "Юрко" not in w[0].text
+    known = text_find(TextFindArgs(q="Мирончук", case="метрика", with_terms=["Юрко", "Степан"]))
+    assert not [x for x in known.warnings if x.code == "with_as_surname"]
 
 
 def test_find_names_where_the_signs_came_from(space: Path) -> None:
