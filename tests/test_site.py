@@ -213,6 +213,21 @@ def test_life_events_render_place_links_not_raw_markdown(space: Path) -> None:
     assert 'href="../places/PL9001.html">Село</a>' in page
 
 
+def test_marriage_of_the_family_shows_in_each_spouses_life(space: Path) -> None:
+    """Шлюб записано в картці родини — але в «Житті» обох подружжя він є,
+    з ім'ям другого й зі своєю зноскою на джерело."""
+    fam = Family(id="F9001", husband="I9001", wife="I9002", children=["I9003"],
+                 facts=[Fact(type="marriage", date=GedDate(value="1874"), status="confirmed",
+                             value="свідки Петро й Павло", citations=_cite())])
+    _w(space, "families", fam)
+    rep = B.build(space, public=False, html=False)
+    page = (rep.out / "docs" / "persons" / "I9002.md").read_text(encoding="utf-8")
+    life = page[page.index("nysh-life"):]
+    assert "nysh-life__item--marriage" in life
+    assert "⚭ Іван Тестовий; свідки Петро й Павло" in life
+    assert f"[^{SRC}]:" in page
+
+
 @pytest.mark.skipif(not B.mkdocs_available(), reason="MkDocs не встановлено (extra site)")
 def test_a_failed_mkdocs_build_is_a_site_error(space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """MkDocs збирає сайт у процесі nysh: його відмова — зрозуміла `SiteError`

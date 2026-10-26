@@ -288,7 +288,9 @@ def _build(
     for p in persons:
         if public and _touches_hidden(p, families_by_id, hidden):
             p = p.model_copy(update={"notes": _notes_withheld()})
-        used = _used_sources_for(p.facts, sources_by_id, published_sources)
+        life = _life(p, families_by_id, person_names,
+                     hidden if public else set())
+        used = _used_sources_for(life, sources_by_id, published_sources)
         relations = _person_relations(p, families_by_id, person_names)
         media_lines = [_media_line(m) for m in p.media] if not p.private else []
         out = docs_dir / "persons" / f"{p.id}.md"
@@ -297,7 +299,7 @@ def _build(
                 person=p,
                 me=card(p.id),
                 kin=_kin(p, families_by_id, card),
-                life=_life(p),
+                life=life,
                 hypotheses=hyp_by_about.get(p.id, []),
                 hyp_ids=hyp_ids,
                 place_names=place_names,
@@ -1153,9 +1155,31 @@ def _kin(person: Person, families_by_id: dict[str, Family],
     }
 
 
-def _life(p: Person) -> list[Fact]:
-    """Факти за часом: датовані за датою, без дати — у кінці в порядку картки."""
-    return sorted(p.facts, key=lambda f: (f.date is None, f.date.value if f.date else ""))
+def _life(p: Person, families_by_id: dict[str, Family] | None = None,
+          names: dict[str, str] | None = None,
+          hidden: set[str] | frozenset[str] = frozenset()) -> list[Fact]:
+    """Факти за часом: датовані за датою, без дати — у кінці в порядку картки.
+
+    🔴 Шлюб записано в картці РОДИНИ, а не особи: без цього подія шлюбу з її
+    джерелом і доказом була видна лише на сторінці родини, і в «Житті» людини
+    шлюбу не було взагалі. Факти власних родин (шлюб, розлучення) додаються
+    сюди зі знаком ⚭ та ім'ям другого з подружжя (без відмінка: сайт
+    семимовний); родина з прихованим (відкрита збірка) — ні.
+    """
+    facts = list(p.facts)
+    for fid in p.spouse_families if families_by_id else []:
+        fam = families_by_id.get(fid) if families_by_id else None
+        if fam is None or not fam.facts:
+            continue
+        partner = fam.wife if fam.husband == p.id else fam.husband
+        if partner and partner in hidden:
+            continue
+        who = (names or {}).get(partner) if partner else None
+        for f in fam.facts:
+            lead = f"⚭ {who}" if who else ""
+            value = "; ".join(x for x in (lead, f.value or "") if x) or None
+            facts.append(f.model_copy(update={"value": value}))
+    return sorted(facts, key=lambda f: (f.date is None, f.date.value if f.date else ""))
 
 
 def _search_index(persons: list[Person], place_names: dict[str, str],
