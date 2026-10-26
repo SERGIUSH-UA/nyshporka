@@ -788,7 +788,8 @@ def _query_is_profile(q: str, fam: Any = None) -> bool:
 
 
 def find(q: str, scope: str | Sequence[str] = "", *, thresh: int = 78, limit: int = 40,
-         context: int = 1, family: str = "") -> dict[str, Any]:
+         context: int = 1, family: str = "",
+         with_terms: Sequence[str] = ()) -> dict[str, Any]:
     """Пошук роду в області: одна справа, прогін, серія або кілька справ.
 
     🔴 Серія й перелік розкладаються на справи, а не шукаються одним заходом.
@@ -796,6 +797,10 @@ def find(q: str, scope: str | Sequence[str] = "", *, thresh: int = 78, limit: in
     існують лише для однієї справи, тож спільний захід мовчки лишав без них
     усю серію, а знаменник «кадрів ?» не казав, яка справа прочитана не вся.
     Кожна справа тепер отримує повний пошук і свій запис у журналі заходу.
+
+    `with_terms` (`--with`) — слова-ознаки для каналу запису: ім'я чи прізвище
+    поруч із прізвищем запиту. Канал вмикається і там, де прізвище запиту не
+    рід профілю, але потребує справи.
     """
     from nyshporka import htr_store as S
     from nyshporka.pagestore import query as PQ
@@ -813,13 +818,15 @@ def find(q: str, scope: str | Sequence[str] = "", *, thresh: int = 78, limit: in
             sc = S.runs_for_scope(scope)
             if sc["kind"] == "cases":
                 return _find_many(q, sc, thresh=thresh, limit=limit, context=context,
-                                  family=family)
+                                  family=family, with_terms=with_terms)
         return _find_one(q, scope if isinstance(scope, str) else "", thresh=thresh,
-                         limit=limit, context=context, family=family)
+                         limit=limit, context=context, family=family,
+                         with_terms=with_terms)
 
 
 def _find_many(q: str, sc: dict[str, Any], *, thresh: int, limit: int,
-               context: int, family: str = "") -> dict[str, Any]:
+               context: int, family: str = "",
+               with_terms: Sequence[str] = ()) -> dict[str, Any]:
     """`find` по кожній справі області й зведення.
 
     Прогін без ключа справи шукається сам по собі: викинути його з серії
@@ -845,7 +852,7 @@ def _find_many(q: str, sc: dict[str, Any], *, thresh: int, limit: int,
         P.report(i, len(items), "справи серії")
         with P.sink(None):
             got = _find_one(q, k, thresh=thresh, limit=limit, context=context,
-                            family=family)
+                            family=family, with_terms=with_terms)
         if got.get("error"):
             return {"error": f"«{k}»: {got['error']}"}
         one.append((k, got))
@@ -914,6 +921,14 @@ def _merge_finds(q: str, sc: dict[str, Any], one: list[tuple[str, dict[str, Any]
                                "of_cases": len(one), "ran_cases": len(ran)}
         if cid in ("surname", "anchor", "record", "notebook"):
             out["hits"] = sum(int(c.get("hits") or 0) for c in got)
+        if cid == "record":
+            merged: dict[str, list[str]] = {}
+            for c in got:
+                for src in c.get("sources") or []:
+                    for lab in src["terms"]:
+                        if lab not in merged.setdefault(src["source"], []):
+                            merged[src["source"]].append(lab)
+            out["sources"] = [{"source": k, "terms": v} for k, v in merged.items()]
         if cid == "selfcheck":
             out.update(eye=sum(int(c.get("eye") or 0) for c in ran),
                        found=sum(int(c.get("found") or 0) for c in ran),
@@ -971,7 +986,8 @@ def _merge_finds(q: str, sc: dict[str, Any], one: list[tuple[str, dict[str, Any]
 
 
 def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
-              context: int = 1, family: str = "") -> dict[str, Any]:
+              context: int = 1, family: str = "",
+              with_terms: Sequence[str] = ()) -> dict[str, Any]:
     """Пошук усіма каналами пакета з журналом заходу.
 
     🔴 Журнал — не прикраса. «Шукай ще» доти означало імпровізацію, бо жоден
@@ -1018,11 +1034,15 @@ def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
             with contextlib.suppress(ValueError):
                 sc = S.runs_for_scope(str(sc["key"]))
                 search_scope = str(sc["key"])
+    # 🔴 `--with` вмикає канал запису й для прізвища, що не є родом профілю:
+    # ознаки тоді дає сама людина, а не `kin`. Справа потрібна й тут.
+    with_terms = tuple(w for w in with_terms if str(w).strip())
     res = S.search(q, name=search_scope or None, thresh=thresh, limit=limit,
                    context=context, given=True, folk=False, rank=True,
                    profile=about_profile, anchors=in_case and about_profile,
                    family=fam.name if (about_profile and fam is not None) else "",
-                   record=in_case and about_profile)
+                   record=in_case and (about_profile or bool(with_terms)),
+                   with_terms=with_terms)
     if res.get("error") and not res.get("hits"):
         return {"error": str(res["error"])}
     anchor: dict[str, Any] = res.get("anchor") or {"on": False}
@@ -1077,10 +1097,15 @@ def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
          "hits": int(record.get("total") or 0),
          "geo_pages": int(record.get("geo_pages") or 0),
          "common": list(record.get("common") or []),
+         "sources": _sign_sources(record),
          "why": ("лише в межах однієї справи: ознаки людей звужуються її роками"
-                 if not in_case else _NOT_FAMILY if not about_profile
-                 else ("у роду менше двох ознак у вікні "
-                       f"{record.get('years') or 'справи'}: заповніть `kin` профілю"
+                 if not in_case else _NOT_FAMILY if not about_profile and not with_terms
+                 else ("менше двох ознак у вікні "
+                       f"{record.get('years') or 'справи'}: "
+                       + ("додайте ще слово `--with` (ім'я чи прізвище поруч)"
+                          + (f"; закороткі й пропущені: {', '.join(record['ignored'])}"
+                             if record.get("ignored") else "")
+                          if with_terms else "заповніть `kin` профілю або додайте `--with`")
                        if record.get("on") and not record.get("terms") else ""))},
         {"id": "latin", "label": "латинський голос (Скриба) у тій самій області",
          "ran": has_latin,
@@ -1156,6 +1181,32 @@ def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
             "stems": res.get("stems"), "stems_dropped": res.get("stems_dropped") or [],
             "anchor": anchor, "record": record, "family": res.get("family"),
             "notebook": notebook, "selfcheck": selfcheck, "ledger": ledger}
+
+
+def truncation_note(parts: Sequence[tuple[str, int, int]], limit: int, cap: int) -> str:
+    """Текст попередження про обрізану видачу, або порожньо, коли обрізано нічого.
+
+    🔴 Обрізання мусить бути видно в конверті, а не лише приглушеним рядком
+    «показано N із M» внизу консолі: агент читає конверт, і сто сорок із
+    трьох тисяч хітів виглядали для нього як уся відповідь. `parts` —
+    (канал, показано, знайдено); підказка — `--limit N`, де N не більше `cap`.
+    """
+    cut = [(lab, shown, total) for lab, shown, total in parts if total and shown < total]
+    if not cut:
+        return ""
+    want = min(max(total for _l, _s, total in cut), cap)
+    return ("видачу обрізано за --limit " + str(limit) + ": "
+            + "; ".join(f"{lab} — показано {shown} із {total}" for lab, shown, total in cut)
+            + f". Усе — `--limit {want}`" + (f" (стеля {cap})" if want == cap else ""))
+
+
+def _sign_sources(record: dict[str, Any]) -> list[dict[str, Any]]:
+    """Звідки ознаки каналу запису: «--with», «профіль», «канон», «запит» — з
+    переліком слів. Без цього «знайдено записів 3» не каже, ЧИМ їх знайдено."""
+    by: dict[str, list[str]] = {}
+    for t in record.get("terms") or []:
+        by.setdefault(str(t.get("source") or "?"), []).append(str(t.get("label")))
+    return [{"source": k, "terms": v} for k, v in by.items()]
 
 
 #: Розгорнутий стем коротший за це в пошук пари не йде (`near`).

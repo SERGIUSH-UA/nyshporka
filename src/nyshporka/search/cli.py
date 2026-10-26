@@ -464,13 +464,19 @@ def find_cmd(
     family: str = typer.Option("", "--family",
                                help="чий рід: ім'я профілю (`nysh profile`); порожньо — "
                                     "рід, написанням якого є запит"),
+    with_terms: list[str] = typer.Option([], "--with",
+                                         help="слово-ознака запису: ім'я («Юрко») чи "
+                                              "прізвище поруч із прізвищем запиту; можна "
+                                              "кілька разів. Запис, де зійшлись прізвище й "
+                                              "ці слова, іде окремим блоком 🏠; потребує --case"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Знайти рід усіма каналами разом. Нуль друкується лише з журналом заходу."""
     from nyshporka import ops as O
 
     env = O.call("text.find", {"q": q, "case": _scope(case), "thresh": thresh, "limit": limit,
-                               "context": context, "family": family})
+                               "context": context, "family": family,
+                               "with_terms": list(with_terms)})
     if _answer(env, as_json):
         return
     d = env.data
@@ -540,6 +546,9 @@ def find_cmd(
                     nums += f" · [warn]пропущено {len(ch['missed'])}[/warn]"
             if ch["id"] == "record" and ch.get("eye_denom"):
                 nums += f" · око {len(ch.get('eye_found') or [])}/{ch['eye_denom']}"
+            if ch["id"] == "record" and ch.get("sources"):
+                nums += " · ознаки " + "; ".join(
+                    f"{x['source']}: {', '.join(x['terms'])}" for x in ch["sources"])
             if ch.get("of_cases") and ch.get("ran_cases") != ch["of_cases"]:
                 nums += f" (у {ch['ran_cases']} із {ch['of_cases']} справ)"
             parts.append(f"[bold]{ch['id']}[/bold] ✓{nums}")

@@ -2149,7 +2149,7 @@ def search(q: str, name: str | None = None, thresh: int = 78,
            given: bool = True, folk: bool = False,
            rank: bool = True, profile: bool = True,
            anchors: bool = False, family: str = "",
-           record: bool = False) -> dict[str, Any]:
+           record: bool = False, with_terms: Sequence[str] = ()) -> dict[str, Any]:
     """Fuzzy-пошук по текстах прогонів. `name=None` — по всіх справах.
 
     `context` — скільки рядків сусідства додати до кожного хіта (0 = без них).
@@ -2171,6 +2171,8 @@ def search(q: str, name: str | None = None, thresh: int = 78,
     активного. Від роду беруться написання, правила рангу, якорі й ознаки запису.
     `record` — канал запису (`search.record`): ознаки родини, зведені в межах
     одного запису через усі колонки. Як і якорі — лише в межах справи.
+    `with_terms` — слова-ознаки від людини (`--with`) для каналу запису: ім'я з
+    довідника чи прізвище, ще по ознаці на слово. Лише разом з `record`.
 
     🔴 Контекст рахується лише для показаних хітів, після зрізу за `limit`.
     Інакше на справі з тисячею збігів кожен пошук читав би тисячу сторінок
@@ -2337,7 +2339,7 @@ def search(q: str, name: str | None = None, thresh: int = 78,
         from nyshporka.search import record as REC
 
         y1, y2 = case_years(scope["key"]) if scope["key"] else (None, None)
-        ts = REC.terms(fam, q, y1, y2)
+        ts = REC.terms(fam, q, y1, y2, with_terms=with_terms)
         got_rec = REC.scan(rows, ts, limit=limit)
         by_run = {r["name"]: r for r in rows}
         for h in got_rec["hits"]:

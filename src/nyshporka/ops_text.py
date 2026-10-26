@@ -695,6 +695,11 @@ class TextFindArgs(BaseModel):
     family: str = Field(default="",
                         description="чий рід: ім'я профілю з `config/research_profile.yaml`. "
                                     "Порожньо — рід, написанням якого є запит")
+    with_terms: list[str] = Field(
+        default_factory=list,
+        description="слова-ознаки каналу запису (`--with`): ім'я («Юрко») чи прізвище "
+                    "поруч із прізвищем запиту. Запис, де зійшлись прізвище й ці слова, "
+                    "стає першим, а канал вмикається й без `kin` та канону. Потребує справи")
 
 
 def _mark_in_canon(res: dict[str, Any]) -> None:
@@ -764,7 +769,7 @@ def text_find(a: TextFindArgs) -> Envelope:
 
     try:
         res = T.find(a.q, a.case, thresh=a.thresh, limit=a.limit, context=a.context,
-                     family=a.family)
+                     family=a.family, with_terms=a.with_terms)
     except ValueError as exc:
         return fail(str(exc))
     if res.get("error"):
@@ -820,6 +825,24 @@ def text_find(a: TextFindArgs) -> Envelope:
                  f"ознаки, які запис звичайного розміру в цій справі зустрічає "
                  f"випадково частіше, ніж через раз, майже нічого не важать: "
                  f"{', '.join(rec['common'])}")
+    cut = T.truncation_note(
+        [("прізвище", len(res.get("hits") or []), int(res.get("total") or 0)),
+         ("якорі", len((res.get("anchor") or {}).get("hits") or []),
+          int((res.get("anchor") or {}).get("total") or 0)),
+         ("запис", len((res.get("record") or {}).get("hits") or []),
+          int((res.get("record") or {}).get("total") or 0))],
+        a.limit, cap=5000)
+    if cut:
+        env.warn("shown_truncated", cut)
+    if a.with_terms:
+        if not rec or not rec.get("ran"):
+            env.warn("with_not_applied",
+                     "`--with` не спрацював: канал запису не ганяли"
+                     + (f" ({rec['why']})" if rec and rec.get("why") else ""))
+        elif rec.get("sources"):
+            env.warn("record_signs",
+                     "ознаки запису: " + "; ".join(
+                         f"{x['source']}: {', '.join(x['terms'])}" for x in rec["sources"]))
     if not res.get("hits") and not (res.get("anchor") or {}).get("hits")             and not (res.get("record") or {}).get("hits"):
         env.warn("zero_with_denominator",
                  f"не знайшлось — кадрів {led.get('frames') or '?'}, прочитано "

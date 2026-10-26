@@ -37,7 +37,7 @@ import math
 import re
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -87,11 +87,15 @@ class Term:
     kind: str
     #: Ключі порівняння, вже нормалізовані тим кодом, яким порівнюється токен.
     keys: tuple[str, ...]
+    #: Звідки ознака: «запит», «профіль», «канон» або «--with».
+    source: str = ""
 
 
 @dataclass(frozen=True)
 class Terms:
     terms: tuple[Term, ...] = ()
+    #: Слова `--with`, які не стали ознакою: закороткі для порівняння (< MIN_TOK).
+    ignored: tuple[str, ...] = ()
     #: Скільки людей роду розглянуто і скільки з них без дат.
     people: int = 0
     undated: int = 0
@@ -103,12 +107,20 @@ class Terms:
 
 
 def terms(prof: Any, q: str = "", y1: int | None = None, y2: int | None = None,
-          *, any_date: bool = False) -> Terms:
-    """Ознаки родини під роки справи: прізвище роду й люди з `kin`.
+          *, any_date: bool = False, with_terms: Sequence[str] = ()) -> Terms:
+    """Ознаки родини під роки справи: прізвище роду й люди з `kin` і канону.
 
     Вікна років — ті самі, що в каналі імен: ім'я, поки людина жива; по
     батькові — поки живі її діти. Особа без дат вікно не звужує й за
     замовчуванням не йде (`any_date` бере всіх).
+
+    🔴 `with_terms` — слова, названі людиною (`--with`): ще по ознаці на слово.
+    Ім'я з довідника (`known_given`) — ознака-ім'я, і збіг іде через гніздо
+    написань («Юрко» ↔ «Georgius»); решта — прізвище чи дівоче прізвище, так
+    само, як `kin[].surname`. Це єдиний шлях до каналу там, де в простору
+    немає ні `kin`, ні канону: прізвище саме — одна ознака, а запису потрібно
+    дві. Домінантне прізвище (сотні сторінок) лише називає книгу; запис
+    однієї пари відрізняє рідкісне слово поруч.
     """
     from nyshporka.search import anchors as A
     from nyshporka.search.store import whole_stems
@@ -128,8 +140,11 @@ def terms(prof: Any, q: str = "", y1: int | None = None, y2: int | None = None,
     sur = set(whole_stems(sorted(sur), keep=asked)[0])
     if sur:
         out.append(Term(label=(getattr(prof, "display", "") or q or "прізвище роду"),
-                        kind="surname", keys=tuple(sorted(sur))))
-    folk = A.people(prof)
+                        kind="surname", keys=tuple(sorted(sur)), source="запит"))
+    # Профілю запиту немає, а слова названо: канон беруть лише ті, хто несе
+    # прізвище запиту, і `kin` чужого активного профілю не підставляється.
+    foreign = tuple(sorted(sur)) if prof is None and with_terms else None
+    folk = A.people(prof, surnames=foreign) if foreign is not None else A.people(prof)
     undated = 0
     seen: set[tuple[str, str]] = set()
     for p in folk:
@@ -140,17 +155,52 @@ def terms(prof: Any, q: str = "", y1: int | None = None, y2: int | None = None,
         g = norm_given(normalize_archival(p.given)) if p.given else ""
         if len(g) >= MIN_TOK and A._alive(p, y1, y2) and ("given", g) not in seen:
             seen.add(("given", g))
-            out.append(Term(label=p.given, kind="given", keys=(g,)))
+            alt = sorted({a for f in p.alt_given
+                          if len(a := norm_given(normalize_archival(f))) >= MIN_TOK} - {g})
+            out.append(Term(label=p.given, kind="given", keys=(g, *alt), source=p.origin))
         pt = norm_patronymic(normalize_archival(p.patronymic)) if p.patronymic else ""
         if len(pt) >= MIN_TOK and A._patr_window(p, y1, y2) and ("patronymic", pt) not in seen:
             seen.add(("patronymic", pt))
-            out.append(Term(label=p.patronymic, kind="patronymic", keys=(pt,)))
+            out.append(Term(label=p.patronymic, kind="patronymic", keys=(pt,),
+                            source=p.origin))
         sn = normalize_archival(p.surname) if p.surname else ""
         if len(sn) >= MIN_TOK and A._alive(p, y1, y2) and ("surname", sn) not in seen:
             seen.add(("surname", sn))
-            out.append(Term(label=p.surname, kind="surname", keys=(sn,)))
+            out.append(Term(label=p.surname, kind="surname", keys=(sn,), source=p.origin))
+    ignored: list[str] = []
+    for word in with_terms:
+        for w in _TOKEN.findall(word or ""):
+            t = _with_term(w, sur, seen)
+            if t is None:
+                ignored.append(w)
+            elif t.label:
+                out.append(t)
     win = (y1, y2) if y1 is not None and y2 is not None else None
-    return Terms(terms=tuple(out), people=len(folk), undated=undated, years=win)
+    return Terms(terms=tuple(out), people=len(folk), undated=undated, years=win,
+                 ignored=tuple(ignored))
+
+
+def _with_term(word: str, sur: set[str], seen: set[tuple[str, str]]) -> Term | None:
+    """Ознака зі слова `--with`. `None` — слово закоротке для порівняння;
+    ознака з порожнім `label` — повтор уже наявної (мовчки не множиться)."""
+    from nyshporka.records.names import expand_given, known_given
+
+    n = normalize_archival(word)
+    if len(n) < MIN_TOK:
+        return None
+    if known_given(n):
+        g = norm_given(n)
+        if ("given", g) in seen:
+            return Term(label="", kind="given", keys=())
+        seen.add(("given", g))
+        # Ключі — усе гніздо: токен, якого рушій скалічив, але що лишився
+        # близьким до якоїсь форми гнізда («Georgiuss»), теж збігається.
+        keys = sorted({g} | {f for f in expand_given(n) if len(f) >= MIN_TOK})
+        return Term(label=word, kind="given", keys=tuple(keys), source="--with")
+    if n in sur or ("surname", n) in seen:
+        return Term(label="", kind="surname", keys=())
+    seen.add(("surname", n))
+    return Term(label=word, kind="surname", keys=(n,), source="--with")
 
 
 # ── збіг токена з ознакою ────────────────────────────────────────────────────
@@ -509,7 +559,8 @@ def scan(rows: list[dict[str, Any]], ts: Terms, *, limit: int = 40) -> dict[str,
     seen: list[tuple[Page, str, int, str, tuple[int, int, int, int] | None, list[str]]] = []
     if ts.empty or not ST.exists():
         return {"on": not ts.empty, "hits": [], "total": 0, "pages": 0,
-                "terms": [], "common": [], "geo_pages": 0}
+                "terms": [], "common": [], "geo_pages": 0,
+                "ignored": list(ts.ignored)}
     words = 0
     count: dict[int, int] = defaultdict(int)
     line_words: list[int] = []
@@ -564,11 +615,12 @@ def scan(rows: list[dict[str, Any]], ts: Terms, *, limit: int = 40) -> dict[str,
     hits.sort(key=lambda h: (-h["score"], h["page"]))
     return {"on": True, "hits": hits[:limit], "total": len(hits), "pages": len(pages),
             "geo_pages": len(geo), "words": words,
-            "terms": [{"label": t.label, "kind": t.kind, "found": count.get(i, 0),
+            "terms": [{"label": t.label, "kind": t.kind, "source": t.source,
+                       "found": count.get(i, 0),
                        "per_1000": round(1000 * freq[i], 2),
                        "weight": round(weigh(i, typical), 2)}
                       for i, t in enumerate(ts.terms)],
-            "common": common}
+            "common": common, "ignored": list(ts.ignored)}
 
 
 def _frame_key(page: str) -> str:

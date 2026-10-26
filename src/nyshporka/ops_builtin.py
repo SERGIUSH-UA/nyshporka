@@ -2316,6 +2316,32 @@ def _add_selfcheck(env: Envelope, a: Any) -> None:
                  f"{', '.join(rep.found_not_shown[:12])} — підніміть limit")
 
 
+def _warn_shown(env: Envelope, res: dict[str, Any], limit: int) -> None:
+    """Обрізану видачу — в конверт: прізвище, якорі й запис, кожен зі своїм «N із M»,
+    а коли запис ганяли з `--with` — ще й звідки його ознаки."""
+    from nyshporka.search import textops as T
+
+    anc, rec = res.get("anchor") or {}, res.get("record") or {}
+    cut = T.truncation_note(
+        [("прізвище", len(res.get("hits") or []), int(res.get("total") or 0)),
+         ("якорі", len(anc.get("hits") or []), int(anc.get("total") or 0)),
+         ("запис", len(rec.get("hits") or []), int(rec.get("total") or 0))],
+        limit, cap=500)
+    if cut:
+        env.warn("shown_truncated", cut)
+    if rec.get("on") and rec.get("terms"):
+        srcs = T._sign_sources(rec)
+        if any(x["source"] == "--with" for x in srcs):
+            env.warn("record_signs", "ознаки запису: " + "; ".join(
+                f"{x['source']}: {', '.join(x['terms'])}" for x in srcs))
+    if rec.get("on") and not rec.get("terms"):
+        env.warn("record_empty",
+                 "канал запису не спрацював: менше двох ознак. Додайте `--with` "
+                 "(ім'я чи прізвище поруч) або `kin` профілю"
+                 + (f"; закороткі й пропущені: {', '.join(rec['ignored'])}"
+                    if rec.get("ignored") else ""))
+
+
 def _warn_anchors(env: Envelope, got: dict[str, Any]) -> None:
     """Сказати, що дав канал імен — і, головне, чого він НЕ мав.
 
@@ -2451,6 +2477,12 @@ class SearchArgs(BaseModel):
         default="",
         description="чий рід: ім'я профілю з `config/research_profile.yaml`. "
                     "Порожньо — рід, написанням якого є запит")
+    # 🏠 Ознаки від людини: домінантне прізвище саме запису не виокремлює.
+    with_terms: list[str] = Field(
+        default_factory=list,
+        description="слова-ознаки каналу запису (`--with`): ім'я («Юрко») чи прізвище "
+                    "поруч із прізвищем запиту; вмикає канал запису. Лише "
+                    "where=decode і обов'язково --case")
     # 🎯 Третє число знаменника. Прапорцем, а не окремою операцією: агентних
     # інструментів у пакеті стеля, і правило пакета — групувати дії полем, а не
     # плодити tool на кожну. Заразом число опиняється в тому самому конверті,
@@ -2577,10 +2609,10 @@ def _search_run(a: SearchArgs) -> Envelope:
     if a.anchors and a.where != "decode":
         return fail(f"канал імен читає текст прогонів, а шукаємо в «{a.where}». "
                     f"Постав where=decode або прибери anchors")
-    if a.record and a.where != "decode":
+    if (a.record or a.with_terms) and a.where != "decode":
         return fail(f"канал запису читає текст і геометрію прогонів, а шукаємо в "
-                    f"«{a.where}». Постав where=decode або прибери record")
-    if a.record and not a.case:
+                    f"«{a.where}». Постав where=decode або прибери record/with")
+    if (a.record or a.with_terms) and not a.case:
         return fail("канал запису працює в межах справи: ознаки людей звужуються "
                     "її роками. Дай --case (ключ, шифру або ім'я прогону)")
     if a.selfcheck and not a.case:
@@ -2607,7 +2639,9 @@ def _search_run(a: SearchArgs) -> Envelope:
                                    limit=a.limit, context=a.context,
                                    given=a.given, folk=a.folk, rank=a.rank,
                                    profile=a.profile, anchors=a.anchors,
-                                   family=a.family, record=a.record)
+                                   family=a.family,
+                                   record=a.record or bool(a.with_terms),
+                                   with_terms=a.with_terms)
         except ValueError as exc:
             # Область пошуку не впізнано. Відмова тут нормативна (перелік
             # прийнятних форм), і вона краща за мовчазний пошук по всьому
@@ -2674,6 +2708,7 @@ def _search_run(a: SearchArgs) -> Envelope:
 
             env.data["coverage"]["reach"] = _R.reach(len(_S.list_cases()))
         _warn_anchors(env, res.get("anchor") or {})
+        _warn_shown(env, res, a.limit)
         # 🧾 Чим цю справу вже шукали. Мовчати про це означає давати людині
         # починати з нуля там, де робота зроблена, — або, гірше, вважати
         # зробленим те, що робив ГІРШИЙ рушій.

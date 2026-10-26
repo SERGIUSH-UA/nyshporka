@@ -59,6 +59,15 @@ class Person:
     #: Прізвище людини, коли воно НЕ прізвище роду: дівоче в дружини, рід
     #: матері. Каналу запису воно дає ще одну ознаку тієї самої родини.
     surname: str = ""
+    #: Інші форми імені тієї самої людини (латинська, польська, побутова):
+    #: у канонічній картці форм імені може бути кілька, і рушій читає ту, якою
+    #: писано акт. Одна людина — одна ознака, а форми лише розширюють її ключі.
+    alt_given: tuple[str, ...] = ()
+    #: Прізвища, які несе картка (усі форми імені), нормалізовані. Потрібні лише
+    #: для відбору канону чужого роду (`people`); ознакою запису не стають.
+    carries: tuple[str, ...] = ()
+    #: Звідки людина: «профіль» чи «канон». Каналу запису — щоб назвати джерело.
+    origin: str = ""
 
     @property
     def dated(self) -> bool:
@@ -86,7 +95,7 @@ class Keys:
 EMPTY = Keys()
 
 
-def people(prof: Any = None) -> list[Person]:
+def people(prof: Any = None, *, surnames: tuple[str, ...] | None = None) -> list[Person]:
     """Люди роду з профілю простору, доповнені каноном, якщо він є.
 
     🔴 Профіль головний, і це не смак. Пакет сам про себе каже, що для
@@ -97,10 +106,16 @@ def people(prof: Any = None) -> list[Person]:
     ⚠ Профіль перекриває канон за іменем: те, що дослідник виписав руками, він
     виписав, подивившись на документ.
 
-    🔴 Канон — лише для роду самого простору (`profile.is_home`). Інша родина
-    з того самого файла має тільки свій `kin`: люди канону їй чужі.
+    🔴 Канон — рід самого простору (`profile.is_home`). Інший профіль із того
+    самого файла — інша родина, і люди канону їй чужі: беруться лише особи,
+    чиї картки несуть ЇЇ прізвище (в проєкті, де канон веде саме цей рід, інакше
+    пошук по такому прізвищу лишався б без канону зовсім).
+
+    `surnames` — прізвища запиту (нормалізовані), коли профілю в запиту немає:
+    тоді профіль не підставляється (його `kin` — чужі люди), а канон
+    відбирається за цими прізвищами.
     """
-    if prof is None:
+    if prof is None and surnames is None:
         try:
             from nyshporka.core.profile import active
 
@@ -112,7 +127,17 @@ def people(prof: Any = None) -> list[Person]:
     # зливав їх в одну особу: по батькові другого разом із його вікном років
     # зникало з якорів (рецензія 08.09, третій раунд).
     out: dict[tuple[str, str], Person] = {}
-    for p in (_from_canon(prof) if _home(prof) else []):
+    if prof is None:
+        # Профілю запиту немає: канон лише тих, хто несе прізвище запиту.
+        want = tuple(surnames or ())
+    elif _home(prof):
+        want = ()
+    else:
+        want = tuple(surnames or ()) or _family_keys(prof)
+    canon = _from_canon(prof, surnames=surnames) if surnames else _from_canon(prof)
+    if want:
+        canon = [p for p in canon if _carries_any(p, want)]
+    for p in canon:
         out.setdefault(_person_key(p), p)
     for p in _from_profile(prof):
         out[_person_key(p)] = p
@@ -145,26 +170,38 @@ def _from_profile(prof: Any) -> list[Person]:
                           patronymic=str(raw.get("patronymic") or ""),
                           born=_int(raw.get("born")),
                           died=_int(raw.get("died")),
-                          surname=str(raw.get("surname") or "")))
+                          surname=str(raw.get("surname") or ""),
+                          origin="профіль"))
     return out
 
 
-def _from_canon(prof: Any = None) -> list[Person]:
+def _from_canon(prof: Any = None, *, surnames: tuple[str, ...] = ()) -> list[Person]:
     """Особи канону, якщо він у цьому просторі є. Немає — порожньо, не помилка.
 
-    ⚠ По батькові беремо розбором рядка імені (`split_name`): у канонічній
-    моделі окремого поля патроніма немає, і заводити його заради цього каналу
-    означало б міграцію всіх наявних карток.
+    🔴 Береться КОЖНА форма імені картки, а не перша. Картка веде «Юрій»
+    українською й «Georgius» латинкою, і акт написано однією з них; поля
+    `given` і `surname` форми, коли заповнені, головніші за розбір рядка.
+    По батькові — розбором рядка (`split_name`): окремого поля патроніма в
+    моделі немає, і заводити його заради цього каналу означало б міграцію всіх
+    наявних карток.
+
+    🔴 Жінка з прізвищем, яке не прізвище роду, — це дівоче (чи рід матері):
+    воно йде в `surname` особи, а канал запису читає його як ще одну ознаку
+    тієї самої родини. Чоловікові чуже прізвище в картці — не дівоче, його
+    не чіпаємо.
+
+    `surnames` — прізвища запиту, що доповнюють «прізвище роду» там, де
+    профілю в запиту немає.
     """
     try:
         from nyshporka.core.workspace import workspace
-        from nyshporka.records.names import split_name
         from nyshporka.storage.files import read_person
 
         root = workspace().canonical / "persons"
         if not root.is_dir():
             return []
         subs = _surname_substrings(prof)
+        fam = _family_keys(prof) + tuple(surnames)
         out: list[Person] = []
         from nyshporka.search.selfcheck import _person
 
@@ -175,19 +212,92 @@ def _from_canon(prof: Any = None) -> list[Person]:
             person = _person(path, read_person)
             if person is None:
                 continue
-            form = ""
-            for nm in person.names:
-                if nm.form:
-                    form = nm.form
-                    break
-            given, patr, _ = split_name(form)
-            out.append(Person(given=_clean_anchor(given, subs),
-                              patronymic=_clean_anchor(patr, subs),
-                              born=_life(person, "birt"),
-                              died=_life(person, "deat")))
+            got = _canon_person(person, subs, fam)
+            if got is not None:
+                out.append(got)
         return out
     except Exception:
         return []
+
+
+def _canon_person(person: Any, subs: tuple[str, ...], fam: tuple[str, ...]) -> Person | None:
+    """Одна картка канону → людина-джерело якорів (див. `_from_canon`)."""
+    from nyshporka.records.names import split_name
+
+    names = sorted((nm for nm in person.names if getattr(nm, "form", "") or getattr(nm, "given", "")),
+                   key=lambda nm: not getattr(nm, "primary", False))
+    if not names:
+        return None
+    givens: list[str] = []
+    patr = ""
+    carried: set[str] = set()
+    own: list[str] = []          # прізвища, названі явно: поле або хвіст рядка
+    for nm in names:
+        form = str(nm.form or "").strip()
+        sur_field = str(nm.surname or "").strip()
+        given_field = str(nm.given or "").strip()
+        toks = form.split()
+        carried.update(normalize_archival(t) for t in toks if len(t) >= MIN_TOK)
+        if sur_field:
+            own.append(sur_field)
+            carried.update(normalize_archival(t) for t in sur_field.split())
+            drop = {normalize_archival(t) for t in sur_field.split()}
+            toks = [t for t in toks if normalize_archival(t) not in drop]
+        if given_field:
+            g = given_field.split()[0]
+            rest = [t for t in toks if normalize_archival(t) != normalize_archival(g)]
+            pt = rest[0] if rest else ""
+        elif sur_field:
+            g, pt = (toks[0] if toks else ""), (toks[1] if len(toks) > 1 else "")
+        else:
+            g, pt, tail = split_name(form)
+            if tail:
+                own.append(tail)
+        g = _clean_anchor(g, subs)
+        if g and g not in givens:
+            givens.append(g)
+        patr = patr or _clean_anchor(pt, subs)
+    maiden = ""
+    if getattr(person, "sex", "U") == "F" and fam:
+        maiden = next((x for x in own if not _carries_any(Person(carries=(
+            normalize_archival(x),)), fam)), "")
+    first_given = givens[0] if givens else ""
+    alt = tuple(g for g in givens[1:]
+                if (norm_given(g) or g.lower()) != (norm_given(first_given) or first_given.lower()))
+    return Person(given=first_given, patronymic=patr,
+                  born=_life(person, "birt", "bapt", "chr"),
+                  died=_life(person, "deat", "buri"),
+                  surname=maiden, alt_given=alt, carries=tuple(sorted(carried)),
+                  origin="канон")
+
+
+def _family_keys(prof: Any) -> tuple[str, ...]:
+    """Цілі нормалізовані написання прізвища роду з профілю (без обрізків переносу)."""
+    if prof is None or not getattr(prof, "name", ""):
+        return ()
+    try:
+        from nyshporka.core.profile import _spellings_norm
+        from nyshporka.search.store import whole_stems
+
+        return tuple(whole_stems(sorted(_spellings_norm(prof)))[0])
+    except Exception:
+        return ()
+
+
+def _same_surname(a: str, b: str) -> bool:
+    """Те саме прізвище з точністю до відмінка: ціле слово або спільний початок."""
+    from rapidfuzz import fuzz
+
+    if len(a) < 4 or len(b) < 4:
+        return False
+    if fuzz.ratio(a, b) >= 80:
+        return True
+    k = min(len(a), len(b)) - 2
+    return k >= 5 and fuzz.ratio(a[:k], b[:k]) >= 85
+
+
+def _carries_any(p: Person, keys: tuple[str, ...]) -> bool:
+    return any(_same_surname(c, k) for c in p.carries for k in keys)
 
 
 def _surname_substrings(prof: Any = None) -> tuple[str, ...]:
@@ -221,13 +331,16 @@ def _clean_anchor(tok: str, subs: tuple[str, ...]) -> str:
     return s
 
 
-def _life(person: Any, kind: str) -> int | None:
-    for f in getattr(person, "facts", ()) or ():
-        if str(getattr(f, "type", "")).startswith(kind):
-            date = getattr(f, "date", None)
-            got = re.search(r"(1[5-9]\d\d|20\d\d)", str(getattr(date, "value", "")))
-            if got:
-                return int(got.group(1))
+def _life(person: Any, *kinds: str) -> int | None:
+    """Рік першої події з переліку, за порядком переліку: народження, а коли його
+    немає, — хрещення; смерть, а тоді поховання (метрика пише саме їх)."""
+    for kind in kinds:
+        for f in getattr(person, "facts", ()) or ():
+            if str(getattr(f, "type", "")).startswith(kind):
+                date = getattr(f, "date", None)
+                got = re.search(r"(1[5-9]\d\d|20\d\d)", str(getattr(date, "value", "")))
+                if got:
+                    return int(got.group(1))
     return None
 
 
@@ -259,9 +372,11 @@ def keys(y1: int | None = None, y2: int | None = None, *,
             undated += 1
             if not any_date:
                 continue
-        g = norm_given(p.given)
-        if len(g) >= MIN_TOK and _alive(p, y1, y2):
-            given.add(g)
+        if _alive(p, y1, y2):
+            for form in (p.given, *p.alt_given):
+                g = norm_given(form)
+                if len(g) >= MIN_TOK:
+                    given.add(g)
         pt = norm_patronymic(p.patronymic)
         if len(pt) >= MIN_TOK and _patr_window(p, y1, y2):
             patr.add(pt)

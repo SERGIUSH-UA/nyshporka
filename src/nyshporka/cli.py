@@ -1804,6 +1804,10 @@ def search_cmd(
         "", "--family",
         help="чий рід: ім'я профілю (`nysh profile`); порожньо — рід, "
              "написанням якого є запит"),
+    with_terms: list[str] = typer.Option(
+        [], "--with",
+        help="слово-ознака каналу запису: ім'я («Юрко») чи прізвище поруч із "
+             "прізвищем запиту; можна кілька разів; вмикає запис. Потребує --case"),
     selfcheck: bool = typer.Option(
         False, "--selfcheck",
         help="поміряти, чи бачить пошук аркуші, де прізвище виписане оком. "
@@ -1829,7 +1833,7 @@ def search_cmd(
                                 "limit": limit, "given": given, "folk": folk,
                                 "rank": rank, "profile": use_profile,
                                 "anchors": anchors, "record": record,
-                                "family": family,
+                                "family": family, "with_terms": list(with_terms),
                                 "selfcheck": selfcheck})
     if _answer(env, as_json):
         return
