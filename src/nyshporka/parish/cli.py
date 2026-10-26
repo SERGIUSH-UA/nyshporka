@@ -103,8 +103,11 @@ def _metric_rows(m: dict, limit: int) -> None:  # type: ignore[type-arg]
                        + (f"; … ще {len(items) - 12}" if len(items) > 12 else ""))
         if r.get("siblings"):
             typer.echo(f"    ті самі книги ведуть і: {'; '.join(r['siblings'])}")
-        for n in r.get("case_notes") or []:
+        notes = r.get("case_notes") or []
+        for n in notes[:4]:
             typer.echo(f"    📝 {n['shifra']} [{n['kind']}]: {str(n['text'])[:220]}")
+        if len(notes) > 4:
+            typer.echo(f"    📝 … ще {len(notes) - 4} записів нотатника (`nysh note list <справа>`)")
     if limit and len(rows) > limit:
         typer.echo(f"\n  … ще {len(rows) - limit} (`nysh parish metrics`)")
 
