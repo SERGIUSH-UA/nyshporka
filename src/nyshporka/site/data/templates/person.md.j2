@@ -1,4 +1,4 @@
-{% from "_macros.j2" import pcard, kin_group, gallery, hyp_list %}
+{% from "_macros.j2" import pcard, kin_group, gallery, hyp_list, fact_crops %}
 ---
 title: {{ person.primary_name | q }}
 private: {{ "true" if person.private else "false" }}
@@ -112,6 +112,7 @@ private: {{ "true" if person.private else "false" }}
 
 {{ f.value }}
 {% endif %}
+{{ fact_crops(life_crops[loop.index0]) }}
 </li>
 {% endfor %}
 </ol>

@@ -508,3 +508,9 @@ body { background: var(--nysh-bg); }
 .nysh-hit__where { font: 0.7rem var(--nysh-mono); color: var(--nysh-muted); word-break: break-all; }
 .md-typeset .nysh-tile--hyp { background: linear-gradient(135deg, var(--nysh-hyp-soft), var(--nysh-surface) 60%); }
 .md-typeset .nysh-panel__hyp, .nysh-panel__hyp { margin: 0.9rem 0 0; font: 600 0.75rem var(--nysh-sans); }
+
+/* Вирізка-доказ під фактом: мініатюра рядка документа, по кліку — лайтбокс. */
+.md-typeset .nysh-fact-crops { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.35rem 0 0.2rem; }
+.md-typeset .nysh-fact-crop img { display: block; max-height: 4.5rem; max-width: 100%; border: 1px solid var(--nysh-line); border-radius: 4px; background: #fff; }
+.md-typeset .nysh-fact-crop--pdf { font-size: 0.75rem; }
+@media (max-width: 600px) { .md-typeset .nysh-fact-crop img { max-height: 3.5rem; } }

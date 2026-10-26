@@ -41,6 +41,12 @@
 {% endif %}
 {%- endmacro %}
 
+{% macro fact_crops(crops) -%}
+{% if crops %}
+<span class="nysh-fact-crops">{% for d in crops %}{% if d.is_img %}<a class="nysh-gallery__item nysh-fact-crop" href="{{ d.url }}" title="{{ d.caption }}"><img src="{{ d.url }}" alt="{{ d.caption }}" loading="lazy"></a>{% else %}<a class="nysh-fact-crop nysh-fact-crop--pdf" href="{{ d.url }}" target="_blank" rel="noopener">📄 {{ d.caption }}</a>{% endif %}{% endfor %}</span>
+{% endif %}
+{%- endmacro %}
+
 {% macro hyp_list(hypotheses, base="../hypotheses/") -%}
 {% if hypotheses %}
 <div class="nysh-plist nysh-plist--wide" markdown>

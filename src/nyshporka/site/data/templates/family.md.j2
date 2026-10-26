@@ -1,4 +1,4 @@
-{% from "_macros.j2" import pcard, kin_group, gallery, hyp_list %}
+{% from "_macros.j2" import pcard, kin_group, gallery, hyp_list, fact_crops %}
 {% set _h = card(family.husband) if family.husband else None %}
 {% set _w = card(family.wife) if family.wife else None %}
 ---
@@ -65,6 +65,7 @@ title: {{ t("family.of", id=family.id) | q }}
 
 {{ f.value }}
 {% endif %}
+{{ fact_crops(life_crops[loop.index0]) }}
 </li>
 {% endfor %}
 </ol>

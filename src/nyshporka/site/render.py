@@ -300,6 +300,9 @@ def _build(
                 me=card(p.id),
                 kin=_kin(p, families_by_id, card),
                 life=life,
+                life_crops=_fact_crops(
+                    life, project_root, docs_dir,
+                    {d["url"] for d in citation_docs.get(p.id, [])} if public else None),
                 hypotheses=hyp_by_about.get(p.id, []),
                 hyp_ids=hyp_ids,
                 place_names=place_names,
@@ -388,6 +391,9 @@ def _build(
                 place_names=place_names,
                 all_sources=used,
                 documents=citation_docs.get(f.id, []),
+                life_crops=_fact_crops(
+                    f.facts, project_root, docs_dir,
+                    {d["url"] for d in citation_docs.get(f.id, [])} if public else None),
             ),
             encoding="utf-8",
         )
@@ -1180,6 +1186,49 @@ def _life(p: Person, families_by_id: dict[str, Family] | None = None,
             value = "; ".join(x for x in (lead, f.value or "") if x) or None
             facts.append(f.model_copy(update={"value": value}))
     return sorted(facts, key=lambda f: (f.date is None, f.date.value if f.date else ""))
+
+
+def _fact_crops(facts: list[Fact], project_root: Path, docs_dir: Path,
+                allowed: set[str] | None = None) -> list[list[dict[str, Any]]]:
+    """Вирізка-доказ кожного факту — поруч із самим фактом, а не лише в галереї.
+
+    🔴 Факт зі зноскою на джерело без вирізки змушував читача йти на сайт
+    архіву й шукати кадр самому; доказ уже лежить у сторі, тож він стоїть під
+    фактом: мініатюра, по кліку — на весь екран. Шлях береться з `note` цитати
+    («Доказ: `data/source/citations/…`»). `allowed` (відкрита збірка) — лише
+    файли, які галерея сторінки вже публікує: власних правил оприлюднення тут
+    немає, щоб не розійтися з ними.
+    """
+    from nyshporka.canon import refs
+    from nyshporka.canon.check import evidence_refs
+
+    root = refs.citations_dir(project_root)
+    out: list[list[dict[str, Any]]] = []
+    for f in facts:
+        crops: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for c in f.citations:
+            for ref in sorted(evidence_refs(c.note or "")):
+                src = refs.resolve(project_root, ref)
+                ext = src.suffix.lower()
+                if not src.is_file() or not (ext in _DOC_IMG_EXT or ext == ".pdf"):
+                    continue
+                try:
+                    rel = src.relative_to(root)
+                except ValueError:
+                    continue      # першоджерело з data/raw на сайт не копіюється
+                url = "../assets/citations/" + rel.as_posix()
+                if url in seen or (allowed is not None and url not in allowed):
+                    continue
+                seen.add(url)
+                dest = docs_dir / "assets" / "citations" / rel
+                if not dest.exists():
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src, dest)
+                crops.append({"url": url, "caption": c.page or _humanize_doc_name(src.stem),
+                              "is_img": ext in _DOC_IMG_EXT, "is_pdf": ext == ".pdf"})
+        out.append(crops)
+    return out
 
 
 def _search_index(persons: list[Person], place_names: dict[str, str],
