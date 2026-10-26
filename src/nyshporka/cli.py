@@ -1365,6 +1365,40 @@ def _supriaha_lookup(case_key: str, frames: int) -> None:
     console.print(f"  [muted]забрати: nysh share pull \"{escape(zapyt)}\" --take[/muted]")
 
 
+def _read_form_cells(case_dir: str, *, out: str, script: str, model: str,
+                     case_key: str, pages: str, dry: bool) -> None:
+    """`nysh read --form-cells`: бланк поклітинно, голос поруч з основним прогоном."""
+    from nyshporka.htr import cells as CE
+    from nyshporka.htr.run import ReadError, case_key_for
+
+    try:
+        p = CE.plan(case_dir, model=model, out_dir=out, script=script)
+    except ReadError as exc:
+        console.print(f"[err]{exc}[/err]")
+        raise typer.Exit(code=1) from None
+    console.print(f"[bold]{p.case_dir.name}[/bold] — {p.frames} кадрів · "
+                  f"клітинки бланка · {p.model.name}")
+    console.print(f"  [muted]{p.out_dir}[/muted]")
+    if not p.base_exists:
+        console.print(f"  [warn]основного прогону немає ({p.base_run.name}): кути "
+                      f"повороту кадрів невідомі, береться 0°[/warn]")
+    if not case_key:
+        case_key = case_key_for(p.case_dir)[0]
+    if dry:
+        console.print("  [muted]" + " ".join(p.command(case_key=case_key, pages=pages))
+                      + "[/muted]")
+        return
+
+    def _say(line: str) -> None:
+        console.print(f"  [muted]{escape(line)}[/muted]")
+
+    rc = CE.read(p, case_key=case_key, pages=pages, on_line=_say)
+    if rc == 0:
+        console.print(f"✅ готово → {p.out_dir.name}. Додати в пошук: "
+                      f"nysh text index --case <справа>")
+    raise typer.Exit(code=rc)
+
+
 @app.command()
 @route("read", op="read.start", mutates=True)
 def read(
@@ -1409,6 +1443,11 @@ def read(
         help=("запустити, хоч справу вже прочитано ЦІЄЮ моделлю: раннер дочитає "
               "сторінки без тексту, готові не перечитує. Перечитати все — "
               "окрема тека (--out) або інша модель (--model)")),
+    form_cells: bool = typer.Option(
+        False, "--form-cells",
+        help="ще один голос для друкованих бланків: клітинки за лініями таблиці, "
+             "кожна читається як один рядок, вихід `<прогін>-cells`; кадри мають "
+             "лежати на диску, основне читання не повторюється"),
     dry: bool = typer.Option(False, "--dry-run", help="лише показати план"),
 ) -> None:
     """Прочитати справу рукописним рушієм.
@@ -1430,6 +1469,10 @@ def read(
     from nyshporka.htr.run import plan as make_plan
 
     _need("htr")
+    if form_cells:
+        _read_form_cells(case_dir, out=out, script=script, model=model,
+                         case_key=case_key, pages=pages, dry=dry)
+        return
     try:
         p = make_plan(case_dir, out_dir=out, script=script,
                       second_voice=not one_voice, model=model, seg_cache=seg_cache,
