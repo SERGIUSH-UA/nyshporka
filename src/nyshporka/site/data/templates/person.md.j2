@@ -1,4 +1,4 @@
-{% from "_macros.j2" import pcard, kin_group, gallery, hyp_list %}
+{% from "_macros.j2" import pcard, kin_group, gallery, hyp_list, fact_crops %}
 ---
 title: {{ person.primary_name | q }}
 private: {{ "true" if person.private else "false" }}
@@ -103,7 +103,7 @@ private: {{ "true" if person.private else "false" }}
 {% if life %}
 ## {{ t("h.life") }} { #life }
 
-<ol class="nysh-life">
+<ol class="nysh-life" markdown="1">
 {% for f in life %}
 <li class="nysh-life__item nysh-life__item--{{ f.type }}{% if f.status != 'confirmed' %} is-{{ f.status }}{% endif %}" markdown="1">
 <span class="nysh-life__date">{{ f.date | format_date(decade_only=person.private) if f.date else t("undated") }}</span>
@@ -112,6 +112,7 @@ private: {{ "true" if person.private else "false" }}
 
 {{ f.value }}
 {% endif %}
+{{ fact_crops(life_crops[loop.index0]) }}
 </li>
 {% endfor %}
 </ol>
