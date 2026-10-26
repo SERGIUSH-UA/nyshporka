@@ -204,11 +204,17 @@ def assets_inputs(models: Sequence[Path]) -> list[tuple[str, Path]]:
     items = [(f"{ARC_MODELS}/{p.name}", p) for p in models]
     items.append((f"{ARC_SCRIPTS}/{RUNNER_ARCNAME}", runner))
     items.append((f"{ARC_SCRIPTS}/{LINES_MODULE}", htr / LINES_MODULE))
+    # 📋 бланк поклітинно (`-p form_cells=1`): раннер імпортує їх лише з прапорцем,
+    # але їдуть завжди — наглядач перевіряє їх наявність перед тим, як його дати
+    items += [(f"{ARC_SCRIPTS}/{m}", htr / m) for m in FORM_MODULES]
     items += [(f"{ARC_SCRIPTS}/patches/{p.name}", p)
               for p in sorted((htr / "patches").glob("*.py"))]
     items.append((f"{ARC_SCRIPTS}/{ENGINE_REQUIREMENTS}", engine_requirements_file()))
     return items
 
+
+#: Модулі бланка поклітинно поруч із раннером (`htr.form_cells`, `htr.cells_read`).
+FORM_MODULES = ("form_cells.py", "cells_read.py")
 
 #: Вимоги середовища рушіїв у архіві ассетів (читає `gpurunner htr plan`).
 ENGINE_REQUIREMENTS = "engine_requirements.txt"

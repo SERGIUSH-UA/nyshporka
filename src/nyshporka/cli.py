@@ -1365,42 +1365,6 @@ def _supriaha_lookup(case_key: str, frames: int) -> None:
     console.print(f"  [muted]забрати: nysh share pull \"{escape(zapyt)}\" --take[/muted]")
 
 
-def _read_form_cells(case_dir: str, *, out: str, script: str, model: str,
-                     case_key: str, pages: str, dry: bool) -> None:
-    """`nysh read --form-cells`: бланк поклітинно, голос поруч з основним прогоном."""
-    from nyshporka.htr import cells as CE
-    from nyshporka.htr.run import ReadError, case_key_for
-
-    try:
-        p = CE.plan(case_dir, model=model, out_dir=out, script=script)
-    except ReadError as exc:
-        console.print(f"[err]{exc}[/err]")
-        raise typer.Exit(code=1) from None
-    console.print(f"[bold]{p.case_dir.name}[/bold] — {p.frames} кадрів · "
-                  f"клітинки бланка · {p.model.name}")
-    console.print(f"  [muted]{p.out_dir}[/muted]")
-    if not p.base_exists:
-        console.print(f"  [warn]основного прогону немає ({p.base_run.name}): кути "
-                      f"повороту кадрів невідомі, береться 0°[/warn]")
-    if not case_key:
-        case_key = case_key_for(p.case_dir)[0]
-    if dry:
-        console.print("  [muted]" + " ".join(p.command(case_key=case_key, pages=pages))
-                      + "[/muted]")
-        return
-
-    from rich.markup import escape
-
-    def _say(line: str) -> None:
-        console.print(f"  [muted]{escape(line)}[/muted]")
-
-    rc = CE.read(p, case_key=case_key, pages=pages, on_line=_say)
-    if rc == 0:
-        console.print(f"✅ готово → {p.out_dir.name}. Додати в пошук: "
-                      f"nysh text index --case <справа>")
-    raise typer.Exit(code=rc)
-
-
 @app.command()
 @route("read", op="read.start", mutates=True)
 def read(
@@ -1447,9 +1411,10 @@ def read(
               "окрема тека (--out) або інша модель (--model)")),
     form_cells: bool = typer.Option(
         False, "--form-cells",
-        help="ще один голос для друкованих бланків: клітинки за лініями таблиці, "
-             "кожна читається як один рядок, вихід `<прогін>-cells`; кадри мають "
-             "лежати на диску, основне читання не повторюється"),
+        help="бланк поклітинно: ще голос `<прогін>-cells` — клітинки за лініями "
+             "друкованої таблиці (розворот ділиться, сторінка вирівнюється, висока "
+             "графа ріжеться на рядки руки). Уже прочитані сторінки дістають лише "
+             "клітинки. Без прапорця — як каже паспорт справи (поле `form`)"),
     dry: bool = typer.Option(False, "--dry-run", help="лише показати план"),
 ) -> None:
     """Прочитати справу рукописним рушієм.
@@ -1471,14 +1436,11 @@ def read(
     from nyshporka.htr.run import plan as make_plan
 
     _need("htr")
-    if form_cells:
-        _read_form_cells(case_dir, out=out, script=script, model=model,
-                         case_key=case_key, pages=pages, dry=dry)
-        return
     try:
         p = make_plan(case_dir, out_dir=out, script=script,
                       second_voice=not one_voice, model=model, seg_cache=seg_cache,
-                      also=with_, fix_sideways=not dry)
+                      also=with_, fix_sideways=not dry,
+                      form_cells=True if form_cells else None)
     except ReadError as exc:
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=1) from None
@@ -1487,6 +1449,9 @@ def read(
                   f"письмо {p.script} · {p.model.name}"
                   + "".join(f" + {v.name}" for v in p.voices))
     console.print(f"  [muted]{p.out_dir}[/muted]")
+    if getattr(p, "form_cells", False):
+        console.print(f"  📋 бланк поклітинно → {p.out_dir.name}-cells "
+                      f"[muted]({p.form_why})[/muted]")
     if bokom := getattr(p, "bokovi", ""):
         console.print(f"  ⚠ {bokom}", style="warn", markup=False)
     # 🔴 Вже прочитане цією моделлю не перечитується мовчки: прогін коштує
@@ -1497,7 +1462,8 @@ def read(
     # `--dry-run` нічого не запускає, а `--pages`/`--limit` читають ЧАСТИНУ, і
     # вимагати для них `--rerun` означало б вимагати дозволу на те, чого
     # перевірка не стосується (знайдено рев'ю 21.09.2026).
-    if not rerun and not dry and not pages and not limit:
+    # Бланкова справа, уже прочитана, дістає лише клітинки — це не перечитування.
+    if not rerun and not dry and not pages and not limit and not getattr(p, "form_cells", False):
         from nyshporka.cloud.go import already_read
 
         if why := already_read(p.out_dir, model=p.model.name, frames=p.frames):
@@ -2218,6 +2184,11 @@ app.add_typer(church_app, name="church")
 from nyshporka.search.cli import app as text_app  # noqa: E402
 
 app.add_typer(text_app, name="text")
+
+# 📋 Бланки поклітинно: замір проти звіреного оком.
+from nyshporka.htr.form_cli import app as form_app  # noqa: E402
+
+app.add_typer(form_app, name="form")
 
 # 🗂 Каталог — довідники, які їдуть у комплекті й оновлюються окремо від коду.
 from nyshporka.catalog.cli import app as catalog_app  # noqa: E402

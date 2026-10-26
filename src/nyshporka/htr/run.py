@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import re
 from collections.abc import Sequence
@@ -89,6 +90,10 @@ class Plan:
     #: одночасні проходи сегментації не влазять у пам'ять типової карти, і
     #: прогін не сповільнюється, а завалюється.
     gpu_lock: Path | None = None
+    #: 📋 Бланк поклітинно (`--form-cells` раннера): голос `<out>-cells`. Звідки
+    #: рішення — `form_why` (прапорець людини чи паспорт справи).
+    form_cells: bool = False
+    form_why: str = ""
 
     @property
     def voices(self) -> tuple[Path, ...]:
@@ -144,6 +149,8 @@ class Plan:
             # 0/1 = не передавати: дефолт вирішує раннер, і звірка з еталоном
             # лишається доступною.
             cmd += ["--voice-batch", str(voice_batch)]
+        if self.form_cells:
+            cmd.append("--form-cells")
         if progress_json:
             cmd.append("--progress-json")
         return cmd
@@ -154,7 +161,8 @@ class Plan:
                 "voices": [v.name for v in self.voices],
                 "script": self.script, "frames": self.frames,
                 "script_trust": self.script_trust, "script_why": self.script_why,
-                "bokovi": self.bokovi}
+                "bokovi": self.bokovi, "form_cells": self.form_cells,
+                "form_why": self.form_why}
 
     # ── шарди ────────────────────────────────────────────────────────────────
     def shards(self, workers: int = 1, *, device: str = "", dynamic: bool = True,
@@ -538,7 +546,8 @@ def seg_cache_dir(case_dir: Path, derived: Path) -> Path:
 def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
          second_voice: bool = True, model: str = "",
          seg_cache: str | Path = "", also: Sequence[str] = (),
-         zone: bool = False, fix_sideways: bool = False) -> Plan:
+         zone: bool = False, fix_sideways: bool = False,
+         form_cells: bool | None = None) -> Plan:
     """Зібрати план прогону або пояснити, чого бракує.
 
     `model` — перечитати справу ЯВНО названою моделлю (напр. Скрибою, коли
@@ -558,6 +567,9 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
     розгортається в кадри). Командний рядок (`nysh read <тека>`) гарду не
     ставить навмисно: там теку називає сама людина у своєму терміналі
     (аудит 29.09.2026 — доти гард, описаний у `under_raw`, на черзі не стояв).
+
+    `form_cells` — бланк поклітинно. `None` — як каже паспорт справи (поле
+    `form` у `_source.json`); `True`/`False` — явне слово людини.
 
     `fix_sideways` — розгорнути бокові кадри PDF і відкласти прочитане з них
     (`htr.bokovi`). Лише для запуску: без нього план тільки каже, скільки
@@ -677,7 +689,28 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
                 frames=frames, python=rep.python, runner=runner, voice=voice,
                 extra_voices=extra, seg_cache=seg, gpu_lock=lock_dir / "gpu.lock",
                 script_trust=trust, script_why=why, seg_why=seg_why,
-                seg_ready=seg_ready, bokovi=bokom)
+                seg_ready=seg_ready, bokovi=bokom,
+                **_form_choice(case, form_cells))
+
+
+def form_of_case(case_dir: Path) -> str:
+    """Поле `form` паспорта справи: порожньо — не бланк; `true` чи ім'я шаблону."""
+    try:
+        src = json.loads((case_dir / "_source.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    got = src.get("form") if isinstance(src, dict) else None
+    if got is True:
+        return "true"
+    return str(got).strip() if isinstance(got, str) else ""
+
+
+def _form_choice(case: Path, asked: bool | None) -> dict[str, object]:
+    if asked is not None:
+        return {"form_cells": asked, "form_why": "слово людини" if asked else ""}
+    form = form_of_case(case)
+    return ({"form_cells": True, "form_why": f"паспорт справи: form={form}"} if form
+            else {"form_cells": False, "form_why": ""})
 
 
 def shard_env(workers: int, *, cores: int = 0) -> dict[str, str]:

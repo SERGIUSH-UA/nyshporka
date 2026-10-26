@@ -114,6 +114,10 @@ def frames_in(case_dir: Path) -> list[Path]:
                   if p.is_file() and p.suffix.lower() in IMG_EXT)
 
 
+#: Дзеркало `htr.runner.CELLS_DONE`: сторінка голосу клітинок опрацьована.
+CELLS_DONE = (".txt", ".nogrid", ".cellsfail")
+
+
 def missing_pages(pages_all: list[Path], out_dir: Path,
                   side_dirs: tuple[Path, ...] = ()) -> list[str]:
     """Кадри без тексту на диску. Дзеркало `htr.runner.missing_pages`.
@@ -128,7 +132,9 @@ def missing_pages(pages_all: list[Path], out_dir: Path,
             gone.append(p.name)
             continue
         for d in side_dirs:
-            if not (d / f"{p.stem}.txt").exists():
+            # голос клітинок: сторінка бланка без сітки має позначку, а не текст
+            done = CELLS_DONE if d.name.endswith("-cells") else (".txt",)
+            if not any((d / f"{p.stem}{suf}").exists() for suf in done):
                 gone.append(p.name)
                 break
     return gone

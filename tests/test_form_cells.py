@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -64,6 +65,65 @@ def test_crop_boxes_pad_upward_and_stay_in_frame() -> None:
     assert box[1] == int(cell[1] - h * FC.PAD_UP)        # запас угору — на рукопис над лінією
     assert box[3] == int(cell[3] + h * FC.PAD_DOWN)
     assert all(0 <= b[0] < b[2] <= W and 0 <= b[1] < b[3] <= H for b in g.crops)
+
+
+def test_a_skewed_form_is_levelled_and_still_found() -> None:
+    """Нахил 2°: без вирівнювання горизонталі розсипаються й сітки немає."""
+    from nyshporka.htr import form_cells as FC
+
+    tilted = fake_form().rotate(2.0, resample=Image.Resampling.BILINEAR, fillcolor=(235, 235, 235))
+    assert abs(FC.page_angle(tilted) - 2.0) <= 0.15
+    g = FC.find_grid(tilted)
+    assert g.found and len(g.crops) >= 40
+    assert g.parts[0].angle != 0
+    assert all(0 <= b[0] < b[2] <= W and 0 <= b[1] < b[3] <= H for b in g.crops)
+    assert len(g.images(tilted)) == len(g.crops)
+
+
+PW = 1900                                             # сторінка розвороту
+
+
+def spread() -> Image.Image:
+    """Розворот: дві сторінки з власними таблицями й порожнім корінцем посередині."""
+    page = fake_form().resize((PW, H))
+    im = Image.new("RGB", (2 * PW + 200, H), (235, 235, 235))
+    im.paste(page, (0, 0))
+    im.paste(page.rotate(1.5, resample=Image.Resampling.BILINEAR, fillcolor=(235, 235, 235)),
+             (PW + 200, 0))
+    return im
+
+
+def test_a_spread_is_split_at_the_gutter_and_each_page_levelled() -> None:
+    from nyshporka.htr import form_cells as FC
+
+    im = spread()
+    parts = FC.split_spread(im)
+    assert len(parts) == 2 and PW <= parts[0][1] <= PW + 200
+    g = FC.find_grid(im)
+    assert [p.angle == 0 for p in g.parts] == [True, False]
+    assert {a[0] for a in g.addr} == {0, 1}
+    # альбомний бланк на всю ширину кадру — не розворот: горизонталі перетинають середину
+    wide = fake_form().resize((H, W))
+    assert FC.split_spread(wide) == [(0, H)]
+
+
+def test_a_tall_cell_is_addressed_but_not_read() -> None:
+    """Графа книжкового бланка (висока клітинка з кількома рядками руки) у кропи не
+    йде: її рядки краще читає звичайна сегментація. Адресу ж має сусідня клітинка."""
+    from nyshporka.htr import form_cells as FC
+
+    im = Image.new("L", (W, H), 235)
+    d = ImageDraw.Draw(im)
+    ys = [300, 450, 600, 2400, 2550]                  # третій рядок таблиці — високий
+    for y in ys:
+        d.line([(150, y), (2250, y)], fill=40, width=4)
+    for x in (150, 1200, 2250):
+        d.line([(x, ys[0]), (x, ys[-1])], fill=40, width=4)
+    g = FC.find_grid(im.convert("RGB"))
+    assert g.found
+    rows = {a[1] for a in g.addr}
+    assert 2 not in rows and {0, 1, 3} <= rows
+    assert any(c[3] - c[1] > H * FC.MAX_CELL_H for c in g.cells)   # сама графа відома
 
 
 def test_empty_and_book_pages_give_no_cells() -> None:
@@ -153,7 +213,11 @@ def test_cells_run_layout_and_meta(space: Path) -> None:
     assert disk["case_dir"] == str(case_dir).replace("\\", "/")
     assert disk["model"] == "pysar_cyr_v17.pt+cells" and disk["voice"] == "cells"
     assert disk["cells_of"] == "проба"
-    assert disk["form_cells"] == {"pages_with_grid": 1, "pages_without_grid": 1}
+    assert disk["form_cells"] == {"pages_with_grid": 1, "pages_without_grid": 1,
+                                  "no_grid": ["0002.jpg"]}
+    # адреса кожного кропа: сторінка, рядок таблиці, колонка, підрядок
+    assert len(geo["cells"]) == 48 and geo["cells"][0] == [0, 0, 0]
+    assert {tuple(c[:2]) for c in geo["cells"]} == {(0, r) for r in range(8)}
     assert list(disk["pages"]) == ["0001.jpg"] and disk["pages"]["0001.jpg"]["lines"] == 48
 
 
@@ -183,25 +247,58 @@ def test_cells_voice_is_searchable_and_crop_hits_the_cell(space: Path) -> None:
         assert im.size == (crop["box"][2] - crop["box"][0], crop["box"][3] - crop["box"][1])
 
 
-# ── план і відмови ───────────────────────────────────────────────────────────
-def test_plan_refuses_a_case_with_frames_only_in_the_cloud(tmp_path: Path) -> None:
-    from nyshporka.htr import cells as CE
-    from nyshporka.htr.run import ReadError
+# ── план: прапорець людини або паспорт справи ────────────────────────────────
+def test_the_passport_field_form_turns_cells_on(tmp_path: Path) -> None:
+    from nyshporka.htr import run as RUN
 
-    (tmp_path / "_r2_frames.json").write_text(json.dumps({"frames": [{"name": "1.jpg"}]}),
-                                              encoding="utf-8")
-    with pytest.raises(ReadError, match="лише маніфест"):
-        CE.plan(tmp_path)
+    assert RUN.form_of_case(tmp_path) == ""
+    assert RUN._form_choice(tmp_path, None) == {"form_cells": False, "form_why": ""}
+    (tmp_path / "_source.json").write_text(json.dumps({"form": "zags_birth"}),
+                                           encoding="utf-8")
+    got = RUN._form_choice(tmp_path, None)
+    assert got["form_cells"] and "zags_birth" in got["form_why"]
+    (tmp_path / "_source.json").write_text(json.dumps({"form": True}), encoding="utf-8")
+    assert RUN.form_of_case(tmp_path) == "true"
+    # слово людини важить більше за паспорт
+    assert RUN._form_choice(tmp_path, False)["form_cells"] is False
 
 
-def test_plan_refuses_missing_and_empty_dirs(tmp_path: Path) -> None:
-    from nyshporka.htr import cells as CE
-    from nyshporka.htr.run import ReadError
+def test_the_runner_command_carries_the_flag(tmp_path: Path) -> None:
+    from nyshporka.htr.run import Plan
 
-    with pytest.raises(ReadError, match="теки немає"):
-        CE.plan(tmp_path / "нема")
-    with pytest.raises(ReadError, match="немає зображень"):
-        CE.plan(tmp_path)
+    p = Plan(case_dir=tmp_path, out_dir=tmp_path / "out", model=tmp_path / "m.pt",
+             script="cyrillic", frames=1, python=tmp_path / "py", runner=tmp_path / "r.py")
+    assert "--form-cells" not in p.command()
+    assert "--form-cells" in dataclasses.replace(p, form_cells=True).command()
+
+
+def test_runner_completeness_counts_a_page_without_grid_as_done(tmp_path: Path) -> None:
+    """Сторінка без сітки тексту голосу не має — лише позначку; повнота не бреше."""
+    from nyshporka.htr import cells_read as CR
+    from nyshporka.htr import runner as RN
+
+    out, cells = tmp_path / "out", tmp_path / "out-cells"
+    out.mkdir()
+    frames = [tmp_path / "0001.jpg", tmp_path / "0002.jpg", tmp_path / "0003.jpg"]
+    for f in frames:
+        (out / f"{f.stem}.txt").write_text("текст\n", encoding="utf-8")
+    CR.write_page(cells, "0001", (["клітинка"], {"size": [1, 1], "boxes": [[0, 0, 1, 1]],
+                                                  "cells": [[0, 0, 0]], "parts": []}))
+    CR.write_page(cells, "0002", None)
+    assert RN.missing_pages(frames, out, (cells,)) == ["0003.jpg"]
+    CR.write_failed(cells, "0003", "RuntimeError: тест")
+    assert RN.missing_pages(frames, out, (cells,)) == []
+    assert RN.missing_pages(frames, out) == []                 # без клітинок — як було
+    meta = CR.finish(cells, names={f.stem: f.name for f in frames}, case_dir=tmp_path,
+                     case_key="", model="m.pt", engine="parseq", script="cyrillic",
+                     device="cpu", base_run="out")
+    assert list(meta["pages"]) == ["0001.jpg"]
+    assert meta["form_cells"]["no_grid"] == ["0002.jpg"]
+    assert meta["form_cells"]["failed"] == ["0003.jpg"]
+    # позначка «сітки немає» зникає, коли сторінку перечитали з сіткою
+    CR.write_page(cells, "0002", (["x"], {"size": [1, 1], "boxes": [[0, 0, 1, 1]],
+                                          "cells": [[0, 0, 0]], "parts": []}))
+    assert not (cells / "0002.nogrid").exists()
 
 
 def test_parse_ranges() -> None:
@@ -209,3 +306,31 @@ def test_parse_ranges() -> None:
 
     assert CR.parse_ranges("", 3) == {1, 2, 3}
     assert CR.parse_ranges("1-2,5", 9) == {1, 2, 5}
+
+
+# ── хмара: ті самі модулі на боксі, повнота голосу клітинок ──────────────────
+def test_cloud_assets_carry_the_form_modules(tmp_path: Path) -> None:
+    from nyshporka.cloud import supervised as SUP
+
+    names = {arc for arc, _src in SUP.assets_inputs([])}
+    assert {f"{SUP.ARC_SCRIPTS}/form_cells.py", f"{SUP.ARC_SCRIPTS}/cells_read.py"} <= names
+    assert all(src.is_file() for arc, src in SUP.assets_inputs([]) if arc.endswith("cells.py")
+               or arc.endswith("cells_read.py"))
+
+
+def test_cloud_verify_counts_a_page_without_grid_as_done(tmp_path: Path) -> None:
+    from nyshporka.cloud import verify as V
+
+    out, cells, diak = tmp_path / "r", tmp_path / "r-cells", tmp_path / "r-diak_v10"
+    for d in (out, cells, diak):
+        d.mkdir()
+    frames = [tmp_path / "0001.jpg", tmp_path / "0002.jpg"]
+    for f in frames:
+        (out / f"{f.stem}.txt").write_text("т", encoding="utf-8")
+        (diak / f"{f.stem}.txt").write_text("т", encoding="utf-8")
+    (cells / "0001.txt").write_text("к", encoding="utf-8")
+    (cells / "0002.nogrid").write_text("", encoding="utf-8")
+    assert V.missing_pages(frames, out, V.voice_dirs(out)) == []
+    (diak / "0002.txt").unlink()
+    (diak / "0002.nogrid").write_text("", encoding="utf-8")
+    assert V.missing_pages(frames, out, V.voice_dirs(out)) == ["0002.jpg"]

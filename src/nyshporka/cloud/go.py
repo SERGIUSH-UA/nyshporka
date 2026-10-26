@@ -521,7 +521,7 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
        boxes: int = 1, datacenter_only: bool = False, pace: str = "",
        min_pph: float = 0.0, machine: int = 0, accept_slow_delivery: bool = False,
        vydannia: str = "", title: str = "", city: str = "",
-       seg_height: int = 0, book: int = 0,
+       seg_height: int = 0, book: int = 0, form_cells: bool = False,
        on_event: EventFn | None = None, tick_sec: float = 60.0) -> GoResult:
     """Прочитати справу (або кілька) на орендованій машині від початку до кінця.
 
@@ -582,7 +582,7 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
             allow_partial=allow_partial, rotate_landscape=rotate_landscape,
             thin=thin, transport=transport,
             max_usd_per_1000=max_usd_per_1000, params=tuple(params),
-            seg_height=seg_height,
+            seg_height=seg_height, form_cells=form_cells,
             pack_dir=pack_dir, upload_jobs=upload_jobs,
             boxes=boxes, datacenter_only=datacenter_only, pace=pace,
             min_pph=min_pph, machine=machine,
@@ -1156,7 +1156,7 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
         pace: str = "", min_pph: float = 0.0, machine: int = 0,
         accept_slow_delivery: bool = False,
         edition: dict[str, Any] | None = None,
-        seg_height: int = 0,
+        seg_height: int = 0, form_cells: bool = False,
         pack_dir: str = "", upload_jobs: int = 0) -> None:
     from nyshporka.cloud import plan as PL
 
@@ -1332,6 +1332,8 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
 
         # Ручки оренди наглядач читає з `-p`; людське `-p …` того самого ключа
         # перемагає (наші йдуть лише туди, де людина нічого не задала).
+        from nyshporka.htr.run import form_of_case
+
         given = {p.split("=", 1)[0].strip() for p in params}
         for knob, setting in (("datacenter_only", "true" if datacenter_only else ""),
                               ("pace", pace),
@@ -1339,7 +1341,13 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
                               ("machine_id", str(int(machine)) if machine else ""),
                               ("accept_slow_delivery",
                                "true" if accept_slow_delivery else ""),
-                              ("seg_height", str(int(seg_height)) if seg_height else "")):
+                              ("seg_height", str(int(seg_height)) if seg_height else ""),
+                              # 📋 бланк поклітинно: слово людини або паспорт хоч
+                              # однієї справи черги (`form` у `_source.json`); на
+                              # сторінці без сітки раннер лише лишає позначку
+                              ("form_cells", "1" if form_cells or any(
+                                  form_of_case(Path(leg.source)) for leg in convoy.legs)
+                               else "")):
             if setting and knob not in given:
                 params = (*params, f"{knob}={setting}")
 

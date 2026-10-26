@@ -1030,6 +1030,10 @@ def cmd_go(
         help="ще голос тим самим проходом: `latin` (Скриба) або ім'я ваг"),
     one_voice: bool = typer.Option(False, "--one-voice",
                                    help="без другого рушія (швидше, але сліпіше)"),
+    form_cells: bool = typer.Option(
+        False, "--form-cells",
+        help="бланк поклітинно: ще голос `<прогін>-cells` (див. `nysh read --form-cells`); "
+             "без прапорця — як каже паспорт справи (поле `form`)"),
     case_key: str = typer.Option("", "--case-key", help="шифра справи для мети прогону"),
     transport: str = typer.Option(
         "auto", "--transport",
@@ -1186,7 +1190,8 @@ def cmd_go(
                 boxes=boxes, datacenter_only=datacenter_only, pace=pace,
                 min_pph=min_pph, machine=machine,
                 accept_slow_delivery=accept_slow_delivery, on_event=on_event,
-                seg_height=seg_height, book=book, tick_sec=max(1.0, tick))
+                seg_height=seg_height, book=book, form_cells=form_cells,
+                tick_sec=max(1.0, tick))
     if as_json:
         # `print`, а не rich: один рядок без переносів і розфарбування — його
         # розбирають `json.loads` від останнього рядка виводу.

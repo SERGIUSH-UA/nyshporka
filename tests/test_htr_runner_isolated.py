@@ -38,13 +38,13 @@ ENGINE_ENV = {
 #: Сусідні файли, що вантажаться за шляхом (той самий трюк, що й патчі).
 LOCAL_MODULES = {"pysar_lines_infer", "gpu_sato", "fast_geom", "seg_ceiling",
                  "seg_resize", "fast_order", "fast_seam", "fast_clahe", "runner",
-                 "pp_fuse", "pp_fp16"}
+                 "pp_fuse", "pp_fp16", "form_cells", "cells_read"}
 
 #: 🔴 Перелік явний, а не `rglob`. У теці живуть модулі двох ярусів: ці їдуть
 #: у середовище рушіїв, а `env.py`/`manifest.py` навпаки — керують ним іззовні,
 #: з того інтерпретатора, де пакет стоїть, і мусять його імпортувати. Автоматом
 #: цю межу не вгадати, а новий файл тут — рішення, яке треба ухвалити свідомо.
-GUEST_FILES = ["runner.py", "pysar_lines_infer.py",
+GUEST_FILES = ["runner.py", "pysar_lines_infer.py", "form_cells.py", "cells_read.py",
                "patches/gpu_sato.py", "patches/fast_geom.py",
                "patches/seg_ceiling.py", "patches/seg_resize.py",
                "patches/fast_order.py", "patches/fast_seam.py", "density_probe.py",

@@ -6,7 +6,9 @@
 `<прогін>-cells` за тією ж конвенцією, що й голоси `--with`:
 
     <стор>.txt          рядок на клітинку (порожні клітинки — порожні рядки)
-    <стор>.lines.json   `size` (розмір повернутого кадру) і `boxes` (рамки кропів)
+    <стор>.lines.json   `size` (розмір повернутого кадру), `boxes` (рамки кропів),
+                        `cells` (адреса кожного кропа: сторінка розвороту, рядок
+                        таблиці, колонка, підрядок) і `parts` (межі сторінок і кут)
     _htr_meta.json      case_key, case_dir, model (`<ваги>+cells`), engine, voice
 
 🔴 Рамки лежать у координатах кадру, повернутого на `orient` з мети основного
@@ -85,13 +87,15 @@ def base_orient(base_run: Path | None) -> dict[str, int]:
 
 def build_meta(*, case_dir: Path, case_key: str, model: str, engine: str, script: str,
                device: str, base_run: str, started: str, pages: dict,
-               with_grid: int, without_grid: int) -> dict:
+               with_grid: int, without_grid: int, no_grid: list[str] | None = None) -> dict:
     return {
         "version": 1, "case_dir": str(case_dir).replace("\\", "/"),
         "case_key": case_key, "model": f"{model}+{VOICE_TAG}", "engine": engine,
         "script": script, "device": device,
         "voice": VOICE_TAG, "cells_of": base_run,
-        "form_cells": {"pages_with_grid": with_grid, "pages_without_grid": without_grid},
+        # Сторінки без сітки txt не мають: повноту голосу рахувати за цим переліком.
+        "form_cells": {"pages_with_grid": with_grid, "pages_without_grid": without_grid,
+                       "no_grid": sorted(no_grid or [])},
         "started": started, "updated": datetime.now().isoformat(timespec="seconds"),
         "pages": pages, "done": len(pages), "failed": []}
 
@@ -116,6 +120,101 @@ def _decode(rec, engine: str, crops: list, device: str, batch: int, runner) -> l
     return [clean_pysar_text(str(t or "")) for t, _ in got]
 
 
+#: Позначка «на цій сторінці сітки немає»: сторінка голосом опрацьована, тексту
+#: в неї немає. Окремий файл на сторінку, а не список у меті: шарди пишуть
+#: сторінки паралельно, і спільний список у меті вони б затирали одне одному.
+NOGRID = ".nogrid"
+#: Позначка «клітинки сторінки не прочитались» (виняток рушія): сторінка не
+#: зупиняє справу, а причина лишається на диску й у меті голосу.
+FAILED = ".cellsfail"
+
+
+def read_page(im: Image.Image, decode) -> tuple[list[str], dict] | None:
+    """Сторінка (уже повернута на `orient`) → тексти кропів і геометрія.
+    `None` — сітки немає."""
+    grid = FC.find_grid(im)
+    if not grid.found:
+        return None
+    texts = [unicodedata.normalize("NFC", (t or "").replace("\n", " ").strip())
+             for t in decode(grid.images(im))]
+    if len(texts) != len(grid.crops):
+        raise RuntimeError(f"рушій віддав {len(texts)} текстів на {len(grid.crops)} клітинок")
+    geo = {"size": [im.width, im.height],
+           "boxes": [list(b) for b in grid.crops],
+           "cells": [list(a) for a in grid.addr],
+           "parts": [[p.x0, p.x1, p.angle] for p in grid.parts]}
+    return texts, geo
+
+
+def _write(path: Path, text: str) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
+
+
+def write_page(out_dir: Path, stem: str, got: tuple[list[str], dict] | None,
+               *, orient: int = 0) -> int:
+    """Записати сторінку голосу: текст і рамки, або позначку «сітки немає».
+    Повертає число клітинок."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    mark = out_dir / f"{stem}{NOGRID}"
+    if got is None:
+        for f in (out_dir / f"{stem}.txt", out_dir / f"{stem}.lines.json"):
+            f.unlink(missing_ok=True)
+        _write(mark, "")
+        return 0
+    texts, geo = got
+    _write(out_dir / f"{stem}.lines.json", json.dumps({**geo, "orient": orient}))
+    _write(out_dir / f"{stem}.txt", "\n".join(texts) + "\n")
+    mark.unlink(missing_ok=True)
+    return len(texts)
+
+
+def write_failed(out_dir: Path, stem: str, reason: str) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    _write(out_dir / f"{stem}{FAILED}", reason + "\n")
+
+
+def page_done(out_dir: Path, stem: str) -> bool:
+    """Чи опрацьована сторінка голосом клітинок (є текст або позначка).
+    🔴 Дзеркало — `runner.CELLS_DONE`: раннер цього модуля для повноти не імпортує."""
+    return any((out_dir / f"{stem}{suf}").exists() for suf in (".txt", NOGRID, FAILED))
+
+
+def finish(out_dir: Path, *, names: dict[str, str] | None = None, started: str = "",
+           **meta_args) -> dict:
+    """Мета голосу — з диска: сторінки з текстом і сторінки без сітки.
+
+    `names` — stem → ім'я кадру (з розширенням), як у меті основного прогону.
+    """
+    names = names or {}
+    pages: dict[str, dict] = {}
+    for f in sorted(out_dir.glob("*.txt")):
+        body = f.read_text(encoding="utf-8").splitlines()
+        try:
+            geo = json.loads((out_dir / f"{f.stem}.lines.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            geo = {}
+        pages[names.get(f.stem, f"{f.stem}.jpg")] = {
+            "orient": int(geo.get("orient") or 0), "detector": "form-cells",
+            "retried": False, "guarded": False, "lines": len(body),
+            "skew": [p[2] for p in geo.get("parts") or []],
+            "chars": sum(len(t) for t in body), "conf": None, "sec": None}
+    def listed(suffix: str) -> list[str]:
+        return sorted(names.get(m.name[:-len(suffix)], m.name[:-len(suffix)] + ".jpg")
+                      for m in out_dir.glob(f"*{suffix}"))
+
+    no_grid = listed(NOGRID)
+    meta = build_meta(started=started or datetime.now().isoformat(timespec="seconds"),
+                      pages=pages, with_grid=len(pages), without_grid=len(no_grid),
+                      no_grid=no_grid, **meta_args)
+    failed = listed(FAILED)
+    if failed:
+        meta["form_cells"]["failed"] = failed
+    _write(out_dir / "_htr_meta.json", json.dumps(meta, ensure_ascii=False, indent=1))
+    return meta
+
+
 def process(frames: list[Path], out_dir: Path, decode, *, orient_of: dict[str, int],
             want: set[int], meta_args: dict, say=print) -> dict:
     """Кадри → клітинки → тексти → файли голосу. `decode(crops) -> [текст]`.
@@ -125,8 +224,7 @@ def process(frames: list[Path], out_dir: Path, decode, *, orient_of: dict[str, i
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     started = datetime.now().isoformat(timespec="seconds")
-    pages: dict[str, dict] = {}
-    with_grid = without_grid = n_cells = 0
+    n_cells = 0
     t0 = time.time()
     for i, src in enumerate(frames, 1):
         if i not in want:
@@ -134,34 +232,16 @@ def process(frames: list[Path], out_dir: Path, decode, *, orient_of: dict[str, i
         orient = orient_of.get(src.stem, 0)
         with Image.open(src) as raw:
             im = rotated(raw.convert("RGB"), orient)
-        grid = FC.find_grid(im)
-        if not grid.found:
-            without_grid += 1
-            say(f"[cells] {i}/{len(frames)} {src.name}: сітки немає "
-                f"(горизонталей {grid.h_lines})")
-            continue
-        texts = [unicodedata.normalize("NFC", t.replace("\n", " ").strip())
-                 for t in decode([im.crop(b) for b in grid.crops])]
-        if len(texts) != len(grid.crops):
-            raise RuntimeError(f"{src.name}: рушій віддав {len(texts)} текстів "
-                               f"на {len(grid.crops)} клітинок")
-        (out_dir / f"{src.stem}.txt").write_text("\n".join(texts) + "\n", encoding="utf-8")
-        (out_dir / f"{src.stem}.lines.json").write_text(
-            json.dumps({"size": [im.width, im.height],
-                        "boxes": [list(b) for b in grid.crops]}), encoding="utf-8")
-        pages[src.name] = {
-            "orient": orient, "detector": "form-cells", "retried": False,
-            "guarded": False, "lines": len(texts),
-            "chars": sum(len(t) for t in texts), "conf": None, "sec": None}
-        with_grid += 1
-        n_cells += len(texts)
-        say(f"[cells] {i}/{len(frames)} {src.name}: {len(texts)} клітинок")
-    meta = build_meta(started=started, pages=pages, with_grid=with_grid,
-                      without_grid=without_grid, **meta_args)
-    (out_dir / "_htr_meta.json").write_text(
-        json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
-    say(f"[cells] готово: сторінок із сіткою {with_grid}, без сітки {without_grid}, "
-        f"клітинок {n_cells} за {time.time() - t0:.0f} с → {out_dir}")
+        got = read_page(im, decode)
+        k = write_page(out_dir, src.stem, got, orient=orient)
+        n_cells += k
+        say(f"[cells] {i}/{len(frames)} {src.name}: "
+            + (f"{k} клітинок" if got else "сітки немає"))
+    meta = finish(out_dir, names={f.stem: f.name for f in frames}, started=started,
+                  **meta_args)
+    fc = meta["form_cells"]
+    say(f"[cells] готово: сторінок із сіткою {fc['pages_with_grid']}, без сітки "
+        f"{fc['pages_without_grid']}, клітинок {n_cells} за {time.time() - t0:.0f} с → {out_dir}")
     return meta
 
 

@@ -2941,6 +2941,29 @@ def sync_guard(shared_path: Path, gs: dict, pushed: dict) -> None:
     pushed.update({k: gs[k] for k in keys})
 
 
+#: Сторінка голосу клітинок опрацьована, коли є хоч один із цих файлів
+#: (дзеркало `cells_read.page_done`: текст, «сітки немає», «клітинки впали»).
+CELLS_DONE = (".txt", ".nogrid", ".cellsfail")
+
+
+def cells_page_done(cells_dir: Path, stem: str) -> bool:
+    return any((cells_dir / f"{stem}{suf}").exists() for suf in CELLS_DONE)
+
+
+def page_orients(out_dir: Path) -> dict[str, int]:
+    """Кут кожної прочитаної сторінки з мети прогону й мет шардів."""
+    out: dict[str, int] = {}
+    for p in [out_dir / "_htr_meta.json", *out_dir.glob("_htr_meta.part*.json")]:
+        try:
+            pages = json.loads(p.read_text(encoding="utf-8")).get("pages") or {}
+        except (OSError, json.JSONDecodeError):
+            continue
+        for name, info in pages.items():
+            if isinstance(info, dict):
+                out[name] = int(info.get("orient") or 0)
+    return out
+
+
 def known_pages(out_dir: Path) -> set[str]:
     """Усі вже розпізнані сторінки (свій парт + чужі + доshard-ова мета)."""
     seen: set[str] = set()
@@ -3522,6 +3545,9 @@ def missing_pages(pages_all: list[Path], out_dir: Path,
     `failed: []`, і прогін виглядав завершеним. Пор. `htr-cloud-shard-ceiling…`,
     де CUDA OOM з'їв 16 сторінок при `rc=0` і порожньому `failed_shards`.
 
+    Голос клітинок (`<out>-cells`) — теж побічна тека, але сторінка бланка без
+    сітки має там позначку, а не текст (`CELLS_DONE`).
+
     Побічні теки голосів перевіряються теж: ансамбль пише їх у тому самому
     проході, тож `<out>/0007.txt` без `<out>-diak_v4/0007.txt` = недороблена
     сторінка, а не «модель промовчала».
@@ -3532,7 +3558,9 @@ def missing_pages(pages_all: list[Path], out_dir: Path,
             gone.append(p.name)
             continue
         for d in side_dirs:
-            if not (d / f"{p.stem}.txt").exists():
+            # голос клітинок: сторінка бланка без сітки має позначку, а не текст
+            done = CELLS_DONE if d.name.endswith("-cells") else (".txt",)
+            if not any((d / f"{p.stem}{suf}").exists() for suf in done):
                 gone.append(p.name)
                 break
     return gone
@@ -3795,6 +3823,11 @@ def main() -> int:
                          "<out>-<тег>; пошук зводить теки разом. Сегментація "
                          "коштує ~80%% сторінки, тому друга модель додає ~20%%, "
                          "а не 100%%, як окремий прогін")
+    ap.add_argument("--form-cells", action="store_true",
+                    help="📋 бланк поклітинно: після сторінки — сітка друкованого бланка, "
+                         "кожна клітинка (чи рядок руки у високій клітинці) читається "
+                         "основною моделлю; голос <out>-cells. Уже прочитані сторінки "
+                         "дістають лише клітинки")
     ap.add_argument("--rescue", default="",
                     help="🛟 рятувальний прохід: шлях до .mlmodel другого рушія "
                          "(Дяк). Відібрані рядки (сіра смуга або якір по "
@@ -4568,6 +4601,39 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
         print(f"[htr-run] ⚠ --models проігноровано: ансамбль реалізований у "
               f"PARSeq-гілці, а основна модель цього прогону — {engine}",
               flush=True)
+    # ── бланк поклітинно: голос <out>-cells тією самою основною моделлю ─────
+    # Кропи клітинок дає сітка друкованого бланка (`form_cells`), а не
+    # сегментація: на бланку kraken рве й губить рукописні значення. Модель та
+    # сама, що читає сторінку, — без другого завантаження.
+    cells_dir: Path | None = None
+    cells_decode = None
+    CR = None
+    if args.form_cells:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import cells_read as CR  # noqa: N811
+        cells_dir = out_dir.parent / f"{out_dir.name}-{CR.VOICE_TAG}"
+        cells_dir.mkdir(parents=True, exist_ok=True)
+        base_rec = (rec_model[0] if isinstance(rec_model, tuple) and len(rec_model) == 3
+                    and isinstance(rec_model[1], list) else rec_model)
+        this = sys.modules[__name__]
+        cells_decode = (lambda crops, _r=base_rec: CR._decode(
+            _r, engine, crops, device, args.batch, this))
+        print(f"[htr-run] 📋 бланк поклітинно → {cells_dir.name}", flush=True)
+
+    def cells_pass(src: Path, orient: int) -> int:
+        """Клітинки сторінки в голос `-cells`. Збій клітинок сторінки не валить:
+        він лягає позначкою `.cellsfail` і в мету голосу."""
+        try:
+            with Image.open(src) as raw:
+                im = rotated(raw.convert("RGB"), orient)
+            return CR.write_page(cells_dir, src.stem, CR.read_page(im, cells_decode),
+                                 orient=orient)
+        except Exception as exc:  # noqa: BLE001 — сторінка не має права зупинити справу
+            CR.write_failed(cells_dir, src.stem, f"{type(exc).__name__}: {exc}")
+            print(f"[htr-run] ⚠ {src.name}: клітинки не прочитались ({type(exc).__name__}: "
+                  f"{exc})", flush=True)
+            return 0
+
     # ── сегментер: спільний для обох рушіїв, з кешем і ледачою моделлю ───────
     seg_cache = None
     if args.seg_cache:
@@ -4714,10 +4780,19 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
         f = segmenter._file(stem, max(0, args.force_orient))
         return f is not None and f.is_file()
 
+    orients: dict[str, int] | None = None
     for i, src in page_feed(pages_all, deferred):
         stem = src.stem
         txt_path = out_dir / f"{stem}.txt"
         if txt_path.exists() and src.name in already:
+            # прочитану сторінку бланка дочитуємо клітинками (і перечитаний
+            # раніше прогін, і догін після обриву) — сам текст не чіпаємо
+            if (cells_dir is not None and not cells_page_done(cells_dir, stem)
+                    and (not claim_mode or claim_page(out_dir, f"{stem}.cells", args.shard))):
+                if orients is None:
+                    orients = page_orients(out_dir)
+                k = cells_pass(src, orients.get(src.name, 0))
+                print(f"[htr-run] 📋 {src.name}: клітинок {k}", flush=True)
             skipped += 1
             emit(prog, "htr", i=i, n=n, page=src.name, skipped=True)
             continue
@@ -4939,6 +5014,8 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
             atomic_write(d / f"{stem}.txt", "\n".join(body) + ("\n" if body else ""))
         for tag, k in (getattr(ocr_page_parseq, "side_lost", {}) or {}).items():
             side_lost[tag] = side_lost.get(tag, 0) + k
+        if cells_dir is not None:
+            cells_pass(src, int(res["orient"] or 0))
         meta["pages"][src.name] = {
             "orient": res["orient"], "detector": res["detector"],
             "retried": res["retried"], "guarded": res.get("guarded", False),
@@ -5173,6 +5250,15 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
             "pages": pages_meta, "done": len(pages_meta), "failed": []},
             ensure_ascii=False, indent=1))
         print(f"[htr-run] побічний вихід {d.name}: {len(pages_meta)} стор.", flush=True)
+    if cells_dir is not None:
+        cm = CR.finish(cells_dir, names={p.stem: p.name for p in pages_all},
+                       started=meta.get("started") or "", case_dir=case_dir,
+                       case_key=meta.get("case_key") or "", model=Path(args.model).name,
+                       engine=engine, script=script, device=device, base_run=out_dir.name)
+        fc = cm["form_cells"]
+        print(f"[htr-run] 📋 {cells_dir.name}: із сіткою {fc['pages_with_grid']}, без сітки "
+              f"{fc['pages_without_grid']}"
+              + (f", збій {len(fc['failed'])}" if fc.get("failed") else ""), flush=True)
     if cache is not None:
         cache["seg_model"] = segmenter._model
         if drained:
@@ -5184,7 +5270,8 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
     # за завершену, маючи 14 сторінок із 18.
     quar = load_quarantine(out_dir)
     finder = claimable_missing if claim_mode else missing_pages
-    gone = [p for p in finder(pages_all, out_dir, tuple(side_dirs.values()))
+    gone = [p for p in finder(pages_all, out_dir,
+                              (*side_dirs.values(), *([cells_dir] if cells_dir else [])))
             if p not in quar]
     if drained:
         # 🚰 Злитий шард не бачить кінця справи: `claimable_missing` рахує
