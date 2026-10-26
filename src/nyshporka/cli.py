@@ -1389,6 +1389,8 @@ def _read_form_cells(case_dir: str, *, out: str, script: str, model: str,
                       + "[/muted]")
         return
 
+    from rich.markup import escape
+
     def _say(line: str) -> None:
         console.print(f"  [muted]{escape(line)}[/muted]")
 
