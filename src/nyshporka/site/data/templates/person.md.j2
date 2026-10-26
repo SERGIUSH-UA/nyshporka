@@ -103,7 +103,7 @@ private: {{ "true" if person.private else "false" }}
 {% if life %}
 ## {{ t("h.life") }} { #life }
 
-<ol class="nysh-life">
+<ol class="nysh-life" markdown="1">
 {% for f in life %}
 <li class="nysh-life__item nysh-life__item--{{ f.type }}{% if f.status != 'confirmed' %} is-{{ f.status }}{% endif %}" markdown="1">
 <span class="nysh-life__date">{{ f.date | format_date(decade_only=person.private) if f.date else t("undated") }}</span>

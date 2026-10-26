@@ -203,6 +203,17 @@ def test_public_html_passes_the_guard(space: Path) -> None:
 
 
 @pytest.mark.skipif(not B.mkdocs_available(), reason="MkDocs не встановлено (extra site)")
+def test_life_events_render_place_links_not_raw_markdown(space: Path) -> None:
+    """🪤 `markdown="1"` на `<li>` не діє, поки його немає на `<ol>`: подія
+    показувала сирий «[Село](../places/PL9001.md)» — код місця замість назви."""
+    env = O.call("site.build", {})
+    assert env.ok, env.error
+    page = (Path(env.data["html"]) / "persons" / "I9001.html").read_text(encoding="utf-8")
+    assert "PL9001.md)" not in page
+    assert 'href="../places/PL9001.html">Село</a>' in page
+
+
+@pytest.mark.skipif(not B.mkdocs_available(), reason="MkDocs не встановлено (extra site)")
 def test_a_failed_mkdocs_build_is_a_site_error(space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """MkDocs збирає сайт у процесі nysh: його відмова — зрозуміла `SiteError`
     з причиною, а не голий виняток посеред команди."""
