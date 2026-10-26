@@ -50,6 +50,11 @@ def test_latin_forms_join_their_nest(latin: str) -> None:
     ("Юрко", "Georgius"), ("Юрій", "Jerzy"), ("Гринь", "Григорій"), ("Гриць", "Gregorius"),
     ("Michaël", "Михайло"), ("Параня", "Параскевія"), ("Феся", "Теодозія"),
     ("Кася", "Катерина"), ("Олекса", "Alexius"), ("Ілько", "Ілля"), ("Євдоха", "Eudoxia"),
+    ("Матвій", "Matthaeus"), ("Матвій", "Mathaeus"), ("Матвей", "Matheus"),
+    ("Пантелеймон", "Pantaleon"), ("Яким", "Joachimus"), ("Остап", "Eustachius"),
+    ("Гнат", "Ignatius"), ("Сидір", "Isidorus"), ("Захар", "Zacharias"), ("Корній", "Cornelius"),
+    ("Кирило", "Cyrillus"), ("Ярема", "Jeremias"), ("Хівря", "Febronia"), ("Розалія", "Rosalia"),
+    ("Єва", "Ewa"),
 ])
 def test_galician_and_latin_forms_are_one_name(a: str, b: str) -> None:
     assert N.norm_given(a) == N.norm_given(b)

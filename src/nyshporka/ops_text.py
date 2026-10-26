@@ -843,6 +843,8 @@ def text_find(a: TextFindArgs) -> Envelope:
             env.warn("record_signs",
                      "ознаки запису: " + "; ".join(
                          f"{x['source']}: {', '.join(x['terms'])}" for x in rec["sources"]))
+        if (res.get("record") or {}).get("as_surname"):
+            env.warn("with_as_surname", T.as_surname_note(res["record"]["as_surname"]))
     if not res.get("hits") and not (res.get("anchor") or {}).get("hits")             and not (res.get("record") or {}).get("hits"):
         env.warn("zero_with_denominator",
                  f"не знайшлось — кадрів {led.get('frames') or '?'}, прочитано "

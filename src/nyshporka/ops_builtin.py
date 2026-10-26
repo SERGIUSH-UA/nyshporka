@@ -2334,6 +2334,8 @@ def _warn_shown(env: Envelope, res: dict[str, Any], limit: int) -> None:
         if any(x["source"] == "--with" for x in srcs):
             env.warn("record_signs", "ознаки запису: " + "; ".join(
                 f"{x['source']}: {', '.join(x['terms'])}" for x in srcs))
+    if rec.get("as_surname"):
+        env.warn("with_as_surname", T.as_surname_note(rec["as_surname"]))
     if rec.get("on") and not rec.get("terms"):
         env.warn("record_empty",
                  "канал запису не спрацював: менше двох ознак. Додайте `--with` "
