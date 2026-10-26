@@ -30,3 +30,25 @@ def bench_cmd(
     for v in d["voices"]:
         console.print(f"  {v['pct']:5.1f} %  {_e(v['name'])}  [muted](сторінок {v['pages']})[/muted]")
     console.print(f"  [bold]{d['together']['pct']:5.1f} %  разом[/bold]")
+
+
+@app.command("extract")
+def extract_cmd(
+    case: str = typer.Argument(..., help="справа: ключ, шифра або тека кадрів"),
+    template: str = typer.Option("", "--template", help="ім'я шаблону; порожньо — за написом"),
+    run: str = typer.Option("", "--run", help="тека голосу клітинок; порожньо — `-cells` справи"),
+    apply: bool = typer.Option(False, "--apply", help="записати в сховище сторінок"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Бланк → записи з ролями: клітинки голосу `-cells` за шаблоном (машинне, не звірене)."""
+    from nyshporka import ops as O
+
+    env = O.call("form.extract", {"case": case, "template": template, "run": run,
+                                  "apply": apply})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    console.print(f"{_e(d['run'])}: сторінок {d['pages']}, бланків {d['matched']}, "
+                  f"записів {d['records']}" + (" — записано" if d["applied"] else ""))
+    for k, n in d["filled"].items():
+        console.print(f"  [muted]{n:5d}  {_e(k)}[/muted]")

@@ -48,7 +48,7 @@ ROLE_ORDER: tuple[str, ...] = (
     "deceased", "spouse",
     "head", "member",
     "convert", "sponsor",
-    "midwife", "priest", "other",
+    "midwife", "priest", "informant", "other",
 )
 
 ROLE_LABEL: dict[str, str] = {
@@ -60,7 +60,8 @@ ROLE_LABEL: dict[str, str] = {
     "deceased": "померлий", "spouse": "подружжя", "witness": "свідок",
     "priest": "причт", "midwife": "повитуха",
     "head": "голова двору", "member": "член двору",
-    "convert": "приєднаний", "sponsor": "поручитель", "other": "інше",
+    "convert": "приєднаний", "sponsor": "поручитель", "informant": "заявник",
+    "other": "інше",
 }
 
 LABEL: dict[str, str] = {

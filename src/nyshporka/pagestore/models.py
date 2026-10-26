@@ -92,6 +92,8 @@ Role = Literal[
     "deceased", "spouse", "witness", "priest", "midwife",
     "head", "member",
     "convert", "sponsor",
+    # заявник акта цивільного стану (РАЦС, ЗАГС): хто приніс звістку й підписав
+    "informant",
     "other",
 ]
 
@@ -139,6 +141,16 @@ class RecordPerson(BaseModel):
         return None if isinstance(v, str) and not v.strip() else v
 
 
+class RecordLine(BaseModel):
+    """Звідки взято поле запису: рядок прогону (у бланку — клітинка голосу `-cells`)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    run: str
+    line: int = Field(ge=1, description="номер рядка сторінки з 1, як у `text ctx`")
+    field: str = Field(default="", description="яке поле запису: 'father.surname'")
+
+
 class Record(BaseModel):
     """Один структурований запис джерела (акт метрики, двір сповідки, сім'я ревізії)."""
 
@@ -168,6 +180,9 @@ class Record(BaseModel):
     places: list[str] = Field(default_factory=list)
     quote: str | None = Field(default=None, description="Дослівний фрагмент транскрипції.")
     confidence: Confidence = "direct"
+    #: Рядки прогону, з яких узято поля (машинне читання бланка: кожне поле — своя
+    #: клітинка). Порожньо — запис читала людина чи агент цілим актом.
+    lines: list[RecordLine] = Field(default_factory=list)
     comment: str = ""
     agent: str = ""
     noted: _dt.date = Field(default_factory=_today)

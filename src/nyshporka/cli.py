@@ -40,7 +40,7 @@ _PAGE_METHOD_HELP = "visual | htr | ocr | hybrid | text"
 _ROLES_HELP = ("child | father | mother | godfather | godmother | groom | bride | "
                "groom_father | groom_mother | bride_father | bride_mother | "
                "deceased | spouse | witness | priest | midwife | head | member | "
-               "convert | sponsor | other")
+               "convert | sponsor | informant | other")
 _RTYPES_HELP = ("birth | marriage | death | conversion | confession_entry | "
                 "revision_entry | tally | other")
 

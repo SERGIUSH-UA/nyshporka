@@ -2420,7 +2420,7 @@ class SearchArgs(BaseModel):
         "", "child", "father", "mother", "godfather", "godmother",
         "groom", "bride", "groom_father", "groom_mother", "bride_father",
         "bride_mother", "deceased", "spouse", "witness", "priest", "midwife",
-        "head", "member", "convert", "sponsor", "other"] = Field(
+        "head", "member", "convert", "sponsor", "informant", "other"] = Field(
         default="",
         description="лише where=records: «хто був БАТЬКОМ із цим прізвищем» — "
                     "інше питання, ніж «хто був восприємником»")
