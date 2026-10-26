@@ -261,18 +261,17 @@ def test_canon_uses_every_name_variant_and_the_maiden_surname(space: Path) -> No
     assert wife.surname == "Дзвінська", "дівоче прізвище, а не прізвище роду"
 
 
-def test_canon_of_the_queried_surname_feeds_the_channel_without_a_profile(space: Path) -> None:
+def test_with_words_alone_make_the_record_no_canon_people(space: Path) -> None:
     from nyshporka.search import record as R
 
     _canon(space)
-    ts = R.terms(None, "Мирончук", 1860, 1900, with_terms=["Юрко"])
+    ts = R.terms(None, "Мирончук", 1860, 1900, with_terms=["Юрко", "Дзвінська"])
+    # Названо слова — запис шукає саме їх: прізвище запиту й `--with`, без людей
+    # канону (їхні часті імена переважили б смугу названої пари).
+    assert {t.source for t in ts.terms} == {"запит", "--with"}
     labels = {t.label: t for t in ts.terms}
-    # Юрій несе прізвище запиту: його ім'я — ознака з гніздом форм, джерело — канон
-    assert labels["Юрій"].source == "канон"
-    assert any(k.startswith("georg") for k in labels["Юрій"].keys)
+    assert any(k.startswith("georg") for k in labels["Юрко"].keys)
     assert labels["Дзвінська"].kind == "surname"
-    # Степан Стороженко — чужа картка: ні його ім'я, ні прізвище в ознаки не йдуть
-    assert "Степан" not in labels and "Стороженко" not in labels
 
 
 def test_canon_of_a_non_home_profile_is_limited_to_its_surname(space: Path) -> None:

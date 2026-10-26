@@ -141,10 +141,11 @@ def terms(prof: Any, q: str = "", y1: int | None = None, y2: int | None = None,
     if sur:
         out.append(Term(label=(getattr(prof, "display", "") or q or "прізвище роду"),
                         kind="surname", keys=tuple(sorted(sur)), source="запит"))
-    # Профілю запиту немає, а слова названо: канон беруть лише ті, хто несе
-    # прізвище запиту, і `kin` чужого активного профілю не підставляється.
-    foreign = tuple(sorted(sur)) if prof is None and with_terms else None
-    folk = A.people(prof, surnames=foreign) if foreign is not None else A.people(prof)
+    # 🔴 Слова названо — запис шукає саме їх, без людей роду. Люди `kin` і
+    # канону — десятки частих імен (Іван, Анна, Михайло); у сумі ваг вони
+    # підіймають кожну густу смугу книги над смугою названої пари (замір:
+    # пара на домінантному прізвищі випала з перших 200).
+    folk = [] if with_terms else A.people(prof)
     undated = 0
     seen: set[tuple[str, str]] = set()
     for p in folk:
