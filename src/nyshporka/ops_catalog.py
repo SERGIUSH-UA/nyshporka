@@ -1135,6 +1135,98 @@ def _court(q: str, also: list[str]
     return ans.rows, _coverage_of(ans), True
 
 
+#: Скільки записів покажчика метрик показувати в `parish find`: решта — `parish metrics`.
+METRICS_SHOWN = 8
+
+#: Скорочення архіву в покажчику метрик → як його читає сховище сторінок.
+#: 🔴 «ДАВО» Зведеного каталогу — Волинь; у просторі зі старим кодом `DAVO` для
+#: Вінниці голе «ДАВО» підставило б нотатки вінницьких справ волинським.
+_METRIC_NOTES_LABEL = {"ДАВО": "ДАВоО"}
+
+
+def _metric_case_notes(row: dict[str, Any]) -> list[dict[str, str]]:
+    """Нотатник справ запису: прогалини, знайдені в самій книзі, помилки опису, копії.
+
+    🔴 Опис дає рамку книги, нотатник — те, що в ній насправді: «село лише з
+    1879 р., 1881–1885 відсутні». Без нього рядок шифру підштовхує до хибного
+    «шукали — немає». Особисте (`note`) сюди не йде.
+    """
+    try:
+        from nyshporka.pagestore.notebook import live
+        from nyshporka.pagestore.store import load_case, resolve_case
+    except ImportError:
+        return []
+    out: list[dict[str, str]] = []
+    label = _METRIC_NOTES_LABEL.get(row.get("archive") or "", row.get("archive") or "")
+    for x in row.get("refs") or []:
+        fond = re.sub(r"^Р(\d)", r"Р-\1", x.get("fond") or "")
+        shifra = f"{label} {fond}-{x.get('opys')}-{x.get('spr')}"
+        try:
+            cf = load_case(resolve_case(shifra))
+        except Exception:        # шифра, якої сховище не розбирає, — без нотаток
+            continue
+        for n in live(cf.notes) if cf else []:
+            if n.kind in ("about", "catalog-error", "copy"):
+                item = {"shifra": shifra, "kind": n.kind, "text": n.text or ""}
+                if item not in out:
+                    out.append(item)
+    return out
+
+
+def _metrics(q: str, also: list[str], limit: int = 0
+             ) -> tuple[dict[str, Any], list[CoverageItem], bool | None]:
+    """Покажчик метрик за селом — і чи є сам пак."""
+    try:
+        from nyshporka.catalog.query import CatalogMissing, find_metrics
+
+        ans = find_metrics(q, also=also, limit=limit)
+    except CatalogMissing:
+        return {}, [], False
+    except Exception:            # битий пак не валить пошук, але й не «немає»
+        return {}, [], None
+    rows = ans.rows
+    for r in rows:
+        r["case_notes"] = _metric_case_notes(r)
+    return ({"rows": rows, "other_povit": ans.other_povit, "alt_names": ans.alt_names,
+             "similar": ans.similar}, _coverage_of(ans), True)
+
+
+class ParishMetricsArgs(BaseModel):
+    q: str = Field(description="«село» або «село, повіт» (повіт чи губернія звужують "
+                               "однойменні села; запис без повіту не відсіюється)")
+    also: list[str] = Field(default_factory=list,
+                            description="інші написання: історична назва, польська форма")
+    limit: int = Field(default=0, description="скільки записів (0 — усі)")
+
+
+@op("parish.metrics", summary="Які метричні книги є про село — за каталогами архівів",
+    args=ParishMetricsArgs, mutates=False, section="material",
+    tier="core", skill="find-parish",
+    when="де метрики села, які книги РАЦС, у якому фонді — без мережі, з пака")
+def parish_metrics(a: ParishMetricsArgs) -> Envelope:
+    """Покажчик метрик (пак `metrics`): церкви, костели, синагоги, сільради й групи
+    сіл РАЦС, до яких належало село, і справи за типом запису й роками.
+
+    Замінює Рідні (ridni.org лежить з 25.10.2026): ті самі першоджерела —
+    Зведений каталог метричних книг т.1–10 і власні каталоги й описи архівів.
+
+    🔴 Рядок справи — рамка книги з опису, а не вміст. Прогалини всередині книги
+    видно лише з нотатника справи (`nysh note add --kind about`), і вони
+    показуються поруч із шифром.
+    """
+    data, cov, installed = _metrics(a.q, a.also, a.limit)
+    if installed is None:
+        return fail("пак покажчика метрик є, але не читається (`nysh catalog verify`)")
+    if not installed:
+        from nyshporka.catalog.store import install_hint
+
+        return fail(f"покажчика метрик (пак `metrics`) на машині немає: {install_hint()}")
+    env = ok({"q": a.q, **data})
+    if cov:
+        env.covered_by(cov)
+    return env
+
+
 def _place_forms(q: str, also: list[str]) -> tuple[list[str], list[str], list[str]]:
     """Форми назви для покажчика: правила, довідники, людина.
 
@@ -1207,12 +1299,17 @@ def parish_find(a: ParishFindArgs) -> Envelope:
     court, court_cov, court_ok = _court(a.q, [*from_books, *a.also])
     if court_ok:
         asked = [*asked, "courtbooks"]
+    # покажчик метрик — офлайн, з пака: те, що колись давали Рідні
+    metrics, metrics_cov, metrics_ok = _metrics(a.q, [*from_books, *a.also], METRICS_SHOWN)
+    if metrics_ok:
+        asked = [*asked, "metrics"]
     data: dict[str, Any] = {"forms": forms, "forms_from_gazetteer": from_books,
                             "gazetteers": asked,
                             "parishes": [_parish_row(p) for p in found.values()],
                             "szady": szady,
                             "rk_parishes": rk, "rk_installed": rk_ok,
                             "court_places": court, "court_installed": court_ok,
+                            "metrics": metrics, "metrics_installed": metrics_ok,
                             "books": {}}
     cut_books: dict[str, tuple[str, ...]] = {}
     if a.books:
@@ -1239,6 +1336,8 @@ def parish_find(a: ParishFindArgs) -> Envelope:
         env.covered_by(rk_cov)
     if court_cov:
         env.covered_by(court_cov)
+    if metrics_cov:
+        env.covered_by(metrics_cov)
     if not found:
         env.warn("nothing_found",
                  f"парафій під назвами {', '.join(forms)} у покажчику немає — "

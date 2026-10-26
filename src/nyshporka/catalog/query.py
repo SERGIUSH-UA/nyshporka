@@ -32,7 +32,7 @@ from nyshporka.core import casekey
 
 __all__ = ["Answer", "CatalogMissing", "Coverage", "church_card", "churches_near",
            "confusers", "find_churches", "find_court_persons", "find_court_places",
-           "find_places", "find_rk_parishes",
+           "find_metrics", "find_places", "find_rk_parishes",
            "link_churches_to_places",
            "locate", "locate_all", "locate_name", "place_card", "places_for_fond", "places_near",
            "siblings", "uezd_known"]
@@ -798,6 +798,252 @@ def find_rk_parishes(q: str, also: list[str] | None = None, limit: int = 5
         close_all(packs)
     out = sorted(best.values(), key=lambda d: (-d["score"], d["name"]))
     return Answer(rows=out[:limit], coverage=cov)
+
+
+# ── 📚 Покажчик метрик за селом ──────────────────────────────────────────────
+
+@dataclass
+class MetricsAnswer(Answer):
+    """Записи покажчика метрик + що відсіяно повітом + якими назвами ще шукали."""
+
+    other_povit: int = 0                 # однойменні села інших повітів, відсіяні
+    alt_names: list[str] = field(default_factory=list)   # історичні назви зі знахідок
+    similar: list[str] = field(default_factory=list)     # на нуль: схожі назви
+
+    def as_dict(self) -> dict[str, Any]:
+        return {**super().as_dict(), "other_povit": self.other_povit,
+                "alt_names": self.alt_names, "similar": self.similar}
+
+
+#: Позначка поселення перед назвою в тексті церкви: «с. Обичі», «м-ко Висоцьк».
+_SETTL_RE = re.compile(r"(?:^|[\s,(])(м-к[оаиу]|с-щ[еаі]|слоб|смт|мст|сел|кол|пос|сл|с|м|х|д)"
+                       r"\.?\s+(?=[А-ЯІЇЄҐ])")
+
+
+def _metric_candidates(con: sqlite3.Connection, key: str, qfold: str
+                       ) -> tuple[list[dict[str, Any]], dict[int, tuple[str, str]]]:
+    """Записи, у яких хоч одна назва може збігтися з ключем, + нечіткий латинський канал."""
+    from nyshporka.geog.metrics import FOLD_MIN, is_latin, sr_variants
+
+    ids = {r[0] for r in con.execute(
+        "SELECT DISTINCT parish_id FROM names WHERE key = ? OR stem = ? OR first = ?",
+        (key, key[:-1], key))}
+    sv = sr_variants(key)
+    ids |= {r[0] for r in con.execute(
+        f"SELECT DISTINCT parish_id FROM names WHERE kind = 'sr' AND key IN "
+        f"({','.join('?' * len(sv))})", sv)}
+    translit: dict[int, tuple[str, str]] = {}
+    if len(qfold) >= 4:
+        try:
+            from rapidfuzz import fuzz
+        except ImportError:
+            fuzz = None  # type: ignore[assignment]
+        q_latin = is_latin(key)
+        for pid, n, f, kind in con.execute(
+                "SELECT parish_id, name, fold, kind FROM names WHERE pref = ?", (qfold[:4],)):
+            # 🔴 лише між РІЗНИМИ письмами (див. `geog.metrics`)
+            if is_latin(n) == q_latin or kind in ("page", "sr"):
+                continue
+            how = ("exact" if f == qfold else
+                   "near" if fuzz is not None and fuzz.ratio(f, qfold) >= FOLD_MIN else "")
+            if how:
+                prev = translit.get(pid)
+                if prev is None or (prev[0] == "near" and how == "exact"):
+                    translit[pid] = (how, kind)
+        ids |= set(translit)
+    out: list[dict[str, Any]] = []
+    ordered = sorted(ids)
+    for i in range(0, len(ordered), 500):
+        chunk = ordered[i:i + 500]
+        q = ",".join("?" * len(chunk))
+        par = {r["id"]: dict(r) for r in con.execute(
+            f"SELECT * FROM parishes WHERE id IN ({q})", chunk)}
+        for r in par.values():
+            r.update(attached=[], page_mentions=[], sr=[], refs=[])
+        for n in con.execute(f"SELECT parish_id, name, kind FROM names "
+                             f"WHERE parish_id IN ({q})", chunk):
+            bucket = {"attached": "attached", "page": "page_mentions", "sr": "sr"}.get(n["kind"])
+            if bucket:
+                par[n["parish_id"]][bucket].append(n["name"])
+        for x in con.execute(f"SELECT * FROM refs WHERE parish_id IN ({q}) ORDER BY rowid", chunk):
+            par[x["parish_id"]]["refs"].append({
+                "kinds": x["kinds"].split(" + ") if x["kinds"] else [], "years": x["years"],
+                "fond": x["fond"], "opys": x["opys"], "spr": x["spr"]})
+        out += par.values()
+    return out, translit
+
+
+def _metric_hits(con: sqlite3.Connection, name: str, narrow: str
+                 ) -> tuple[list[tuple[str, dict[str, Any]]], int]:
+    from nyshporka.geog.metrics import fold, match, name_key, narrowed, sr_variants
+
+    key = name_key(name)
+    rows, translit = _metric_candidates(con, key, fold(name))
+    hits, other = [], 0
+    sv = set(sr_variants(key))
+    for r in rows:
+        how = ""
+        mp = match(key, r["place"]) or match(key, r.get("place_alt") or "")
+        if mp:
+            how = "парафія" if mp == "exact" else "парафія ~"
+        else:
+            for a in r["attached"]:
+                mm = match(key, a)
+                if mm:
+                    how = "приписне" if mm == "exact" else "приписне ~"
+                    break
+            else:
+                if any(match(key, a) == "exact" for a in r["page_mentions"]):
+                    how = "згадане на сторінці парафії ~ стор."
+                elif sv & set(r["sr"]):
+                    how = "сільрада ~"
+        if not how and r["id"] in translit:
+            t_how, t_kind = translit[r["id"]]
+            how = ("парафія" if t_kind == "place" else "приписне") + (
+                " · транслітерація" if t_how == "exact" else " ~ транслітерація")
+        if not how:
+            continue
+        if not narrowed(narrow, r["povit"] or "", r["gub"] or "", r["sotnya"] or "",
+                        r["church"] or ""):
+            # 🔴 Запис без повіту фільтром не відкидається: синагога М'ястківки
+            # повіту в каталозі не має, і відсів робив її тихим нулем
+            if r["povit"] or r["sotnya"]:
+                other += 1
+                continue
+            how += " · повіт не вказано"
+        hits.append((how, r))
+    return hits, other
+
+
+def _metric_alt_names(name: str, hits: list[tuple[str, dict[str, Any]]]) -> list[str]:
+    """Історичні назви з самих знахідок: «с. Нове Село (Стара Воля)», «Зеленка (Zielonka)».
+
+    Каталоги XIX ст. пишуть село тодішньою назвою, а сучасний покажчик — іншим
+    написанням: без цього людина таких книг не бачить.
+    """
+    from nyshporka.geog.metrics import is_latin, name_key
+
+    key, out = name_key(name), []
+    for how, r in hits:
+        if not how.startswith("парафія") or "~" in how:
+            continue
+        church = r["church"] or ""
+        cands = re.findall(r"\(([А-ЯІЇЄҐ][\w’'\-]+)\)", church)
+        cands += [church[m.end():].split()[0].strip(",.;()") for m in _SETTL_RE.finditer(church)
+                  if church[m.end():].split()]
+        if r.get("place_alt") and is_latin(r["place_alt"]):
+            cands.append(r["place_alt"])
+        for c in cands:
+            if name_key(c) != key and c not in out:
+                out.append(c)
+    return out[:4]
+
+
+def _metric_siblings(con: sqlite3.Connection, r: dict[str, Any], limit: int = 6) -> list[str]:
+    """Інші села тих самих книг і їхні ОКРЕМІ книги: Зеленка → «Лугове (+9-8-56)».
+
+    Лише з того самого джерела: збірні книги кількох парафій тягнули б чужих.
+    Групи РАЦС (пів району в одній книзі) — без сусідів: рядок нічого б не сказав.
+    """
+    keys = {(x["fond"], x["opys"], x["spr"]) for x in r["refs"]}
+    if not keys or len(keys) > 60:
+        return []
+    q = " OR ".join(["(fond = ? AND opys = ? AND spr = ?)"] * len(keys))
+    pids = {row[0] for row in con.execute(
+        f"SELECT DISTINCT parish_id FROM refs WHERE {q}", [v for k in keys for v in k])}
+    pids.discard(r["id"])
+    if len(pids) > 25:
+        return []
+    found = []
+    for pid in sorted(pids):
+        p = con.execute("SELECT place, vol FROM parishes WHERE id = ?", (pid,)).fetchone()
+        if not p or p["vol"] != r.get("vol") or not p["place"] or p["place"] == r["place"]:
+            continue
+        theirs = {tuple(x) for x in con.execute(
+            "SELECT fond, opys, spr FROM refs WHERE parish_id = ?", (pid,))}
+        extra = sorted("-".join(x) for x in theirs - keys)
+        if extra:
+            found.append((-len(theirs & keys),
+                          f"{p['place']} (+{', '.join(extra[:4])}{' …' if len(extra) > 4 else ''})"))
+    return list(dict.fromkeys(t for _n, t in sorted(found)))[:limit]
+
+
+def _metric_similar(packs: list[tuple[str, sqlite3.Connection]], name: str,
+                    limit: int = 8) -> list[str]:
+    """На нуль: назви того самого письма, що відрізняються на літеру-дві («Зелинка» → Зеленка)."""
+    from nyshporka.geog.metrics import SIMILAR_MIN, name_key
+
+    try:
+        from rapidfuzz import fuzz
+    except ImportError:
+        return []
+    key = name_key(name)
+    if len(key) < 4:
+        return []
+    scored: list[tuple[float, str]] = []
+    for _pid, con in packs:
+        scored += [(fuzz.ratio(key, k), n) for n, k in con.execute(
+            "SELECT DISTINCT name, key FROM names WHERE kind IN ('place', 'attached') "
+            "AND length(key) BETWEEN ? AND ?", (len(key) - 2, len(key) + 2))]
+    out: list[str] = []
+    for sc, n in sorted(scored, reverse=True):
+        if sc < SIMILAR_MIN:
+            break
+        if n not in out:
+            out.append(n)
+    return out[:limit]
+
+
+def find_metrics(q: str, *, also: list[str] | None = None, limit: int = 0) -> MetricsAnswer:
+    """Які метричні книги є про село: «<село>[, <повіт або губернія>]».
+
+    Запис несе `how` — чим зійшлось: «парафія», «приписне», «сільрада ~»,
+    «· транслітерація», «· як «<історична назва>»»; знак «~» — схоже, а не точно.
+    `also` — інші написання, які людина знає сама.
+
+    🔴 Рядок справи — рамка книги з опису, а не вміст: прогалини всередині книги
+    знає лише той, хто її читав (нотатник справи, `nysh note`).
+    """
+    from nyshporka.geog.metrics import norm
+
+    name, _, narrow = (q or "").partition(",")
+    name, narrow = norm(name), norm(narrow).lower()
+    packs = open_packs("metrics", with_own=False)
+    cov = coverage("metrics")
+    try:
+        hits: list[tuple[str, str, dict[str, Any]]] = []
+        other = 0
+        seen: set[tuple[str, int]] = set()
+        for pack_id, con in packs:
+            found, o = _metric_hits(con, name, narrow)
+            hits += [(pack_id, how, r) for how, r in found]
+            other += o
+        alts = _metric_alt_names(name, [(h, r) for _p, h, r in hits])
+        for a in [*alts, *(also or [])]:
+            for pack_id, con in packs:
+                for how, r in _metric_hits(con, a, narrow)[0]:
+                    # нечіткий збіг через історичну назву — уже другий крок від
+                    # запиту: польська форма ~ схоже село іншої землі тягнуло чужих
+                    if "~" in how:
+                        continue
+                    hits.append((pack_id, f"{how} · як «{a}»", r))
+        rows: list[dict[str, Any]] = []
+        for pack_id, how, r in hits:
+            if (pack_id, r["id"]) in seen:
+                continue
+            seen.add((pack_id, r["id"]))
+            con = dict(packs)[pack_id]
+            row = _tag({k: v for k, v in r.items() if k != "sr"}, pack_id)
+            row["how"] = how
+            row["siblings"] = _metric_siblings(con, r)
+            rows.append(row)
+        rows.sort(key=lambda x: ("~" in x["how"], " як «" in x["how"],
+                                 not x["how"].startswith("парафія"), x.get("archive") or ""))
+        similar = _metric_similar(packs, name) if not rows else []
+    finally:
+        close_all(packs)
+    return MetricsAnswer(rows=rows[:limit] if limit else rows, coverage=cov,
+                         other_povit=other, alt_names=alts, similar=similar)
 
 
 # ── 📜 Гродські книги: особи й місця покажчиків ──────────────────────────────

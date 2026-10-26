@@ -69,6 +69,62 @@ def _rk_block(data: dict) -> None:  # type: ignore[type-arg]
                        f"{what:<16} {b.get('types', '')}")
 
 
+def _metric_rows(m: dict, limit: int) -> None:  # type: ignore[type-arg]
+    """Записи покажчика метрик: місце, джерело, справи за типом, сусіди, нотатник."""
+    from collections import OrderedDict
+
+    from nyshporka.geog.metrics import compact, years_span
+
+    rows = m.get("rows") or []
+    for r in rows[:limit] if limit else rows:
+        povit = r.get("povit") or ""
+        if povit and not any(w in povit for w in ("р-н", "район", "пов", "округ")):
+            povit = f"{povit} пов."
+        place = r.get("place") or "—"
+        if r.get("place_alt"):
+            place += f" ({r['place_alt']})"
+        where = ", ".join(x for x in (place, r.get("volost") and f"{r['volost']} вол.",
+                                      povit, r.get("sotnya") and f"{r['sotnya']} сотні") if x)
+        page = f", с. {r['page']}" if r.get("page") else ""
+        typer.echo(f"\n  ▸ {r.get('archive') or '?'} · {r.get('how')} · {str(r.get('church') or '')[:110]}")
+        typer.echo(f"    {where} · {r.get('gub') or ''} · {r.get('conf') or '?'} · "
+                   f"{r.get('source') or r.get('vol')}{page}")
+        if r.get("note"):
+            typer.echo(f"    примітка: {str(r['note'])[:200]}")
+        if r.get("attached"):
+            typer.echo(f"    приписні: {', '.join(r['attached'])}")
+        by_kind: OrderedDict[str, list] = OrderedDict()  # type: ignore[type-arg]
+        for ref in r.get("refs") or []:
+            by_kind.setdefault(" + ".join(ref.get("kinds") or []) or "?", []).append(ref)
+        for kind, refs in by_kind.items():
+            items = compact(refs)
+            typer.echo(f"    {kind} ({years_span(refs)}, справ {len(items)}): "
+                       + "; ".join(items[:12])
+                       + (f"; … ще {len(items) - 12}" if len(items) > 12 else ""))
+        if r.get("siblings"):
+            typer.echo(f"    ті самі книги ведуть і: {'; '.join(r['siblings'])}")
+        for n in r.get("case_notes") or []:
+            typer.echo(f"    📝 {n['shifra']} [{n['kind']}]: {str(n['text'])[:220]}")
+    if limit and len(rows) > limit:
+        typer.echo(f"\n  … ще {len(rows) - limit} (`nysh parish metrics`)")
+
+
+def _metrics_block(data: dict, limit: int = 0) -> None:  # type: ignore[type-arg]
+    """Покажчик метрик за селом — або що пака немає."""
+    if data.get("metrics_installed") is None:
+        typer.echo("\n   Пак покажчика метрик є, але не читається — книги за "
+                   "каталогами архівів не перевірено (`nysh catalog verify`)")
+        return
+    if not data.get("metrics_installed"):
+        typer.echo("\n   Покажчика метрик (metrics) на машині немає — книги за "
+                   "каталогами архівів не перевірено")
+        return
+    m = data.get("metrics") or {}
+    rows = m.get("rows") or []
+    typer.echo(f"\n📚 Покажчик метрик (каталоги архівів): {len(rows)}")
+    _metric_rows(m, limit)
+
+
 def _court_block(data: dict) -> None:  # type: ignore[type-arg]
     """Згадки села в гродських книгах XVII–XVIII ст. — або що пака немає."""
     if data.get("court_installed") is None:
@@ -138,10 +194,46 @@ def cmd_find(
             typer.echo(f"  · {c['name']}{alt} · деканат {c.get('deanery') or '—'}"
                        f" · `nysh church card {c['ob_id']}`")
     _rk_block(data)
+    _metrics_block(data)
     _court_block(data)
     for title, rows in (data.get("books") or {}).items():
         typer.echo(f"\n📕 {str(title)[:70]} → {len(rows)} справ")
         _cases(rows, limit)
+    _notes(env)
+
+
+@app.command("metrics")
+def cmd_metrics(
+    village: str = typer.Argument(..., help="«село» або «село, повіт»"),
+    also: list[str] = typer.Option([], "--also",
+                                   help="інше написання: історична назва, польська форма"),
+    limit: int = typer.Option(20, "--limit", help="скільки записів показати (0 — усі)"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Які метричні книги є про село — за каталогами й описами архівів (без мережі).
+
+    Те, що колись давали Рідні: церкви, костели, синагоги, сільради й групи сіл
+    РАЦС, до яких належало село, і справи за типом запису. Прогалини всередині
+    книги — з нотатника справи (`nysh note add --kind about`).
+    """
+    env = O.call("parish.metrics", {"q": village, "also": list(also)})
+    if _answer(env, as_json):
+        return
+    m = env.data or {}
+    rows = m.get("rows") or []
+    typer.echo(f"📚 «{village}» — записів покажчика: {len(rows)}")
+    if m.get("other_povit"):
+        typer.echo(f"   ⚠ відсіяно однойменних з інших повітів: {m['other_povit']}")
+    if rows and "," not in village and len({(r.get("povit"), r.get("gub")) for r in rows}) > 1:
+        typer.echo(f"   ⚠ запит без повіту: книги однойменних сіл змішані — «{village}, <повіт>»")
+    if m.get("alt_names"):
+        typer.echo(f"   шукали й як: {', '.join(m['alt_names'])}")
+    _metric_rows(m, limit)
+    if not rows:
+        typer.echo("\n0 — у каталогах книг під цією назвою немає. Перед «немає»: сучасна й "
+                   "історична назва, повіт, покажчик (`nysh parish find`).")
+        if m.get("similar"):
+            typer.echo(f"   схожі назви (перевірити написання): {', '.join(m['similar'])}")
     _notes(env)
 
 

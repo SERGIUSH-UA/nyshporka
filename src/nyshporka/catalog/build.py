@@ -337,6 +337,57 @@ def build_rkparishes(parishes_json: Path, out: Path, *, pack_id: str, taken: str
     return {**res, "parishes": n_p, "villages": n_v, "books": n_b}
 
 
+# ── покажчик метрик за селом ─────────────────────────────────────────────────
+
+def build_metrics(records_jsonl: Path, out: Path, *, pack_id: str, taken: str,
+                  source: str, note: str = "",
+                  coverage: Iterable[tuple[str, str, int, int | None, str]] = (),
+                  verbose: bool = False) -> dict[str, Any]:
+    """Пак `metrics` із записів розбору каталогів (`records.jsonl`, запис на рядок).
+
+    Запис: поля `parishes` (`vol`, `source`, `page`, `archive`, `church`, `place`,
+    `povit`…), списки `attached`, `page_mentions`, `sr_keys` і `refs`
+    (`kinds` — список, `years`, `fond`, `opys`, `spr`). Розбір джерел лежить у
+    дослідницькому репозиторії: він тягне PDF, Word і сайти архівів; сюди
+    приходить уже рівний перелік.
+    """
+    import json
+
+    from nyshporka.geog.metrics import name_rows
+
+    pcols = ["vol", "source", "page", "archive", "conf", "gub", "eparchy", "church",
+             "settl_type", "place", "place_alt", "volost", "povit", "sotnya",
+             "attached_raw", "note"]
+    con, tmp = _open_fresh(out, "metrics")
+    n_p = n_r = 0
+    with records_jsonl.open(encoding="utf-8") as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            rec = json.loads(line)
+            n_p += 1
+            con.execute(f"INSERT INTO parishes (id, {','.join(pcols)}) "
+                        f"VALUES ({','.join('?' * (len(pcols) + 1))})",
+                        [n_p, *[rec.get(c) or (0 if c == "page" else "") for c in pcols]])
+            con.executemany("INSERT INTO names VALUES (?,?,?,?,?,?,?,?)",
+                            [(n_p, *row) for row in name_rows(rec)])
+            refs = rec.get("refs") or []
+            con.executemany("INSERT INTO refs VALUES (?,?,?,?,?,?)",
+                            [(n_p, " + ".join(x.get("kinds") or []), x.get("years") or "",
+                              x.get("fond") or "", x.get("opys") or "", x.get("spr") or "")
+                             for x in refs])
+            n_r += len(refs)
+    cov = list(coverage) or [
+        ("source", s, k, None, "") for s, k in con.execute(
+            "SELECT source, COUNT(*) FROM parishes GROUP BY source ORDER BY 2 DESC")]
+    res = finalize(con, tmp, out, domain="metrics", pack_id=pack_id, taken=taken,
+                   source=source, built_from=_digest([records_jsonl]), rows=n_p,
+                   coverage=cov, note=note or f"{n_p} церков · {n_r} посилань на справи")
+    if verbose:
+        print(f"✅ {out.name} — {n_p} церков · {n_r} посилань · {res['size'] / 1e6:.1f} МБ")
+    return {**res, "parishes": n_p, "refs": n_r}
+
+
 # ── гродські книги: покажчики осіб і місць ───────────────────────────────────
 
 def build_courtbooks(src_dir: Path, out: Path, *, pack_id: str, taken: str,

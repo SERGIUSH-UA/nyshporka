@@ -30,7 +30,7 @@ MAP_BUDGET = 3_000
 #: Порядок груп карти. Ядро поза групами падає в «інше» — тест цього не пускає.
 GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("орієнтація", ("ops.find", "doctor")),
-    ("знайти матеріал", ("catalog.search", "parish.find", "share.pull",
+    ("знайти матеріал", ("catalog.search", "parish.find", "parish.metrics", "share.pull",
                          "acquire.start", "case.register", "cases.list",
                          "cases.build")),
     ("прочитати", ("read.start", "cloud.go", "cloud.state", "text.index")),

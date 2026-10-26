@@ -296,10 +296,49 @@ CREATE TABLE places (
 CREATE INDEX ix_cbl_sig ON places(sig);
 """
 
+#: 📚 Покажчик метрик за селом (`geog.metrics`): запис — церква, костел, синагога,
+#: сільрада чи група сіл РАЦС з місцем і справами за типом запису. Ключі назв
+#: (`names`) рахує збирач тими самими функціями, що й читач.
+METRICS = _PRAGMA + _COMMON + """
+CREATE TABLE parishes (
+    id INTEGER PRIMARY KEY,
+    vol TEXT,            -- джерело всередині пака (том каталогу, опис фонду)
+    source TEXT,         -- те саме словами: «Т. 4, …», «<архів>, опис ф.Р-…»
+    page INTEGER,        -- сторінка джерела (0 — немає)
+    archive TEXT,        -- скорочення архіву, як у джерелі: ДАІФО, ЦДІАЛ
+    conf TEXT, gub TEXT, eparchy TEXT,
+    church TEXT,         -- церква/костел/група сіл, як у джерелі
+    settl_type TEXT, place TEXT, place_alt TEXT,
+    volost TEXT, povit TEXT, sotnya TEXT,
+    attached_raw TEXT, note TEXT
+);
+CREATE TABLE names (
+    parish_id INTEGER NOT NULL,
+    name TEXT,
+    kind TEXT,           -- place | attached | page | sr
+    key TEXT, stem TEXT, first TEXT,
+    fold TEXT,           -- транслітерований ключ (лише між письмами)
+    pref TEXT            -- перші 4 літери fold — вибірка нечіткого збігу
+);
+CREATE INDEX ix_mn_key ON names(key);
+CREATE INDEX ix_mn_stem ON names(stem);
+CREATE INDEX ix_mn_first ON names(first);
+CREATE INDEX ix_mn_pref ON names(pref);
+CREATE INDEX ix_mn_pid ON names(parish_id);
+CREATE TABLE refs (
+    parish_id INTEGER NOT NULL,
+    kinds TEXT,          -- «народження + шлюб»
+    years TEXT,          -- як у джерелі: «1835-1837,1839-1844»
+    fond TEXT, opys TEXT, spr TEXT
+);
+CREATE INDEX ix_mr_pid ON refs(parish_id);
+CREATE INDEX ix_mr_case ON refs(fond, opys, spr);
+"""
+
 #: Домен → DDL. Ключ домену входить в ім'я пака: `geog-cdiak-2026.08.sqlite`.
 DDL: dict[str, str] = {"geog": GEOG, "opys": OPYS, "churches": CHURCHES,
                        "places": PLACES, "rkparishes": RKPARISHES,
-                       "courtbooks": COURTBOOKS}
+                       "courtbooks": COURTBOOKS, "metrics": METRICS}
 
 
 def apply(con: sqlite3.Connection, domain: str) -> None:
