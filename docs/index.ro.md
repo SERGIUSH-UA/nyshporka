@@ -1,7 +1,7 @@
 # Nyshporka
 
-<p align="center">
-  <img alt="Nyshporka cu lupa" src="assets/maskot-lupa.webp" width="200" height="231">
+<p align="center" markdown>
+![Nyshporka cu lupa](assets/maskot-lupa.webp){ width="200" height="231" }
 </p>
 
 <p align="center"><em>Citește manuscrisul. Aduce ce a găsit.</em></p>
@@ -12,8 +12,8 @@ funcționează ca un program obișnuit.
 
 ## Munca o face asistentul, decideți dumneavoastră
 
-<p align="center">
-  <img alt="O genealogistă examinează o filă adusă de asistentul Nyshporka" src="assets/scena-pomichnyk.webp" width="420" height="382">
+<p align="center" markdown>
+![O genealogistă examinează o filă adusă de asistentul Nyshporka](assets/scena-pomichnyk.webp){ width="420" height="382" }
 </p>
 
 Unui asistent precum Claude sau ChatGPT i se poate permite să lucreze pe

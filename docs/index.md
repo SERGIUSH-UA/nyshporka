@@ -1,7 +1,7 @@
 # Нишпорка
 
-<p align="center">
-  <img alt="Нишпорка з лупою" src="assets/maskot-lupa.webp" width="200" height="231">
+<p align="center" markdown>
+![Нишпорка з лупою](assets/maskot-lupa.webp){ width="200" height="231" }
 </p>
 
 <p align="center"><em>Читає рукопис. Приносить знайдене.</em></p>
@@ -12,8 +12,8 @@
 
 ## Роботу робить помічник, вирішуєте ви
 
-<p align="center">
-  <img alt="Генеалогиня переглядає аркуш, який приніс їй помічник-Нишпорка" src="assets/scena-pomichnyk.webp" width="420" height="382">
+<p align="center" markdown>
+![Генеалогиня переглядає аркуш, який приніс їй помічник-Нишпорка](assets/scena-pomichnyk.webp){ width="420" height="382" }
 </p>
 
 Помічникові на кшталт Claude чи ChatGPT можна дозволити працювати на вашому

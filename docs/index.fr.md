@@ -1,7 +1,7 @@
 # Nyshporka
 
-<p align="center">
-  <img alt="Nyshporka avec une loupe" src="assets/maskot-lupa.webp" width="200" height="231">
+<p align="center" markdown>
+![Nyshporka avec une loupe](assets/maskot-lupa.webp){ width="200" height="231" }
 </p>
 
 <p align="center"><em>Lit le manuscrit. Rapporte ce qu'elle a trouvé.</em></p>
@@ -12,8 +12,8 @@ Mais elle ne fonctionne pas comme un programme ordinaire.
 
 ## L'assistant fait le travail, vous décidez
 
-<p align="center">
-  <img alt="Une généalogiste examine un feuillet que lui a apporté son assistant Nyshporka" src="assets/scena-pomichnyk.webp" width="420" height="382">
+<p align="center" markdown>
+![Une généalogiste examine un feuillet que lui a apporté son assistant Nyshporka](assets/scena-pomichnyk.webp){ width="420" height="382" }
 </p>
 
 Un assistant comme Claude ou ChatGPT peut être autorisé à travailler sur votre

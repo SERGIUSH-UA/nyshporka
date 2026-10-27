@@ -1,7 +1,7 @@
 # Nyshporka
 
-<p align="center">
-  <img alt="Nyshporka z lupą" src="assets/maskot-lupa.webp" width="200" height="231">
+<p align="center" markdown>
+![Nyshporka z lupą](assets/maskot-lupa.webp){ width="200" height="231" }
 </p>
 
 <p align="center"><em>Czyta rękopis. Przynosi to, co znalazła.</em></p>
@@ -12,8 +12,8 @@ nie działa tak jak zwykły program.
 
 ## Pracę wykonuje asystent, decydujesz Ty
 
-<p align="center">
-  <img alt="Genealożka ogląda kartę, którą przyniósł jej asystent Nyshporka" src="assets/scena-pomichnyk.webp" width="420" height="382">
+<p align="center" markdown>
+![Genealożka ogląda kartę, którą przyniósł jej asystent Nyshporka](assets/scena-pomichnyk.webp){ width="420" height="382" }
 </p>
 
 Asystentowi takiemu jak Claude czy ChatGPT można pozwolić pracować na Twoim

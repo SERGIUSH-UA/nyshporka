@@ -69,6 +69,10 @@ extra_javascript:
 markdown_extensions:
   - admonition
   - attr_list
+  # Markdown усередині HTML-блоку (`<p align="center" markdown>`): сирий
+  # `<img src="assets/…">` плагін мов не переписує, і на /pl/, /en/… він вів у
+  # неіснуючу /pl/assets/ (404, 27.10.2026).
+  - md_in_html
   - tables
   - toc: {permalink: true}
   - pymdownx.superfences

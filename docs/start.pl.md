@@ -1,7 +1,7 @@
 # Jak pracować
 
-<p align="center">
-  <img alt="Nyshporka czyta rękopis z lupą" src="../assets/maskot-pratsiuie.webp" width="220" height="206">
+<p align="center" markdown>
+![Nyshporka czyta rękopis z lupą](assets/maskot-pratsiuie.webp){ width="220" height="206" }
 </p>
 
 Nyshporka jest zainstalowana, asystent podłączony ([jeśli nie](install.md)).
