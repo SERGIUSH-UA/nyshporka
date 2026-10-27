@@ -1,7 +1,7 @@
 # Cum se lucrează
 
-<p align="center">
-  <img alt="Nyshporka citește un manuscris cu lupa" src="../assets/maskot-pratsiuie.webp" width="220" height="206">
+<p align="center" markdown>
+![Nyshporka citește un manuscris cu lupa](assets/maskot-pratsiuie.webp){ width="220" height="206" }
 </p>
 
 Nyshporka este instalată, asistentul este conectat ([dacă nu](install.md)).

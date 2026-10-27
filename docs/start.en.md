@@ -1,7 +1,7 @@
 # How to work
 
-<p align="center">
-  <img alt="Nyshporka reading a manuscript with a magnifying glass" src="../assets/maskot-pratsiuie.webp" width="220" height="206">
+<p align="center" markdown>
+![Nyshporka reading a manuscript with a magnifying glass](assets/maskot-pratsiuie.webp){ width="220" height="206" }
 </p>
 
 Nyshporka is installed and the assistant is connected ([if not](install.md)). From

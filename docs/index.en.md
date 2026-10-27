@@ -1,7 +1,7 @@
 # Nyshporka
 
-<p align="center">
-  <img alt="Nyshporka with a magnifying glass" src="assets/maskot-lupa.webp" width="200" height="231">
+<p align="center" markdown>
+![Nyshporka with a magnifying glass](assets/maskot-lupa.webp){ width="200" height="231" }
 </p>
 
 <p align="center"><em>Reads the manuscript. Brings back what it finds.</em></p>
@@ -12,8 +12,8 @@ does not work like an ordinary program.
 
 ## The assistant does the work, you decide
 
-<p align="center">
-  <img alt="A genealogist looks over a folio her Nyshporka assistant has brought her" src="assets/scena-pomichnyk.webp" width="420" height="382">
+<p align="center" markdown>
+![A genealogist looks over a folio her Nyshporka assistant has brought her](assets/scena-pomichnyk.webp){ width="420" height="382" }
 </p>
 
 An assistant such as Claude or ChatGPT can be allowed to work on your

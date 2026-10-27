@@ -1,7 +1,7 @@
 # So arbeiten Sie
 
-<p align="center">
-  <img alt="Nyshporka liest mit einer Lupe eine Handschrift" src="../assets/maskot-pratsiuie.webp" width="220" height="206">
+<p align="center" markdown>
+![Nyshporka liest mit einer Lupe eine Handschrift](assets/maskot-pratsiuie.webp){ width="220" height="206" }
 </p>
 
 Nyshporka ist installiert, der Assistent verbunden ([falls nicht](install.md)).

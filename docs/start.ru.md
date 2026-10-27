@@ -1,7 +1,7 @@
 # Как работать
 
-<p align="center">
-  <img alt="Нышпорка читает рукопись с лупой" src="../assets/maskot-pratsiuie.webp" width="220" height="206">
+<p align="center" markdown>
+![Нышпорка читает рукопись с лупой](assets/maskot-pratsiuie.webp){ width="220" height="206" }
 </p>
 
 Нышпорка установлена, помощник подключён ([если нет](install.md)). Дальше
