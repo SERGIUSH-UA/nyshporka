@@ -86,7 +86,8 @@ def test_an_old_workspace_has_the_migration_pending_until_done(space: Path) -> N
                                                "0.29.1", "0.30.0", "0.30.1", "0.30.2",
                                                "0.30.4", "0.31.0", "0.32.0", "0.33.0",
                                                "0.34.0", "0.35.0", "0.36.0", "0.36.1", "0.36.2",
-                                               "0.37.0", "0.37.1", "0.37.2", "0.37.3", "0.37.4", "0.37.5", "0.37.6"]
+                                               "0.37.0", "0.37.1", "0.37.2", "0.37.3", "0.37.4", "0.37.5", "0.37.6",
+                                               "0.37.7"]
     assert M.pending(space, "0.19.0") == [] and M.pending(space, "0.20.0") == []
     assert not any(w.code == "agent_migration" for w in O.call("workspace.info", {}).warnings)
 
