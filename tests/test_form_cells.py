@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -52,7 +53,7 @@ def test_grid_cells_count_and_positions() -> None:
         assert abs(want - got) <= 3
     rows = sorted({(c[1], c[3]) for c in g.cells})
     assert len(rows) == 8
-    for (y0, y1), (a, b) in zip(rows, zip(ROW_YS, ROW_YS[1:], strict=False), strict=True):
+    for (y0, y1), (a, b) in zip(rows, pairwise(ROW_YS), strict=True):
         assert abs(y0 - a) <= 3 and abs(y1 - b) <= 3
 
 
@@ -252,15 +253,15 @@ def test_the_passport_field_form_turns_cells_on(tmp_path: Path) -> None:
     from nyshporka.htr import run as RUN
 
     assert RUN.form_of_case(tmp_path) == ""
-    assert RUN._form_choice(tmp_path, None) == {"form_cells": False, "form_why": ""}
+    assert RUN._form_choice(tmp_path, None) == (False, "")
     (tmp_path / "_source.json").write_text(json.dumps({"form": "zags_birth"}),
                                            encoding="utf-8")
     got = RUN._form_choice(tmp_path, None)
-    assert got["form_cells"] and "zags_birth" in got["form_why"]
+    assert got[0] and "zags_birth" in got[1]
     (tmp_path / "_source.json").write_text(json.dumps({"form": True}), encoding="utf-8")
     assert RUN.form_of_case(tmp_path) == "true"
     # слово людини важить більше за паспорт
-    assert RUN._form_choice(tmp_path, False)["form_cells"] is False
+    assert RUN._form_choice(tmp_path, False)[0] is False
 
 
 def test_the_runner_command_carries_the_flag(tmp_path: Path) -> None:

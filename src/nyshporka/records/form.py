@@ -241,8 +241,8 @@ def extract(t: Template, cells: list[Cell]) -> dict[str, tuple[str, int]]:
                     values.append((val, n.line))
             if not values:
                 continue
-            for key, val in zip(f.to, values, strict=False):
-                got[key] = val
+            for key, pair in zip(f.to, values, strict=False):
+                got[key] = pair
             break
     return got
 
@@ -258,7 +258,8 @@ def _sex(value: str) -> str | None:
     return None
 
 
-def to_record(t: Template, got: dict[str, tuple[str, int]], *, scan: str, run: str) -> dict:
+def to_record(t: Template, got: dict[str, tuple[str, int]], *, scan: str,
+              run: str) -> dict[str, Any]:
     """Поля → JSON запису для `records.ingest` (машинне читання, не звірене)."""
     persons: dict[str, dict[str, Any]] = {}
     rec: dict[str, Any] = {"rtype": t.rtype, "scans": [scan], "confidence": "indirect",

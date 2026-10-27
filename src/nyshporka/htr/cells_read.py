@@ -32,13 +32,13 @@ import time
 import unicodedata
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from PIL import Image  # noqa: E402
-
 import form_cells as FC  # noqa: E402
+from PIL import Image  # noqa: E402
 
 Image.MAX_IMAGE_PIXELS = None
 
@@ -86,8 +86,9 @@ def base_orient(base_run: Path | None) -> dict[str, int]:
 
 
 def build_meta(*, case_dir: Path, case_key: str, model: str, engine: str, script: str,
-               device: str, base_run: str, started: str, pages: dict,
-               with_grid: int, without_grid: int, no_grid: list[str] | None = None) -> dict:
+               device: str, base_run: str, started: str, pages: dict[str, Any],
+               with_grid: int, without_grid: int,
+               no_grid: list[str] | None = None) -> dict[str, Any]:
     return {
         "version": 1, "case_dir": str(case_dir).replace("\\", "/"),
         "case_key": case_key, "model": f"{model}+{VOICE_TAG}", "engine": engine,
@@ -100,12 +101,13 @@ def build_meta(*, case_dir: Path, case_key: str, model: str, engine: str, script
         "pages": pages, "done": len(pages), "failed": []}
 
 
-def _decode(rec, engine: str, crops: list, device: str, batch: int, runner) -> list[str]:
+def _decode(rec: Any, engine: str, crops: list[Any], device: str, batch: int,
+            runner: Any) -> list[str]:
     """Тексти кропів у порядку `crops`: рушій — за вагами, як у раннері."""
     if engine == "kraken":
-        return runner.kraken_decode_crops(rec, crops, runner.VOICE_BATCH)
+        return list(runner.kraken_decode_crops(rec, crops, runner.VOICE_BATCH))
     if engine == "ppocr":
-        return runner.pp_decode_crops(rec, crops)
+        return list(runner.pp_decode_crops(rec, crops))
     import numpy as np
     import torch
     from pysar_lines_infer import clean_pysar_text
@@ -129,7 +131,7 @@ NOGRID = ".nogrid"
 FAILED = ".cellsfail"
 
 
-def read_page(im: Image.Image, decode) -> tuple[list[str], dict] | None:
+def read_page(im: Image.Image, decode: Any) -> tuple[list[str], dict[str, Any]] | None:
     """Сторінка (уже повернута на `orient`) → тексти кропів і геометрія.
     `None` — сітки немає."""
     grid = FC.find_grid(im)
@@ -152,7 +154,7 @@ def _write(path: Path, text: str) -> None:
     tmp.replace(path)
 
 
-def write_page(out_dir: Path, stem: str, got: tuple[list[str], dict] | None,
+def write_page(out_dir: Path, stem: str, got: tuple[list[str], dict[str, Any]] | None,
                *, orient: int = 0) -> int:
     """Записати сторінку голосу: текст і рамки, або позначку «сітки немає».
     Повертає число клітинок."""
@@ -182,13 +184,13 @@ def page_done(out_dir: Path, stem: str) -> bool:
 
 
 def finish(out_dir: Path, *, names: dict[str, str] | None = None, started: str = "",
-           **meta_args) -> dict:
+           **meta_args: Any) -> dict[str, Any]:
     """Мета голосу — з диска: сторінки з текстом і сторінки без сітки.
 
     `names` — stem → ім'я кадру (з розширенням), як у меті основного прогону.
     """
     names = names or {}
-    pages: dict[str, dict] = {}
+    pages: dict[str, dict[str, Any]] = {}
     for f in sorted(out_dir.glob("*.txt")):
         body = f.read_text(encoding="utf-8").splitlines()
         try:
@@ -215,8 +217,8 @@ def finish(out_dir: Path, *, names: dict[str, str] | None = None, started: str =
     return meta
 
 
-def process(frames: list[Path], out_dir: Path, decode, *, orient_of: dict[str, int],
-            want: set[int], meta_args: dict, say=print) -> dict:
+def process(frames: list[Path], out_dir: Path, decode: Any, *, orient_of: dict[str, int],
+            want: set[int], meta_args: dict[str, Any], say: Any = print) -> dict[str, Any]:
     """Кадри → клітинки → тексти → файли голосу. `decode(crops) -> [текст]`.
 
     Без torch і ваг: розпізнавач приходить викликом, тож усе, крім нього, можна

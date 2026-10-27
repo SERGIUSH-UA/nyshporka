@@ -1,7 +1,6 @@
 """📋 Операції бланка: замір читання поклітинно проти звіреного оком."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from pydantic import BaseModel, Field

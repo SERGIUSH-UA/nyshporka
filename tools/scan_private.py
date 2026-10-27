@@ -469,11 +469,118 @@ def iter_history_blobs(skip: Callable[[str, str], bool] | None = None,
             for sha, blob in _batch_read(small).items()]
 
 
+def rules_stamp() -> str:
+    """Відбиток правил, винятків і самого сканера: змінене правило чи логіка
+    звірки (`scan_text`, `_allowed`, ліміт розміру) не знайде старого кешу —
+    інакше блоб, «чистий» під старою логікою, лишився б чистим і під новою
+    (рецензія 20.10.2026)."""
+    import hashlib
+    import inspect
+    import json
+
+    rules = [(r.id, r.pattern.pattern, r.pattern.flags) for r in RULES]
+    code = [inspect.getsource(scan_text), inspect.getsource(_allowed), str(MAX_BYTES)]
+    return hashlib.sha1(json.dumps([rules, list(ALLOW), code]).encode()).hexdigest()[:16]
+
+
+class HistoryMemory:
+    """Пам'ять перевіреної історії — файл у СПІЛЬНІЙ теці `.git` репозиторію.
+
+    🔴 Доти пам'ять жила лише в `.pytest_cache` тесту: `--history` з командного
+    рядка (хук перед push, ворота релізу) щоразу читав усю історію заново —
+    хвилини, — а свіжий worktree без кешу стояв у паку на 99 % (28.10.2026, і
+    так само 19–21.10). `git rev-parse --git-common-dir` один на всі worktree
+    клону, тож перевірене в одному не перевіряється вдруге в жодному.
+    Інтерфейс — `get/set`, як у `pytest.Cache`, щоб тест міг підставити свій.
+    """
+
+    def __init__(self, path: Path | None = None) -> None:
+        if path is None:
+            common = _git("rev-parse", "--git-common-dir").strip()
+            path = (ROOT / common).resolve() / "nyshporka-scan-private.json"
+        self.path = path
+
+    def _load(self) -> dict:
+        import json
+
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def get(self, key: str, default):
+        return self._load().get(key, default)
+
+    def set(self, key: str, value) -> None:
+        import json
+
+        data = self._load()
+        data[key] = value
+        # лише один штамп правил: старі вершини під новими правилами не діють
+        stamp = key.rsplit("/", 1)[-1]
+        data = {k: v for k, v in data.items() if k.rsplit("/", 1)[-1] == stamp}
+        tmp = self.path.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        os.replace(tmp, self.path)
+
+
+#: Як часто холодний прохід історії скидає прогрес у пам'ять.
+SAVE_EVERY_SEC = 20.0
+
+
+def scan_history(cache=None) -> list[Finding]:
+    """Знахідки в історії; перевіряється лише НОВЕ відносно вже чистого.
+
+    Коміт незмінний, тож історія, видима з уже перевірених вершин, чистою й
+    лишається. Пам'ять (`cache`, типово `HistoryMemory`) тримає ці вершини, і
+    наступний прохід бере лише блоби, яких із них не видно (`since`). Нових між
+    прогонами — одиниці, тож прохід триває секунди, а не хвилини.
+
+    Перелік чистих блобів живе лише під час холодного проходу (нові правила,
+    свіжий клон): прогрес пишеться ПО ДОРОЗІ, бо обірваний прохід інакше щоразу
+    стартував би з холоду. Щойно прохід завершився чистим, вершини стають
+    пам'яттю, а перелік блобів стирається. Вершини пишуться лише після чистого
+    проходу: блоб зі знахідкою інакше сховався б за вершиною й більше не
+    перевірявся б.
+    """
+    import time
+
+    if cache is None:
+        cache = HistoryMemory()
+    stamp = rules_stamp()
+    tips_slot = f"scan_private/clean_tips/{stamp}"
+    blobs_slot = f"scan_private/clean_blobs/{stamp}"
+    since = cache.get(tips_slot, [])
+    clean = set(cache.get(blobs_slot, []))
+    tips = history_tips()
+    findings: list[Finding] = []
+    seen_clean: set[str] = set()
+    saved_at = time.monotonic()
+    for name, sha, text in iter_history_blobs(
+            skip=lambda n, s: f"{n}\0{s}" in clean, since=since):
+        got = scan_text(name, text, f"{name} @{sha[:8]}")
+        findings += got
+        if not got:
+            seen_clean.add(f"{name}\0{sha}")
+        if time.monotonic() - saved_at > SAVE_EVERY_SEC:
+            cache.set(blobs_slot, sorted(seen_clean | clean))
+            saved_at = time.monotonic()
+    if findings:
+        cache.set(blobs_slot, sorted(seen_clean | clean))
+    else:
+        cache.set(tips_slot, tips)
+        cache.set(blobs_slot, [])
+    return findings
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--staged", action="store_true", help="лише те, що в git add")
     g.add_argument("--history", action="store_true", help="уся історія (перед першим push)")
+    ap.add_argument("--cold", action="store_true",
+                    help="з --history: без пам'яті перевіреного, уся історія наново")
     ap.add_argument("--list-rules", action="store_true", help="показати правила й вийти")
     a = ap.parse_args()
 
@@ -482,24 +589,27 @@ def main() -> int:
             print(f"  {r.id:16s} {r.why}")
         return 0
 
+    findings: list[Finding] = []
     try:
-        if a.staged:
-            items, what = iter_staged(), "індекс"
-        elif a.history:
+        if a.history and a.cold:
             items, what = iter_history(), "історія"
+        elif a.history:
+            items, what = [], "історія, нове відносно перевіреного"
+            findings = scan_history()
+        elif a.staged:
+            items, what = iter_staged(), "індекс"
         else:
             items, what = iter_worktree(), "робоче дерево"
     except RuntimeError as exc:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
 
-    findings: list[Finding] = []
     for rel, text, where in items:
         findings += scan_text(rel, text, where)
 
     if not findings:
-        print(f"✅ приватних даних не знайдено ({what}: {len(items)} файлів, "
-              f"{len(RULES)} правил)")
+        counted = f": {len(items)} файлів" if items else ""
+        print(f"✅ приватних даних не знайдено ({what}{counted}, {len(RULES)} правил)")
         return 0
 
     print(f"🔴 ЗНАЙДЕНО ПРИВАТНІ ДАНІ ({what}) — {len(findings)} збігів:\n")

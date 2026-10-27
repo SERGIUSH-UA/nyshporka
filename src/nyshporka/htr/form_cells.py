@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from itertools import pairwise
 
 import numpy as np
 from PIL import Image
@@ -143,7 +144,8 @@ def _local_mean(a: np.ndarray, size: int) -> np.ndarray:
     h, w = a.shape
     tot = (s[size:size + h, size:size + w] - s[0:h, size:size + w]
            - s[size:size + h, 0:w] + s[0:h, 0:w])
-    return tot / float(size * size)
+    out: np.ndarray = tot / float(size * size)
+    return out
 
 
 def _open_runs(ink: np.ndarray, length: int, axis: int) -> np.ndarray:
@@ -163,13 +165,15 @@ def _open_runs(ink: np.ndarray, length: int, axis: int) -> np.ndarray:
     lo = np.maximum(x - length + 1, 0)
     covered = (e[:, hi] - e[:, lo]) > 0
     out = covered & (a > 0)
-    return np.moveaxis(out, 1, axis)
+    moved: np.ndarray = np.moveaxis(out, 1, axis)
+    return moved
 
 
 def _thin(mask: np.ndarray, axis: int) -> np.ndarray:
     """Лише тонкі лінії маски: прибрати те, що товще за MAX_LINE_PX поперек лінії
     (axis — напрям ЛІНІЇ: 1 — горизонталі, 0 — вертикалі)."""
-    return mask & ~_open_runs(mask, MAX_LINE_PX + 1, axis=1 - axis)
+    thin: np.ndarray = mask & ~_open_runs(mask, MAX_LINE_PX + 1, axis=1 - axis)
+    return thin
 
 
 def _hlines(ink: np.ndarray) -> np.ndarray:
@@ -185,15 +189,15 @@ def _positions(mask: np.ndarray, axis: int, min_fill: float) -> list[int]:
     prof = mask.sum(axis=axis)
     idx = np.where(prof > min_fill)[0]
     out: list[int] = []
-    start = prev = None
-    for i in idx:
-        i = int(i)
-        if start is None or i - prev > 3:
-            if start is not None:
+    start = prev = -1
+    for raw in idx:
+        i = int(raw)
+        if start < 0 or i - prev > 3:
+            if start >= 0:
                 out.append((start + prev) // 2)
             start = i
         prev = i
-    if start is not None:
+    if start >= 0:
         out.append((start + prev) // 2)
     return out
 
@@ -222,12 +226,12 @@ def raw_cells(img: Image.Image) -> tuple[list[Box], int]:
         return [], len(ys)
     vm = _thin(_open_runs(ink, max(2, int(sh * V_RUN)), axis=0), 0)
     out: list[Box] = []
-    for y0, y1 in zip(ys, ys[1:], strict=False):
+    for y0, y1 in pairwise(ys):
         if y1 - y0 < MIN_ROW_PX:
             continue
         band = vm[y0 + 3:y1 - 3]
         xs = sorted({0, *_positions(band, 0, (y1 - y0 - 6) * V_FILL), sw})
-        for x0, x1 in zip(xs, xs[1:], strict=False):
+        for x0, x1 in pairwise(xs):
             if x1 - x0 < MIN_CELL_PX:
                 continue
             out.append((round(x0 / s), round(y0 / s), round(x1 / s), round(y1 / s)))
@@ -332,7 +336,7 @@ def split_spread(img: Image.Image) -> list[tuple[int, int]]:
     if w < 8 or h < 8 or w / h < SPREAD_ASPECT:
         return [(0, w)]
     small, s = _work(img)
-    sh, sw = small.shape
+    sw = small.shape[1]
     hm = _hlines(_ink(small))
     cover = np.convolve(hm.sum(0).astype(np.float64), np.ones(9) / 9, mode="same")
     lo, hi = int(sw * SPREAD_BAND[0]), int(sw * SPREAD_BAND[1])

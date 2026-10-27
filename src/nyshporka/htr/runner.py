@@ -4623,14 +4623,15 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
     CR = None
     if args.form_cells:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
-        import cells_read as CR  # noqa: N811
+        import cells_read
+        CR = cells_read
         cells_dir = out_dir.parent / f"{out_dir.name}-{CR.VOICE_TAG}"
         cells_dir.mkdir(parents=True, exist_ok=True)
         base_rec = (rec_model[0] if isinstance(rec_model, tuple) and len(rec_model) == 3
                     and isinstance(rec_model[1], list) else rec_model)
         this = sys.modules[__name__]
-        cells_decode = (lambda crops, _r=base_rec: CR._decode(
-            _r, engine, crops, device, args.batch, this))
+        def cells_decode(crops, _r=base_rec):
+            return CR._decode(_r, engine, crops, device, args.batch, this)
         print(f"[htr-run] 📋 бланк поклітинно → {cells_dir.name}", flush=True)
 
     def cells_pass(src: Path, orient: int) -> int:
@@ -4641,7 +4642,7 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
                 im = rotated(raw.convert("RGB"), orient)
             return CR.write_page(cells_dir, src.stem, CR.read_page(im, cells_decode),
                                  orient=orient)
-        except Exception as exc:  # noqa: BLE001 — сторінка не має права зупинити справу
+        except Exception as exc:
             CR.write_failed(cells_dir, src.stem, f"{type(exc).__name__}: {exc}")
             print(f"[htr-run] ⚠ {src.name}: клітинки не прочитались ({type(exc).__name__}: "
                   f"{exc})", flush=True)

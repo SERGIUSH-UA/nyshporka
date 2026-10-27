@@ -685,12 +685,13 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
     # не бачить прогонів, запущених із командного рядка, а карта в них спільна.
     lock_dir = ws.derived / "htr_lock"
     lock_dir.mkdir(parents=True, exist_ok=True)
+    form_on, form_why = _form_choice(case, form_cells)
     return Plan(case_dir=case, out_dir=out, model=weights, script=scr,
                 frames=frames, python=rep.python, runner=runner, voice=voice,
                 extra_voices=extra, seg_cache=seg, gpu_lock=lock_dir / "gpu.lock",
                 script_trust=trust, script_why=why, seg_why=seg_why,
                 seg_ready=seg_ready, bokovi=bokom,
-                **_form_choice(case, form_cells))
+                form_cells=form_on, form_why=form_why)
 
 
 def form_of_case(case_dir: Path) -> str:
@@ -705,12 +706,12 @@ def form_of_case(case_dir: Path) -> str:
     return str(got).strip() if isinstance(got, str) else ""
 
 
-def _form_choice(case: Path, asked: bool | None) -> dict[str, object]:
+def _form_choice(case: Path, asked: bool | None) -> tuple[bool, str]:
+    """(читати клітинки, чому) — слово людини або `form` у паспорті справи."""
     if asked is not None:
-        return {"form_cells": asked, "form_why": "слово людини" if asked else ""}
+        return asked, "слово людини" if asked else ""
     form = form_of_case(case)
-    return ({"form_cells": True, "form_why": f"паспорт справи: form={form}"} if form
-            else {"form_cells": False, "form_why": ""})
+    return (True, f"паспорт справи: form={form}") if form else (False, "")
 
 
 def shard_env(workers: int, *, cores: int = 0) -> dict[str, str]:

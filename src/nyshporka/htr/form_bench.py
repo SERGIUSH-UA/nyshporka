@@ -18,7 +18,9 @@ import json
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from itertools import pairwise
 from pathlib import Path
+from typing import Any
 
 #: Поріг схожості слова (0–100), як `--thresh` пошуку.
 THRESH = 80
@@ -43,7 +45,7 @@ class Bench:
     #: (сторінка, слово, {голос: схожість}) — для розбору, що саме не видно.
     rows: list[tuple[str, str, dict[str, int]]] = field(default_factory=list)
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> dict[str, Any]:
         def pct(n: int) -> float:
             return round(100 * n / self.words, 1) if self.words else 0.0
 
@@ -67,7 +69,7 @@ def _tokens(lines: Iterable[str]) -> list[str]:
     for line in lines:
         toks = [_norm(t) for t in _WORD.findall(line)]
         out += [t for t in toks if len(t) >= 2]
-        out += [a + b for a, b in zip(toks, toks[1:], strict=False)]
+        out += [a + b for a, b in pairwise(toks)]
     return out
 
 
@@ -113,7 +115,7 @@ def score(truth: Mapping[str, Iterable[str]], voices: Mapping[str, Path]) -> Ben
     return b
 
 
-def truth_from_notes(notes: Iterable) -> dict[str, list[str]]:
+def truth_from_notes(notes: Iterable[Any]) -> dict[str, list[str]]:
     """Звірені оком читання нотатника → {сторінка: слова}.
 
     Звірене одне слово (`word`) — лише воно; звірений рядок — усі його слова.
