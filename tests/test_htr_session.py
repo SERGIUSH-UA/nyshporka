@@ -199,3 +199,71 @@ def test_oblik_indeksuie_i_holosy(case, monkeypatch: pytest.MonkeyPatch) -> None
 
     assert GO._bookkeeping("skany") == []
     assert indexed == [["skany-diak_v4"]]
+
+
+DOCHYTAV_I_ZAVYS = ("import sys, time, pathlib\n"
+                    "out = pathlib.Path(sys.argv[1])\n"
+                    "for n in (1, 2, 3):\n"
+                    "    (out / f'{n:04d}.txt').write_text('x', encoding='utf-8')\n"
+                    "print('@@PROGRESS@@ {\"v\": 1, \"phase\": \"done\", \"done\": 3}', flush=True)\n"
+                    "time.sleep(120)\n")
+
+ZAMOVK = ("import sys, time, pathlib\n"
+          "out = pathlib.Path(sys.argv[1])\n"
+          "(out / '0001.txt').write_text('x', encoding='utf-8')\n"
+          "print('first', flush=True)\n"
+          "time.sleep(120)\n")
+
+
+def test_shard_shcho_ne_vyishov_pislia_done_hasytsia_bez_zboiu(
+        case, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Шард записав усе й звітував `done`, а процес не вийшов — `nysh read`
+    чекав його вічно (відгук №3 з порталу, ДАЧкО 833-1-263). Тепер його гасять,
+    а дочитана справа лишається дочитаною, без червоного коду."""
+    import time
+
+    from nyshporka.htr import runs as R
+
+    monkeypatch.setattr(S, "STOP_POLL_SEC", 0.1)
+    monkeypatch.setattr(S, "EXIT_AFTER_DONE_SEC", 0.5)
+    d, out = case
+    seen: list[str] = []
+    t0 = time.monotonic()
+    got = S.read_case(_Plan(d, out, DOCHYTAV_I_ZAVYS),
+                      on_event=lambda ev, human: seen.append(human or ""))
+
+    assert time.monotonic() - t0 < 60, "завислий після done шард не погашено"
+    assert got.ok and (got.done, got.missing, got.stopped) == (3, 0, False)
+    assert any("не вийшов" in s for s in seen)
+    assert R.alive() == []
+
+
+def test_shard_shcho_zamovk_hasytsia_i_propusk_vydno(
+        case, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Шард замовк посеред справи (відгук №4: tmp поруч із txt, CPU 0) —
+    його гасять за тишею, а непрочитане лишається пропуском, а не «дочитано»."""
+    import time
+
+    monkeypatch.setattr(S, "STOP_POLL_SEC", 0.1)
+    monkeypatch.setattr(S, "STALL_SEC", 0.5)
+    d, out = case
+    seen: list[str] = []
+    t0 = time.monotonic()
+    got = S.read_case(_Plan(d, out, ZAMOVK),
+                      on_event=lambda ev, human: seen.append(human or ""))
+
+    assert time.monotonic() - t0 < 60, "замовклий шард не погашено"
+    assert not got.ok and not got.stopped
+    assert (got.done, got.missing) == (1, 2)
+    assert any("мовчить" in s for s in seen)
+
+
+def test_zhyvyi_shard_vartovyi_ne_chipaie(case, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Вартовий не гасить шард, що говорить і виходить сам."""
+    monkeypatch.setattr(S, "STOP_POLL_SEC", 0.1)
+    d, out = case
+    seen: list[str] = []
+    got = S.read_case(_Plan(d, out, PYSHE), on_event=lambda ev, human: seen.append(human or ""))
+
+    assert got.ok
+    assert not any("🐕" in s for s in seen)

@@ -26,6 +26,14 @@ from nyshporka.core.progress import Event, split
 STOP_POLL_SEC = 2.0
 #: Скільки чекати на ввічливе завершення, перш ніж убити.
 KILL_AFTER_SEC = 5.0
+#: 🐕 Шард, що мовчить стільки, вважається завислим і гаситься. Найдовша
+#: жива тиша — завантаження моделей і густа сторінка в стелі (хвилини), тож
+#: поріг утричі вищий за неї. Прочитане лишається на диску, а пропуски
+#: наступний запуск дочитує.
+STALL_SEC = 900.0
+#: Шард звітував `done`, а процес не вийшов: після цього йому лишається лише
+#: повернути код, тож довге чекання — це вже зависання на виході.
+EXIT_AFTER_DONE_SEC = 60.0
 
 EventFn = Callable[[Event | None, str | None], None]
 StopFn = Callable[[], bool]
@@ -138,7 +146,7 @@ def read_case(plan: Any, *, case_key: str = "", workers: int = 1, device: str = 
     from nyshporka.htr.run import shard_env
 
     env = foreign_env(shard_env(len(cmds)) if len(cmds) > 1 else None)
-    lines: queue.Queue[str | None] = queue.Queue()
+    lines: queue.Queue[tuple[int, str | None]] = queue.Queue()
     procs: list[Any] = []
     trees: list[Any] = []
     pace = Pace(shards=len(cmds))
@@ -157,27 +165,39 @@ def read_case(plan: Any, *, case_key: str = "", workers: int = 1, device: str = 
             # по ньому ж видно, чи робота ще йде.
             R.register(proc.pid, case=plan.case_dir.name, case_key=case_key,
                        shard=shard or (f"{k + 1}/{len(cmds)}" if len(cmds) > 1 else ""))
-            threading.Thread(target=_pump, args=(proc, lines), daemon=True).start()
+            threading.Thread(target=_pump, args=(k, proc, lines), daemon=True).start()
 
         live = len(procs)
+        heard = [time.monotonic()] * len(procs)
+        done_at: list[float | None] = [None] * len(procs)
+        gone = [False] * len(procs)
+        # погашені вже після `done`: робота скінчена, їхній код — не збій
+        finished: set[int] = set()
         while live:
             try:
-                line = lines.get(timeout=STOP_POLL_SEC)
+                k, line = lines.get(timeout=STOP_POLL_SEC)
             except queue.Empty:
-                line = ""
+                k, line = -1, ""
             if line is None:
                 live -= 1
+                gone[k] = True
             elif line:
+                heard[k] = time.monotonic()
                 ev, human = split(line)
                 if ev is not None:
                     pace.page(ev, time.monotonic())
+                    if ev.phase == "done":
+                        done_at[k] = time.monotonic()
                 if on_event is not None:
                     on_event(ev, human)
             if not stopped and should_stop is not None and should_stop():
                 stopped = True
                 for proc, tree in zip(procs, trees, strict=False):
                     _terminate(proc, tree)
-        rc = max((int(p.wait() or 0) for p in procs), default=0)
+            if not stopped:
+                finished |= _watchdog(procs, trees, heard, done_at, gone, on_event)
+        rc = max((0 if k in finished else int(p.wait() or 0)
+                  for k, p in enumerate(procs)), default=0)
     finally:
         # Знімається і при Ctrl+C: інакше справа лишалась би «зайнятою» до
         # перевірки живості.
@@ -207,13 +227,47 @@ def read_case(plan: Any, *, case_key: str = "", workers: int = 1, device: str = 
                       partial=partial, stopped=stopped, notes=tuple(notes), pace=pace)
 
 
-def _pump(proc: Any, lines: queue.Queue[str | None]) -> None:
-    """Рядки одного процесу — у спільну чергу; `None` означає «цей скінчив»."""
+def _pump(k: int, proc: Any, lines: queue.Queue[tuple[int, str | None]]) -> None:
+    """Рядки процесу `k` — у спільну чергу; `None` означає «цей скінчив»."""
     try:
         for line in proc.stdout:
-            lines.put(line.rstrip())
+            lines.put((k, line.rstrip()))
     finally:
-        lines.put(None)
+        lines.put((k, None))
+
+
+def _watchdog(procs: list[Any], trees: list[Any], heard: list[float],
+              done_at: list[float | None], gone: list[bool],
+              on_event: EventFn | None) -> set[int]:
+    """Погасити шард, що завис: замовк на `STALL_SEC` або не вийшов після `done`.
+
+    🔴 Без цього один завислий шард тримав `nysh read` вічно: процес живий,
+    CPU і карта на нулі, а решта справи давно дочитана (відгук №3–4 з порталу,
+    27.10.2026: ДАЧкО 833-1-*, -j 4 і -j 7, Windows). Гаситься лише він;
+    сторінки, що не лягли, лишаються пропуском, і повтор їх дочитує.
+    Повертає номери погашених уже після `done`.
+    """
+    now = time.monotonic()
+    finished: set[int] = set()
+    for k, proc in enumerate(procs):
+        if gone[k] or proc.poll() is not None:
+            continue
+        done = done_at[k]
+        if done is not None and now - done > EXIT_AFTER_DONE_SEC:
+            why = f"дочитав, але не вийшов за {EXIT_AFTER_DONE_SEC:.0f} с"
+            finished.add(k)
+        elif done is None and now - heard[k] > STALL_SEC:
+            why = f"мовчить {STALL_SEC / 60:.0f} хв"
+        else:
+            continue
+        if on_event is not None:
+            on_event(None, f"🐕 шард {k + 1}/{len(procs)} (pid {proc.pid}) {why} — "
+                           f"гашу; непрочитане дочитає повторний запуск")
+        _terminate(proc, trees[k])
+        # щоб не гасити вдруге, поки його потік не дочитав закритий канал
+        done_at[k] = None
+        heard[k] = float("inf")
+    return finished
 
 
 def _terminate(proc: Any, tree: Any = None) -> None:

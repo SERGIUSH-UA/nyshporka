@@ -2731,15 +2731,23 @@ def atomic_write(path: Path, text: str) -> None:
     tmp = path.with_suffix(f"{path.suffix}.{os.getpid()}.tmp")
     tmp.write_text(text, encoding="utf-8")
     # на Windows os.replace падає з PermissionError, якщо ціль саме читає
-    # в'ювер консолі — мета велика (тисячі сторінок), тож це реально буває
-    for attempt in range(4):
+    # в'ювер консолі — мета велика (тисячі сторінок), тож це реально буває.
+    # 🔴 Паузи наростають до ~10 с разом: антивірус, що сканує щойно записаний
+    # tmp, тримає його довше за секунду, і чотири спроби по 0.2 с здавались
+    # раніше, ніж він відпускав (відгук №4 з порталу, 27.10.2026: tmp лишався
+    # поруч із txt, а шард падав посеред справи)
+    for pause in _REPLACE_PAUSES:
         try:
             os.replace(tmp, path)
             return
         except PermissionError:
-            if attempt == 3:
+            if pause is None:
                 raise
-            time.sleep(0.2)
+            time.sleep(pause)
+
+
+#: Паузи між спробами `os.replace` в `atomic_write`; `None` — здатись.
+_REPLACE_PAUSES = (0.2, 0.3, 0.5, 1.0, 2.0, 3.0, 3.0, None)
 
 
 def parse_shard(spec: str) -> tuple[int, int]:
@@ -5299,5 +5307,38 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
     return 0
 
 
+def _exit_hard(run: Any) -> None:
+    """Виконати `run()` і вийти через `os._exit`, минаючи фіналізацію інтерпретатора.
+
+    🔴 На Windows шард, що вже все записав (`done` у парті), лишався живим із
+    ~2.4 ГБ пам'яті й нулем CPU, і `nysh read` чекав його вічно (відгук №3–4 з
+    порталу, 27.10.2026). Після `main()` уся робота вже на диску — кожен запис
+    іде через `atomic_write` і закритий файл, — тож розвантаження CUDA й модулів
+    нічого не додає, а повиснути може. Виняток друкується, як друкував би
+    Python, і дає той самий код: 1, а для Ctrl+C — 130.
+    """
+    import contextlib
+    import traceback
+
+    try:
+        rc = run()
+    except SystemExit as exc:
+        code = exc.code
+        if code is None or isinstance(code, int):
+            rc = code or 0
+        else:
+            print(code, file=sys.stderr)
+            rc = 1
+    except KeyboardInterrupt:
+        rc = 130
+    except BaseException:
+        traceback.print_exc()
+        rc = 1
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(Exception):
+            stream.flush()
+    os._exit(int(rc or 0))
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    _exit_hard(main)
