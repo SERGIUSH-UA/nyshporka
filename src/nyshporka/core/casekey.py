@@ -28,11 +28,32 @@ import re
 from typing import NamedTuple
 
 __all__ = [
-    "FIELD_LABEL_WORD", "FOND_LABEL", "FOND_TOKEN", "OPYS_LABEL", "OPYS_TOKEN", "SPR_LABEL",
-    "SPR_TOKEN", "UNKNOWN", "CaseKey", "LegacyKeysError",
-    "compatible", "fond_variants", "is_bundle", "is_legacy", "keys_current", "make",
-    "norm_fond", "norm_part",
-    "parse", "parse_legacy", "require_current", "stem",
+    "FIELD_LABEL_WORD",
+    "FOND_LABEL",
+    "FOND_TOKEN",
+    "LETTERS",
+    "LETTER_TO_LAT",
+    "OPYS_LABEL",
+    "OPYS_TOKEN",
+    "SPR_LABEL",
+    "SPR_TOKEN",
+    "UNKNOWN",
+    "CaseKey",
+    "LegacyKeysError",
+    "compatible",
+    "fond_variants",
+    "is_bundle",
+    "is_legacy",
+    "keys_current",
+    "make",
+    "norm_fond",
+    "norm_letter",
+    "norm_part",
+    "parse",
+    "parse_legacy",
+    "require_current",
+    "show_part",
+    "stem",
 ]
 
 #: Опис не встановлено. Один символ, якого немає в жодному номері.
@@ -58,9 +79,20 @@ SPR_LABEL = r"(?:спр|д|d)\.?\s*"
 #: Будь-яка з позначок як окреме слово — щоб її не взяли за назву архіву.
 FIELD_LABEL_WORD = r"(?:ф|оп|спр|д|inv|d)"
 
-#: кирилична літера індексу справи → латинська. Канон латинський — ним названі
-#: файли сховища сторінок (`315-1-7029a.json`).
-_LETTER_TO_LAT = {"а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e"}
+#: 🔴 ЄДИНА таблиця письма літер у шифрі (індекс опису й справи: `1д`, `5доп`,
+#: `355а`). Канон — ЛАТИНКА: ним названі файли сховища сторінок
+#: (`315-1-7029a.json`), теки прогонів (`118-3d-38`) і ключі в `overrides`.
+#: Кирилиця лишається лише у «показі» (`show_part`): так опис друкує архів, так
+#: названі теки (`op1д-spr-406`) і колонки реєстрів опису.
+#: Звукова пара: а→a б→b в→v г→g д→d е→e.
+LETTER_TO_LAT = {"а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e"}
+#: Двійники (`о`↔`o`, `с`↔`c`, `х`↔`x`, `і`↔`i`, `р`↔`p`…) і `п` (`доп`↔`dop`)
+#: зводяться теж (таблиця нижче). ⚠ `р` і `п` обидві дають `p`, тож `дор` і `доп`
+#: збігаються — суфікса `-дор` в описах немає. Решта літер (`ч`, `ж`, `з`…) не
+#: зводиться: тоді токен лишається як є.
+#: Клас літер, з яких складається індекс опису/справи, — для регексів розборів.
+LETTERS = "а-яіїєґa-z"
+_TAIL_RE = re.compile(r"^(\d+)([^\W\d_]+)$")
 #: кирилична літера префікса фонду → латинська: «Р-6129» і «R-6129» — один фонд.
 _FOND_PREFIX_TO_LAT = {"р": "R", "п": "P", "ф": "F", "c": "C", "с": "S"}
 #: латинська літера префікса → кирилична, ОДНАКОВА НА ВИГЛЯД. Для пошуку, не для
@@ -75,22 +107,60 @@ _FOND_PREFIX_LOOKALIKE = {
     "m": "м", "o": "о", "p": "р", "t": "т", "x": "х", "y": "у",
 }
 _FOND_PREFIX_LOOKALIKE_BACK = {v: k for k, v in _FOND_PREFIX_LOOKALIKE.items()}
+# Ті самі двійники обслуговують і літери індексу (одна таблиця на обидва
+# застосування): звукові `а в е` вже в `LETTER_TO_LAT`, `п` — звуково `p`.
+_LOOKALIKE_TO_LAT = {**{c: lat for c, lat in _FOND_PREFIX_LOOKALIKE_BACK.items()
+                        if c not in LETTER_TO_LAT}, "п": "p"}
+_FOLD = {**_LOOKALIKE_TO_LAT, **LETTER_TO_LAT}
+_FOLD_TR = str.maketrans(_FOLD)
+#: Зворотне зведення для показу: латинка → кирилиця; `p` → `п` (суфікс `доп`).
+_UNFOLD_TR = str.maketrans({v: k for k, v in _FOLD.items() if k != "р"})
 _FOND_PREFIX_RE = re.compile(r"^([A-Za-zА-ЯЄІЇҐа-яєіїґ]{1,2})-(\d.*)$")
 
 
+def _fold_letters(letters: str) -> str | None:
+    """Літери індексу → канон, або `None`, коли хоч одна не зводиться (`ч`)."""
+    low = letters.lower()
+    if all(c in _FOLD or ("a" <= c <= "z") for c in low):
+        return low.translate(_FOLD_TR)
+    return None
+
+
+def norm_letter(s: object) -> str:
+    """Літера (чи літери) індексу справи в каноні: `А`, `a`, `а` → `a`."""
+    low = str(s or "").strip().lower()
+    return _fold_letters(low) or low
+
+
 def norm_part(s: object) -> str | None:
-    """Номер справи чи опису без провідних нулів: `00114`→`114`, `2а`→`2a`.
+    """Номер справи чи опису для ПОРІВНЯННЯ і ключа: `00114`→`114`, `2а`→`2a`.
+
+    Регістр, провідні нулі й письмо літер зведені: `1Д`, `1д`, `1d` → `1d`;
+    `5доп` = `5dop`; `355a` = `355а`. Літери зводяться, лише коли ВСІ вони в
+    таблиці (`LETTER_TO_LAT` + двійники): `7049ч` лишається як є.
 
     Приймає і число: паспорти пишуть `"inv": 1` так само часто, як `"inv": "1"`.
     """
     if s is None or s == "":
         return None
     out = str(s).strip().lower().lstrip("0") or "0"
-    # Літерний індекс справи приходить обома письмами: тека `spr-2a`, рендер тієї
-    # самої книги — `230-1-2а` кирилицею. Без зведення це дві справи.
-    if len(out) > 1 and out[-1] in _LETTER_TO_LAT and out[:-1].isdigit():
-        out = out[:-1] + _LETTER_TO_LAT[out[-1]]
+    m = _TAIL_RE.match(out)
+    if m:
+        folded = _fold_letters(m.group(2))
+        if folded:
+            out = m.group(1) + folded
     return out
+
+
+def show_part(s: object) -> str:
+    """Номер опису для ПОКАЗУ й імені теки: латинський суфікс → кирилиця.
+
+    `1d` → `1д`, `5dop` → `5доп`, `1д` → `1д`. Токен без цифр+латинки
+    (`GP35`, `@збірка`) лишається, як є, лише в нижньому регістрі.
+    """
+    low = str(s or "").strip().lower()
+    m = re.match(r"^(\d+)([a-z]+)$", low)
+    return m.group(1) + m.group(2).translate(_UNFOLD_TR) if m else low
 
 
 def norm_fond(s: object) -> str | None:

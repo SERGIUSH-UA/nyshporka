@@ -131,13 +131,10 @@ def disk_key(opys: object, spr_int: object, letter: object) -> tuple[str, str, s
     `spr-5а` поруч із прочитаною `spr-5a`, а `--todo` ставив у чергу 2а, 2б,
     40а–д, давно прочитані.
     """
-    from nyshporka.core.casekey import _LETTER_TO_LAT
+    from nyshporka.core.casekey import norm_letter, norm_part
 
-    low = str(letter or "").strip().lower()
     # Опис теж: бібліотека віддає `1d` (латинкою), реєстр опису — `1д`.
-    from nyshporka.core.casekey import norm_part
-
-    return (norm_part(opys) or "", str(spr_int or ""), _LETTER_TO_LAT.get(low, low))
+    return (norm_part(opys) or "", str(spr_int or ""), norm_letter(letter))
 @lru_cache(maxsize=1)
 def _key_re() -> re.Pattern[str]:
     """Ключ справи для реєстру опису.
@@ -147,10 +144,12 @@ def _key_re() -> re.Pattern[str]:
     ⚠ Імпорт відкладений: `library` на рівні модуля кличе `workspace()`, а цей
     модуль вантажить CLI ще до того, як простір знайдено.
     """
+    from nyshporka.core.casekey import LETTERS
     from nyshporka.library import FOND_TOKEN
 
     return re.compile(rf"^([A-Za-zА-Яа-яІЇЄҐіїєґ]+)[/\s-]+({FOND_TOKEN})[/\s-]+"
-                      r"(?:(\d+[а-яіїєґa-z]*)[/\s-]+)?(\d+)\s*([а-яіїєґa-z]?)$", re.IGNORECASE)
+                      rf"(?:(\d+[{LETTERS}]*)[/\s-]+)?(\d+)\s*([{LETTERS}]?)$",
+                      re.IGNORECASE)
 
 
 _YEAR_RE = re.compile(r"^(\d{4})(?:\s*[-–]\s*(\d{4}))?$")
@@ -583,9 +582,9 @@ def row_status(row: dict[str, Any],
     # сховища сторінок (`84a`) — і без цього переводу колонка мовчки порожня
     # саме на літерних справах. Виміряно на ДАХмО 315-1-84а: у пулі текст є,
     # у таблиці не показувався.
-    from nyshporka.core.casekey import _LETTER_TO_LAT
+    from nyshporka.core.casekey import norm_letter
 
-    pool_key = (key[0], key[1], _LETTER_TO_LAT.get(key[2], key[2]))
+    pool_key = (key[0], key[1], norm_letter(key[2]))
     cell = None if pool is None else pool.get(pool_key)
     return {
         "on_disk_live": on_live,
@@ -886,9 +885,9 @@ def parse_key(key: str) -> tuple[str, str, str, str, str]:
     fond = str(_norm_fond(m.group(2)))
     # 🔴 Опис буває літерним (`1д`, `5доп`); латинська `d` у ньому — це `д`
     # (та сама нормалізація, що в розборі назв Commons).
-    from nyshporka.sources.commons import opys_cyr
+    from nyshporka.core.casekey import show_part
 
-    opys = opys_cyr(m.group(3)) if m.group(3) else (default_opys(repo, fond) or "")
+    opys = show_part(m.group(3)) if m.group(3) else (default_opys(repo, fond) or "")
     return (repo, fond, opys, m.group(4),
             (m.group(5) or "").lower())
 
@@ -926,8 +925,9 @@ def registry_row(repo: str, fond: str, opys: str, spr: str,
     path = fond_path(fond_id)
     if not path.exists():
         return None, path
+    # 🔴 Порівняння в каноні письма (`casekey`): `355a` = `355а`, `1d` = `1д`.
+    want = disk_key(opys, spr, letter)
     for r in load_rows(fond_id):
-        if (r.get("opys") == opys and r.get("spr_int") == spr
-                and (r.get("spr_letter") or "") == (letter or "")):
+        if disk_key(r.get("opys"), r.get("spr_int"), r.get("spr_letter")) == want:
             return r, path
     return None, path

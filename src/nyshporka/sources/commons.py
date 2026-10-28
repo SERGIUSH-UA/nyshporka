@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from nyshporka.core.casekey import LETTERS
 from nyshporka.sources.base import (
     FetchResult,
     Hit,
@@ -46,7 +47,7 @@ def _sha1_of(path: Path) -> str:
     return h.hexdigest()
 
 
-_LET = "а-яіїєґa-z"
+_LET = LETTERS
 _SEP_DASH = r"\s*[-–]\s*"
 _REPO_WORD = r"(?P<repo>[A-Za-zА-Яа-яІЇЄҐіїєґ']+)"
 #: Опис буває літерним: `2д`, `1d`, `5доп` — тому літер після цифр кілька.
@@ -62,17 +63,6 @@ _COMPACT = re.compile(
 _WORDED = re.compile(
     rf"{_REPO_WORD}\W+(?:фонд|ф)\W*{_FOND}(?!\d)\W*(?:опис[ьи]?|оп|о)\W*{_OPYS}"
     rf"(?![\d])\W*(?:справа|спр|дело|дел|д|с)\W*{_SPR}", re.IGNORECASE)
-#: Латинські двійники в літері опису (`1d` → `1д`); решта літер лишається як є.
-_LAT_TO_CYR = str.maketrans({"d": "д", "a": "а", "e": "е", "o": "о", "p": "р",
-                             "c": "с", "x": "х", "i": "і"})
-
-
-def opys_cyr(opys: str) -> str:
-    """Номер опису з латинськими двійниками літер → кирилиця: `1D` → `1д`.
-
-    Одна нормалізація і для назв Commons, і для ключів справ (`fonds.registry`).
-    """
-    return (opys or "").strip().lower().translate(_LAT_TO_CYR)
 
 
 def title_of_ref(ref: str) -> str:
@@ -102,6 +92,7 @@ def shifra_of_title(title: str) -> dict[str, str]:
     вигадана шифра приписує теці чужу справу.
     """
     from nyshporka.archives.pack import active
+    from nyshporka.core.casekey import show_part
 
     pk = active()
     for pattern in (_COMPACT, _WORDED):
@@ -109,7 +100,7 @@ def shifra_of_title(title: str) -> dict[str, str]:
             code = pk.resolve_code(m.group("repo"))
             if not code:
                 continue
-            opys = _plain(opys_cyr(m.group("opys")))
+            opys = _plain(show_part(m.group("opys")))
             spr = _plain(m.group("spr")) + m.group("lit").lower()
             return {"archive": pk.canon_repo(code), "fond": m.group("fond"),
                     "inv": opys, "spr": spr}

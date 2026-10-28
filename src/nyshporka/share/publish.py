@@ -495,12 +495,12 @@ def _letter_variants(letter: str) -> list[str]:
     `_norm_spr` зводить кириличну літеру до латинської, і другий перелік
     розійшовся б із першим при першому ж доданому рядку.
     """
-    from nyshporka.core.casekey import _LETTER_TO_LAT
+    from nyshporka.core.casekey import LETTER_TO_LAT
 
     if not letter:
         return [""]
     out = [letter]
-    out += [cyr for cyr, lat in _LETTER_TO_LAT.items()
+    out += [cyr for cyr, lat in LETTER_TO_LAT.items()
             if lat == letter and cyr != letter]
     return out
 
