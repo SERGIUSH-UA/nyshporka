@@ -268,6 +268,13 @@ def take(key: str, *, force: bool = False, reindex: bool = True,
     from nyshporka.cases import acquire as A
 
     repo, fond, opys, spr_i, letter, row, _ = _row(key)
+    # 🔴 Справа вже на диску — та сама, хоч би якою літерою названа: 28.10.2026
+    # 230-2-5а лягла вдруге в теку `spr-5а` поруч із прочитаною `spr-5a`.
+    from nyshporka.fonds.registry import disk_key, live_on_disk
+
+    have = live_on_disk(repo, fond).get(disk_key(opys, spr_i, letter))
+    if have and not force:
+        raise TakeError(f"справа вже на диску: {have}. Узяти ще раз — --force")
     p = {**_plan_from(repo, fond, opys, spr_i, letter, row, commons_file),
          "opys_assumed": not opys_named(key)}
     if not p["channel"]:
@@ -311,5 +318,4 @@ def take(key: str, *, force: bool = False, reindex: bool = True,
     # Письмо — лише з паспорта справи (`script`/`langs`), не з жанру й років:
     # підказка «далі» інакше радила б рушій навмання.
     out["script"] = next((e.script for e in mine if e.script), "")
-    _ = force  # перезапис вирішує сам `acquire`: він звіряє sha256 файлів
     return out

@@ -680,7 +680,7 @@ def cmd_fond(
         # 🔴 Обірване завантаження виглядає точно як ціле, якщо не сказати
         # інакше: показуємо частку взятих кадрів, а не саму галочку.
         if "partial" in st["flags"]:
-            key = (r.get("opys") or "", r.get("spr_int") or "", r.get("spr_letter") or "")
+            key = _fonds.disk_key(r.get("opys"), r.get("spr_int"), r.get("spr_letter"))
             disk = (f"[err]{frames_live.get(key, 0)}/"
                     f"{_fonds.expected_frames(r)}[/err]")
         # 🎞 плівка: показуємо DGS — саме його вводять у FamilySearch, щоб

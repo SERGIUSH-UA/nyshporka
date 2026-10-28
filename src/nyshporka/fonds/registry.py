@@ -120,6 +120,21 @@ _LEGACY_UNKNOWN = ("spr_to", "title_alt", "commons_title", "years_src", "folios"
                    "cover_place", "cover_letters", "cover_note")
 
 _SPR_RE = re.compile(r"^(\d+)\s*([а-яіїєґa-z]?)$", re.IGNORECASE)
+
+
+def disk_key(opys: object, spr_int: object, letter: object) -> tuple[str, str, str]:
+    """Ключ живого стану диска: (опис, номер, літера), літера — латинкою.
+
+    🔴 Літерний індекс приходить обома письмами: бібліотека — з теки `spr-5a`,
+    реєстр опису — «5а» кирилицею. Без зведення справа на диску лишалась «не
+    взятою», і `cases take` 28.10.2026 викачав 230-2-5а вдруге в нову теку
+    `spr-5а` поруч із прочитаною `spr-5a`, а `--todo` ставив у чергу 2а, 2б,
+    40а–д, давно прочитані.
+    """
+    from nyshporka.core.casekey import _LETTER_TO_LAT
+
+    low = str(letter or "").strip().lower()
+    return (str(opys or ""), str(spr_int or ""), _LETTER_TO_LAT.get(low, low))
 @lru_cache(maxsize=1)
 def _key_re() -> re.Pattern[str]:
     """Ключ справи для реєстру опису.
@@ -447,7 +462,7 @@ def _live_maps(repo: str, fond: str
         m = _SPR_RE.match(str(c.get("spr") or ""))
         if not m:
             continue
-        key = (str(c.get("opys") or "1"), m.group(1), m.group(2).lower())
+        key = disk_key(c.get("opys") or "1", m.group(1), m.group(2))
         paths[key] = c.get("path") or ""
         try:
             frames[key] = int(c.get("frames") or 0)
@@ -508,8 +523,7 @@ def row_status(row: dict[str, Any],
     і в `ops_catalog.fond_rows` досі стоїть коментар про те, як його забули
     передати — і `partial` не виставлявся ніколи.
     """
-    key = (row.get("opys") or "", row.get("spr_int") or "",
-           row.get("spr_letter") or "")
+    key = disk_key(row.get("opys"), row.get("spr_int"), row.get("spr_letter"))
     on_live = live.get(key, "")
     on_tsv = row.get("on_disk")
     flags: list[str] = []

@@ -358,6 +358,8 @@ def place_card(card: str, repo: str = "CDIAK") -> dict[str, Any]:
     # `live_on_disk` віддає (опис, номер, літера), а номер справи неунікальний
     # між описами. Переплутавши опис із номером, дістаєш тихий нуль — «на диску
     # немає» для справ, які лежать поруч на диску.
+    from nyshporka.fonds.registry import disk_key
+
     disk: dict[tuple[str, str, str, str], str] = {}
     try:
         from nyshporka.fonds.registry import live_on_disk
@@ -370,7 +372,7 @@ def place_card(card: str, repo: str = "CDIAK") -> dict[str, Any]:
         n = re.sub(r"\D", "", c["spr"])
         letter = c["spr"][len(n):].lower()
         c["shifra"] = f"{c['fond']}-{c['opys']}-{c['spr']}"
-        c["on_disk"] = disk.get((c["fond"], c["opys"], n, letter), "")
+        c["on_disk"] = disk.get((c["fond"], *disk_key(c["opys"], n, letter)), "")
     n_rows = len(cases)
     cases = _merge_by_shifra(cases)
     place["cases"] = cases

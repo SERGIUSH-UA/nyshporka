@@ -212,3 +212,16 @@ def test_a_registry_built_before_the_conflict_kind_is_still_caught(space):
     row = _conflict_row(year_from="1879", year_to="1879")
     row["commons_kind"] = "variants"
     assert T._plan_from("DAVO", "904", "31", "5", "", row)["parts"] == [_F79]
+
+
+def test_a_case_already_on_disk_is_not_taken_again(space, monkeypatch):
+    """🔴 Справа вже на диску під латинською літерою — `take` не кладе другу
+    копію поруч під кириличною (230-2-5а → `spr-5а` біля `spr-5a`, 28.10.2026)."""
+    from nyshporka.fonds import registry as F
+
+    monkeypatch.setattr(T, "_row", lambda key: (
+        "DAHMO", "230", "2", "5", "а", _row(commons_title="x.pdf"), space / "r.tsv"))
+    monkeypatch.setattr(F, "live_on_disk", lambda repo, fond: {
+        F.disk_key("2", "5", "a"): "data/raw/dahmo_230/spr-5a"})
+    with pytest.raises(T.TakeError, match="вже на диску"):
+        T.take("DAHMO/230/2/5а", reindex=False)

@@ -451,6 +451,8 @@ def place_card(card: str, repo: str = "CDIAK") -> Answer:
     # 🔴 Ключ — (фонд, опис, номер, літера): номер справи неунікальний між
     # описами, і переплутавши їх, дістаєш тихий нуль «на диску немає» для справ,
     # які лежать поруч на диску.
+    from nyshporka.fonds.registry import disk_key
+
     disk: dict[tuple[str, str, str, str], str] = {}
     try:
         from nyshporka.fonds.registry import live_on_disk
@@ -470,7 +472,7 @@ def place_card(card: str, repo: str = "CDIAK") -> Answer:
         # відкрити.
         c["repo"] = repo
         c["key"] = casekey.make(repo, c["fond"], c["opys"], c["spr"]) or ""
-        c["on_disk"] = disk.get((c["fond"], c["opys"], n, letter), "")
+        c["on_disk"] = disk.get((c["fond"], *disk_key(c["opys"], n, letter)), "")
     place["cases"] = cases
     place["n_on_disk"] = sum(1 for c in cases if c["on_disk"])
     # 🕍 те саме поселення в інших конфесіях

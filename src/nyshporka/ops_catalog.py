@@ -506,8 +506,8 @@ def fond_rows(a: FondRowsArgs) -> Envelope:
                     # числа потрібні, щоб сказати «завантажено 100 з 207», а не
                     # просто «неповно».
                     "frames_disk": frames.get(
-                        (r.get("opys") or "", r.get("spr_int") or "",
-                         r.get("spr_letter") or "")) or None,
+                        R.disk_key(r.get("opys"), r.get("spr_int"),
+                                   r.get("spr_letter"))) or None,
                     "frames_expected": R.expected_frames(r) or None})
     # 🔴 Знаменник рахується по всьому фонду, а не по фільтру: інакше «5 справ»
     # читалось би як «у фонді п'ять справ», а не «п'ять із семи тисяч».

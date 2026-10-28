@@ -126,3 +126,20 @@ def test_a_known_number_means_the_collector_can_start() -> None:
     got, invs = ArchiumCollector(workspace=None).known_fond_id(_T())
     assert got == "198", got
     assert sorted(invs) == ["1", "2", "3"], invs
+
+
+def test_a_letter_on_disk_in_latin_is_the_same_case_in_cyrillic() -> None:
+    """🔴 Бібліотека пише літеру з теки (`spr-5a`), реєстр опису — «5а»
+    кирилицею. Без зведення справа на диску лишалась `todo`: 28.10.2026 так
+    230-2-5а викачали вдруге, а 2а, 2б, 40а–д стояли в черзі, давно прочитані."""
+    from nyshporka.fonds.registry import disk_key
+
+    live = {disk_key("2", "5", "a"): "data/raw/dahmo_230/spr-5a"}
+    row = {"opys": "2", "spr_int": "5", "spr_letter": "а",
+           "commons_url": "https://commons/…"}
+    st = row_status(row, live=live, conflicts={})
+    assert st["disk_state"] == "disk"
+    assert st["on_disk_live"] == "data/raw/dahmo_230/spr-5a"
+    assert disk_key("1", "2", "б") == disk_key("1", "2", "B") == ("1", "2", "b")
+    # інша літера — інша справа
+    assert disk_key("1", "2", "а") != disk_key("1", "2", "б")
