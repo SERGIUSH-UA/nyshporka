@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
@@ -43,6 +44,75 @@ def _sha1_of(path: Path) -> str:
         for block in iter(lambda: fh.read(1 << 24), b""):
             h.update(block)
     return h.hexdigest()
+
+
+_LET = "а-яіїєґa-z"
+_SEP_DASH = r"\s*[-–]\s*"
+_REPO_WORD = r"(?P<repo>[A-Za-zА-Яа-яІЇЄҐіїєґ']+)"
+#: Опис буває літерним: `2д`, `1d`, `5доп` — тому літер після цифр кілька.
+_OPYS = rf"(?P<opys>\d+[{_LET}]*)"
+_SPR = rf"(?P<spr>\d+)(?P<lit>[{_LET}]?)(?![{_LET}\d])"
+_FOND = r"(?P<fond>(?:[А-ЯЄІЇҐA-Z]{1,2}-)?\d+)"
+
+#: «ДАХмО 227-2д-905 …», «ДАХмО 227-1-6563а …», «ДАХмО 227-1d-356. …».
+_COMPACT = re.compile(
+    rf"{_REPO_WORD}[\s_.\-]*(?:ф(?:онд)?\.?\s*)?{_FOND}(?!\d){_SEP_DASH}{_OPYS}"
+    rf"{_SEP_DASH}{_SPR}", re.IGNORECASE)
+#: «ДАХмО Ф.227, о.2, с.6026», «Ф. 227 О. 5доп С. 291», «Фонд 227, опись 6д, дело 34».
+_WORDED = re.compile(
+    rf"{_REPO_WORD}\W+(?:фонд|ф)\W*{_FOND}(?!\d)\W*(?:опис[ьи]?|оп|о)\W*{_OPYS}"
+    rf"(?![\d])\W*(?:справа|спр|дело|дел|д|с)\W*{_SPR}", re.IGNORECASE)
+#: Латинські двійники в літері опису (`1d` → `1д`); решта літер лишається як є.
+_LAT_TO_CYR = str.maketrans({"d": "д", "a": "а", "e": "е", "o": "о", "p": "р",
+                             "c": "с", "x": "х", "i": "і"})
+
+
+def title_of_ref(ref: str) -> str:
+    """Назва файла з адреси `file:<назва>` (чи повного посилання); інакше порожньо."""
+    from urllib.parse import unquote
+
+    text = unquote((ref or "").strip())
+    for prefix in ("https://commons.wikimedia.org/wiki/",
+                   "http://commons.wikimedia.org/wiki/"):
+        if text.lower().startswith(prefix):
+            text = text[len(prefix):]
+    kind, _, ident = text.partition(":")
+    return ident.strip() if kind.strip().lower() in ("file", "файл") else ""
+
+
+def _plain(num: str) -> str:
+    """Без провідних нулів: «01» → «1», «6д» лишається."""
+    m = re.match(r"(\d+)(.*)$", num)
+    return f"{int(m.group(1))}{m.group(2)}" if m else num
+
+
+def shifra_of_title(title: str) -> dict[str, str]:
+    """Шифра справи з назви файла Commons: `archive/fond/inv/spr`, або `{}`.
+
+    Архів — той самий код, що скрізь у пакеті (`archives.pack`: ДАХмО → DAHMO).
+    Не розібралось (архів невідомий, це опис фонду, а не справа) — порожньо:
+    вигадана шифра приписує теці чужу справу.
+    """
+    from nyshporka.archives.pack import active
+
+    pk = active()
+    for pattern in (_COMPACT, _WORDED):
+        for m in pattern.finditer(title or ""):
+            code = pk.resolve_code(m.group("repo"))
+            if not code:
+                continue
+            opys = _plain(m.group("opys").lower().translate(_LAT_TO_CYR))
+            spr = _plain(m.group("spr")) + m.group("lit").lower()
+            return {"archive": pk.canon_repo(code), "fond": m.group("fond"),
+                    "inv": opys, "spr": spr}
+    return {}
+
+
+def shifra_of_ref(source: str, ref: str) -> dict[str, str]:
+    """Поля шифри для паспорта завантаження; не Commons чи не розібрано — `{}`."""
+    if source != "commons":
+        return {}
+    return shifra_of_title(title_of_ref(ref))
 
 
 class CommonsSource:

@@ -228,9 +228,24 @@ def record_fetch(case_dir: Path, res: Any, *, source: str, ref: str, url: str = 
         "fetch_causes": dict(getattr(res, "causes", None) or {}),
         "files": frame_files(case_dir, Path(res.dest), source=source),
     })
+    # 🔴 Шифра з назви файла — щоб бібліотека могла прив'язати теку до справи
+    # без дописування полів руками. Лише коли паспорт ще шифри не має: те, що
+    # записав `cases take` чи людина, надійніше за розбір назви.
+    from nyshporka.sources.commons import shifra_of_ref
+
+    shifra = shifra_of_ref(source, ref)
+    if shifra and not _has_shifra(case_dir):
+        passport.update(shifra)
     passport.update(extra or {})
     patch_meta(case_dir, passport)
     return verdict
+
+
+def _has_shifra(case_dir: Path) -> bool:
+    from nyshporka.utils.atomic import read_json
+
+    got = read_json(case_dir / "meta.json", default={})
+    return isinstance(got, dict) and bool(got.get("archive") and got.get("fond"))
 
 
 def write_meta(case_dir: Path, *, archive: str, fond: str, opys: str, spr: str,
