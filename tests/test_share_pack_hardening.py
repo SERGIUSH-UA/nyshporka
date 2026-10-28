@@ -430,6 +430,21 @@ def test_kadriv_menshe_za_prochytane_ne_znamennyk(space: Path, monkeypatch: Any)
         PUB.pack("DAZHO/1/2149", geometry=False)
 
 
+def test_chastyna_kadriv_i_chyslo_v_pasporti(space: Path, monkeypatch: Any) -> None:
+    """Кадри в R2, у теці — забутий один: знаменник дає паспорт (28.10.2026, ф.196)."""
+    import json
+
+    PUB = _chastyna_kadriv(space, monkeypatch, na_dysku=1)
+    (space / "kadry-chastyny" / "_source.json").write_text(
+        json.dumps({"frames_got": 9, "frames_remote": True}), encoding="utf-8")
+
+    proba = PUB.pack("DAZHO/1/2149", geometry=False, dry_run=True)
+
+    fr = proba["manifest"]["frames"]
+    assert fr["total"] == 9 and fr["listed"] == 1
+    assert "pack_refusals" not in proba
+
+
 @pytest.mark.parametrize("nazvano, vidmova", [(310, False), (3, True)])
 def test_nazvane_chyslo_menshe_za_prochytane_tezh_ne_beretsia(
         space: Path, monkeypatch: Any, nazvano: int, vidmova: bool) -> None:

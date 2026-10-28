@@ -899,6 +899,15 @@ def build_manifest(scope: str, *,
         if n >= listed:
             frames_block = {**frames_block, "total": n, "on_disk": listed}
     frames_block = _ne_menshe_za_prochytane(frames_block, int(counted["pages"]))
+    if not frames_block.get("total") and frames and not seg_mode:
+        # 🔴 Кадри на диску — лише частина (справа з кадрами в R2 і забутим
+        # одним кадром у теці): число з диску скинуто, тож питаємо паспорт, як
+        # і для теки без кадрів. 28.10.2026 так п'ять справ ф.196 із 119–531
+        # кадрами плівки стали «1 кадр» і не пакувались.
+        z_pasporta = _ne_menshe_za_prochytane(
+            _znamennyk_z_pasporta(frames_block, home), int(counted["pages"]))
+        if z_pasporta.get("total"):
+            frames_block = {**z_pasporta, "on_disk": int(frames_block.get("listed") or 0)}
     # Причина, з якої числа кадрів немає, живе в картці — щоб її бачило кожне
     # пакування цієї справи (пачкою, автовіддача), а не лише те, де її назвали.
     extra = dict(extra or {})
