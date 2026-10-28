@@ -67,6 +67,14 @@ _LAT_TO_CYR = str.maketrans({"d": "д", "a": "а", "e": "е", "o": "о", "p": "�
                              "c": "с", "x": "х", "i": "і"})
 
 
+def opys_cyr(opys: str) -> str:
+    """Номер опису з латинськими двійниками літер → кирилиця: `1D` → `1д`.
+
+    Одна нормалізація і для назв Commons, і для ключів справ (`fonds.registry`).
+    """
+    return (opys or "").strip().lower().translate(_LAT_TO_CYR)
+
+
 def title_of_ref(ref: str) -> str:
     """Назва файла з адреси `file:<назва>` (чи повного посилання); інакше порожньо."""
     from urllib.parse import unquote
@@ -101,7 +109,7 @@ def shifra_of_title(title: str) -> dict[str, str]:
             code = pk.resolve_code(m.group("repo"))
             if not code:
                 continue
-            opys = _plain(m.group("opys").lower().translate(_LAT_TO_CYR))
+            opys = _plain(opys_cyr(m.group("opys")))
             spr = _plain(m.group("spr")) + m.group("lit").lower()
             return {"archive": pk.canon_repo(code), "fond": m.group("fond"),
                     "inv": opys, "spr": spr}

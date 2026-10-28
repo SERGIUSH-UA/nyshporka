@@ -134,7 +134,10 @@ def disk_key(opys: object, spr_int: object, letter: object) -> tuple[str, str, s
     from nyshporka.core.casekey import _LETTER_TO_LAT
 
     low = str(letter or "").strip().lower()
-    return (str(opys or ""), str(spr_int or ""), _LETTER_TO_LAT.get(low, low))
+    # Опис теж: бібліотека віддає `1d` (латинкою), реєстр опису — `1д`.
+    from nyshporka.core.casekey import norm_part
+
+    return (norm_part(opys) or "", str(spr_int or ""), _LETTER_TO_LAT.get(low, low))
 @lru_cache(maxsize=1)
 def _key_re() -> re.Pattern[str]:
     """Ключ справи для реєстру опису.
@@ -147,7 +150,7 @@ def _key_re() -> re.Pattern[str]:
     from nyshporka.library import FOND_TOKEN
 
     return re.compile(rf"^([A-Za-zА-Яа-яІЇЄҐіїєґ]+)[/\s-]+({FOND_TOKEN})[/\s-]+"
-                      r"(?:(\d+)[/\s-]+)?(\d+)\s*([а-яіїєґa-z]?)$", re.IGNORECASE)
+                      r"(?:(\d+[а-яіїєґa-z]*)[/\s-]+)?(\d+)\s*([а-яіїєґa-z]?)$", re.IGNORECASE)
 
 
 _YEAR_RE = re.compile(r"^(\d{4})(?:\s*[-–]\s*(\d{4}))?$")
@@ -881,7 +884,12 @@ def parse_key(key: str) -> tuple[str, str, str, str, str]:
     repo = {"ДАХМО": "DAHMO", "ЦДІАК": "CDIAK", "ДАВІО": "DAVIO",
             "ДАВО": "DAVIO"}.get(repo, repo)
     fond = str(_norm_fond(m.group(2)))
-    return (repo, fond, (m.group(3) or default_opys(repo, fond) or ""), m.group(4),
+    # 🔴 Опис буває літерним (`1д`, `5доп`); латинська `d` у ньому — це `д`
+    # (та сама нормалізація, що в розборі назв Commons).
+    from nyshporka.sources.commons import opys_cyr
+
+    opys = opys_cyr(m.group(3)) if m.group(3) else (default_opys(repo, fond) or "")
+    return (repo, fond, opys, m.group(4),
             (m.group(5) or "").lower())
 
 

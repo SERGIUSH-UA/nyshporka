@@ -83,3 +83,63 @@ def test_passport_without_shifra_writes_no_fields(tmp_path):
                  ref="file:ДАХмО фонд 227 опис 1 том 1.pdf", want=1)
     meta = json.loads((tmp_path / "meta.json").read_text(encoding="utf-8"))
     assert not {"archive", "fond", "inv", "spr"} & meta.keys()
+
+
+# ── ключ справи з літерним описом (`cases take DAHMO/227/1д/406`) ────────────
+
+@pytest.fixture
+def _ws(tmp_path_factory):
+    from nyshporka.core import workspace as W
+
+    root = tmp_path_factory.mktemp("простір")
+    (root / "data" / "raw").mkdir(parents=True)
+    W.use(W.Workspace(root=root, name="тест", origin="test"))
+    yield
+    W.reset()
+
+
+@pytest.mark.parametrize("key,want", [
+    ("DAHMO/227/1д/406", ("DAHMO", "227", "1д", "406", "")),
+    ("DAHMO/227/1d/406", ("DAHMO", "227", "1д", "406", "")),
+    ("DAHMO/227/5доп/291", ("DAHMO", "227", "5доп", "291", "")),
+    ("DAHMO/227/2д/355а", ("DAHMO", "227", "2д", "355", "а")),
+    ("DAHMO/227/1/6563а", ("DAHMO", "227", "1", "6563", "а")),
+    ("ДАХмО 227-2д-905", ("DAHMO", "227", "2д", "905", "")),
+    ("DAHMO/230/1/43", ("DAHMO", "230", "1", "43", "")),
+])
+def test_parse_key_literal_opys(_ws, key, want):
+    from nyshporka.fonds.registry import parse_key
+
+    assert parse_key(key) == want
+
+
+def test_parse_key_two_segments_unchanged(_ws):
+    from nyshporka.cases.take import opys_named
+    from nyshporka.fonds.registry import parse_key
+
+    got = parse_key("DAHMO/230/43")
+    assert got[:2] == ("DAHMO", "230") and got[3:] == ("43", "")
+    assert not opys_named("DAHMO/230/43")
+    assert opys_named("DAHMO/227/1д/406")
+
+
+def test_disk_key_cyr_and_lat_opys_meet(_ws):
+    from nyshporka.fonds.registry import disk_key
+
+    assert disk_key("1д", "406", "") == disk_key("1d", "406", "")
+    assert disk_key("1", "5", "а") == ("1", "5", "a")
+
+
+def test_case_dir_name_for_literal_opys(_ws):
+    from nyshporka.cases.take import case_dir_for
+
+    assert case_dir_for("DAHMO", "227", "406", "", "1д").name == "op1д-spr-406"
+    assert case_dir_for("DAHMO", "227", "291", "", "5доп").name == "op5доп-spr-291"
+
+
+def test_library_reads_opys_from_dir_name(_ws):
+    from nyshporka.library import _OP_PREFIX_RE
+
+    assert _OP_PREFIX_RE.search("op5доп-spr-291").group(1) == "5доп"
+    assert _OP_PREFIX_RE.search("op1д-spr-406").group(1) == "1д"
+    assert _OP_PREFIX_RE.search("op2spr-148").group(1) == "2"
