@@ -30,7 +30,8 @@ from typing import NamedTuple
 __all__ = [
     "FIELD_LABEL_WORD", "FOND_LABEL", "FOND_TOKEN", "OPYS_LABEL", "OPYS_TOKEN", "SPR_LABEL",
     "SPR_TOKEN", "UNKNOWN", "CaseKey", "LegacyKeysError",
-    "compatible", "is_bundle", "is_legacy", "keys_current", "make", "norm_fond", "norm_part",
+    "compatible", "fond_variants", "is_bundle", "is_legacy", "keys_current", "make",
+    "norm_fond", "norm_part",
     "parse", "parse_legacy", "require_current", "stem",
 ]
 
@@ -62,6 +63,19 @@ FIELD_LABEL_WORD = r"(?:ф|оп|спр|д|inv|d)"
 _LETTER_TO_LAT = {"а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e"}
 #: кирилична літера префікса фонду → латинська: «Р-6129» і «R-6129» — один фонд.
 _FOND_PREFIX_TO_LAT = {"р": "R", "п": "P", "ф": "F", "c": "C", "с": "S"}
+#: латинська літера префікса → кирилична, ОДНАКОВА НА ВИГЛЯД. Для пошуку, не для
+#: канону: канон лишається звуковим (вище), бо ним названі всі наявні записи.
+#: 🔴 Дві таблиці тому, що звукова породжує двозначність: «Р» за звуком дає «R»,
+#: «П» дає «P», а виглядає «Р» як латинська «P». Набрана латинська «P» — це або
+#: канон фонду «П», або одруківка замість «Р», і розрізнити їх може лише
+#: бібліотека (відгук №5 з порталу, 28.10.2026). Те саме чекає на H (Г/Н),
+#: B (Б/В) і Y (И/У), щойно ці літери потраплять у звукову таблицю.
+_FOND_PREFIX_LOOKALIKE = {
+    "a": "а", "b": "в", "c": "с", "e": "е", "h": "н", "i": "і", "k": "к",
+    "m": "м", "o": "о", "p": "р", "t": "т", "x": "х", "y": "у",
+}
+_FOND_PREFIX_LOOKALIKE_BACK = {v: k for k, v in _FOND_PREFIX_LOOKALIKE.items()}
+_FOND_PREFIX_RE = re.compile(r"^([A-Za-zА-ЯЄІЇҐа-яєіїґ]{1,2})-(\d.*)$")
 
 
 def norm_part(s: object) -> str | None:
@@ -95,6 +109,41 @@ def norm_fond(s: object) -> str | None:
     if not rest:
         return norm_part(raw)
     return f"{_FOND_PREFIX_TO_LAT.get(pref, pref.upper())}-{rest}"
+
+
+def fond_variants(s: object) -> list[str]:
+    """Написання того самого фонду: канонічне перше, далі — чим його підміняють.
+
+    `R-7720` → `R-7720`, `7720`; `P-1989` → `P-1989`, `R-1989`, `1989`;
+    `7720` → `7720`, `R-7720`, `P-7720`, `F-7720`, `C-7720`, `S-7720`.
+
+    🔴 Перше значення — канон, решта — ПРИПУЩЕННЯ, яке мусить підтвердити
+    бібліотека: латинську «P» набирають і замість «Р», і як канон фонду «П», а
+    «Р-7720» і «7720» в архівах бувають різними фондами. Підставляти з цього
+    переліку наосліп не можна.
+    """
+    canon = norm_fond(s)
+    if not canon:
+        return []
+    out = [canon]
+
+    def add(value: str) -> None:
+        v = norm_fond(value)
+        if v and v not in out:
+            out.append(v)
+
+    m = _FOND_PREFIX_RE.match(canon)
+    if m:
+        pref, rest = m.group(1).lower(), m.group(2)
+        for table in (_FOND_PREFIX_LOOKALIKE, _FOND_PREFIX_LOOKALIKE_BACK):
+            swapped = "".join(table.get(c, c) for c in pref)
+            if swapped != pref:
+                add(f"{swapped}-{rest}")
+        add(rest)
+    else:
+        for pref in dict.fromkeys(_FOND_PREFIX_TO_LAT.values()):
+            add(f"{pref}-{canon}")
+    return out
 
 
 def _norm_opys(s: object) -> str:

@@ -64,6 +64,21 @@ def test_stats_count_cases_not_events(space: Path) -> None:
     assert got["from"] == [{"publisher": "oksana", "cases": 1}]
 
 
+def test_stats_count_one_case_however_the_shifra_is_spelled(space: Path) -> None:
+    """Літера справи двома письмами й перейменований архів — одна справа (відгук №7)."""
+    journal.record(journal.PACKED, shifra="ДАХО 40-110-502a", case_key="DAHO/40/110/502a",
+                   pages=5)
+    journal.record(journal.PACKED, shifra="ДАХО 40-110-502а", case_key="DAHO/40/110/502a",
+                   pages=5)
+    journal.record(journal.PACKED, shifra="РГАДА 1209-1-34", case_key="RDADA/1209/1/34",
+                   pages=7)
+    journal.record(journal.PACKED, shifra="РДАДА 1209-1-34", case_key="RDADA/1209/1/34",
+                   pages=7)
+    got = journal.stats()
+    assert got["packed"]["cases"] == 2
+    assert got["packed"]["pages"] == 12
+
+
 def test_broken_line_does_not_kill_the_journal(space: Path) -> None:
     journal.record(journal.PACKED, shifra="A", pages=1)
     with journal.journal_path().open("a", encoding="utf-8") as fh:

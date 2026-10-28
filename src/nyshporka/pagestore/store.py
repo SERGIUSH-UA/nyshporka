@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -194,6 +195,27 @@ def _near_miss(addr: Address) -> str:
 
 
 # ── резолюція справи ─────────────────────────────────────────────────────────
+#: Уже показані підміни префікса фонду. Резолвер кличуть на кожен прогін
+#: простору, і без цього одна справа друкувала б свій рядок десятки разів.
+_FOND_SWAP_SAID: set[tuple[str, str]] = set()
+
+
+def _warn_fond_swap(asked: str, entry: dict[str, Any]) -> None:
+    """Сказати, що взято інше написання фонду, ніж назвали.
+
+    🔴 stderr, а не stdout: резолвер працює й під `--json`, і зайвий рядок у
+    видачі зламав би розбір. Мовчазна підміна неприпустима — людина мусить
+    бачити, що пішов не той ключ, який вона набрала.
+    """
+    got = str(entry.get("fond") or "")
+    if (asked, got) in _FOND_SWAP_SAID:
+        return
+    _FOND_SWAP_SAID.add((asked, got))
+    print(f"ℹ фонд «{asked}» у бібліотеці не значиться; узято «{got}» "
+          f"({entry.get('shifra') or entry.get('key')}) — інше написання префікса.",
+          file=sys.stderr)
+
+
 def resolve_case(value: str) -> CaseRef:
     """Будь-який людський ідентифікатор справи → CaseRef. ValueError якщо не вийшло.
 
@@ -303,6 +325,29 @@ def resolve_case(value: str) -> CaseRef:
             entry = same[0]
             repo = str(entry["repo"])
             label = _REPO_LABEL.get(repo, repo)
+    if entry is None and not casekey.is_bundle(spr):
+        # 🔴 Написання префікса фонду — ОСТАННІЙ канал: наявну справу завжди
+        # виграє точний збіг, інакше фонд «П-7720» мовчки підмінявся б фондом
+        # «Р-7720». Кандидат приймається, лише якщо в бібліотеці він один
+        # (відгук №5 з порталу: «ДАСО Р-7720-15-133» не діставав справу, що
+        # лежить як «7720», і її готували вдруге).
+        alts: dict[str, dict[str, Any]] = {}
+        for alt in casekey.fond_variants(fond)[1:]:
+            got = lib.find(repo, alt, opys, spr)
+            if got is not None:
+                alts.setdefault(str(got.get("key") or alt), got)
+        if len(alts) == 1:
+            entry = next(iter(alts.values()))
+            _warn_fond_swap(fond, entry)
+            fond = str(entry.get("fond") or fond)
+            repo = str(entry.get("repo") or repo)
+            label = _REPO_LABEL.get(repo, repo)
+        elif len(alts) > 1:
+            found = ", ".join(f"«{k}»" for k in sorted(alts))
+            raise ValueError(
+                f"фонду «{fond}» у бібліотеці немає, а написань, які могли мати на "
+                f"увазі, кілька: {found}. Назви потрібне точно — вибрати за тебе "
+                f"означало б узяти чужу справу.")
     entry = entry or {}
     # Збірка — з різних справ: опис за замовчуванням фонду її не стосується.
     opys = entry.get("opys") or opys or (

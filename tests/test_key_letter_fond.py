@@ -76,6 +76,46 @@ def test_cyrillic_prefix_in_key_is_the_same_fond(store: Any) -> None:
     assert store.resolve_case("DAHMO/Р-100/1/7").key == "DAHMO/R-100/1/7"
 
 
+DASO = {"key": "DASO/7720/15/133", "repo": "DASO", "fond": "7720", "opys": "15",
+        "spr": "133", "shifra": "ДАСО 7720-15-133"}
+DAPO = {"key": "DAPO/R-1989/1/1", "repo": "DAPO", "fond": "R-1989", "opys": "1",
+        "spr": "1", "shifra": "ДАПО R-1989-1-1"}
+
+
+@pytest.mark.parametrize(("shifra", "key"), [
+    ("ДАСО Р-7720-15-133", "DASO/7720/15/133"),      # кирилична «Р»
+    ("ДАСО P-7720-15-133", "DASO/7720/15/133"),      # латинська «P» замість «Р»
+    ("ДАСО R-7720-15-133", "DASO/7720/15/133"),
+    ("ДАСО 7720-15-133", "DASO/7720/15/133"),
+    ("ДАПО Р-1989-1-1", "DAPO/R-1989/1/1"),
+    ("ДАПО P-1989-1-1", "DAPO/R-1989/1/1"),
+    ("ДАПО R-1989-1-1", "DAPO/R-1989/1/1"),
+    ("ДАПО 1989-1-1", "DAPO/R-1989/1/1"),
+])
+def test_fond_prefix_spelling_finds_the_case_on_disk(
+        store: Any, monkeypatch: pytest.MonkeyPatch, shifra: str, key: str) -> None:
+    """Справа на диску дістається будь-яким написанням префікса (відгук №5 з порталу)."""
+    monkeypatch.setattr(store, "load_library", lambda: [*LIB, DASO, DAPO])
+    assert store.resolve_case(shifra).key == key
+
+
+def test_exact_fond_wins_over_another_spelling(store: Any,
+                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    """Точний збіг першим: фонд «П-» не підміняється фондом «Р-»."""
+    p = {**DASO, "key": "DASO/P-7720/15/133", "fond": "P-7720", "shifra": "ДАСО П-7720-15-133"}
+    monkeypatch.setattr(store, "load_library", lambda: [*LIB, DASO, p])
+    assert store.resolve_case("ДАСО П-7720-15-133").key == "DASO/P-7720/15/133"
+    assert store.resolve_case("ДАСО 7720-15-133").key == "DASO/7720/15/133"
+
+
+def test_two_possible_fonds_are_refused_with_both_named(
+        store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    r = {**DASO, "key": "DASO/R-7720/15/133", "fond": "R-7720", "shifra": "ДАСО R-7720-15-133"}
+    monkeypatch.setattr(store, "load_library", lambda: [*LIB, DASO, r])
+    with pytest.raises(ValueError, match="кілька"):
+        store.resolve_case("ДАСО P-7720-15-133")
+
+
 def test_bundle_key_still_parses(store: Any) -> None:
     assert store.resolve_case("DAHMO/315/@fuzovka").spr == "@fuzovka"
 
