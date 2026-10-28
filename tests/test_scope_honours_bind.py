@@ -168,7 +168,7 @@ def test_share_suggest_offers_the_bound_key(scope: Any, monkeypatch) -> None:
 
 def test_share_suggest_ready_only_against_the_passport_film(scope: Any, monkeypatch) -> None:
     """Кадри в R2, у теці — три: «прочитано 3 з 3» не «готова», коли паспорт знає 1229."""
-    S, R = scope
+    S, _ = scope
     from nyshporka.share import publish as PB
     from nyshporka.share import suggest as SG
 
