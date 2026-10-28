@@ -683,6 +683,14 @@ def _znamennyk_z_pasporta(frames_block: dict[str, Any],
     return frames_block
 
 
+def kadriv_pasporta(key: str) -> int:
+    """Кадри справи за паспортом теки (плівка FS, `_offloaded`, старий `meta.json`); 0 — немає."""
+    home = align.case_home_for(key) if key else None
+    if home is None:
+        return 0
+    return int(_znamennyk_z_pasporta({"total": 0}, home).get("total") or 0)
+
+
 def znamennyk_spravy(key: str, shifra: str = "") -> dict[str, Any]:
     """Скільки кадрів має справа і ЗВІДКИ це число — те саме, що візьме пакування.
 
@@ -705,10 +713,13 @@ def znamennyk_spravy(key: str, shifra: str = "") -> dict[str, Any]:
     case_dir = align.case_dir_for(key)
     na_dysku = len(align.frames_sorted(case_dir)) if case_dir else 0
     total, source = na_dysku, ("кадри на диску" if na_dysku else "")
-    if not total:
-        home = align.case_home_for(key)
-        total = int(_znamennyk_z_pasporta({"total": 0}, home).get("total") or 0)
-        source = "паспорт теки" if total else ""
+    # 🔴 Паспорт і тоді, коли кадри на диску є: справа з кадрами в R2 лишає в
+    # теці один-три, а паспорт знає плівку (`frames_got` 1229). Доти такі
+    # справи з прочитаними трьома сторінками стояли «готовими» (28.10.2026,
+    # 61 справа ДАХмО ф.315 — хмарний прогін обірвався на перших кадрах).
+    z_pasporta = kadriv_pasporta(key)
+    if z_pasporta > total:
+        total, source = z_pasporta, "паспорт теки"
     if not total:
         total = align.library_frames(key)
         source = "бібліотека" if total else ""
@@ -798,10 +809,9 @@ def build_manifest(scope: str, *,
         raise PublishError(
             f"у теках прогонів немає жодної сторінки тексту: {', '.join(d.name for d in run_dirs)}")
 
-    counted = bundle.tally(
-        {d.name: {p.name: p.read_text(encoding="utf-8", errors="replace")
-                  for p in sorted(d.glob(bundle.PACKED_TEXT))} for d in run_dirs},
-        {v.run: v.model for v in voices})
+    teksty = {d.name: {p.name: p.read_text(encoding="utf-8", errors="replace")
+                       for p in sorted(d.glob(bundle.PACKED_TEXT))} for d in run_dirs}
+    counted = bundle.tally(teksty, {v.run: v.model for v in voices})
     decode = {
         "pages": counted["pages"],
         "lines": counted["lines"],
@@ -876,15 +886,30 @@ def build_manifest(scope: str, *,
         from nyshporka.cases.register import read_sidecar
 
         side = read_sidecar(home) if home else {}
-        nazva = (opys.catalog_title(row)
-                 or opys.passport_title(side, str(case.get("doc_type") or "")))
+        z_kataloga = opys.catalog_title(row) or opys.fs_stub_title(str(side.get("title") or ""))
+        nazva = z_kataloga or opys.passport_title(side, str(case.get("doc_type") or ""))
         if nazva:
             case["title"] = nazva
-            case["title_src"] = "catalog" if opys.catalog_title(row) else "pasport"
+            case["title_src"] = "catalog" if z_kataloga else "pasport"
     if row and not case.get("years"):
         ry = opys.trusted_registry_years(row)
         if ry:
             case["years"] = ry
+    # Роки паспорта справи з FamilySearch — лише з підтвердженням самим текстом
+    # (головний голос — перший прогін справи). Картка людини нижче — поверх.
+    roky_perevirka: dict[str, Any] = {}
+    if case.get("years") and home is not None and not seg_mode:
+        from nyshporka.cases.register import read_sidecar
+
+        side_r = read_sidecar(home)
+        if opys.roky_z_fs(side_r):
+            tekst = opys.roky_tekstu(teksty.get(run_dirs[0].name, {}))
+            fs = [int(y) for y in case["years"]]
+            roky_perevirka = {"fs": fs, "text_mode": (tekst.most_common(1)[0][0]
+                                                     if tekst else None)}
+            if not opys.fs_roky_pidtverdzheno(fs, tekst):
+                case.pop("years", None)
+                roky_perevirka["dropped"] = True
     # 🔴 Картка людини — ОСТАННЬОЮ, поверх усього зібраного: паспорт і
     # реєстр — здогад пакувальника, а задане руками — рішення.
     kartka = {**K.get(key), **(card_fields or {})}
@@ -926,6 +951,8 @@ def build_manifest(scope: str, *,
         frames_total=int(frames_block.get("total") or 0),
         geometry_pages=_geometry_pages(run_dirs),
         text_pages=counted["pages"])
+    if roky_perevirka:
+        described = {**(described or {}), "years_check": roky_perevirka}
     if described:
         case["details"] = described
     # «Де кадри» з картки — першим: це власник САМЕ ЦІЄЇ зйомки, і воно

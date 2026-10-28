@@ -336,6 +336,13 @@ def _nepodileni_now() -> list[dict[str, Any]]:
         pages = naibilshe.get(key, int(row.get("pages_done") or 0))
         frames = int(row.get("frames") or 0)
         nevidomo = ""
+        if frames and pages >= GOTOVA_CHASTKA * frames:
+            # 🔴 Кадри бібліотеки — це кадри теки, а справа з кадрами в R2
+            # тримає в теці один-три: «прочитано 3 з 3» — ще не готова, коли
+            # паспорт знає плівку на 1229 кадрів (28.10.2026, ДАХмО ф.315).
+            from nyshporka.share.publish import kadriv_pasporta
+
+            frames = max(frames, kadriv_pasporta(key))
         if not frames:
             # 🔴 Те саме число, що візьме пакування (`publish.znamennyk_spravy`),
             # а не лише бібліотека: справа з числом у паспорті чи в картці

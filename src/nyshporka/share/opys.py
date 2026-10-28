@@ -94,7 +94,8 @@ def _working(title: str) -> bool:
     low = title.casefold()
     # «[[File:ДАХмО 315-1-7195. 1823. Сповід» — обрізана вікірозмітка, не назва.
     return (bool(_WORKING_TITLE.match(title)) or any(m in low for m in _NOTE_MARKERS)
-            or bool(_FS_STUB.search(title)) or "[[" in title)
+            or bool(_FS_STUB.search(title)) or "[[" in title
+            or bool(_STUB_OBKHODU.search(title.strip())))
 
 
 def title(side_title: str, row: dict[str, Any] | None, library: str = "") -> str:
@@ -185,6 +186,12 @@ def registry_row(shifra: str) -> dict[str, Any] | None:
 STUB_REPEATS = 5
 #: Заглушка каталогу FamilySearch: «f. 315-1-3574 Church Records Delo».
 _FS_STUB = re.compile(r"church records|\bdelo\b", re.IGNORECASE)
+#: Заглушки, які пишуть інструменти, а не опис: англійський підпис обходу FS
+#: («Religious Records — taujna, Balta, Podolia»), загальник покажчика
+#: («Церковні документи»), ім'я теки колекції («0230-01-1943 Gnatowscy»).
+#: 28.10.2026 так стояли тисячі паспортів обходу ДАХмО.
+_STUB_OBKHODU = re.compile(r"^[A-Za-z][A-Za-z ]+\s—\s|^церковні документи$|^\d{4}-\d{2}-\d+\s",
+                           re.IGNORECASE)
 
 
 def _povtory(repo: str, fond: str, title: str) -> int:
@@ -246,6 +253,47 @@ def trusted_registry_years(row: dict[str, Any] | None) -> list[int]:
     return [min(ys), max(ys)] if ys else []
 
 
+#: Рік у тексті рушія — чотири цифри XVII–XX ст. окремим словом.
+_RIK_TEKSTU = re.compile(r"(?<!\d)(1[6-9]\d\d)(?!\d)")
+#: Найширший проміжок FS, який ще може бути роками однієї справи: «1795–1920» —
+#: межі серії каталогу, а не справа.
+FS_PROMIZHOK_MAX = 10
+#: Скільки років має знайтись у тексті, щоб він щось підтверджував.
+ROKIV_U_TEKSTI_MIN = 3
+
+
+def roky_tekstu(storinky: dict[str, str]) -> Counter[int]:
+    """Скільки разів кожен рік трапляється в тексті голосу."""
+    out: Counter[int] = Counter()
+    for t in storinky.values():
+        out.update(int(y) for y in _RIK_TEKSTU.findall(t))
+    return out
+
+
+def roky_z_fs(side: dict[str, Any]) -> bool:
+    """Роки паспорта — з каталогу FamilySearch: справа звідти, а джерела років не названо."""
+    if str(side.get("years_src") or "") not in ("", "fs"):
+        return False
+    return bool(side.get("dgs") or side.get("fetched_from") == "familysearch"
+                or str(side.get("years_src") or "") == "fs")
+
+
+def fs_roky_pidtverdzheno(roky: list[int], tekst: Counter[int]) -> bool:
+    """Роки FS — роки справи, коли найчастіший рік тексту лежить у їхніх межах.
+
+    🔴 Рік каталогу FS — нижня межа серії, а не роки справи: звірка на 42
+    справах ф.315 розійшлася в 28. Але рік, який повторюється в самому тексті
+    справи, — підтвердження: на обході ДАХмО 28.10.2026 так лишилось 2 390 із
+    ~3 200 років FS, а «1851» при найчастішому в тексті «1833» пішло геть.
+    """
+    if len(roky) != 2 or roky[1] - roky[0] > FS_PROMIZHOK_MAX:
+        return False
+    if sum(tekst.values()) < ROKIV_U_TEKSTI_MIN:
+        return False
+    naichastishyi = tekst.most_common(1)[0][0]
+    return roky[0] <= naichastishyi <= roky[1]
+
+
 def sidecar_years_from_fs(side: dict[str, Any]) -> bool:
     """Паспорт, чиї роки взято з індексу FamilySearch («FS-індекс (не звірено…)»)."""
     if str(side.get("years_src") or "") in _UNTRUSTED_YEARS_SRC:
@@ -265,8 +313,36 @@ FS_TYPES = {
     "Parish Registers": "Парафіяльні книги",
     "Clergy Records": "Клірові відомості",
     "Confession Lists": "Сповідні розписи",
+    "Court Records": "Судові записи",
+    "Legal Records": "Судові записи",
+    "Genealogies": "Родоводи",
+    "Census Records": "Переписи",
+    "Land Records": "Земельні записи",
+    "Military Records": "Військові записи",
+    "Individual Summary From Parish Registers": "Витяги з парафіяльних книг",
 }
 _FS_REGION_TAIL = re.compile(r",\s*(Podolia|Russian Empire)\b.*$", re.IGNORECASE)
+#: Підпис обходу FS: «вид — місце».
+_FS_PIDPYS = re.compile(r"^\s*([A-Za-z][A-Za-z ]+?)\s+—\s+(.+?)\s*$")
+
+
+def fs_stub_title(raw: str) -> str:
+    """«Religious Records — taujna, Balta, Podolia» → «Церковні записи · taujna, Balta
+    (каталог FamilySearch)»: той самий вид і місце каталогу, але не англійською.
+
+    Місце лишається латинкою, як у каталозі: перекласти його на село — справа
+    прив'язки карти Супряги (`app.heo`), яка знає довідник поселень.
+    """
+    m = _FS_PIDPYS.match(str(raw or ""))
+    if not m:
+        return ""
+    kind = FS_TYPES.get(m.group(1).strip(), "")
+    if not kind:
+        return ""
+    place = _FS_REGION_TAIL.sub("", m.group(2)).strip(" ,")
+    if place.casefold() in ("podolia", ""):
+        place = "Поділля"
+    return f"{kind} · {place} (каталог FamilySearch)"
 
 
 def catalog_title(row: dict[str, Any] | None) -> str:

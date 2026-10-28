@@ -499,3 +499,31 @@ def test_radianski_zhanry_ne_berut_chuzhe(title: str, code: str) -> None:
     got = _infer_record_types(title)
     assert "repression" not in got and "protocol" not in got
     assert (got[0] if len(got) == 1 else "") == code, got
+
+
+@pytest.mark.parametrize("raw", [
+    "Religious Records — Podolia",
+    "Court Records — rudnytske, Olgopol, Podolia",
+    "Genealogies — Дворянські організації, Поділля/Хмельницький",
+    "Церковні документи",
+    "0230-01-1943 Gnatowscy",
+])
+def test_zahlushka_obkhodu_ne_nazva(raw: str) -> None:
+    """Підписи, які пишуть інструменти обходу, — не назва справи (28.10.2026)."""
+    assert opys.clean_text(raw) == ""
+
+
+def test_spravzhni_nazvy_lyshaiutsia() -> None:
+    for raw in ("Księga Metryk Chrztów za Rok 1843",
+                "Метрична книга костелу (Lityń): народження",
+                "О дворянском происхождении рода Боровских"):
+        assert opys.clean_text(raw) == raw
+
+
+def test_nazva_z_pidpysu_obkhodu_fs() -> None:
+    assert (opys.fs_stub_title("Court Records — rudnytske, Olgopol, Podolia")
+            == "Судові записи · rudnytske, Olgopol (каталог FamilySearch)")
+    assert (opys.fs_stub_title("Religious Records — Podolia")
+            == "Церковні записи · Поділля (каталог FamilySearch)")
+    assert opys.fs_stub_title("Невідомий вид — щось") == ""
+    assert opys.fs_stub_title("Mystery Records — Balta, Podolia") == ""

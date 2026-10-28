@@ -166,6 +166,25 @@ def test_share_suggest_offers_the_bound_key(scope: Any, monkeypatch) -> None:
     assert got[0]["frames"] == 12, "справа з кадрами, а не «без кадрів»"
 
 
+def test_share_suggest_ready_only_against_the_passport_film(scope: Any, monkeypatch) -> None:
+    """Кадри в R2, у теці — три: «прочитано 3 з 3» не «готова», коли паспорт знає 1229."""
+    S, R = scope
+    from nyshporka.share import publish as PB
+    from nyshporka.share import suggest as SG
+
+    rows = [{"name": "проба-фонд-Р", "case_key": KEY, "case_dir": "D:/gone/x",
+             "pages_done": 3, "frames": 3}]
+    monkeypatch.setattr(S, "list_cases", lambda: [dict(r) for r in rows])
+    monkeypatch.setattr(SG, "vidmovleni", lambda: set())
+    monkeypatch.setattr(SG, "viddani", lambda: set())
+    monkeypatch.setattr(SG, "_u_puli", lambda k: None)
+    monkeypatch.setattr(SG, "_u_puli_poruch", lambda k, s: {})
+    monkeypatch.setattr(PB, "kadriv_pasporta", lambda k: 1229 if k == KEY else 0)
+
+    got = SG.nepodileni()
+    assert got[0]["frames"] == 1229 and got[0]["status"] == SG.NEPOVNA
+
+
 def test_meta_key_stale_only_by_opys_takes_the_library_key() -> None:
     """Літерний опис «5д» колись читався як «5»: тека — та сама справа."""
     from nyshporka import htr_store as S

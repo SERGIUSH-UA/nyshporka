@@ -445,6 +445,21 @@ def test_chastyna_kadriv_i_chyslo_v_pasporti(space: Path, monkeypatch: Any) -> N
     assert "pack_refusals" not in proba
 
 
+def test_znamennyk_spravy_bere_plivku_z_pasporta(space: Path, monkeypatch: Any) -> None:
+    """Перелік «Віддати» і пакування — одне число: плівка з паспорта, не три кадри теки."""
+    import json
+
+    from nyshporka.share import align
+
+    PUB = _chastyna_kadriv(space, monkeypatch, na_dysku=1)
+    teka = space / "kadry-chastyny"
+    (teka / "_source.json").write_text(json.dumps({"frames_got": 9}), encoding="utf-8")
+    monkeypatch.setattr(align, "case_home_for", lambda key, opys="": teka)
+
+    got = PUB.znamennyk_spravy("DAZHO/1/2149")
+    assert got["total"] == 9 and got["source"] == "паспорт теки"
+
+
 @pytest.mark.parametrize("nazvano, vidmova", [(310, False), (3, True)])
 def test_nazvane_chyslo_menshe_za_prochytane_tezh_ne_beretsia(
         space: Path, monkeypatch: Any, nazvano: int, vidmova: bool) -> None:
@@ -533,3 +548,33 @@ def test_prychyna_z_pakuvannia_zapamiatovuietsia(space: Path, monkeypatch: Any) 
     assert ok.ok, ok.error
     assert K.get("DAZHO/1/2149")["frames_unknown"] == "PDF без числа сторінок"
     assert O.call("share.pack", {"case": "DAZHO/1/2149", "geometry": False}).ok
+
+
+@pytest.mark.parametrize("rik_u_teksti, lyshaietsia", [(1851, True), (1833, False)])
+def test_roky_fs_lyshe_z_pidtverdzhenniam_tekstom(
+        space: Path, monkeypatch: Any, rik_u_teksti: int, lyshaietsia: bool) -> None:
+    """Рік каталогу FS — роки справи, лише коли його повторює сам текст (28.10.2026)."""
+    PUB = _chastyna_kadriv(space, monkeypatch, na_dysku=4)
+    (space / "kadry-chastyny" / "_source.json").write_text(json.dumps(
+        {"dgs": "118894554", "year_from": 1851, "year_to": 1851}), encoding="utf-8")
+    run = _root(space) / "spr-2149"
+    for i, f in enumerate(sorted(run.glob("*.txt"))):
+        f.write_text(f"Метрична книга {rik_u_teksti} року, запис {i}\n", encoding="utf-8")
+
+    proba = PUB.pack("DAZHO/1/2149", geometry=False, dry_run=True)
+
+    case = proba["manifest"]["case"]
+    assert (case.get("years") == [1851, 1851]) is lyshaietsia
+    assert case["details"]["years_check"]["text_mode"] == rik_u_teksti
+
+
+def test_roky_fs_pidtverdzhennia_pravyla() -> None:
+    from collections import Counter
+
+    assert opys.fs_roky_pidtverdzheno([1845, 1845], Counter({1845: 10, 1844: 3}))
+    assert not opys.fs_roky_pidtverdzheno([1851, 1851], Counter({1833: 4, 1851: 2}))
+    # «1800–1917» — межі серії каталогу, а не справа
+    assert not opys.fs_roky_pidtverdzheno([1800, 1917], Counter({1802: 85}))
+    # двох згадок замало, щоб текст щось підтверджував
+    assert not opys.fs_roky_pidtverdzheno([1857, 1857], Counter({1857: 2}))
+    assert opys.roky_z_fs({"dgs": "1"}) and not opys.roky_z_fs({"dgs": "1", "years_src": "опис"})
