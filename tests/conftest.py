@@ -162,6 +162,20 @@ def _isolate_from_the_machine(monkeypatch: pytest.MonkeyPatch,
     # міг писати в чуже дослідження. Тести, яким потрібна своя домівка,
     # підмінюють `Path.home` самі; ця підміна лише прибирає машину.
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: _fake_home))
+    # 🔴 Карта Супряги (`nyshporka.karta`) — лише з каталогу, який тест назвав
+    # сам (`NYSHPORKA_CATALOG`). Без цього кожне пакування в наборі збирало б
+    # довідник зі справжнього каталогу машини: 7 с на процес і відповідь, що
+    # залежить від того, що в людини встановлено (28.10.2026).
+    from nyshporka import karta
+
+    spravzhnii = karta.dovidnyk
+
+    def _lyshe_svii_kataloh(*a: object, **kw: object) -> object:
+        import os
+
+        return spravzhnii(*a, **kw) if os.environ.get("NYSHPORKA_CATALOG") else None
+
+    monkeypatch.setattr(karta, "dovidnyk", _lyshe_svii_kataloh)
 
 
 @pytest.fixture(autouse=True)

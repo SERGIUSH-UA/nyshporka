@@ -953,6 +953,20 @@ def build_manifest(scope: str, *,
         text_pages=counted["pages"])
     if roky_perevirka:
         described = {**(described or {}), "years_check": roky_perevirka}
+    # Куди ляже книга на карті Супряги — тим самим рушієм, що й у пулі
+    # (`nyshporka.karta`): людина бачить це до заливки, а не ніколи.
+    karta_info: dict[str, Any] = {}
+    if not seg_mode:
+        try:
+            from nyshporka import karta
+
+            karta_info = karta.dlia_spravy(
+                str(case.get("repo") or ""), str(case.get("title") or ""),
+                str(case.get("place") or ""), [str(x) for x in case.get("places") or []])
+        except Exception:   # карта — підказка, а не умова пакування
+            karta_info = {}
+    if karta_info:
+        described = {**(described or {}), "karta": karta_info}
     if described:
         case["details"] = described
     # «Де кадри» з картки — першим: це власник САМЕ ЦІЄЇ зйомки, і воно
@@ -1083,6 +1097,7 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
         # Чи названо той опис: пул — завжди (офлайн), покажчик — лише в пробі,
         # бо це запит у мережу. Лише підказки, заливку вони не зупиняють.
         "opys_check": opys_check.check(m.case, network=dry_run),
+        "karta": dict((m.case.get("details") or {}).get("karta") or {}),
     }
     # 🔴 Пакет без числа кадрів справи не збирається мовчки. Ворота його
     # пускають із попередженням (і пускатимуть: ними судить і пул, а старі

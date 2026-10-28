@@ -578,3 +578,39 @@ def test_roky_fs_pidtverdzhennia_pravyla() -> None:
     # двох згадок замало, щоб текст щось підтверджував
     assert not opys.fs_roky_pidtverdzheno([1857, 1857], Counter({1857: 2}))
     assert opys.roky_z_fs({"dgs": "1"}) and not opys.roky_z_fs({"dgs": "1", "years_src": "опис"})
+
+
+def test_karta_bez_kataloga_ne_zupyniaie_pakuvannia(space: Path, monkeypatch: Any) -> None:
+    """Паку поселень немає — пакування йде, а людина бачить, що карту не перевірено."""
+    from nyshporka import karta
+    from nyshporka import ops as O
+
+    _bez_kadriv(space, monkeypatch)
+    monkeypatch.setattr(karta, "dovidnyk", lambda *a, **kw: None)
+    env = O.call("share.pack", {"case": "DAZHO/1/2149", "dry_run": True,
+                                "frames_unknown": "тест"})
+    assert env.ok
+    assert "karta_bez_kataloga" in [w.as_dict()["code"] for w in env.warnings]
+
+
+@pytest.mark.parametrize("info, kod, slovo", [
+    ({"tochky": [{"qid": "Q1", "nazva": "Таужне", "oblast": "Кіровоградська область",
+                  "sposib": "latynka", "pevnist": "vysoka", "dzherelo": "x"}], "chomu": []},
+     "karta", "Таужне"),
+    ({"tochky": [], "chomu": [{"dzherelo": "с. Капітанка", "chomu": "dvoznachno",
+                               "kandydaty": ["Капітанка (Голованівський район)",
+                                             "Капітанка (Врадіївська громада)"]}]},
+     "karta_bez_tochky", "Голованівський"),
+])
+def test_karta_u_probi_pakuvannia(space: Path, monkeypatch: Any, info: dict[str, Any],
+                                  kod: str, slovo: str) -> None:
+    from nyshporka import karta
+    from nyshporka import ops as O
+
+    _bez_kadriv(space, monkeypatch)
+    monkeypatch.setattr(karta, "dlia_spravy", lambda *a, **kw: info)
+    env = O.call("share.pack", {"case": "DAZHO/1/2149", "dry_run": True,
+                                "frames_unknown": "тест"})
+    w = {x.as_dict()["code"]: x.as_dict()["text"] for x in env.warnings}
+    assert kod in w and slovo in w[kod]
+    assert env.data["manifest"]["case"]["details"]["karta"] == info

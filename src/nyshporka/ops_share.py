@@ -262,6 +262,18 @@ def share_pack(a: SharePackArgs) -> Envelope:
         env.warn(str(w.get("code") or "gate"), str(w.get("text") or ""))
     for w in got.get("opys_check") or []:
         env.warn(str(w.get("code") or "opys"), str(w.get("text") or ""))
+    karta_info = got.get("karta") or {}
+    if karta_info:
+        from nyshporka import karta
+
+        # Точка є — це довідка для проби; точки немає — те, що людина має
+        # виправити до заливки, тож і в справжньому пакуванні.
+        if karta_info.get("tochky"):
+            if a.dry_run:
+                env.warn("karta", karta.poiasnennia(karta_info))
+        else:
+            env.warn("karta_bez_kataloga" if karta_info.get("bez_kataloga")
+                     else "karta_bez_tochky", karta.poiasnennia(karta_info))
     # 🔴 `--dry-run` не пише файл і тому не падає на воротах — але відмова
     # мусить бути видна: доти `pack --dry-run --json` віддавав `ok` без
     # жодного сліду, що справжнє пакування не пройде.
