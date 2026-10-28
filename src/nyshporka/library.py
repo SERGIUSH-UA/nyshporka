@@ -1076,10 +1076,20 @@ def _scan_disk_cases(limit: int | None = None) -> list[tuple[str, int, int]]:
     (по рівнях, сортування об'єктами `Path`), бо від нього залежить, які теки
     потраплять під стелю `limit`, — паритет закріплено `tests/test_walk_parity.py`.
     """
-    from nyshporka.cases.walk import scan_dir, walk_root
+    from nyshporka.cases.walk import case_depth, record_cut, scan_dir, walk_root
 
     out: list[tuple[str, int, int]] = []
     seen: set[Path] = set()
+    depth = case_depth()
+    cut: list[str] = []
+
+    def on_cut(_: int, below: list[Path]) -> None:
+        for d in below:
+            try:
+                cut.append(str(d.relative_to(case_base())).replace("\\", "/"))
+            except ValueError:
+                cut.append(str(d).replace("\\", "/"))
+
     raw_key = os.path.normcase(str(raw_dir()))
     for base in _scan_roots():
         # 🔴 Оголошений корінь може бути сам текою справи: людина показує на
@@ -1101,7 +1111,8 @@ def _scan_disk_cases(limit: int | None = None) -> list[tuple[str, int, int]]:
             if imgs or pdfs or (root_scan.n_files and _frames_removed(base, root_scan.dirs)):
                 seen.add(base)
                 out.append((str(base).replace("\\", "/"), imgs, pdfs))
-        for scan in walk_root(base, max_depth=4, skip_slugs=skip_slugs()):
+        for scan in walk_root(base, max_depth=depth, skip_slugs=skip_slugs(),
+                              on_truncate=on_cut):
             d = scan.path
             if d in seen or d.name.startswith("_"):
                 continue
@@ -1120,6 +1131,9 @@ def _scan_disk_cases(limit: int | None = None) -> list[tuple[str, int, int]]:
                 out.append((path.replace("\\", "/"), imgs, pdfs))
             if limit is not None and len(out) >= limit:
                 return out
+    # Лише повний обхід: обірваний стелею `limit` бачив не все дерево.
+    if limit is None:
+        record_cut(depth, cut)
     return out
 
 

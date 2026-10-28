@@ -359,6 +359,11 @@ async def _run_build(bus: JobBus, job: JobRecord, rescan: bool) -> None:
 
         warnings.append({"code": "cloud_pdf",
                          "text": pdfcount.describe(res["cloud"]["skipped"])})
+    if res.get("depth_cut", {}).get("cut"):
+        from nyshporka.cases.walk import describe_cut
+
+        warnings.append({"code": "depth_cut", "text": describe_cut(
+            res["depth_cut"]["depth"], res["depth_cut"]["cut"])})
     await bus.update(job.id, state=JobState.DONE, result=res, warnings=warnings,
                      progress=Progress(i=n, n=n, done=n, basis="справа"))
 

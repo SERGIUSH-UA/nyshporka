@@ -892,7 +892,13 @@ def _rebuild_now(*, rescan: bool = True, fetch_cloud: bool = False) -> dict[str,
             entries = len(rows)
         res = build_index()
     _note_history()
+    from nyshporka.cases.walk import cut_report
+
+    # Що обрізала стеля глибини обходу (`cases.walk`) — лише щойно обійдене.
+    cut = (cut_report() or {}) if rescan else {}
     return {"entries": entries, "rescanned": rescan, **res,
+            "depth_cut": {"depth": int(cut.get("depth") or 0),
+                          "cut": list(cut.get("cut") or [])},
             "cloud": {"files": len(sess.skipped), "bytes": sess.nbytes,
                       "skipped": dict(sess.skipped)}}
 

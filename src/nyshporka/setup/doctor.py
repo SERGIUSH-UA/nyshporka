@@ -837,6 +837,30 @@ def _cloud_pdfs() -> Check:
                  "`nysh cases build --fetch-cloud`")
 
 
+def _case_depth() -> Check:
+    """Чи не лишились справи під стелею глибини обходу тек.
+
+    🔴 Пропущена справа нічим не відрізняється від справи, якої немає: її не
+    ловить ні звірка кількостей, ні реєстр (відгук №6 з порталу, 28.10.2026).
+    Читається перелік, записаний перебудовою: обходу диска тут немає.
+    """
+    from nyshporka.cases.walk import cut_report, describe_cut
+    from nyshporka.core.workspace import WorkspaceError, workspace
+
+    name = "Глибина обходу тек"
+    try:
+        workspace()
+    except WorkspaceError:
+        return Check(name, "ok", "простір не визначено")
+    got = cut_report()
+    if got is None:
+        return Check(name, "ok", "реєстр ще не перебудовувався з цією перевіркою")
+    depth, cut = int(got.get("depth") or 0), list(got.get("cut") or [])
+    if not cut:
+        return Check(name, "ok", f"глибина {depth}, нічого не обрізано (перебудова {got['at']})")
+    return Check(name, "warn", describe_cut(depth, cut), "після правки маркера — `nysh cases build`")
+
+
 def _chain() -> Check:
     """Чи не лежать завантажені теки без реєстрації.
 
@@ -914,7 +938,7 @@ def _queue() -> Check:
 
 
 CHECKS = (_version, _skills, _skill_listing, _python, _workspace, _cloud_sync, _disk, _profile,
-          _library, _cloud_pdfs, _chain, _queue, _decode_visible, _history, _case_keys, _torch,
+          _library, _cloud_pdfs, _case_depth, _chain, _queue, _decode_visible, _history, _case_keys, _torch,
           _engines, _models, _rent)
 
 #: Перевірки, які мають сенс лише при ввімкненій секції. 🔴 Не косметика:

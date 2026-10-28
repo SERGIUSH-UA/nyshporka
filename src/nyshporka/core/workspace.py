@@ -154,6 +154,9 @@ class Workspace:
     #: Майстерня без власного проєкту (`[workspace] hub_only = true`). Тоді в
     #: корені хаба проєктного шару немає зовсім, і звертання до нього — помилка.
     hub_only: bool = False
+    #: Глибина обходу тек справ (`[workspace] case_depth`, типово 4) — див.
+    #: `cases.walk.case_depth`.
+    case_depth: int = 4
     #: Чужий проєкт, відкритий з іншого (`--project`) — лише для читання.
     readonly: bool = False
 
@@ -462,7 +465,8 @@ def _build_hub(root: Path, origin: str) -> Workspace:
                      marker_stamp=_stamp_of(root / MARKER),
                      text_store_dir=(root / str(cfg["text_store"])
                                      if cfg.get("text_store") else None),
-                     hub_only=bool(cfg.get("hub_only")))
+                     hub_only=bool(cfg.get("hub_only")),
+                     case_depth=_case_depth(cfg))
 
 
 def _stamp_of(marker: Path) -> tuple[int, int] | None:
@@ -471,6 +475,20 @@ def _stamp_of(marker: Path) -> tuple[int, int] | None:
     except OSError:
         return None
     return (st.st_mtime_ns, st.st_size)
+
+
+def _case_depth(cfg: dict[str, Any]) -> int:
+    """Глибина обходу тек справ із маркера; немає чи негодяща — типова 4.
+
+    🔴 Налаштуванням, а не літералом, з тієї ж причини, що й `skip_slugs`:
+    розкладка на диску належить дослідникові. Тека-група над архівом (партія
+    завантаження, рік, замовлення) додає рівень, і при зашитій стелі вся гілка
+    під нею зникала з бібліотеки мовчки (відгук №6 з порталу, 28.10.2026).
+    """
+    try:
+        return max(1, int(cfg.get("case_depth") or 4))
+    except (TypeError, ValueError):
+        return 4
 
 
 def _keys_version(cfg: dict[str, Any]) -> int:

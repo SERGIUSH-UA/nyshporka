@@ -36,10 +36,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
-from collections.abc import Iterable, Iterator
+import time
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 #: Кадри, які читає рушій, — ЄДИНИЙ знаменник повноти прогону для реєстру,
 #: сховища сторінок і раннера. Раннер пакета не імпортує, тож тримає дзеркало
@@ -211,14 +214,38 @@ def scan_dir(path: Path, base: Path, rel_parts: tuple[str, ...],
     )
 
 
-def walk_root(base: Path, *, max_depth: int = 4,
-              skip_slugs: frozenset[str] = frozenset()) -> Iterator[DirScan]:
+#: Типова глибина обходу тек справ: `<архів>/<фонд>/<опис>/<справа>`.
+CASE_DEPTH = 4
+
+
+def case_depth() -> int:
+    """Глибина обходу тек справ: `[workspace] case_depth` простору, інакше 4."""
+    try:
+        from nyshporka.core.workspace import workspace
+
+        return max(1, int(workspace().case_depth))
+    except Exception:
+        return CASE_DEPTH
+
+
+def walk_root(base: Path, *, max_depth: int | None = None,
+              skip_slugs: frozenset[str] = frozenset(),
+              on_truncate: Callable[[int, list[Path]], None] | None = None,
+              ) -> Iterator[DirScan]:
     """Теки під `base` глибиною 1..`max_depth`, у порядку `glob`-перерахунку.
 
     Тобто: спершу вся глибина 1 (відсортована), потім уся глибина 2, і так далі.
     Саме цей порядок мали чотири окремі `glob`-и, і від нього залежить, які теки
     потраплять під стелю `limit` у споживача.
+
+    `max_depth=None` — глибина простору (`case_depth`). `on_truncate(глибина,
+    теки)` кличеться, коли стеля обрізала гілку: тека останнього рівня без
+    кадрів і PDF, але з підтеками, — це тека-група, під якою лежать справи.
+    🔴 Без цього пропущена справа нічим не відрізнялась від справи, якої
+    немає (відгук №6 з порталу, 28.10.2026: 107 справ під текою партії).
     """
+    if max_depth is None:
+        max_depth = case_depth()
     if not base.is_dir():
         return
     level: list[tuple[Path, tuple[str, ...]]] = [(base, ())]
@@ -247,14 +274,86 @@ def walk_root(base: Path, *, max_depth: int = 4,
             return
         # сортування об'єктами Path: на Windows це нижній регістр, як у `sorted(glob)`
         children.sort(key=lambda pr: pr[0])
+        cut: list[Path] = []
         for path, rel in children:
-            yield scan_dir(path, base, rel, depth)
+            scan = scan_dir(path, base, rel, depth)
+            # Теки з `_` і `.` — службові теки справи (кропи, частини джерела,
+            # кеш), не справи й не групи: споживачі їх справами не беруть.
+            if (depth == max_depth and path.name[:1] not in "_."
+                    and not (scan.n_img or scan.n_pdf)
+                    and any(_has_material(path / d) for d in scan.dirs if d[:1] not in "_.")):
+                cut.append(path)
+            yield scan
+        if cut and on_truncate is not None:
+            on_truncate(max_depth, cut)
         level = children
 
 
-def walk_case_roots(roots: list[Path], *, max_depth: int = 4,
+def _has_material(path: Path, levels: int = 3) -> bool:
+    """Чи є кадри чи PDF у теці або на `levels` рівнів нижче — з першого ж.
+
+    Підтеки без матеріалу (чекпоінти моделей, порожні заготовки) стелею не
+    обрізані: справ там немає, і попередження було б шумом.
+    """
+    try:
+        with os.scandir(path) as it:
+            subdirs: list[Path] = []
+            for e in it:
+                try:
+                    if e.is_dir():
+                        if e.name[:1] not in "_.":
+                            subdirs.append(Path(e.path))
+                        continue
+                except OSError:
+                    continue
+                ext = os.path.splitext(e.name)[1].lower()
+                if ext in IMG_EXT or ext == ".pdf":
+                    return True
+    except OSError:
+        return False
+    return levels > 0 and any(_has_material(d, levels - 1) for d in subdirs)
+
+
+def walk_case_roots(roots: list[Path], *, max_depth: int | None = None,
                     skip_slugs: frozenset[str] = frozenset()
                     ) -> Iterator[DirScan]:
     """Те саме для кількох коренів, по черзі — як робив `_scan_disk_cases`."""
     for base in roots:
         yield from walk_root(base, max_depth=max_depth, skip_slugs=skip_slugs)
+
+
+#: Файл у похідних простору: які гілки обрізала стеля в останній перебудові.
+CUT_FILE = "case_walk_cut.json"
+
+
+def record_cut(depth: int, cut: list[str]) -> None:
+    """Записати обрізане повною перебудовою — `nysh doctor` читає без обходу."""
+    try:
+        from nyshporka.core.workspace import workspace
+
+        path = workspace().derived / CUT_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"at": time.strftime("%Y-%m-%d %H:%M"), "depth": depth,
+                                    "cut": cut}, ensure_ascii=False, indent=1),
+                        encoding="utf-8")
+    except Exception:
+        pass
+
+
+def cut_report() -> dict[str, Any] | None:
+    """Що обрізала остання перебудова; None — перебудови з цим записом не було."""
+    try:
+        from nyshporka.core.workspace import workspace
+
+        data = json.loads((workspace().derived / CUT_FILE).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def describe_cut(depth: int, cut: list[str]) -> str:
+    """Попередження для людини: де стеля, приклад і як її підняти."""
+    show = ", ".join(cut[:3]) + (f" і ще {len(cut) - 3}" if len(cut) > 3 else "")
+    return (f"обхід тек справ зупинився на глибині {depth}, а глибше лежать теки "
+            f"(під {len(cut)}: {show}) — справ там бібліотека не бачить. Підняти "
+            f"стелю: `case_depth = {depth + 2}` у [workspace] файла nyshporka.toml")

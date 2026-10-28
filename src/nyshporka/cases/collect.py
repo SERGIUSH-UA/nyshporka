@@ -226,7 +226,7 @@ def _raw_scans() -> list[Any]:
 
     if not raw_dir().is_dir():
         return []
-    return list(walk_root(raw_dir(), max_depth=4, skip_slugs=skip_slugs()))
+    return list(walk_root(raw_dir(), skip_slugs=skip_slugs()))
 
 
 #: код архіву кирилицею → латинський код репозиторію (як у `fonds.registry`).

@@ -2275,6 +2275,11 @@ def cases_build(
         console.print(f"[warn]{line}[/warn]")
     if res["cloud"]["skipped"]:
         console.print(f"[warn]⚠ {pdfcount.describe(res['cloud']['skipped'])}[/warn]")
+    if res.get("depth_cut", {}).get("cut"):
+        from nyshporka.cases.walk import describe_cut
+
+        console.print(f"[warn]⚠ {describe_cut(res['depth_cut']['depth'], res['depth_cut']['cut'])}"
+                      f"[/warn]")
     console.print(f"✅ реєстр: [bold]{res['cases']}[/bold] справ · "
                   f"нерозв'язаних прогонів: {res.get('orphans', 0)} · {res['path']}")
 
