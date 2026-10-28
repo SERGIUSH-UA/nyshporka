@@ -100,13 +100,30 @@ def _card(a: Any) -> dict[str, Any]:
     from nyshporka.share import card as K
 
     places = getattr(a, "place", None)
+    selo_tekst = getattr(a, "selo", None)
+    selo: dict[str, Any] | str | None = None
+    if selo_tekst is not None:
+        selo = ""
+        if str(selo_tekst).strip():
+            from nyshporka import karta
+
+            try:
+                from nyshporka.pagestore import resolve_case
+
+                repo = str(resolve_case(str(getattr(a, "case", "") or "")).repo or "")
+            except Exception:
+                repo = ""
+            try:
+                selo = karta.znaity_selo(str(selo_tekst), repo=repo)
+            except karta.KartaError as exc:
+                raise K.CardError(str(exc)) from exc
     return K.normalize(
         title=getattr(a, "title", None), years=getattr(a, "years", None),
         places=list(places) if places else None,
         doc_type=getattr(a, "genre", None),
         frames=getattr(a, "frames", None),
         frames_unknown=getattr(a, "frames_unknown", None),
-        scans=getattr(a, "scans", None))
+        scans=getattr(a, "scans", None), selo=selo)
 
 
 def _contact(value: str, default: str) -> str:
@@ -136,6 +153,10 @@ class _CardFields(BaseModel):
         default=None,
         description="хто тримає кадри, з яких читано: «підпис=адреса» "
                     "(приватна колекція, сайт дослідника); «» — стерти")
+    selo: str | None = Field(
+        default=None,
+        description="село справи на карті Супряги, коли машина не розбирає його сама: "
+                    "«Назва[, район]» сучасною назвою; «» — стерти")
 
 
 class SharePackArgs(_CardFields):

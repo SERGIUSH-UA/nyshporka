@@ -36,7 +36,8 @@ CARDS_NAME = "cards.json"
 #: `frames_unknown` — чому його немає (`extra.frames_unknown`), `scans` — хто
 #: тримає кадри цієї зйомки (першим у `links`, з `role: scans`); решта лягає в
 #: `case` маніфесту.
-FIELDS = ("title", "years", "places", "doc_type", "frames", "frames_unknown", "scans")
+FIELDS = ("title", "years", "places", "doc_type", "frames", "frames_unknown", "scans",
+          "selo")
 
 #: Позначка посилання «де кадри» серед `links` маніфесту — за нею пул показує
 #: його окремо від реєстрових «справа є ще там».
@@ -170,8 +171,12 @@ def normalize(*, title: str | None = None, years: str | None = None,
               doc_type: str | None = None,
               frames: int | None = None,
               frames_unknown: str | None = None,
-              scans: str | None = None) -> dict[str, Any]:
-    """Перевірити поля картки. `None` — поле не задавали; `""`/`[]` — стерти."""
+              scans: str | None = None,
+              selo: dict[str, Any] | str | None = None) -> dict[str, Any]:
+    """Перевірити поля картки. `None` — поле не задавали; `""`/`[]` — стерти.
+
+    `selo` — уже знайдене поселення (`karta.znaity_selo`): `{"qid", "nazva"}`.
+    """
     out: dict[str, Any] = {}
     if title is not None:
         t = " ".join(str(title).split())
@@ -214,6 +219,14 @@ def normalize(*, title: str | None = None, years: str | None = None,
         out["frames_unknown"] = why
     if scans is not None:
         out["scans"] = parse_scans(scans) if str(scans).strip() else ""
+    if selo is not None:
+        if isinstance(selo, dict) and re.fullmatch(r"(Q\d+|r:[a-z0-9-]+)", str(selo.get("qid"))):
+            out["selo"] = {"qid": str(selo["qid"]), "nazva": str(selo.get("nazva") or "")[:MAX_PLACE],
+                           "oblast": str(selo.get("oblast") or "")[:MAX_PLACE]}
+        elif not selo:
+            out["selo"] = ""
+        else:
+            raise CardError("село картки — поселення довідника з qid (`--selo «Назва, район»`)")
     return out
 
 
@@ -275,4 +288,10 @@ def apply(case: dict[str, Any], card: dict[str, Any]) -> dict[str, Any]:
     if card.get("doc_type"):
         out["doc_type"] = card["doc_type"]
         out["record_types"] = [card["doc_type"]]
+    # Село, назване людиною, — покриття справи на карті Супряги (`case.karta`):
+    # сильніше за будь-який розбір назви, бо розбирає його не машина.
+    selo = card.get("selo")
+    if isinstance(selo, dict) and selo.get("qid"):
+        out["karta"] = {"qid": str(selo["qid"]), "nazva": str(selo.get("nazva") or ""),
+                        "dzherelo": "людина"}
     return out

@@ -1099,10 +1099,15 @@ def _lat_z_pamiati(dov: Dovidnyk, selo: str, kp: tuple[str, tuple[str, ...]],
 
 def pryviazaty(dov: Dovidnyk, *, repo: str, title: str, place: str,
                places: list[str], seriia: list[dict[str, Any]] | None = None,
-               chomu: list[dict[str, Any]] | None = None) -> list[Tochka]:
+               chomu: list[dict[str, Any]] | None = None,
+               selo_lyudyny: str = "") -> list[Tochka]:
     """Точки однієї книги. Не знайдене чи двозначне — просто без точки.
 
     `seriia` — точки (lat, lng) інших книг того самого опису.
+
+    `selo_lyudyny` — `qid` поселення, яке назвала людина (`nysh share card
+    --selo`): воно й є покриттям справи (`tytul`, спосіб `lyudyna`), а розбір
+    назви лишає лише згадки з тексту. Невідомий довіднику `qid` — звичайний розбір.
 
     `chomu` — куди дописати, чому точки з назви чи місця немає (для людини перед
     заливкою): `{"dzherelo", "chomu", "kandydaty"}`, де `chomu` — `nema` (такого
@@ -1110,6 +1115,12 @@ def pryviazaty(dov: Dovidnyk, *, repo: str, title: str, place: str,
     які), `poza_povitom` / `poza_oblastiu`, або `bez_sela` — у назві й місці села
     не названо зовсім (лише губернія чи повіт).
     """
+    lyudyna = poselennia(dov, selo_lyudyny) if selo_lyudyny else None
+    if lyudyna is not None:
+        zvychaini = pryviazaty(dov, repo=repo, title=title, place=place, places=places,
+                               seriia=seriia)
+        return [_tochka(lyudyna, "tytul", "lyudyna", "людина"),
+                *[t for t in zvychaini if t.rol == "tekst" and t.qid != lyudyna["qid"]]]
     kt = _kontekst(dov, repo, title, place, places)
     kt.seriia = list(seriia or [])
     tyt = z_nazvy(title)
@@ -1233,7 +1244,8 @@ def _z_raionom(d: dict[str, Any]) -> str:
     return f"{d.get('name_uk') or '?'} ({adm})" if adm else str(d.get("name_uk") or "?")
 
 
-def dlia_spravy(repo: str, title: str, place: str, places: list[str]) -> dict[str, Any]:
+def dlia_spravy(repo: str, title: str, place: str, places: list[str],
+                selo_lyudyny: str = "") -> dict[str, Any]:
     """Куди ляже книга на карті Супряги — для людини до заливки.
 
     `{"tochky": [...], "chomu": [...]}` або `{"bez_kataloga": True}`, коли паку
@@ -1245,7 +1257,8 @@ def dlia_spravy(repo: str, title: str, place: str, places: list[str]) -> dict[st
         return {"bez_kataloga": True}
     chomu: list[dict[str, Any]] = []
     tochky = [t for t in pryviazaty(dov, repo=repo, title=title, place=place,
-                                    places=list(places), chomu=chomu) if t.rol == "tytul"]
+                                    places=list(places), chomu=chomu,
+                                    selo_lyudyny=selo_lyudyny) if t.rol == "tytul"]
     return {"tochky": [{"qid": t.qid, "nazva": t.nazva, "oblast": t.oblast,
                         "sposib": t.sposib, "pevnist": t.pevnist,
                         "dzherelo": t.dzherelo} for t in tochky],
@@ -1261,7 +1274,8 @@ def poiasnennia(info: dict[str, Any]) -> str:
     if tochky:
         return "на карті: " + "; ".join(
             f"{t['nazva']} ({t['oblast']}"
-            + (", непевно" if t.get("pevnist") == "nyzka" else "") + ")" for t in tochky)
+            + (", непевно" if t.get("pevnist") == "nyzka" else "")
+            + (", назвали ви" if t.get("sposib") == "lyudyna" else "") + ")" for t in tochky)
     prychyny = []
     for c in info.get("chomu") or []:
         dzh = f"«{c['dzherelo']}» " if c.get("dzherelo") else ""
@@ -1276,4 +1290,72 @@ def poiasnennia(info: dict[str, Any]) -> str:
         else:
             prychyny.append(f"{dzh}— такого поселення в довіднику немає (написання?)")
     return ("на карту не ляже: " + "; ".join(dict.fromkeys(prychyny))
-            + ". Місце — `nysh share card <справа> --place \"с. Назва, Повіт пов.\"`")
+            + ". Назвіть село: `nysh share card <справа> --selo \"Назва, район\"`")
+
+
+def _tochka(d: dict[str, Any], rol: str, sposib: str, dzherelo: str) -> Tochka:
+    return Tochka(qid=d["qid"], nazva=(d["name_uk"] or "")[:160],
+                  oblast=oblast_tochky(float(d["lat"]), float(d["lng"]), d["top"] or "")[:80],
+                  lat=float(d["lat"]), lng=float(d["lng"]), rol=rol, sposib=sposib,
+                  dzherelo=dzherelo[:160])
+
+
+def poselennia(dov: Dovidnyk, qid: str) -> dict[str, Any] | None:
+    """Поселення довідника за `qid` (Wikidata чи `r:` ручного довідника)."""
+    za_qid = getattr(dov, "_za_qid", None)
+    if za_qid is None:
+        za_qid = {d["qid"]: d for d in dov.vsi}
+        dov._za_qid = za_qid  # type: ignore[attr-defined]
+    got: dict[str, Any] | None = za_qid.get(str(qid or "").strip())
+    return got
+
+
+class KartaError(ValueError):
+    """Село не знайдено або назване неоднозначно — з переліком, що є."""
+
+
+#: «Голованівський р-н», «Кіровоградська обл.», «громада» — підказка, де шукати.
+_PIDKAZKA_SLUZHBOVI = re.compile(r"\b(р-н|район|районі|обл\.?|область|області|громада|"
+                                 r"сільська|селищна|міська|рада)\b", re.IGNORECASE)
+
+
+def znaity_selo(tekst: str, *, repo: str = "") -> dict[str, Any]:
+    """«Капітанка, Голованівський р-н» → одне поселення довідника.
+
+    Перше — назва (кирилицею, у називному відмінку); далі — підказка: район,
+    громада, область (досить кореня: «Голованівськ»). Без підказки — серед
+    областей архіву справи. Двозначно чи нічого — `KartaError` з переліком
+    кандидатів і їхніх районів, щоб людина могла уточнити.
+    """
+    dov = dovidnyk()
+    if dov is None:
+        raise KartaError("паку поселень немає в каталозі — `nysh catalog update`")
+    chastyny = [c.strip() for c in str(tekst or "").split(",") if c.strip()]
+    if not chastyny:
+        raise KartaError("не названо села")
+    nazva = chastyny[0]
+    kand = list(_kandydaty(dov, nazva).values())
+    if not kand:
+        raise KartaError(f"«{nazva}» немає в довіднику поселень — перевірте написання "
+                         "(сучасна назва, називний відмінок)")
+    pidkazky = [_norm(_PIDKAZKA_SLUZHBOVI.sub(" ", c)).translate(STARE)[:6]
+                for c in chastyny[1:]]
+    pidkazky = [p for p in pidkazky if len(p) >= 3]
+    if pidkazky:
+        kand = [d for d in kand
+                if all(p in (d["adm"] + " " + d["obl"]).translate(STARE) for p in pidkazky)]
+    else:
+        obl = oblasti_arkhivu(repo) if repo else ()
+        v = [d for d in kand if any(o in d["obl"] for o in obl)]
+        kand = v or kand
+    if len(kand) > 1 and _odne(kand):
+        kand = kand[:1]
+    if len(kand) != 1:
+        if not kand:
+            raise KartaError(f"«{nazva}» з такою підказкою не знайдено")
+        perelik = "; ".join(sorted({_z_raionom(d) for d in kand})[:8])
+        raise KartaError(f"«{nazva}» — кілька однойменних: {perelik}. Додайте район: "
+                         f"«{nazva}, <район> р-н»")
+    d = kand[0]
+    return {"qid": d["qid"], "nazva": d["name_uk"],
+            "oblast": oblast_tochky(float(d["lat"]), float(d["lng"]), d["top"] or "")}

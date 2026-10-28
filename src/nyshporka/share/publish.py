@@ -962,7 +962,8 @@ def build_manifest(scope: str, *,
 
             karta_info = karta.dlia_spravy(
                 str(case.get("repo") or ""), str(case.get("title") or ""),
-                str(case.get("place") or ""), [str(x) for x in case.get("places") or []])
+                str(case.get("place") or ""), [str(x) for x in case.get("places") or []],
+                selo_lyudyny=str((case.get("karta") or {}).get("qid") or ""))
         except Exception:   # карта — підказка, а не умова пакування
             karta_info = {}
     if karta_info:

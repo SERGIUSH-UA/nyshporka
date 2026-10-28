@@ -74,6 +74,11 @@ def _show_card(card: dict[str, Any], indent: str = "  ") -> None:
     if isinstance(scans, dict) and scans.get("url"):
         label = f"{scans['label']} — " if scans.get("label") else ""
         console.print(f"{indent}кадри: {_e(label)}{_e(scans['url'])}")
+    selo = card.get("selo")
+    if isinstance(selo, dict) and selo.get("qid"):
+        oblast = f" ({selo['oblast']})" if selo.get("oblast") else ""
+        console.print(f"{indent}на карті: {_e(selo.get('nazva') or selo['qid'])}{_e(oblast)} "
+                      "— назвали ви")
 
 
 # Прапорці картки однакові в `pack`, `suggest` і `card` — одна довідка.
@@ -87,12 +92,14 @@ _FRAMES_UNKNOWN_HELP = ("чому число кадрів справи неві�
                         "нема з чого; «» — стерти")
 _SCANS_HELP = ("хто тримає кадри, з яких читано: «підпис=адреса» (приватна колекція, "
                "сайт дослідника); «» — стерти")
+_SELO_HELP = ("село справи на карті Супряги, коли машина не розбирає його сама: "
+              "«Назва[, район]» сучасною назвою; «» — стерти")
 
 
 def _card_args(title: str | None, years: str | None, place: list[str] | None,
                genre: str | None, frames: int | None = None,
                frames_unknown: str | None = None,
-               scans: str | None = None) -> dict[str, Any]:
+               scans: str | None = None, selo: str | None = None) -> dict[str, Any]:
     out: dict[str, Any] = {}
     if title is not None:
         out["title"] = title
@@ -108,6 +115,8 @@ def _card_args(title: str | None, years: str | None, place: list[str] | None,
         out["frames_unknown"] = frames_unknown
     if scans is not None:
         out["scans"] = scans
+    if selo is not None:
+        out["selo"] = selo
     return out
 
 
@@ -396,6 +405,7 @@ def card_cmd(
     frames_unknown: str | None = typer.Option(None, "--frames-unknown",
                                               help=_FRAMES_UNKNOWN_HELP),
     scans: str | None = typer.Option(None, "--scans", help=_SCANS_HELP),
+    selo: str | None = typer.Option(None, "--selo", help=_SELO_HELP),
     clear: bool = typer.Option(False, "--clear", help="прибрати картку цілком"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
@@ -409,7 +419,7 @@ def card_cmd(
 
     env = O.call("share.card", {"case": case, "clear": clear,
                                 **_card_args(title, years, place, genre, frames,
-                                             frames_unknown, scans)})
+                                             frames_unknown, scans, selo)})
     if _answer(env, as_json):
         return
     d = env.data or {}

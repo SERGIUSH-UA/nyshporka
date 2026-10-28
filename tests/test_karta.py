@@ -452,3 +452,37 @@ def test_latynka_odnoimenni_i_chuzhyi_povit_bez_tochky(dov: heo.Dovidnyk) -> Non
     # Таужне за 113 км від Гайсина — не в Гайсинському повіті
     assert heo.pryviazaty(dov, repo="DAHMO", place="", places=[],
                           title="Court Records — taujna, Gaysin, Podolia") == []
+
+
+def test_selo_liudyny_odne_z_odnoimennykh(dov: heo.Dovidnyk) -> None:
+    """`share card --selo`: людина називає, яке з однойменних (28.10.2026)."""
+    with pytest.raises(heo.KartaError, match=r"кілька однойменних.*Бахмутський.*Летичівський"):
+        heo.znaity_selo("Михайлівка")
+    assert heo.znaity_selo("Михайлівка, Летичівський р-н")["qid"] == "Q3"
+    # без підказки — серед областей архіву справи
+    assert heo.znaity_selo("Михайлівка", repo="DAHMO")["qid"] == "Q3"
+    with pytest.raises(heo.KartaError, match="немає в довіднику"):
+        heo.znaity_selo("Неіснуйківка")
+
+
+def test_selo_liudyny_staie_pokryttiam(dov: heo.Dovidnyk) -> None:
+    t = heo.pryviazaty(dov, repo="CDIAK", place="", places=[], selo_lyudyny="Q4",
+                       title="Метрична книга церкви с. Михайлівка Летичівського повіту")
+    tyt = [x for x in t if x.rol == "tytul"]
+    assert [(x.qid, x.sposib, x.pevnist) for x in tyt] == [("Q4", "lyudyna", "vysoka")]
+    # невідомий довіднику qid — звичайний розбір назви
+    t2 = heo.pryviazaty(dov, repo="CDIAK", place="", places=[], selo_lyudyny="Q999999",
+                        title="Метрична книга церкви с. Михайлівка Летичівського повіту")
+    assert [x.qid for x in t2 if x.rol == "tytul"] == ["Q3"]
+
+
+def test_selo_v_kartsi_i_manifesti() -> None:
+    from nyshporka.share import card as K
+
+    pole = K.normalize(selo={"qid": "Q3", "nazva": "Михайлівка", "oblast": "Хмельницька"})
+    assert pole["selo"]["qid"] == "Q3"
+    assert K.normalize(selo="")["selo"] == ""
+    with pytest.raises(K.CardError):
+        K.normalize(selo={"qid": "3"})
+    case = K.apply({"title": "x"}, pole)
+    assert case["karta"] == {"qid": "Q3", "nazva": "Михайлівка", "dzherelo": "людина"}
