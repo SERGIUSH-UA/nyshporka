@@ -151,6 +151,13 @@ def test_v_pul_odnochasno_ne_bilshe_slotiv(pul: Pul, monkeypatch: pytest.MonkeyP
     assert got["summary"]["viddano"] == 18
     assert 1 < naibilshe <= B.PUBLISH_SLOTS
 
+    # `--slots`: адміну й довіреним пул дає більше — пачка бере стільки, скільки сказано.
+    zaraz, naibilshe = 0, 0
+    items = [{"case": f"A/2/{i}"} for i in range(1, 25)]
+    got = B.viddaty(items, jobs=8, slots=6, pool=lambda n: ThreadPoolExecutor(max_workers=n))
+    assert got["summary"]["viddano"] == 24
+    assert B.PUBLISH_SLOTS < naibilshe <= 6
+
 
 def test_mynushchyi_429_perechikuietsia(pul: Pul, monkeypatch: pytest.MonkeyPatch) -> None:
     """Слот зайняв сусід (черга, друга сесія) — справа чекає, пачка йде далі."""
@@ -386,6 +393,7 @@ def test_notatnyk_ne_ide_pislia_nevdaloi_zalyvky(pul: Pul, notatnyky: dict[str, 
 
 def test_vorker_bere_prostir_batka(tmp_path: Path) -> None:
     """🔴 `--workspace` живе лише в батьківському процесі — воркер бере його явно."""
+    from nyshporka import htr_store
     from nyshporka.core import workspace as W
 
     was = W.workspace()
@@ -393,8 +401,12 @@ def test_vorker_bere_prostir_batka(tmp_path: Path) -> None:
     try:
         B._init(inshyi)
         assert W.workspace() is inshyi
+        # Воркер бере обхід кореня прогонів вікном, а не на кожну справу.
+        assert htr_store._SCAN_REUSE == B.SCAN_REUSE_SEC
     finally:
         W.use(was)
+        # Вікно — властивість процесу-воркера, а тест іде в процесі паку.
+        htr_store.reuse_scan(0)
 
 
 def test_zhurnal_pyshe_pid_zamkom(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

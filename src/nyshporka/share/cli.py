@@ -680,7 +680,10 @@ def push_cmd(
                                        "\"partial\": …, \"skip_run\": […]})"),
     jobs: int = typer.Option(4, "--jobs", "-j",
                              help="скільки справ пакувати одночасно, 1–8 (у пул — "
-                                  "не більше трьох)"),
+                                  "не більше --slots)"),
+    slots: int = typer.Option(3, "--slots",
+                              help="скільки справ одночасно заливається, 1–8; понад три "
+                                   "пул пускає лише адміну й довіреним"),
     notes: bool = typer.Option(False, "--notes",
                                help="після заливки віддати й нотатник справи (note push)"),
     wait: bool = typer.Option(False, "--wait",
@@ -706,7 +709,8 @@ def push_cmd(
 
     _kliuch_abo_vkhid(as_json)
     env = O.call("share.push", {"cases": list(cases or []), "ready": ready,
-                                "from_file": from_file, "jobs": jobs, "notes": notes,
+                                "from_file": from_file, "jobs": jobs, "slots": slots,
+                                "notes": notes,
                                 "wait": wait, "private_ok": private_ok,
                                 "replace_own": replace_own, "why": why})
     if _answer(env, as_json):

@@ -40,6 +40,10 @@ MAX_JOBS = 8
 #: тридцятій справі з тисячі (11.10.2026). Межа тут — та сама, що на сервері:
 #: якщо слот займе ще хтось (черга, друга сесія), справа перечекає (`CHEKATY`).
 PUBLISH_SLOTS = 3
+#: Стеля слотів заливки, яку людина може попросити (`share push --slots`).
+#: Пул дає більше трьох незавершених заливань лише адміну, довіреним і тим,
+#: кому знято ліміт; іншим зайві слоти обернуться 429 і паузами.
+MAX_SLOTS = 8
 #: Паузи між спробами заливки після 429, секунди (~2,5 хв разом). Незавершене
 #: заливання сусіда закінчується за секунди; якщо 429 тримається довше — це
 #: справжня стеля (година, доба), і пачка зупиняється.
@@ -50,6 +54,10 @@ CHEKATY_SAM = 60.0
 #: Найдовше, скільки `share push --wait` чекає на стелю пулу за раз. Денна норма
 #: ковзна, тож довше за добу (і запас на годинники) пул не просить.
 CHEKATY_NAIDOVSHE = 26 * 3600.0
+
+#: Скільки секунд воркер бере той самий обхід кореня прогонів, замість свіжого
+#: на кожну справу (`htr_store.reuse_scan`): ~1 с на справу.
+SCAN_REUSE_SEC = 30.0
 
 #: На якому кроці зупинилась справа.
 PACK = "pack"
@@ -94,13 +102,20 @@ def _init(ws: Any, sloty: Any = None) -> None:
     процеси разом, а не кожен свою.
     """
     global _SLOTY
+    from nyshporka import htr_store
     from nyshporka.core.workspace import use
 
     use(ws)
     _SLOTY = sloty
+    # Воркер прогонів не пише, а справи пачки вирішено до її початку.
+    htr_store.reuse_scan(SCAN_REUSE_SEC)
 
 
-def _protsesy(jobs: int) -> Executor:
+def slots_in_range(slots: int) -> int:
+    return max(1, min(MAX_SLOTS, int(slots)))
+
+
+def _protsesy(jobs: int, slots: int = PUBLISH_SLOTS) -> Executor:
     import multiprocessing as mp
     from concurrent.futures import ProcessPoolExecutor
 
@@ -110,7 +125,7 @@ def _protsesy(jobs: int) -> Executor:
     # успадковує їхні замки в довільному стані.
     ctx = mp.get_context("spawn")
     return ProcessPoolExecutor(max_workers=jobs, mp_context=ctx, initializer=_init,
-                               initargs=(workspace(), ctx.BoundedSemaphore(PUBLISH_SLOTS)))
+                               initargs=(workspace(), ctx.BoundedSemaphore(slots)))
 
 
 #: Службове поле справи пачки: причина заміни свого чинного внеску
@@ -258,8 +273,9 @@ def riadok(row: Row, n: int, total: int) -> str:
 
 def viddaty(items: list[Item], *, jobs: int = JOBS, notes: bool = False,
             say: Callable[[str], None] | None = None,
-            pool: Callable[[int], Executor] | None = None) -> dict[str, Any]:
-    """Віддати пачку справ, `jobs` одночасно.
+            pool: Callable[[int], Executor] | None = None,
+            slots: int = PUBLISH_SLOTS) -> dict[str, Any]:
+    """Віддати пачку справ, `jobs` одночасно, у пул — не більше `slots` разом.
 
     `pool(n)` — фабрика виконавця; типово процеси (`_protsesy`), тести дають
     потоки. Порядок відповіді — порядок `items`, а не закінчення.
@@ -279,6 +295,7 @@ def viddaty(items: list[Item], *, jobs: int = JOBS, notes: bool = False,
 
     global _SLOTY
     jobs = jobs_in_range(jobs)
+    slots = slots_in_range(slots)
     total = len(items)
     pochatok = time.monotonic()
     rows: list[Row | None] = [None] * total
@@ -306,12 +323,12 @@ def viddaty(items: list[Item], *, jobs: int = JOBS, notes: bool = False,
             _pryiniaty(i, odna(item, notes))
     else:
         if pool is None:
-            ex = _protsesy(min(jobs, total))
+            ex = _protsesy(min(jobs, total), slots)
         else:
             import threading
 
             # Потоки цього процесу ділять один семафор так само, як процеси — свій.
-            _SLOTY = threading.BoundedSemaphore(PUBLISH_SLOTS)
+            _SLOTY = threading.BoundedSemaphore(slots)
             ex = pool(min(jobs, total))
         futs: dict[Future[Row], int] = {}
         try:
@@ -357,7 +374,8 @@ def viddaty(items: list[Item], *, jobs: int = JOBS, notes: bool = False,
 def viddaty_dochekuiuchys(items: list[Item], *, jobs: int = JOBS, notes: bool = False,
                           say: Callable[[str], None] | None = None,
                           pool: Callable[[int], Executor] | None = None,
-                          sleep: Callable[[float], None] | None = None) -> dict[str, Any]:
+                          sleep: Callable[[float], None] | None = None,
+                          slots: int = PUBLISH_SLOTS) -> dict[str, Any]:
     """`viddaty`, яка на стелі пулу (429) чекає, скільки просить пул, і йде далі.
 
     Для `share push --wait`: заливка сотень справ за ніч, коли нікому
@@ -371,7 +389,7 @@ def viddaty_dochekuiuchys(items: list[Item], *, jobs: int = JOBS, notes: bool = 
     from nyshporka.sources.http import RETRY_AFTER_PAD_S
 
     pochatok = time.monotonic()
-    got = viddaty(items, jobs=jobs, notes=notes, say=say, pool=pool)
+    got = viddaty(items, jobs=jobs, notes=notes, say=say, pool=pool, slots=slots)
     po_spravi: dict[str, Row] = {r["case"]: r for r in got["rows"]}
     chekano = 0.0
     while True:
@@ -393,7 +411,7 @@ def viddaty_dochekuiuchys(items: list[Item], *, jobs: int = JOBS, notes: bool = 
         pauza = float(prosyt) + RETRY_AFTER_PAD_S
         (sleep or time.sleep)(pauza)
         chekano += pauza
-        got = viddaty(cherha, jobs=jobs, notes=notes, say=say, pool=pool)
+        got = viddaty(cherha, jobs=jobs, notes=notes, say=say, pool=pool, slots=slots)
         po_spravi.update({r["case"]: r for r in got["rows"]})
 
     rows = [po_spravi[c] for c in (str(it.get("case") or "") for it in items) if c in po_spravi]

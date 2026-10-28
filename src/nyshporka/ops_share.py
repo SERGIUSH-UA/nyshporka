@@ -821,7 +821,11 @@ class SharePushArgs(BaseModel):
                                                    "JSON-об'єкт аргументів share.pack "
                                                    "на рядок")
     jobs: int = Field(default=4, description="скільки справ пакувати одночасно (1–8); "
-                                             "у пул одночасно йдуть не більше трьох")
+                                             "у пул одночасно йдуть не більше `slots`")
+    slots: int = Field(default=3, description="скільки справ одночасно ЗАЛИВАЄТЬСЯ (1–8). "
+                                              "Пул пускає більше трьох незавершених "
+                                              "заливань лише адміну, довіреним і тим, "
+                                              "кому знято ліміт")
     notes: bool = Field(default=False, description="після заливки віддати й нотатник "
                                                    "справи (`note push`)")
     wait: bool = Field(default=False, description="на стелі пулу (429) чекати, скільки "
@@ -1005,9 +1009,10 @@ def _push(a: SharePushArgs, *, say: Any) -> Envelope:
                     f"ключ у {ENV_NAME} (видається в кабінеті на nyshporka.online)")
 
     if a.wait:
-        got = B.viddaty_dochekuiuchys(cherha, jobs=a.jobs, notes=a.notes, say=say)
+        got = B.viddaty_dochekuiuchys(cherha, jobs=a.jobs, notes=a.notes, say=say,
+                                      slots=a.slots)
     else:
-        got = B.viddaty(cherha, jobs=a.jobs, notes=a.notes, say=say)
+        got = B.viddaty(cherha, jobs=a.jobs, notes=a.notes, say=say, slots=a.slots)
     env = ok(got)
     if skipped:
         env.warn("private", f"пропущено готові справи з позначкою private: "

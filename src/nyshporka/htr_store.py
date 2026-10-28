@@ -22,6 +22,7 @@ import json
 import math
 import os
 import re
+import time
 from collections.abc import Iterator, Sequence
 from contextvars import ContextVar
 from pathlib import Path
@@ -628,7 +629,39 @@ def _scan() -> tuple[tuple[int, int, int, str], list[tuple[str, os.stat_result]]
     """
     from nyshporka.core.scope import once
 
-    return once("htr.scan", _scan_now)
+    return once("htr.scan", _scan_reused)
+
+
+#: Скільки секунд довгоживучий процес бере той самий обхід кореня прогонів
+#: (`reuse_scan`); 0 — щоразу свіжий.
+_SCAN_REUSE = 0.0
+_SCAN_LAST: tuple[float, tuple[tuple[int, int, int, str], list[tuple[str, os.stat_result]]]] | None = None
+
+
+def reuse_scan(seconds: float) -> None:
+    """Дозволити процесу брати той самий обхід кореня прогонів `seconds` секунд.
+
+    ⚡ Для воркера пачки (`share push`): кожна справа — окрема операція, і
+    кожна платила за свіжий обхід ~16 тис. тек і стільки ж мет (~1 с, 32 тис.
+    `stat`), хоч перелік справ пачки вирішено ще до її початку. Вікно коротке:
+    прогін, що з'явився посеред пачки, підхопить наступне вікно.
+    ⚠ Лише для процесів, що прогонів не пишуть.
+    """
+    global _SCAN_REUSE, _SCAN_LAST
+    _SCAN_REUSE = max(0.0, float(seconds))
+    _SCAN_LAST = None
+
+
+def _scan_reused() -> tuple[tuple[int, int, int, str], list[tuple[str, os.stat_result]]]:
+    global _SCAN_LAST
+    if _SCAN_REUSE <= 0:
+        return _scan_now()
+    now = time.monotonic()
+    if _SCAN_LAST is not None and now - _SCAN_LAST[0] < _SCAN_REUSE:
+        return _SCAN_LAST[1]
+    got = _scan_now()
+    _SCAN_LAST = (now, got)
+    return got
 
 
 def _scan_now() -> tuple[tuple[int, int, int, str], list[tuple[str, os.stat_result]]]:

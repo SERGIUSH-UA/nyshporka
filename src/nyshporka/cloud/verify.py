@@ -35,6 +35,7 @@
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -146,14 +147,22 @@ def voice_dirs(out_dir: Path) -> tuple[Path, ...]:
     🔴 Саме сестринські, а не вкладені. Складені в одну теку голоси дають
     нуль знахідок при пошуку без жодної помилки: файли перетирають один одного
     за іменем, і залишається текст того голосу, який писав останнім.
+
+    ⚡ Ім'я — до `is_dir`, і через `scandir`: у корені ~16 тис. прогонів, і
+    `Path.is_dir()` на кожному — це `stat` заради одного-двох голосів. Пакування
+    справи кликало це по кілька разів і витрачало 2,4 с із 4 на самі `stat`
+    (замір 28.10.2026). Запис `scandir` знає тип теки без системного виклику.
     """
     out_dir = Path(out_dir)
     parent = out_dir.parent
-    if not parent.is_dir():
-        return ()
     prefix = out_dir.name + "-"
-    return tuple(sorted(d for d in parent.iterdir()
-                        if d.is_dir() and d.name.startswith(prefix)))
+    try:
+        with os.scandir(parent) as it:
+            found = [Path(e.path) for e in it
+                     if e.name.startswith(prefix) and e.is_dir()]
+    except (FileNotFoundError, NotADirectoryError):
+        return ()
+    return tuple(sorted(found))
 
 
 def read_meta(out_dir: Path) -> dict[str, Any]:
