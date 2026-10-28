@@ -57,7 +57,7 @@ _FOND = r"(?P<fond>(?:[А-ЯЄІЇҐA-Z]{1,2}-)?\d+)"
 
 #: «ДАХмО 227-2д-905 …», «ДАХмО 227-1-6563а …», «ДАХмО 227-1d-356. …».
 _COMPACT = re.compile(
-    rf"{_REPO_WORD}[\s_.\-]*(?:ф(?:онд)?\.?\s*)?{_FOND}(?!\d){_SEP_DASH}{_OPYS}"
+    rf"{_REPO_WORD}[\s_.\-]*(?P<fmark>ф(?:онд)?\.?\s*)?{_FOND}(?!\d){_SEP_DASH}{_OPYS}"
     rf"{_SEP_DASH}{_SPR}", re.IGNORECASE)
 #: «ДАХмО Ф.227, о.2, с.6026», «Ф. 227 О. 5доп С. 291», «Фонд 227, опись 6д, дело 34».
 _WORDED = re.compile(
@@ -92,16 +92,22 @@ def shifra_of_title(title: str) -> dict[str, str]:
     вигадана шифра приписує теці чужу справу.
     """
     from nyshporka.archives.pack import active
-    from nyshporka.core.casekey import show_part
+    from nyshporka.core.casekey import show_letter, show_part
 
     pk = active()
     for pattern in (_COMPACT, _WORDED):
         for m in pattern.finditer(title or ""):
+            # 🔴 «ДАХмО 2021-1-12» - рік видання, а не фонд 2021. Без слова «ф.»
+            # голе чотирицифрове число 1700-2099 за фонд не береться: краще
+            # без шифри, ніж з вигаданою.
+            if (pattern is _COMPACT and not m.group("fmark")
+                    and re.fullmatch(r"(?:17|18|19|20)\d\d", m.group("fond"))):
+                continue
             code = pk.resolve_code(m.group("repo"))
             if not code:
                 continue
             opys = _plain(show_part(m.group("opys")))
-            spr = _plain(m.group("spr")) + m.group("lit").lower()
+            spr = _plain(m.group("spr")) + show_letter(m.group("lit"))
             return {"archive": pk.canon_repo(code), "fond": m.group("fond"),
                     "inv": opys, "spr": spr}
     return {}

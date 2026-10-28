@@ -26,6 +26,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from nyshporka.core.casekey import norm_part, show_part
 from nyshporka.core.workspace import workspace
 from nyshporka.utils.fsname import safe_filename
 
@@ -131,7 +132,7 @@ def disk_key(opys: object, spr_int: object, letter: object) -> tuple[str, str, s
     `spr-5а` поруч із прочитаною `spr-5a`, а `--todo` ставив у чергу 2а, 2б,
     40а–д, давно прочитані.
     """
-    from nyshporka.core.casekey import norm_letter, norm_part
+    from nyshporka.core.casekey import norm_letter
 
     # Опис теж: бібліотека віддає `1d` (латинкою), реєстр опису — `1д`.
     return (norm_part(opys) or "", str(spr_int or ""), norm_letter(letter))
@@ -405,7 +406,7 @@ def conflicts_index(fond_id: str) -> dict[tuple[str, str], int]:
         return {}
     idx: dict[tuple[str, str], int] = {}
     for r in rows:
-        k = ((r.get("opys") or "").strip(), (r.get("spr") or "").strip())
+        k = (norm_part(r.get("opys")) or "", norm_part(r.get("spr")) or "")
         idx[k] = idx.get(k, 0) + 1
     return idx
 
@@ -592,7 +593,7 @@ def row_status(row: dict[str, Any],
         "disk_mismatch": (on_tsv is not None and bool(on_tsv) != bool(on_live)),
         "disk_state": state,
         "flags": flags,
-        "conflicts": conflicts.get((row.get("opys") or "", row.get("spr") or ""), 0),
+        "conflicts": conflicts.get((norm_part(row.get("opys")) or "", norm_part(row.get("spr")) or ""), 0),
         "pool": None if pool is None else _pool_state(cell),
         "pool_n": None if pool is None else (cell.n if cell else 0),
         "pool_pages": None if pool is None else (cell.pages if cell else 0),
@@ -666,7 +667,7 @@ def filter_rows(rows: list[dict[str, Any]], *, opys: str = "", q: str = "", surn
     _needs_status = bool(on_disk or todo or order or state or want_flags)
 
     def keep(r: dict[str, Any]) -> bool:
-        if opys and (r.get("opys") or "") != opys:
+        if opys and norm_part(r.get("opys")) != norm_part(opys):
             return False
         if ql:
             hay = " ".join(str(r.get(k) or "") for k in
@@ -830,7 +831,7 @@ def facets(rows: list[dict[str, Any]], fond_id: str | None = None) -> dict[str, 
     opys_c: dict[str, int] = {}
     uezd_c: dict[str, int] = {}
     for r in rows:
-        o = r.get("opys") or ""
+        o = show_part(r.get("opys") or "")
         if o:
             opys_c[o] = opys_c.get(o, 0) + 1
         m = _UEZD_RE.search(r.get("title") or "")
@@ -885,11 +886,12 @@ def parse_key(key: str) -> tuple[str, str, str, str, str]:
     fond = str(_norm_fond(m.group(2)))
     # 🔴 Опис буває літерним (`1д`, `5доп`); латинська `d` у ньому — це `д`
     # (та сама нормалізація, що в розборі назв Commons).
-    from nyshporka.core.casekey import show_part
+    from nyshporka.core.casekey import show_letter
 
     opys = show_part(m.group(3)) if m.group(3) else (default_opys(repo, fond) or "")
-    return (repo, fond, opys, m.group(4),
-            (m.group(5) or "").lower())
+    # Літера справи — у тому ж показовому письмі, що й опис: від неї будується
+    # ім'я теки (`op2д-spr-355а`), а латинська `a` дала б іншу теку.
+    return (repo, fond, opys, m.group(4), show_letter(m.group(5)))
 
 
 def fond_id_of(repo: str, fond: str) -> str:

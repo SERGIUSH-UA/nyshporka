@@ -628,7 +628,11 @@ def case_home_for(case_key: str, opys: str = "") -> Path | None:
     slug = f"{F.REPO_SLUG.get(repo, repo.lower())}_{fond}"
     # Тека справи з описом в імені (`op3-spr-213`, так бере `cases take`) і
     # давня, без нього (`spr-213`) — паспорт вирішує, чия вона.
-    names = ([f"op{want}-spr-{spr}"] if want else []) + [f"spr-{spr}"]
+    from nyshporka.core.casekey import show_part
+    shown = show_part(spr)
+    names = list(dict.fromkeys(
+        ([f"op{show_part(want)}-spr-{shown}", f"op{want}-spr-{spr}"] if want else [])
+        + [f"spr-{shown}", f"spr-{spr}"]))
     for d in (base / slug / name for base in ws.case_roots() for name in names):
         if not d.is_dir():
             continue

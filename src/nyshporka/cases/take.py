@@ -91,10 +91,15 @@ def case_dir_for(repo: str, fond: str, spr: str, letter: str, opys: str = "") ->
     from nyshporka.library import _norm_spr, _sidecar_opys
 
     base = workspace().raw / f"{F.REPO_SLUG.get(repo, repo.lower())}_{fond}"
+    # Ім'я теки - в одному показовому письмі для опису й літери справи:
+    # `355a` і `355а` - одна тека `op2д-spr-355а`.
+    from nyshporka.core.casekey import show_letter, show_part
+
+    letter = show_letter(letter)
     plain = base / f"spr-{spr}{letter}"
     if not opys:
         return plain
-    own = base / f"op{opys}-spr-{spr}{letter}"
+    own = base / f"op{show_part(opys)}-spr-{spr}{letter}"
     if own.is_dir() or not plain.is_dir():
         return own
     from nyshporka.cases.register import read_sidecar

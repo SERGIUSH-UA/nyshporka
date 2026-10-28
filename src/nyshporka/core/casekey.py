@@ -52,6 +52,7 @@ __all__ = [
     "parse",
     "parse_legacy",
     "require_current",
+    "show_letter",
     "show_part",
     "stem",
 ]
@@ -162,6 +163,16 @@ def show_part(s: object) -> str:
     low = str(s or "").strip().lower()
     m = re.match(r"^(\d+)([a-z]+)$", low)
     return m.group(1) + m.group(2).translate(_UNFOLD_TR) if m else low
+
+
+def show_letter(s: object) -> str:
+    """Літера (літери) індексу справи для ПОКАЗУ й імені теки: `a` → `а`.
+
+    Той самий вигляд, що в `show_part`, але без номера: `355a` і `355а` дають
+    однакову теку й однакове поле `spr`.
+    """
+    low = str(s or "").strip().lower()
+    return low.translate(_UNFOLD_TR) if re.fullmatch(r"[a-z]+", low) else low
 
 
 def norm_fond(s: object) -> str | None:

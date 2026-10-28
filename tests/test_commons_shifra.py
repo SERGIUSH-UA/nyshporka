@@ -103,6 +103,7 @@ def _ws(tmp_path_factory):
     ("DAHMO/227/1d/406", ("DAHMO", "227", "1д", "406", "")),
     ("DAHMO/227/5доп/291", ("DAHMO", "227", "5доп", "291", "")),
     ("DAHMO/227/2д/355а", ("DAHMO", "227", "2д", "355", "а")),
+    ("DAHMO/227/2д/355a", ("DAHMO", "227", "2д", "355", "а")),   # латинська літера справи
     ("DAHMO/227/1/6563а", ("DAHMO", "227", "1", "6563", "а")),
     ("ДАХмО 227-2д-905", ("DAHMO", "227", "2д", "905", "")),
     ("DAHMO/230/1/43", ("DAHMO", "230", "1", "43", "")),
@@ -222,3 +223,77 @@ def test_table_is_injective_transliteration():
     assert C.norm_part("5дор") != C.norm_part("5доп")
     assert C.norm_part("5dop") == C.norm_part("5доп")
     assert C.norm_part("5dor") == C.norm_part("5дор")
+
+
+def test_case_dir_same_for_both_scripts(_ws):
+    from nyshporka.cases.take import case_dir_for
+
+    a = case_dir_for("DAHMO", "227", "355", "a", "2д")
+    b = case_dir_for("DAHMO", "227", "355", "а", "2d")
+    assert a == b and a.name == "op2д-spr-355а"
+
+
+def test_align_names_use_shown_form(_ws):
+    from nyshporka.core.workspace import workspace
+    from nyshporka.share import align
+
+    d = workspace().raw / "dahmo_227" / "op2д-spr-355а"
+    d.mkdir(parents=True)
+    assert align.case_home_for("DAHMO/227/2d/355a") == d
+
+
+@pytest.mark.parametrize("stem,want", [
+    ("op3дод-spr-4", "3dod"), ("op3dod-spr-4", "3dod"), ("op5доп-spr-1", "5dop"),
+    ("op1д-spr-406", "1d"), ("op2spr-148", "2"), ("op2-spr-148", "2"),
+    ("op4а_x", "4a"),
+])
+def test_op_prefix_any_suffix(stem, want):
+    from nyshporka.library import _OP_PREFIX_RE, _norm_spr
+
+    assert _norm_spr(_OP_PREFIX_RE.search(stem).group(1)) == want
+
+
+def test_fsub_takes_long_suffix():
+    from nyshporka.library import _FSUB_RE
+
+    assert _FSUB_RE.fullmatch("f227_op5доп").group(2) == "5доп"
+
+
+def test_registry_filter_opys_script_insensitive():
+    from nyshporka.fonds.registry import filter_rows
+
+    rows = [{"opys": "1Д", "spr": "1"}, {"opys": "5д", "spr": "2"}, {"opys": "2", "spr": "3"}]
+    for q in ("1д", "1d", "1Д"):
+        got = filter_rows(rows, opys=q)
+        assert [r["spr"] for r in (got[0] if isinstance(got, tuple) else got)] == ["1"]
+
+
+def test_year_is_not_fond():
+    assert shifra_of_title("ДАХмО 2021-1-12.pdf") == {}
+    assert shifra_of_title("ДАХмО ф.2021-1-12.pdf")["fond"] == "2021"
+
+
+def test_passport_fills_only_missing_fields(tmp_path):
+    import json
+
+    from nyshporka.cases.acquire import record_fetch
+    from nyshporka.sources.base import FetchResult
+
+    (tmp_path / "meta.json").write_text(json.dumps(
+        {"archive": "DAHMO", "fond": "230"}), encoding="utf-8")
+    record_fetch(tmp_path, FetchResult(dest=tmp_path, frames=1), source="commons",
+                 ref="file:ДАХмО 227-2д-905 X.pdf", want=1)
+    meta = json.loads((tmp_path / "meta.json").read_text(encoding="utf-8"))
+    assert (meta["archive"], meta["fond"], meta["inv"], meta["spr"]) == (
+        "DAHMO", "230", "2д", "905")
+
+
+def test_write_meta_spr_shown_form(tmp_path):
+    import json
+
+    from nyshporka.cases.acquire import write_meta
+
+    for spr in ("6563a", "6563а"):
+        write_meta(tmp_path, archive="DAHMO", fond="227", opys="1", spr=spr,
+                   files=[], source="commons")
+        assert json.loads((tmp_path / "meta.json").read_text(encoding="utf-8"))["spr"] == "6563а"

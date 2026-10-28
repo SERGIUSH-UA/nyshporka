@@ -233,19 +233,25 @@ def record_fetch(case_dir: Path, res: Any, *, source: str, ref: str, url: str = 
     # записав `cases take` чи людина, надійніше за розбір назви.
     from nyshporka.sources.commons import shifra_of_ref
 
+    # Дописується лише те, чого в паспорті немає: наявне не перекривається.
     shifra = shifra_of_ref(source, ref)
-    if shifra and not _has_shifra(case_dir):
-        passport.update(shifra)
+    if shifra:
+        passport.update(_missing_shifra(case_dir, shifra))
     passport.update(extra or {})
     patch_meta(case_dir, passport)
     return verdict
 
 
-def _has_shifra(case_dir: Path) -> bool:
+SHIFRA_FIELDS = ("archive", "fond", "inv", "spr")
+
+
+def _missing_shifra(case_dir: Path, shifra: dict[str, str]) -> dict[str, str]:
+    """Поля шифри з назви файла, яких у паспорті ще немає (усі чотири перевіряються)."""
     from nyshporka.utils.atomic import read_json
 
     got = read_json(case_dir / "meta.json", default={})
-    return isinstance(got, dict) and bool(got.get("archive") and got.get("fond"))
+    got = got if isinstance(got, dict) else {}
+    return {k: v for k, v in shifra.items() if k in SHIFRA_FIELDS and not got.get(k)}
 
 
 def write_meta(case_dir: Path, *, archive: str, fond: str, opys: str, spr: str,
@@ -257,8 +263,10 @@ def write_meta(case_dir: Path, *, archive: str, fond: str, opys: str, spr: str,
     забутого — а для цілих описів ARCHIUM поле дат порожнє ЗА ПОБУДОВОЮ, і
     наступна сесія йшла добувати те, чого в джерелі немає.
     """
+    from nyshporka.core.casekey import show_part
+
     patch: dict[str, Any] = {
-        "archive": archive, "fond": fond, "inv": opys, "spr": spr,
+        "archive": archive, "fond": fond, "inv": opys, "spr": show_part(spr),
         "title": title, "year": year, "files": files, "source": source,
         "year_source": "реєстр опису" if year else "джерело року не дає"}
     patch.update(extra or {})
