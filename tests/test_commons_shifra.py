@@ -149,8 +149,8 @@ def test_library_reads_opys_from_dir_name(_ws):
 
 @pytest.mark.parametrize("a,b", [
     ("355a", "355а"), ("1d", "1д"), ("1D", "1Д"), ("5dop", "5доп"), ("5DOP", "5доп"),
-    ("2c", "2с"), ("2e", "2е"), ("3o", "3о"), ("4p", "4п"), ("5x", "5х"),
-    ("6i", "6і"), ("00114", "114"), ("2a", "2а"),
+    ("2s", "2с"), ("2e", "2е"), ("3o", "3о"), ("4p", "4п"), ("5x", "5х"),
+    ("4r", "4р"), ("6i", "6і"), ("00114", "114"), ("2a", "2а"),
 ])
 def test_norm_part_homoglyphs(a, b):
     from nyshporka.core.casekey import norm_part
@@ -208,3 +208,17 @@ def test_op_dir_prefix_unchanged(_ws):
     from nyshporka.library import _norm_spr, _OP_PREFIX_RE
 
     assert _norm_spr(_OP_PREFIX_RE.search("op2spr-148").group(1)) == "2"
+
+
+def test_table_is_injective_transliteration():
+    from nyshporka.core import casekey as C
+
+    assert len(set(C._FOLD.values())) == len(C._FOLD)          # різні літери - різні образи
+    for cyr, lat in C._FOLD.items():
+        assert C.norm_part(f"1{cyr}") == f"1{lat}"
+        assert C.show_part(C.norm_part(f"1{cyr}")) == f"1{cyr}"   # round-trip
+        assert C.show_part(f"1{lat}") == f"1{cyr}"
+    # колишня колізія: `р` і `п` - різні літери
+    assert C.norm_part("5дор") != C.norm_part("5доп")
+    assert C.norm_part("5dop") == C.norm_part("5доп")
+    assert C.norm_part("5dor") == C.norm_part("5дор")
