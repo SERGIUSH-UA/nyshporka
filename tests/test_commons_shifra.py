@@ -205,7 +205,7 @@ def test_old_keys_parse_as_before(_ws, key, want):
 
 
 def test_op_dir_prefix_unchanged(_ws):
-    from nyshporka.library import _norm_spr, _OP_PREFIX_RE
+    from nyshporka.library import _OP_PREFIX_RE, _norm_spr
 
     assert _norm_spr(_OP_PREFIX_RE.search("op2spr-148").group(1)) == "2"
 
