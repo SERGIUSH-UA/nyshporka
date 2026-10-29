@@ -508,3 +508,15 @@ def test_library_shifra_is_shown_and_resolves_back(_ws, folder, key, shifra):
     L.write_library(entries)
     ref = resolve_case(shifra)
     assert (ref.key, ref.shifra) == (key, shifra)
+
+
+def test_conflicts_index_meets_row_in_either_script(monkeypatch):
+    """Розбіжність опису, записана `1d/355a`, видна рядку реєстру `1д/355а`."""
+    from nyshporka.fonds import registry as F
+
+    monkeypatch.setattr(F, "load_conflicts", lambda fid: [
+        {"opys": "1д", "spr": "355а"}, {"opys": "1d", "spr": "355a"}, {"opys": "1", "spr": "355"}])
+    idx = F.conflicts_index("DAHMO_227")
+    assert idx[("1d", "355a")] == 2 and idx[("1", "355")] == 1
+    row = {"opys": "1д", "spr": "355а", "spr_int": "355", "spr_letter": "а"}
+    assert F.row_status(row, {}, idx)["conflicts"] == 2

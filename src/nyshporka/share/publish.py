@@ -488,23 +488,6 @@ def _merge_refs(pershi: list[dict[str, str]],
     return out
 
 
-def _letter_variants(letter: str) -> list[str]:
-    """Літерний індекс справи обома письмами: `a` → `["a", "а"]`.
-
-    ⚠ Зворотний бік таблиці будується З НЕЇ САМОЇ, а не пишеться вдруге:
-    `_norm_spr` зводить кириличну літеру до латинської, і другий перелік
-    розійшовся б із першим при першому ж доданому рядку.
-    """
-    from nyshporka.core.casekey import LETTER_TO_LAT
-
-    if not letter:
-        return [""]
-    out = [letter]
-    out += [cyr for cyr, lat in LETTER_TO_LAT.items()
-            if lat == letter and cyr != letter]
-    return out
-
-
 def _links_from_registry(shifra: str) -> list[dict[str, str]]:
     """Куди піти по ці скани — з реєстру опису фонду.
 

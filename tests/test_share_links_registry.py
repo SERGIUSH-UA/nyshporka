@@ -33,10 +33,13 @@ def reiestr(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
 
     def _row(repo: str, fond: str, opys: str, spr: str,
              letter: str = "") -> tuple[dict[str, Any] | None, Any]:
+        from nyshporka.core.casekey import norm_letter
+
         pytannia.append((repo, fond, opys, spr, letter))
-        # Реєстр тримає літеру так, як стоїть в опису, — КИРИЛИЦЕЮ.
-        return (dict(RYADOK) if letter == "а" or (spr == "6940" and not letter)
-                else None), "шлях"
+        # Реєстр тримає літеру так, як стоїть в опису, — КИРИЛИЦЕЮ, а порівнює
+        # у каноні письма (`registry_row` → `disk_key`), як і справжній.
+        return (dict(RYADOK) if norm_letter(letter) == norm_letter("а")
+                or (spr == "6940" and not letter) else None), "шлях"
 
     monkeypatch.setattr("nyshporka.fonds.registry.registry_row", _row)
     return pytannia
@@ -59,11 +62,10 @@ def test_litera_shukaietsia_oboma_pysmamy(reiestr: list[tuple[str, ...]]) -> Non
     надруковано в опису. Без другої спроби ДАХмО 315-1-84а виглядає як справа
     без джерела, хоч DGS у реєстрі є — виміряно на живій базі 23.09.2026.
     """
-    got = publish._links_from_registry("ДАХмО 315-1-84a")  # латинська «a»
-
-    assert got, "латинське написання літери лишилось без джерела"
-    litery = [q[4] for q in reiestr]
-    assert "a" in litery and "а" in litery, f"пробували лише {litery}"
+    for shifra in ("ДАХмО 315-1-84a", "ДАХмО 315-1-84а"):   # латинська і кирилична
+        assert publish._links_from_registry(shifra), f"{shifra}: лишилось без джерела"
+    # Одне питання на шифру: письмо зводить сам реєстр, перебору варіантів немає.
+    assert len(reiestr) == 2
 
 
 def test_reiestrove_posylannia_ne_ide_v_refs(reiestr: list[tuple[str, ...]]) -> None:

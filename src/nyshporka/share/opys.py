@@ -154,13 +154,12 @@ def sidecar_extras(side: dict[str, Any]) -> dict[str, Any]:
 
 
 def registry_row(shifra: str) -> dict[str, Any] | None:
-    """Рядок реєстру опису для шифри — з пробою літери обома письмами."""
+    """Рядок реєстру опису для шифри; письмо літери зводить `registry_row`."""
     if not shifra.strip():
         return None
     try:
         from nyshporka.fonds.registry import registry_row as _row
         from nyshporka.pagestore import resolve_case
-        from nyshporka.share.publish import _letter_variants
 
         ref = resolve_case(shifra)
         spr = str(ref.spr or "")
@@ -168,11 +167,10 @@ def registry_row(shifra: str) -> dict[str, Any] | None:
         while i and not spr[i - 1].isdigit():
             i -= 1
         number, letter = spr[:i], spr[i:]
-        for variant in _letter_variants(letter):
-            row, _ = _row(ref.repo, ref.fond, ref.opys or "", number, variant)
-            if row:
-                return {**row, "_title_repeats": _povtory(ref.repo, ref.fond,
-                                                          str(row.get("title") or ""))}
+        row, _ = _row(ref.repo, ref.fond, ref.opys or "", number, letter)
+        if row:
+            return {**row, "_title_repeats": _povtory(ref.repo, ref.fond,
+                                                      str(row.get("title") or ""))}
     except Exception:
         # Широко й навмисно: реєстр не обов'язковий, а падінь у нього багато
         # різних — немає простору, немає фонду, битий TSV.
