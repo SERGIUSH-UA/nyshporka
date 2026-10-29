@@ -279,7 +279,9 @@ def plan(case_dir: str | Path, specs: list[tuple[str, str, str]]) -> Plan:
             f"Кожен кадр мусить належати частині; ті, що поза справами, назвіть "
             f"явно: --part «-={free[0]}..{free[-1]}»")
     real = [p for p in parts if not p.leftover]
-    if len(real) < 2:
+    # Одна справа й шматок поза справами (`-`) — теж розбивка: шматок — початок
+    # чи кінець справи з сусідньої плівки, і його далі зводить `cases join`.
+    if not real or len(parts) < 2:
         raise SplitError("у карті менше двох справ — розкладати нічого. Якщо тека "
                          "— одна справа: nysh case <тека> --one-case")
     keys = [p.key for p in real]

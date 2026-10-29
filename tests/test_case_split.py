@@ -328,6 +328,8 @@ def test_undo_ne_chipaie_zminenoho_pislia_rozbyvky(space: Path, zbirka: Path) ->
     ([("926", "0001.jpg", "0003.jpg"), ("927", "0004.jpg", "0009.jpg")], "у теці немає"),
     ([("926", "0005.jpg", "0003.jpg"), ("927", "0006.jpg", "0008.jpg")], "стоїть після"),
     ([("926", "0001.jpg", "0008.jpg")], "менше двох справ"),
+    ([("-", "0001.jpg", "0008.jpg")], "менше двох справ"),
+    ([("-", "0001.jpg", "0003.jpg"), ("-", "0004.jpg", "0008.jpg")], "менше двох справ"),
     ([("926", "0001.jpg", "0003.jpg"), ("926", "0004.jpg", "0008.jpg")], "названо двічі"),
     ([], "карти немає"),
 ])
@@ -335,6 +337,15 @@ def test_vidmovy_karty(space: Path, zbirka: Path, karta: list[Any], why: str) ->
     with pytest.raises(SPL.SplitError, match=why):
         SPL.plan(zbirka, karta)
     assert not (zbirka / SPL.JOURNAL).exists()
+
+
+def test_odna_sprava_i_shmatok_na_zvedennia(space: Path, zbirka: Path) -> None:
+    """Плівка, де одна справа, а решта — початок справи з наступної плівки:
+    розбивка дає одну справу, шматок лишається поза справами для `cases join`."""
+    pl = SPL.plan(zbirka, [("926", "0001.jpg", "0003.jpg"), ("-", "0004.jpg", "0008.jpg")])
+
+    assert [p.leftover for p in pl.parts] == [False, True]
+    assert pl.parts[0].names == ["0001.jpg", "0002.jpg", "0003.jpg"]
 
 
 def test_mezhu_kadru_ne_zsuvaie(space: Path, zbirka: Path) -> None:
