@@ -613,10 +613,13 @@ class Year:
     read: int
     missing_pages: list[str] = field(default_factory=list)
     missing_numbers: list[str] = field(default_factory=list)
+    #: Сторінок тексту в наявній теці року, яку збірка НЕ підмінила, бо сама
+    #: вийшла біднішою (рік узято з пулу цілим, тексту при номерах немає).
+    kept: int = 0
 
     @property
     def complete(self) -> bool:
-        return self.pages > 0 and self.read == self.pages
+        return not self.kept and self.pages > 0 and self.read == self.pages
 
     @property
     def key(self) -> str:
@@ -626,7 +629,7 @@ class Year:
         return {"key": self.key, "year": self.year, "run": self.run_dir.name,
                 "issues": self.issues, "pages": self.pages, "read": self.read,
                 "complete": self.complete, "missing_pages": self.missing_pages[:20],
-                "missing_numbers": self.missing_numbers}
+                "missing_numbers": self.missing_numbers, "kept": self.kept}
 
 
 def _edition_of(rec: dict[str, Any]) -> tuple[VI.Edition | None, dict[str, Path]]:
@@ -677,6 +680,13 @@ def run_dir_for(code: str, year: int) -> Path:
     from nyshporka.core.workspace import workspace
 
     return workspace().htr_reports / f"vyd_{code.lower()}_{year}"
+
+
+def texts_in(run: Path) -> int:
+    """Сторінок тексту (`0001.txt`…) у теці зібраного року."""
+    if not run.is_dir():
+        return 0
+    return sum(1 for f in run.glob("*.txt") if f.stem.isdigit())
 
 
 def assemble(code: str = "") -> list[Year]:
@@ -750,6 +760,16 @@ def _assemble_year(rec: dict[str, Any], ed: VI.Edition, by_dir: dict[str, Path],
     (tmp / "_print_source.json").write_text(
         json.dumps({"code": code, "title": rec.get("title") or "", "city": rec.get("city") or "",
                     "pages": source}, ensure_ascii=False, indent=1), encoding="utf-8")
+    # 🔴 Тека року, принесена `share pull`, — ЄДИНА локальна копія тексту: пул
+    # тримає рік однією книгою, розкладки по номерах немає, і збірка з номерів
+    # виходить порожньою. Біднішою збіркою рік не підміняти (відгук №10, 29.10.2026:
+    # так зникло 3 382 сторінки дев'яти років двох газет).
+    have = texts_in(run)
+    if have > len(pages_meta):
+        shutil.rmtree(tmp, ignore_errors=True)
+        return Year(code=code, year=year, run_dir=run, issues=len(issues), pages=k,
+                    read=len(pages_meta), missing_pages=missing,
+                    missing_numbers=ed.missing(year), kept=have)
     # Підміна цілим каталогом: напівзібраний рік у сторі гірший за старий.
     old = run.with_name(run.name + ".old")
     shutil.rmtree(old, ignore_errors=True)
@@ -781,7 +801,8 @@ def status(code: str = "") -> list[dict[str, Any]]:
             years.append({"year": y, "key": vydannia.key(rec["code"], y),
                           "issues": len(ed.of_year(y)) if ed else 0, "pages": pages,
                           "read": read, "missing_numbers": ed.missing(y) if ed else [],
-                          "assembled": run_dir_for(rec["code"], y).is_dir()})
+                          "assembled": run_dir_for(rec["code"], y).is_dir(),
+                          "texts": texts_in(run_dir_for(rec["code"], y))})
         out.append({"code": rec["code"], "title": rec.get("title") or "",
                     "city": rec.get("city") or "", "roots": rec.get("roots") or [],
                     "years": years,

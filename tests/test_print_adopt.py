@@ -231,3 +231,61 @@ def test_places_follow_the_years_of_the_administrative_division() -> None:
     assert PE.places_for(rec, 1937) == ["Пирятинський район", "Харківська область",
                                         "Полтавська область"]
     assert PE.places_for(rec, 1940) == ["Пирятинський район", "Полтавська область"]
+
+
+# ── рік із пулу ──────────────────────────────────────────────────────────────
+def _pulled_year_over_unread_issues(ws: Any) -> Path:
+    """Номери записано, тексту при них немає, а рік лежить цілим — як після
+    `nysh share pull VYD/<код>/<рік> --take` (відгук №10, 29.10.2026)."""
+    from nyshporka import print_edition as PE
+    from nyshporka.cloud import printed as PR
+
+    _read_issue(PR.out_root(), "kolselo_pyr_1936-01-06_3", 2, read=0)
+    _read_issue(PR.out_root(), "kolselo_pyr_1936-01-08_4", 2, read=0)
+    PE.adopt("KOLSELO_PYR")
+    run = PE.run_dir_for("KOLSELO_PYR", 1936)
+    run.mkdir(parents=True)
+    for k in range(1, 5):
+        (run / f"{k:04d}.txt").write_text(f"з пулу {k}\n", encoding="utf-8")
+    (run / "_htr_meta.json").write_text("{}", encoding="utf-8")
+    return run
+
+
+def test_assemble_keeps_a_pulled_year_it_cannot_rebuild(ws: Any) -> None:
+    from nyshporka import ops as O
+    from nyshporka import print_edition as PE
+
+    run = _pulled_year_over_unread_issues(ws)
+    env = O.call("print.assemble", {"vydannia": "KOLSELO_PYR", "index": False})
+    assert env.ok and any(w.code == "year_kept" for w in env.warnings), env.warnings
+    assert sorted(f.name for f in run.glob("*.txt")) == [f"{k:04d}.txt" for k in range(1, 5)]
+    assert (run / "0001.txt").read_text(encoding="utf-8") == "з пулу 1\n"
+    assert not run.with_name(run.name + ".tmp").exists()
+    (row,) = PE.status("KOLSELO_PYR")[0]["years"]
+    assert (row["read"], row["texts"]) == (0, 4)
+
+
+def test_pack_does_not_destroy_or_ship_a_pulled_year(ws: Any) -> None:
+    from nyshporka import ops as O
+    from nyshporka import print_edition as PE
+
+    run = _pulled_year_over_unread_issues(ws)
+    PE.set_card("KOLSELO_PYR", title="КС", city="Пирятин", doc_type="newspaper",
+                holder="ДАПО", places=["Пирятин"])
+    env = O.call("print.pack", {"vydannia": "KOLSELO_PYR", "dry_run": True})
+    assert env.ok and env.data["skipped"] == ["VYD/KOLSELO_PYR/1936"], env.data
+    assert PE.texts_in(run) == 4
+
+
+def test_a_richer_build_still_replaces_the_year(ws: Any) -> None:
+    from nyshporka import print_edition as PE
+    from nyshporka.cloud import printed as PR
+
+    _read_issue(PR.out_root(), "kolselo_pyr_1936-01-06_3", 2)
+    PE.adopt("KOLSELO_PYR")
+    run = PE.run_dir_for("KOLSELO_PYR", 1936)
+    run.mkdir(parents=True)
+    (run / "0001.txt").write_text("старе\n", encoding="utf-8")
+    (y,) = PE.assemble("KOLSELO_PYR")
+    assert not y.kept and y.complete
+    assert (run / "0001.txt").read_text(encoding="utf-8") != "старе\n"

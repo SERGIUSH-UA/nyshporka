@@ -119,6 +119,13 @@ def print_assemble(a: PrintAssembleArgs) -> Envelope:
             else:
                 env.warn("index_failed", f"{y.run_dir.name}: {got.error}")
     for y in years:
+        if y.kept:
+            env.warn("year_kept",
+                     f"{y.key}: тека року має {y.kept} стор. тексту, а з номерів зібралось "
+                     f"лише {y.read} — рік лишено як є (його, ймовірно, взято з Супряги "
+                     f"цілим). Щоб зібрати з номерів, приберіть теку {y.run_dir.name} "
+                     f"самі")
+            continue
         if not y.complete:
             env.warn("year_incomplete",
                      f"{y.key}: прочитано {y.read} з {y.pages} сторінок — рік у пошуку "
@@ -221,6 +228,11 @@ def print_pack(a: PrintPackArgs) -> Envelope:
     skipped: list[str] = []
     env = ok({"packs": packs, "skipped": skipped})
     for y in years:
+        if y.kept:
+            skipped.append(y.key)
+            env.warn("year_kept", f"{y.key}: рік узято з Супряги цілим, із номерів його "
+                                  f"не зібрано — не пакую")
+            continue
         if not y.complete:
             skipped.append(y.key)
             env.warn("year_incomplete", f"{y.key}: прочитано {y.read} з {y.pages} — "

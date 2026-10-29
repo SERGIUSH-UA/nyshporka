@@ -2019,6 +2019,13 @@ def print_status_cmd(
             gap = (f" · немає номерів: {len(y['missing_numbers'])}"
                    if y["missing_numbers"] else "")
             mark = "зібрано" if y["assembled"] else "не зібрано"
+            if y.get("texts", 0) > y["read"]:
+                # Рік із пулу: текст є цілим роком, а при номерах його немає —
+                # «прочитано 0/N» тут підштовхувало до assemble.
+                console.print(f"  {y['year']}: {y['issues']} номерів · рік цілим із "
+                              f"Супряги ({y['texts']} стор.), при номерах прочитано "
+                              f"{y['read']}/{y['pages']}{gap}")
+                continue
             console.print(f"  {y['year']}: {y['issues']} номерів · прочитано "
                           f"{y['read']}/{y['pages']} стор. · {mark}{gap}")
     _notes(env)
