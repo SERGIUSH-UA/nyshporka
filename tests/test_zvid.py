@@ -235,6 +235,43 @@ def test_private_set_never_packs(owner: W.Workspace, tmp_path: Path) -> None:
         OW.build(["x17-z4-0006L"], out=tmp_path / "out", ws=owner)
 
 
+def test_rest_repacks_only_unfinished_sets_of_partial_answer(owner: W.Workspace,
+                                                             tmp_path: Path) -> None:
+    """Часткова відповідь: решта — новим пакетом тієї серії; друга відповідь дописує."""
+    rep = _pack(owner, tmp_path)
+    work = next(a for a, n in rep.sets.items() if n == "x17-z4-0006L")
+    sb = H.take(rep.file, base=tmp_path / "helper").root
+    _answer_all(sb)
+    for f in sorted((sb / C.TASKS).glob(f"{work}_part*.answer.json"))[:1]:
+        ans = json.loads(f.read_text(encoding="utf-8"))
+        ans.pop(sorted(ans)[-1])
+        f.write_text(json.dumps(ans, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(C.ZvidError, match="--partial"):
+        H.give(rep.id, model="m", base=tmp_path / "helper")
+    given = H.give(rep.id, model="m", partial=True, base=tmp_path / "helper")
+    got = OW.collect(given.file, ws=owner)
+    assert got.missing == 1
+    assert OW.unfinished(rep.id, ws=owner) == ["x17-z4-0006L"]
+
+    (tmp_path / "context.md").unlink()     # контекст — з книги пакетів, не з файла
+    rest = OW.rest(rep.id, out=tmp_path / "rest", ws=owner)
+    assert rest is not None and sorted(rest.sets.values()) == ["x17-z4-0006L", "x17-z5-0015R"]
+    led = json.loads(rest.ledger.read_text(encoding="utf-8"))
+    old = json.loads(rep.ledger.read_text(encoding="utf-8"))
+    assert led["rest_of"] == rep.id and old["rest"] == [rest.id]
+    assert led["note"] == old["note"] and led["context"] == old["context"] != ""
+    with pytest.raises(C.ZvidError, match="уже спаковано"):
+        OW.rest(rep.id, out=tmp_path / "rest", ws=owner)
+
+    sb2 = H.take(rest.file, base=tmp_path / "helper2").root
+    _answer_all(sb2)
+    OW.collect(H.give(rest.id, model="m2", base=tmp_path / "helper2").file, ws=owner)
+    assert OW.unfinished(rest.id, ws=owner) == [] and OW.unfinished(rep.id, ws=owner) == []
+
+    OW.forget_rest(rep.id, rest.id, ws=owner)
+    assert not rest.ledger.exists() and OW.rest(rep.id, out=tmp_path / "r3", ws=owner) is None
+
+
 def test_missing_page_image_leaves_no_local_path(owner: W.Workspace, tmp_path: Path) -> None:
     """Сторінку не поклали — шлях машини власника в пакет не йде, `take` бере пакет."""
     def no_image(spec, pm, pg):
@@ -369,12 +406,42 @@ def test_portal_round_trip(owner: W.Workspace, tmp_path: Path,
     assert fake.packs[rep.id]["meta"]["model"] == "claude-test"
 
     out = P.fetch(ws=owner)
-    assert [o["id"] for o in out] == [rep.id]
+    assert [o["id"] for o in out] == [rep.id] and "rest" not in out[0]
     assert fake.accepted[rep.id]["imported"] == {"x17-z4-0006L": 5}
     assert "x17-z5-0015R" in fake.accepted[rep.id]["control"]
     reg = S.registry(owner)
     meta = json.loads((reg.merge_dir(reg.load("x17-z4-0006L")) / S.META_FILE).read_text(encoding="utf-8"))
     assert meta["pages"]["0002"]["source"]["helper"] == "portal:184"
+
+
+def test_portal_fetch_requeues_rest_of_partial_answer(owner: W.Workspace, tmp_path: Path,
+                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    """Повернутий пакет портал у чергу не бере — решту `fetch` викладає новим пакетом."""
+    from nyshporka.zvid import portal as P
+
+    fake = _FakePortal()
+    monkeypatch.setattr(P, "_call", fake.call)
+    monkeypatch.setattr(P, "_put", lambda url, blob: fake.bytes.__setitem__(url[4:], blob))
+    monkeypatch.setattr(P, "_download", lambda url, sha, size: fake.bytes[url[4:]])
+
+    rep = _pack(owner, tmp_path)
+    P.publish(rep.file)
+    base = tmp_path / "helper" / "zvid"
+    f, _ = P.take(base=base)
+    took = H.take(f, base=base)
+    P.mark_portal(took.root)
+    _answer_all(took.root)
+    work = next(a for a, n in rep.sets.items() if n == "x17-z4-0006L")
+    for t in sorted((took.root / C.TASKS).glob(f"{work}_part*.answer.json"))[:1]:
+        t.unlink()
+    P.upload_answer(rep.id, H.give(rep.id, model="m", partial=True, base=base).file)
+
+    out = P.fetch(ws=owner)
+    rest = out[0]["rest"]
+    assert rest and rest["sets"] == 1 and rest["id"] != rep.id
+    assert fake.packs[rest["id"]]["status"] == "vilnyi"
+    assert fake.packs[rest["id"]]["kind"] == fake.packs[rep.id]["kind"]
+    assert fake.packs[rest["id"]]["note"] == fake.packs[rep.id]["note"], "та сама серія"
 
 
 def test_kind_of_names_the_specialist() -> None:

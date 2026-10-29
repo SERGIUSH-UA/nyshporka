@@ -127,6 +127,9 @@ def give_cmd(
     console.print(f"зведено {d['answered']} з {d['rows']} (h{c['high']}/m{c['med']}/l{c['low']})"
                   + (" — залито на портал, власник забере сам" if d["uploaded"]
                      else " — передай файл власникові"))
+    if d["missing"] and d["uploaded"]:
+        console.print("незведене власник сам викладе в чергу новим пакетом — "
+                      "повертати (drop) нічого не треба")
     _notes(env)
 
 
@@ -211,6 +214,36 @@ def fetch_cmd(
                       f"{len(g['imported'])} наборах, підозрілих {g['suspects']}")
         for n, v in g["control"].items():
             console.print(f"   🎯 контрольний {n}: CER {v['cer']:.1%} на {v['lines']} рядках")
+        if g.get("rest"):
+            r = g["rest"]
+            console.print(f"   ↻ незведене — у чергу пакетом {r['id']}: {r['sets']} наборів")
+        if g.get("rest_error"):
+            console.print(f"   [warn]⚠ решту не викладено: {g['rest_error']}[/warn]")
+    _notes(env)
+
+
+@app.command("rest")
+def rest_cmd(
+    pack_id: str = typer.Argument(..., metavar="ID"),
+    context: str = typer.Option("", "--context", metavar="ФАЙЛ",
+                                help="context.md, якщо його немає в книзі пакетів"),
+    out: str = typer.Option("", "--out", metavar="ТЕКА", help="куди покласти .zvid решти"),
+    publish: bool = typer.Option(False, "--publish", help="одразу в чергу порталу"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Решта пакета після часткової відповіді — новим пакетом тієї самої серії (власник)."""
+    from nyshporka import ops as O
+
+    env = O.call("zvid.rest", {"id": pack_id, "context": context, "out": out,
+                               "publish": publish})
+    if _answer(env, as_json):
+        return
+    d = env.data
+    if not d["rest"]:
+        console.print(f"[muted]{pack_id}: незведеного немає[/muted]")
+    else:
+        where = "у черзі порталу" if d["published"] else d["file"]
+        console.print(f"↻ {pack_id} → {d['rest']}: {d['sets']} наборів, {d['pages']} стор. — {where}")
     _notes(env)
 
 

@@ -165,7 +165,9 @@ def zvid_give(a: GiveArgs) -> Envelope:
               "answered": rep.answered, "missing": rep.missing, "conf": rep.conf,
               "uploaded": uploaded})
     if rep.missing:
-        env.warn("partial", f"не зведено {rep.missing} рядків з {rep.rows}")
+        env.warn("partial", f"не зведено {rep.missing} рядків з {rep.rows}"
+                 + (" — решту власник викладе в чергу новим пакетом сам, drop не потрібен"
+                    if uploaded else ""))
     return env
 
 
@@ -259,6 +261,55 @@ def zvid_fetch(_: NoArgs) -> Envelope:
     if n:
         env.warn("suspects", f"{n} рядків на очі людині: nysh train gates --set <набір> "
                              "--suspects")
+    return env
+
+
+class RestArgs(BaseModel):
+    id: str = Field(description="id пакета, на який прийшла часткова відповідь")
+    context: str = Field(default="", description="context.md, якщо його немає в книзі пакетів "
+                                                 "(пакети до 0.38.6)")
+    out: str = Field(default="", description="тека для .zvid решти; з --publish можна не давати")
+    publish: bool = Field(default=False, description="одразу покласти решту в чергу порталу")
+
+
+@op("zvid.rest", summary="Решта пакета Зводу після часткової відповіді — новим пакетом",
+    args=RestArgs, mutates=True, long=True, section="lab", tier="rare", skill="zvid",
+    when="помічник віддав пакет Зводу частково — незведене віддати іншому")
+def zvid_rest(a: RestArgs) -> Envelope:
+    """Набори з недозведеними рядками → новий пакет тієї самої серії й контрольної.
+
+    `fetch` робить це сам після кожної часткової відповіді; руками — коли в
+    книзі пакетів немає контексту або `fetch` не зміг викласти.
+    """
+    import tempfile
+
+    from nyshporka.train import sets as S
+    from nyshporka.zvid import common as C
+    from nyshporka.zvid import owner, portal
+
+    if not a.out and not a.publish:
+        return fail("дай --out <тека> або --publish")
+    try:
+        with tempfile.TemporaryDirectory(prefix="zvid-rest-") as tmp:
+            rep = owner.rest(a.id, out=Path(a.out or tmp),
+                             context=Path(a.context) if a.context else None)
+            if rep is None:
+                return ok({"id": a.id, "rest": None})
+            published = None
+            if a.publish:
+                try:
+                    published = portal.publish(rep.file)
+                except C.ZvidError:
+                    owner.forget_rest(a.id, rep.id)
+                    raise
+            data = {"id": a.id, "rest": rep.id, "sets": len(rep.sets) - len(rep.control),
+                    "pages": rep.pages, "file": str(rep.file) if a.out else "",
+                    "published": published}
+    except (C.ZvidError, S.SetError, OSError) as exc:
+        return fail(str(exc))
+    env = ok(data)
+    if not a.publish:
+        env.suggest("zvid.publish", "покласти решту в чергу порталу")
     return env
 
 

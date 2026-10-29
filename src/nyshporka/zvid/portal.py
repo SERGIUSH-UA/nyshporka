@@ -144,9 +144,40 @@ def fetch(*, ws: Any = None) -> list[dict[str, Any]]:
         pidsumok = {"imported": {k: v["rows"] for k, v in rep.imported.items()},
                     "control": rep.control, "refused": rep.refused, "model": rep.model}
         _call("POST", f"/packs/{p['id']}/accepted", {"pidsumok": pidsumok})
-        out.append({"id": p["id"], "file": str(f), **pidsumok,
-                    "suspects": sum(v["suspects"] for v in rep.imported.values())})
+        item = {"id": p["id"], "file": str(f), **pidsumok,
+                "suspects": sum(v["suspects"] for v in rep.imported.values())}
+        if rep.missing:
+            item.update(_requeue_rest(p["id"], kind=str(p.get("kind") or ""), ws=ws))
+        out.append(item)
     return out
+
+
+def _requeue_rest(pack_id: str, *, kind: str, ws: Any) -> dict[str, Any]:
+    """Часткова відповідь: незведене — новим пакетом у чергу.
+
+    Повернутий пакет портал назад у чергу не бере (для нього це завершений
+    внесок), тож решту кладе власник окремим пакетом тієї самої серії.
+    """
+    import tempfile
+
+    from nyshporka.zvid import owner
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="zvid-rest-") as tmp:
+            rep = owner.rest(pack_id, out=Path(tmp), ws=ws)
+            if rep is None:
+                return {"rest": None}
+            # Локальна копія не потрібна: пакет лежить у сховищі порталу,
+            # а `collect` читає книгу пакетів, не файл.
+            try:
+                publish(rep.file, kind=kind)
+            except C.ZvidError:
+                owner.forget_rest(pack_id, rep.id, ws=ws)
+                raise
+    except C.ZvidError as exc:
+        return {"rest_error": f"{exc} — nysh zvid rest {pack_id} --context <файл> --publish"}
+    return {"rest": {"id": rep.id, "sets": len(rep.sets) - len(rep.control),
+                     "pages": rep.pages}}
 
 
 # ── помічник ────────────────────────────────────────────────────────────────

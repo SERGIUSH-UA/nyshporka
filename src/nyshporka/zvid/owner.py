@@ -190,7 +190,12 @@ def build(sets: list[str], *, out: Path, procedure: str = "arbiter",
                             "procedure": procedure, "file": str(path), "map": rep.sets,
                             "control": rep.control,
                             "frames": {s["name"]: s["frames"] for s in m_sets},
-                            "note": note, "returns": []})
+                            "note": note, "pages_per_file": max(1, pages_per_file),
+                            # Текст, не шлях: решту пакета (`rest`) пакують
+                            # тижнями пізніше, коли файла контексту вже може не бути.
+                            "context": context.read_text(encoding="utf-8")
+                            if context is not None else "",
+                            "returns": []})
     return rep
 
 
@@ -203,6 +208,8 @@ class CollectReport:
     control: dict[str, dict[str, Any]] = field(default_factory=dict)
     refused: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    #: Рядків, яких помічник не звів (`give --partial`): решта пакета.
+    missing: int = 0
 
 
 def _reference(reg: S.Registry, spec: S.SetSpec) -> dict[str, str]:
@@ -244,7 +251,8 @@ def collect(path: Path, *, ws: Workspace | None = None, helper: str = "") -> Col
             if len(p.parts) == 2 and p.parts[0] == "answers" and p.name.endswith(".answer.json"):
                 a = p.name[: -len(".answer.json")].rsplit("_part", 1)[0]
                 answers.setdefault(a, {})[p.name] = zf.read(info)
-    rep = CollectReport(id=pack_id, model=str(meta.get("model") or ""))
+    rep = CollectReport(id=pack_id, model=str(meta.get("model") or ""),
+                        missing=int(meta.get("missing") or 0))
     # Походження рядків — у мету злиття кожної сторінки (`import_answers`):
     # модель і агенти — самозвіт помічника з `give`, помічник — з порталу.
     source = {"zvid": pack_id, "model": rep.model, "agents": meta.get("agents"),
@@ -290,3 +298,92 @@ def collect(path: Path, *, ws: Workspace | None = None, helper: str = "") -> Col
         "control": rep.control, "refused": rep.refused})
     write_json(ledger_path, ledger)
     return rep
+
+
+# ── решта пакета ─────────────────────────────────────────────────────────────
+def unfinished(pack_id: str, *, ws: Workspace | None = None) -> list[str]:
+    """Робочі набори пакета, у злитті яких бракує хоч одного рядка."""
+    w = ws if ws is not None else workspace()
+    reg = S.registry(w)
+    ledger = read_json(ledger_dir(w) / f"{pack_id}.json", default=None)
+    if not isinstance(ledger, dict):
+        raise C.ZvidError(f"пакета {pack_id} немає в книзі пакетів цього простору")
+    control = set(ledger.get("control") or [])
+    out = []
+    for a, name in sorted((ledger.get("map") or {}).items()):
+        if a in control:
+            continue
+        spec = reg.load(name)
+        conf = reg.merge_conf(spec)
+        for pg in sorted(reg.crop_pages(spec)):
+            n = len(list((reg.crops_of(spec) / pg).glob("line_*.png")))
+            if any(str(i) not in conf.get(pg, {}) for i in range(n)):
+                out.append(name)
+                break
+    return out
+
+
+def _context_of(ledger: dict[str, Any], given: Path | None) -> str:
+    if given is not None:
+        return given.read_text(encoding="utf-8")
+    if ledger.get("context"):
+        return str(ledger["context"])
+    f = Path(str(ledger.get("file") or ""))
+    if f.is_file():
+        with C.open_zip(f) as zf:
+            if C.CONTEXT in zf.namelist():
+                return zf.read(C.CONTEXT).decode("utf-8")
+    return ""
+
+
+def rest(pack_id: str, *, out: Path, context: Path | None = None,
+         ws: Workspace | None = None) -> PackReport | None:
+    """Незведене після часткової відповіді — новим пакетом тієї самої серії.
+
+    Портал часткову відповідь приймає як завершений внесок, і повернути
+    пакет у чергу помічник уже не може. Тому решту пакує власник після
+    `collect`: набори з недозведеними рядками, та сама контрольна, той самий
+    підпис (серія). Друга відповідь дописує рядки в наявне злиття
+    (`import_answers`), а не затирає першу. `None` — недозведеного немає.
+    """
+    w = ws if ws is not None else workspace()
+    lpath = ledger_dir(w) / f"{pack_id}.json"
+    ledger = read_json(lpath, default=None)
+    if not isinstance(ledger, dict):
+        raise C.ZvidError(f"пакета {pack_id} немає в книзі пакетів цього простору")
+    if ledger.get("rest"):
+        raise C.ZvidError(f"решту пакета {pack_id} уже спаковано: {', '.join(ledger['rest'])}")
+    sets = unfinished(pack_id, ws=w)
+    if not sets:
+        return None
+    text = _context_of(ledger, context)
+    if not text:
+        raise C.ZvidError(f"контексту пакета {pack_id} немає ні в книзі пакетів, ні в "
+                          f"файлі пакета — дай --context")
+    amap: dict[str, str] = ledger.get("map") or {}
+    out.mkdir(parents=True, exist_ok=True)
+    ctx = out / f"{pack_id}.context.md"
+    ctx.write_text(text, encoding="utf-8")
+    try:
+        rep = build(sets, out=out, procedure=str(ledger.get("procedure") or "arbiter"),
+                    context=ctx, control=[amap[a] for a in ledger.get("control") or []],
+                    pages_per_file=int(ledger.get("pages_per_file") or 1),
+                    note=str(ledger.get("note") or ""), ws=w)
+    finally:
+        ctx.unlink(missing_ok=True)
+    new = read_json(rep.ledger, default={})
+    new["rest_of"] = pack_id
+    write_json(rep.ledger, new)
+    ledger["rest"] = [rep.id]
+    write_json(lpath, ledger)
+    return rep
+
+
+def forget_rest(pack_id: str, rest_id: str, *, ws: Workspace | None = None) -> None:
+    """Решту не вдалося викласти — прибрати її з книги, щоб `rest` можна було повторити."""
+    d = ledger_dir(ws)
+    (d / f"{rest_id}.json").unlink(missing_ok=True)
+    ledger = read_json(d / f"{pack_id}.json", default=None)
+    if isinstance(ledger, dict) and rest_id in (ledger.get("rest") or []):
+        ledger["rest"] = [x for x in ledger["rest"] if x != rest_id]
+        write_json(d / f"{pack_id}.json", ledger)

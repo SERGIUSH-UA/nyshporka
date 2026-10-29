@@ -92,7 +92,9 @@ nysh -w "<пісочниця>" train view ctx --set zv-01 --page <стор> --li
 ## Перед `give`
 
 - `nysh zvid status <id>` — усе зведено? Частину віддавай лише свідомо
-  (`--partial`) і скажи людині чому.
+  (`--partial`) і скажи людині чому. Незведене власник сам викладе в чергу
+  новим пакетом: після `give --partial` пакет не повертають (`drop` лише для
+  пакета, з якого не віддано нічого, і портал на відданому відмовить).
 - `give` сам перевіряє відповіді: ключі лише з завдання, `c` лише
   `high|med|low`, жодних маркерів `‹A|B›`, `[?]`. Відмова — виправ і повтори.
 - Людині скажи: скільки рядків, high/med/low, що лишилось непевним, де
@@ -106,7 +108,8 @@ nysh zvid pack --sets <н1>,<н2> --out <тека> --procedure crop-read \
 nysh zvid collect <id>.answer.zvid             # відповідь файлом
 nysh zvid publish <id>.zvid                    # або: у чергу порталу
 nysh zvid queue                                # хто що взяв
-nysh zvid fetch                                # усі повернуті → collect → «прийнято»
+nysh zvid fetch                                # усі повернуті → collect → «прийнято»; часткова — решта сама в чергу
+nysh zvid rest <id> --publish [--context <md>] # решта часткової відповіді руками (fetch не зміг)
 nysh train gates --set <набір> --suspects      # підозрілі — оком
 nysh zvid patch --pack <id> --voices <голос> --out <тека>   # новий голос без перепакування
 nysh zvid publish <id>.r2.zvidpatch            # доповнення — до пакета в черзі
