@@ -91,15 +91,22 @@ def case_dir_for(repo: str, fond: str, spr: str, letter: str, opys: str = "") ->
     from nyshporka.library import _norm_spr, _sidecar_opys
 
     base = workspace().raw / f"{F.REPO_SLUG.get(repo, repo.lower())}_{fond}"
-    # Ім'я теки - в одному показовому письмі для опису й літери справи:
-    # `355a` і `355а` - одна тека `op2д-spr-355а`.
-    from nyshporka.core.casekey import show_letter, show_part
+    # 🔴 Наявна тека знаходиться в БУДЬ-ЯКОМУ письмі: на диску лежать і
+    # `op4a-spr-2355`, і `op4а-spr-5323`, і `spr-7029a` поруч зі `spr-5а`.
+    # Нова тека — в одному показовому письмі (`op2д-spr-355а`): `355a` і
+    # `355а` — одна справа, отже й одна тека.
+    from nyshporka.core.casekey import norm_letter, norm_part, show_letter, show_part
 
-    letter = show_letter(letter)
-    plain = base / f"spr-{spr}{letter}"
+    letters = list(dict.fromkeys([show_letter(letter), norm_letter(letter),
+                                  str(letter or "").strip().lower()]))
+    plains = [base / f"spr-{spr}{lt}" for lt in letters]
+    plain = next((d for d in plains if d.is_dir()), plains[0])
     if not opys:
         return plain
-    own = base / f"op{show_part(opys)}-spr-{spr}{letter}"
+    opyses = list(dict.fromkeys([show_part(opys), norm_part(opys) or "",
+                                 str(opys).strip().lower()]))
+    owns = [base / f"op{o}-spr-{spr}{lt}" for o in opyses for lt in letters]
+    own = next((d for d in owns if d.is_dir()), owns[0])
     if own.is_dir() or not plain.is_dir():
         return own
     from nyshporka.cases.register import read_sidecar
@@ -316,8 +323,13 @@ def take(key: str, *, force: bool = False, reindex: bool = True,
     write_library(entries)
     db.build_index()
     out["reindexed"] = True
+    # 🔴 Порівняння — у каноні письма (`casekey`): бібліотека дає `5a`, план —
+    # `5а`, і пряма рівність казала «не видима» про кожну справу з літерою.
+    from nyshporka.core.casekey import norm_part
+
     mine = [e for e in entries
-            if str(e.fond) == fond and str(e.spr) == spr
+            if str(e.fond) == fond and norm_part(e.spr) == norm_part(spr)
+            and (not e.opys or norm_part(e.opys) == norm_part(opys))
             and (e.repo or "").upper() == repo]
     out["in_library"] = bool(mine)
     # Письмо — лише з паспорта справи (`script`/`langs`), не з жанру й років:

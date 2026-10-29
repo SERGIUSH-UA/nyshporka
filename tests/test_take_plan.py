@@ -225,3 +225,51 @@ def test_a_case_already_on_disk_is_not_taken_again(space, monkeypatch):
         F.disk_key("2", "5", "a"): "data/raw/dahmo_230/spr-5a"})
     with pytest.raises(T.TakeError, match="вже на диску"):
         T.take("DAHMO/230/2/5а", reindex=False)
+
+
+# ── наявна тека в будь-якому письмі; бібліотека після взяття ─────────────────
+@pytest.mark.parametrize("have,args", [
+    ("op4a-spr-2355", ("CDIAL", "201", "2355", "", "4a")),
+    ("op4a-spr-2355", ("CDIAL", "201", "2355", "", "4а")),
+    ("op4а-spr-5323", ("CDIAL", "201", "5323", "", "4a")),
+    ("spr-7029a", ("DAHMO", "315", "7029", "а", "")),
+    ("spr-7029a", ("DAHMO", "315", "7029", "a", "1")),
+    ("spr-2a", ("DAHMO", "230", "2", "а", "1")),
+    ("op1д-spr-406", ("DAHMO", "227", "406", "", "1d")),
+])
+def test_an_existing_folder_is_found_in_either_script(space, have, args):
+    """🔴 Тека на диску латинкою (`op4a-spr-2355`, `spr-7029a`, `spr-2a`) —
+    та сама справа, що й кирилицею; взяття не заводить поруч другу."""
+    repo, fond, spr, letter, opys = args
+    d = space / "data" / "raw" / f"{repo.lower()}_{fond}" / have
+    d.mkdir(parents=True)
+    assert T.case_dir_for(repo, fond, spr, letter, opys) == d
+
+
+def test_a_new_folder_gets_the_shown_form(space):
+    got = T.case_dir_for("DAHMO", "227", "355", "a", "2d")
+    assert got.name == "op2д-spr-355а"
+
+
+@pytest.mark.parametrize("letter,lib_spr", [("а", "5a"), ("a", "5a"), ("а", "5а")])
+def test_a_letter_case_is_seen_in_the_library_after_take(space, monkeypatch, letter, lib_spr):
+    """`in_library` порівнює в каноні письма: бібліотека пише `5a`, план — `5а`."""
+    from types import SimpleNamespace
+
+    from nyshporka import library as L
+    from nyshporka.cases import acquire as A
+    from nyshporka.cases import db
+    from nyshporka.fonds import registry as F
+
+    monkeypatch.setattr(T, "_row", lambda key: (
+        "DAHMO", "230", "2", "5", letter, _row(commons_title="x.pdf"), space / "r.tsv"))
+    monkeypatch.setattr(F, "live_on_disk", lambda repo, fond: {})
+    monkeypatch.setattr(A, "from_commons", lambda case_dir, *a, **k: SimpleNamespace(
+        pages=1, bytes=1, case_dir=case_dir, files=[], skipped=0))
+    seen = [SimpleNamespace(fond="230", spr=lib_spr, opys="2", repo="DAHMO", script="")]
+    monkeypatch.setattr(L, "build_library", lambda: seen)
+    monkeypatch.setattr(L, "write_library", lambda e: None)
+    monkeypatch.setattr(db, "build_index", lambda: None)
+    assert T.take("DAHMO/230/2/5а")["in_library"] is True
+    seen[0].opys = "3"          # інший опис — інша книга
+    assert T.take("DAHMO/230/2/5а")["in_library"] is False
