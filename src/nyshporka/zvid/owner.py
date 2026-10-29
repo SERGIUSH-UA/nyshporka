@@ -68,8 +68,13 @@ def _page_image(spec: S.SetSpec, cut_page: dict[str, Any], page: str) -> Any:
 def build(sets: list[str], *, out: Path, procedure: str = "arbiter",
           context: Path | None = None, control: list[str] | None = None,
           pages_per_file: int = 1, note: str = "", ws: Workspace | None = None,
-          image_of: Any = None) -> PackReport:
-    """Спакувати набори (і контрольні) в один `.zvid`."""
+          image_of: Any = None,
+          only: dict[str, dict[str, list[int]]] | None = None) -> PackReport:
+    """Спакувати набори (і контрольні) в один `.zvid`.
+
+    `only` — {набір: {сторінка: [рядки]}} для решти пакета: їдуть лише ці
+    сторінки, а завдання помічника — лише з цих рядків.
+    """
     if procedure not in T.PROCEDURES:
         raise C.ZvidError(f"процедура «{procedure}» невідома: {' | '.join(T.PROCEDURES)}")
     w = ws if ws is not None else workspace()
@@ -114,7 +119,9 @@ def build(sets: list[str], *, out: Path, procedure: str = "arbiter",
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
         for n in order:
             spec, a = specs[n], alias[n]
-            pages = sorted(reg.crop_pages(spec))
+            all_pages = sorted(reg.crop_pages(spec))
+            want = (only or {}).get(n)
+            pages = [pg for pg in all_pages if want is None or pg in want]
             cut = reg.cut_meta(spec)
             new_cut = {**cut, "source_run": "", "pages": {}}
             for pg in pages:
@@ -169,8 +176,11 @@ def build(sets: list[str], *, out: Path, procedure: str = "arbiter",
                                hint_sources=sources)
             zf.writestr(f"sets/{a}/{S.SET_FILE}",
                         json.dumps(packed.as_dict(), ensure_ascii=False, indent=1))
+            # Відбиток — з усіх сторінок набору: `collect` звіряє його з набором
+            # цілим, і решта пакета з частиною сторінок має лягти так само.
             m_sets.append({"name": a, "pages": pages,
-                           "frames": C.frames_sha(cut, pages)})
+                           "frames": C.frames_sha(cut, all_pages),
+                           **({"only": {pg: want[pg] for pg in pages}} if want else {})})
         rules = T.CROP_RULES if procedure == "crop-read" else T.RULES
         from nyshporka import __version__
 
@@ -301,25 +311,25 @@ def collect(path: Path, *, ws: Workspace | None = None, helper: str = "") -> Col
 
 
 # ── решта пакета ─────────────────────────────────────────────────────────────
-def unfinished(pack_id: str, *, ws: Workspace | None = None) -> list[str]:
-    """Робочі набори пакета, у злитті яких бракує хоч одного рядка."""
+def unfinished(pack_id: str, *, ws: Workspace | None = None) -> dict[str, dict[str, list[int]]]:
+    """Незведене робочих наборів пакета: {набір: {сторінка: [рядки]}}.
+
+    Рахується тим самим відбором, що й завдання (`T.pending_rows`): порожня
+    смужка в завдання не йде, тож і «незведеною» не є.
+    """
     w = ws if ws is not None else workspace()
     reg = S.registry(w)
     ledger = read_json(ledger_dir(w) / f"{pack_id}.json", default=None)
     if not isinstance(ledger, dict):
         raise C.ZvidError(f"пакета {pack_id} немає в книзі пакетів цього простору")
     control = set(ledger.get("control") or [])
-    out = []
+    out: dict[str, dict[str, list[int]]] = {}
     for a, name in sorted((ledger.get("map") or {}).items()):
         if a in control:
             continue
-        spec = reg.load(name)
-        conf = reg.merge_conf(spec)
-        for pg in sorted(reg.crop_pages(spec)):
-            n = len(list((reg.crops_of(spec) / pg).glob("line_*.png")))
-            if any(str(i) not in conf.get(pg, {}) for i in range(n)):
-                out.append(name)
-                break
+        rows = T.pending_rows(reg, reg.load(name))
+        if rows:
+            out[name] = rows
     return out
 
 
@@ -353,8 +363,8 @@ def rest(pack_id: str, *, out: Path, context: Path | None = None,
         raise C.ZvidError(f"пакета {pack_id} немає в книзі пакетів цього простору")
     if ledger.get("rest"):
         raise C.ZvidError(f"решту пакета {pack_id} уже спаковано: {', '.join(ledger['rest'])}")
-    sets = unfinished(pack_id, ws=w)
-    if not sets:
+    todo = unfinished(pack_id, ws=w)
+    if not todo:
         return None
     text = _context_of(ledger, context)
     if not text:
@@ -365,10 +375,10 @@ def rest(pack_id: str, *, out: Path, context: Path | None = None,
     ctx = out / f"{pack_id}.context.md"
     ctx.write_text(text, encoding="utf-8")
     try:
-        rep = build(sets, out=out, procedure=str(ledger.get("procedure") or "arbiter"),
+        rep = build(list(todo), out=out, procedure=str(ledger.get("procedure") or "arbiter"),
                     context=ctx, control=[amap[a] for a in ledger.get("control") or []],
                     pages_per_file=int(ledger.get("pages_per_file") or 1),
-                    note=str(ledger.get("note") or ""), ws=w)
+                    note=str(ledger.get("note") or ""), ws=w, only=todo)
     finally:
         ctx.unlink(missing_ok=True)
     new = read_json(rep.ledger, default={})

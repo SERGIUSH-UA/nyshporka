@@ -142,7 +142,8 @@ def take(path: Path, *, base: Path | None = None, fresh: bool = False) -> TakeRe
     for s in manifest.get("sets") or []:
         got = T.export_tasks(str(s["name"]), pages_per_file=int(manifest.get("pages_per_file") or 1),
                              out=root / C.TASKS, ws=ws, procedure=rep.procedure,
-                             next_cmd=f"nysh zvid give {pack_id} --model <модель>")
+                             next_cmd=f"nysh zvid give {pack_id} --model <модель>",
+                             only=s.get("only"))
         rep.tasks += got.files
         rep.rows += got.rows
         rep.warnings += [f"{s['name']}: {w}" for w in got.warnings]

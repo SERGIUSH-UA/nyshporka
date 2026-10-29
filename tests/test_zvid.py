@@ -244,14 +244,16 @@ def test_rest_repacks_only_unfinished_sets_of_partial_answer(owner: W.Workspace,
     _answer_all(sb)
     for f in sorted((sb / C.TASKS).glob(f"{work}_part*.answer.json"))[:1]:
         ans = json.loads(f.read_text(encoding="utf-8"))
-        ans.pop(sorted(ans)[-1])
+        left = sorted(ans)[-1]
+        ans.pop(left)
         f.write_text(json.dumps(ans, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(C.ZvidError, match="--partial"):
         H.give(rep.id, model="m", base=tmp_path / "helper")
     given = H.give(rep.id, model="m", partial=True, base=tmp_path / "helper")
     got = OW.collect(given.file, ws=owner)
     assert got.missing == 1
-    assert OW.unfinished(rep.id, ws=owner) == ["x17-z4-0006L"]
+    pg, idx = left.rsplit(":", 1)
+    assert OW.unfinished(rep.id, ws=owner) == {"x17-z4-0006L": {pg: [int(idx)]}},         "лише незведений рядок; порожні смужки, яких не було в завданнях, — ні"
 
     (tmp_path / "context.md").unlink()     # контекст — з книги пакетів, не з файла
     rest = OW.rest(rep.id, out=tmp_path / "rest", ws=owner)
@@ -263,10 +265,14 @@ def test_rest_repacks_only_unfinished_sets_of_partial_answer(owner: W.Workspace,
     with pytest.raises(C.ZvidError, match="уже спаковано"):
         OW.rest(rep.id, out=tmp_path / "rest", ws=owner)
 
-    sb2 = H.take(rest.file, base=tmp_path / "helper2").root
+    took2 = H.take(rest.file, base=tmp_path / "helper2")
+    sb2 = took2.root
+    work2 = next(a for a, n in rest.sets.items() if n == "x17-z4-0006L")
+    ids2 = [k for f in sorted((sb2 / C.TASKS).glob(f"{work2}_part*.txt")) for k in H._task_ids(f)]
+    assert ids2 == [left], "друга рука бачить лише незведене, не цілу сторінку"
     _answer_all(sb2)
     OW.collect(H.give(rest.id, model="m2", base=tmp_path / "helper2").file, ws=owner)
-    assert OW.unfinished(rest.id, ws=owner) == [] and OW.unfinished(rep.id, ws=owner) == []
+    assert OW.unfinished(rest.id, ws=owner) == {} and OW.unfinished(rep.id, ws=owner) == {}
 
     OW.forget_rest(rep.id, rest.id, ws=owner)
     assert not rest.ledger.exists() and OW.rest(rep.id, out=tmp_path / "r3", ws=owner) is None

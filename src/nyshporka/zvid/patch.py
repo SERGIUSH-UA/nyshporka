@@ -199,7 +199,8 @@ def apply(path: Path, *, base: Path | None = None) -> ApplyReport:
         got = T.export_tasks(str(s["name"]), pages_per_file=int(state.get("pages_per_file") or 1),
                              out=root / C.TASKS, ws=ws,
                              procedure=str(state.get("procedure") or "arbiter"),
-                             next_cmd=f"nysh zvid give {pack_id} --model <модель>")
+                             next_cmd=f"nysh zvid give {pack_id} --model <модель>",
+                             only=s.get("only"))
         rep.tasks += got.files
     state.setdefault("patches", []).append(rev)
     write_json(root / C.STATE, state)

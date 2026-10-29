@@ -238,6 +238,26 @@ def page_rows(reg: S.Registry, spec: S.SetSpec, page: str,
     return rows
 
 
+def pending_rows(reg: S.Registry, spec: S.SetSpec) -> dict[str, list[int]]:
+    """Рядки, які пішли б у завдання й ще не зведені: {сторінка: [індекси]}.
+
+    Той самий відбір, що в `export_tasks(only_missing=True)`: смужки без
+    прочитання й без чорнила в завдання не йдуть, тож і незведеними не є.
+    """
+    conf = reg.merge_conf(spec)
+    voices = spec.voices()
+    out: dict[str, list[int]] = {}
+    for pg in sorted(reg.crop_pages(spec)):
+        for r in page_rows(reg, spec, pg, voices):
+            if str(r["idx"]) in conf.get(pg, {}):
+                continue
+            png = reg.crop_path(spec, pg, r["idx"])
+            if png is not None and G.ink_fraction(png) < G.INK_MIN:
+                continue
+            out.setdefault(pg, []).append(r["idx"])
+    return out
+
+
 def row_block(r: dict[str, Any], fold: bool) -> str:
     vs = r["v"]
     tail = [f"  {tag}: {text}" + (f"  ⚠ {doubt}" if doubt else "")
@@ -279,7 +299,9 @@ def export_tasks(name: str, *, pages: list[str] | None = None, pages_per_file: i
                  out: Path | None = None, sheets: bool = True, fold: bool = True,
                  skip_blank: bool = True, hints: bool = True, ws: Workspace | None = None,
                  image_of: Any = None, procedure: str = "arbiter",
-                 next_cmd: str = "") -> ExportReport:
+                 next_cmd: str = "",
+                 only: dict[str, list[int]] | None = None) -> ExportReport:
+    """Завдання набору. `only` — {сторінка: [рядки]}: лише ці (решта пакета Зводу)."""
     if procedure not in PROCEDURES:
         raise TaskError(f"процедура «{procedure}» невідома: {' | '.join(PROCEDURES)}")
     w = ws if ws is not None else workspace()
@@ -307,6 +329,8 @@ def export_tasks(name: str, *, pages: list[str] | None = None, pages_per_file: i
     rows = [r for pg in all_pages for r in page_rows(reg, spec, pg, voices)]
     rep = ExportReport(set=name, out=out or reg.set_dir(name) / TASKS_DIR)
 
+    if only is not None:
+        rows = [r for r in rows if r["idx"] in set(only.get(r["page"]) or ())]
     if only_missing:
         # 🔴 «Зведено» — це наявність conf у меті, а не непорожній текст: арбітр
         # має право лишити смужку порожньою (`"m": ""`), і такий рядок не має
