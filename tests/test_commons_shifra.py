@@ -371,3 +371,57 @@ def test_glued_word_rule():
     assert glued_word("261Справа") and glued_word("12bis")
     assert not glued_word("2а") and not glued_word("8433") and not glued_word("@fuzovka")
     assert not glued_word("pt1a") and not glued_word("7864_parish56_1846")
+
+
+# ── один розбір назв Commons: паспорт `nysh get` і збирач реєстру опису ─────
+
+_SPILNI = [
+    "ДАХмО 227-2д-905 Объявления о торгах (1899).pdf",
+    "ДАХмО 227-1-6563а Справи про щось.pdf",
+    "ДАХмО 227-1d-356. 1851 рік. Метричні книги.pdf",
+    "ДАХмО Ф.227, о.2, с.6026 Списки мешканців.pdf",
+    "ДАХмО Ф. 227 О. 5доп С. 291 Статистичний опис.pdf",
+    "1845 год. ДАХМО. Фонд 227, опись 6д, дело 34. Метрическая книга.pdf",
+    "ДАХмО 227 1 6563 Метрична книга.pdf",
+    "ДАХмО 227-01-0624. Родовід.pdf",
+    "ДАХмО 227 -1-2621 Iliński.pdf",
+    "ДАХмО 227-1-2640 Дзічковських.pdf",
+    "ДАХмО фонд 227, опис 1, справа 54а. Метрична книга.pdf",
+    "ДАХмО-227-1-253. Справа про призначення.pdf",
+    # без шифри в обох
+    "ДАХмО фонд 227 опис 1 том 1.pdf",
+    "ДАХмО 227-1-261Справа про призначення.pdf",
+    "ДАХмО 227 1858 1859 метрики.pdf",
+]
+
+
+@pytest.mark.parametrize("title", _SPILNI)
+def test_get_and_registry_collector_agree(title):
+    """🔴 Обидва шляхи дають ОДИН ключ: справа, яку `nysh get` назвав, у реєстрі
+    опису стоїть під тією самою шифрою, і `cases take` її знаходить."""
+    from nyshporka.core import casekey as ck
+    from nyshporka.fonds.collect.commons import parse_shifra
+
+    got = shifra_of_title(title)
+    reg = parse_shifra(title, ("ДАХмО", "ДАХМО"), "227")
+    k_get = ck.make(got["archive"], got["fond"], got["inv"], got["spr"]) if got else None
+    k_reg = ck.make("DAHMO", "227", reg[0], reg[1] + reg[2]) if reg else None
+    assert k_get == k_reg
+
+
+def test_collector_keeps_fond_that_looks_like_a_year():
+    """Збирач знає свій фонд: ЦДІАК ф.2081 — фонд, а не рік."""
+    from nyshporka.fonds.collect.commons import parse_shifra
+
+    assert parse_shifra("ЦДІАК 2081-1-5. Справа.pdf", ("ЦДІАК",), "2081") == ("1", "5", "")
+    assert shifra_of_title("ЦДІАК 2081-1-5. Справа.pdf") == {}
+
+
+def test_collector_reads_literal_opys():
+    from nyshporka.fonds.collect.commons import parse_shifra
+
+    codes = ("ДАХмО",)
+    assert parse_shifra("ДАХмО 227-2д-905 X.pdf", codes, "227") == ("2д", "905", "")
+    assert parse_shifra("ДАХмО 227-1d-356. X.pdf", codes, "227") == ("1д", "356", "")
+    assert parse_shifra("ДАХмО Ф. 227 О. 5доп С. 291 X.pdf", codes, "227") == ("5доп", "291", "")
+    assert parse_shifra("ДАХмО 227-2д-355a X.pdf", codes, "227") == ("2д", "355", "а")

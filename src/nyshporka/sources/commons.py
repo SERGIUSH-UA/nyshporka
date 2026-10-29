@@ -16,10 +16,10 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 from urllib.parse import quote
 
-from nyshporka.core.casekey import LETTERS
+from nyshporka.core.casekey import LETTERS, OPYS_TOKEN
 from nyshporka.sources.base import (
     FetchResult,
     Hit,
@@ -32,6 +32,8 @@ from nyshporka.sources.base import (
 from nyshporka.sources.http import Fetcher, HttpError, app_ua
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from nyshporka.sources.base import ProgressFn
 
 BASE = "https://commons.wikimedia.org"
@@ -48,21 +50,38 @@ def _sha1_of(path: Path) -> str:
 
 
 _LET = LETTERS
-_SEP_DASH = r"\s*[-–]\s*"
+#: Між фондом, описом і справою — дефіс (з пробілами довкола чи без) або самі
+#: пробіли: ДАЖО ф.146 заливали і «146-01-0624», і «146 01 0767», і «146 -1-2621».
+_SEP = r"(?:\s*[-–]\s*|[ _]+)"
 _REPO_WORD = r"(?P<repo>[A-Za-zА-Яа-яІЇЄҐіїєґ']+)"
-#: Опис буває літерним: `2д`, `1d`, `5доп` — тому літер після цифр кілька.
-_OPYS = rf"(?P<opys>\d+[{_LET}]*)"
+#: Опис буває літерним: `2д`, `1d`, `5доп` — та сама цеглина, що скрізь у пакеті.
+_OPYS = rf"(?P<opys>{OPYS_TOKEN})"
+#: 🔴 Літера справи — одна й злито; за нею ні літери, ні цифри. «…-261Справа
+#: про…» не дає ні фантомної справи 26, ні «261С»: такий файл лишається без
+#: шифри (фантом гірший за пропуск — він виглядає як відкриття справи).
 _SPR = rf"(?P<spr>\d+)(?P<lit>[{_LET}]?)(?![{_LET}\d])"
 _FOND = r"(?P<fond>(?:[А-ЯЄІЇҐA-Z]{1,2}-)?\d+)"
 
-#: «ДАХмО 227-2д-905 …», «ДАХмО 227-1-6563а …», «ДАХмО 227-1d-356. …».
+#: «ДАХмО 227-2д-905 …», «ДАХмО 227-1-6563а …», «ЦДІАК-972-1-253. …», «ДАЖО 146 01 0767».
 _COMPACT = re.compile(
-    rf"{_REPO_WORD}[\s_.\-]*(?P<fmark>ф(?:онд)?\.?\s*)?{_FOND}(?!\d){_SEP_DASH}{_OPYS}"
-    rf"{_SEP_DASH}{_SPR}", re.IGNORECASE)
+    rf"{_REPO_WORD}[\s_.\-–]*(?P<fmark>ф(?:онд)?\.?\s*)?{_FOND}(?!\d)(?P<s1>{_SEP}){_OPYS}"
+    rf"(?P<s2>{_SEP}){_SPR}", re.IGNORECASE)
 #: «ДАХмО Ф.227, о.2, с.6026», «Ф. 227 О. 5доп С. 291», «Фонд 227, опись 6д, дело 34».
+#: Опис фонду без справи («фонд 227 опис 1 том 1») сюди не влучає: після опису
+#: мусить стояти позначка справи.
 _WORDED = re.compile(
     rf"{_REPO_WORD}\W+(?:фонд|ф)\W*{_FOND}(?!\d)\W*(?:опис[ьи]?|оп|о)\W*{_OPYS}"
     rf"(?![\d])\W*(?:справа|спр|дело|дел|д|с)\W*{_SPR}", re.IGNORECASE)
+_YEAR = re.compile(r"(?:17|18|19|20)\d\d")
+
+
+class TitleShifra(NamedTuple):
+    """Шифра, знайдена в назві файла: слово архіву як написане, номери — показові."""
+
+    repo_word: str
+    fond: str
+    opys: str
+    spr: str
 
 
 def title_of_ref(ref: str) -> str:
@@ -84,6 +103,43 @@ def _plain(num: str) -> str:
     return f"{int(m.group(1))}{m.group(2)}" if m else num
 
 
+def title_shifras(title: str, *, years_ok: bool = False) -> Iterator[TitleShifra]:
+    """🔴 ЄДИНИЙ розбір шифри в назві файла Commons — для паспорта `nysh get` і
+    для збирача реєстру опису (`fonds.collect.commons.parse_shifra`).
+
+    Доти їх було два, і вони розходились: збирач реєстру не бачив жодної з
+    форм `227-2д-905`, `227-1d-356`, `Ф. 227 О. 5доп С. 291`, а паспорт — форми
+    через пробіли `ДАЖО 146 01 0767`. Справа, яку `nysh get` уже називав, у
+    реєстрі опису лишалась «без шифри», і `cases take` її не знаходив.
+
+    Віддає всі кандидати в порядку появи; архів і фонд відбирає викликач.
+    Номери — без провідних нулів, опис і літера — у показовому письмі (`2д`,
+    `6563а`), як і всюди в паспортах.
+
+    `years_ok=False`: голе чотирицифрове 1700–2099 без «ф.» фондом не
+    береться («ДАХмО 2021-1-12» — рік). Збирач, що знає свій фонд, ставить
+    `True`: у нього фонд 2081 — це фонд 2081.
+    """
+    from nyshporka.core.casekey import show_letter, show_part
+
+    text = title or ""
+    for pattern in (_COMPACT, _WORDED):
+        for m in pattern.finditer(text):
+            if pattern is _COMPACT:
+                if (not years_ok and not m.group("fmark")
+                        and _YEAR.fullmatch(m.group("fond"))):
+                    continue
+                # Через самі пробіли («ДАЖО 146 1 3099») шифру нічим не відрізнити
+                # від ряду років: «ДАХмО 315 1858 1859» — не опис 1858.
+                if (not m.group("s1").strip(" _") and not m.group("s2").strip(" _")
+                        and _YEAR.fullmatch(m.group("opys"))):
+                    continue
+            yield TitleShifra(
+                repo_word=m.group("repo"), fond=m.group("fond"),
+                opys=_plain(show_part(m.group("opys"))),
+                spr=_plain(m.group("spr")) + show_letter(m.group("lit")))
+
+
 def shifra_of_title(title: str) -> dict[str, str]:
     """Шифра справи з назви файла Commons: `archive/fond/inv/spr`, або `{}`.
 
@@ -92,25 +148,28 @@ def shifra_of_title(title: str) -> dict[str, str]:
     вигадана шифра приписує теці чужу справу.
     """
     from nyshporka.archives.pack import active
-    from nyshporka.core.casekey import show_letter, show_part
 
     pk = active()
-    for pattern in (_COMPACT, _WORDED):
-        for m in pattern.finditer(title or ""):
-            # 🔴 «ДАХмО 2021-1-12» - рік видання, а не фонд 2021. Без слова «ф.»
-            # голе чотирицифрове число 1700-2099 за фонд не береться: краще
-            # без шифри, ніж з вигаданою.
-            if (pattern is _COMPACT and not m.group("fmark")
-                    and re.fullmatch(r"(?:17|18|19|20)\d\d", m.group("fond"))):
-                continue
-            code = pk.resolve_code(m.group("repo"))
-            if not code:
-                continue
-            opys = _plain(show_part(m.group("opys")))
-            spr = _plain(m.group("spr")) + show_letter(m.group("lit"))
-            return {"archive": pk.canon_repo(code), "fond": m.group("fond"),
-                    "inv": opys, "spr": spr}
+    for got in title_shifras(title):
+        code = pk.resolve_code(got.repo_word)
+        if code:
+            return {"archive": pk.canon_repo(code), "fond": got.fond,
+                    "inv": got.opys, "spr": got.spr}
     return {}
+
+
+def shifra_line_of_title(title: str) -> str:
+    """Та сама шифра одним рядком для паспорта: «ДАХмО 227-2д-905»; або порожньо.
+
+    Рядок — у тій формі, яку бібліотека читає з паспорта (`library._sidecar_case`).
+    """
+    from nyshporka.archives.pack import active
+
+    got = shifra_of_title(title)
+    if not got:
+        return ""
+    label = active().repo_label(got["archive"]) or got["archive"]
+    return f"{label} {got['fond']}-{got['inv']}-{got['spr']}"
 
 
 def shifra_of_ref(source: str, ref: str) -> dict[str, str]:

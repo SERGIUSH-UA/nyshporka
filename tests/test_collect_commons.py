@@ -15,7 +15,6 @@ from nyshporka.fonds.collect.commons import (
     CommonsCollector,
     norm_title,
     parse_shifra,
-    shifra_pattern,
 )
 from nyshporka.sources.base import SourceError
 from nyshporka.sources.commons import CommonsSource
@@ -70,22 +69,20 @@ def test_underscore_and_space_are_the_same_page() -> None:
 def test_a_letter_after_a_space_is_a_title_not_a_shifra() -> None:
     """🔴 «230-1-2640 Дзічковських» — це справа 2640, а не фантомна «2640д»,
     якої в описі немає. Справжня при цьому лишалась би «без скана»."""
-    p = shifra_pattern("ДАХмО", "230")
-    m = p.search("ДАХмО 230-1-2640 Дзічковських.pdf")
-    assert m and (m.group(1), m.group(2), m.group(3)) == ("1", "2640", "")
-    m2 = p.search("ДАХмО 230-1-24а. Опис.pdf")
-    assert m2 and m2.group(3) == "а"
+    codes = ("ДАХмО",)
+    assert parse_shifra("ДАХмО 230-1-2640 Дзічковських.pdf", codes, "230") == ("1", "2640", "")
+    assert parse_shifra("ДАХмО 230-1-24а. Опис.pdf", codes, "230") == ("1", "24", "а")
 
 
 def test_hyphen_between_archive_and_fond_is_still_a_shifra() -> None:
     """🔴 Заливач ЦДІАК ф.972 ставив дефіс замість пробілу — «ЦДІАК-972-1-253».
     Половина фонду лягала в «без шифри», і справа з живим сканом на Commons
     виглядала як така, якої онлайн немає."""
-    p = shifra_pattern("ЦДІАК", "972")
-    m = p.search("ЦДІАК-972-1-253. Справа про призначення Лукаша Полюховича.pdf")
-    assert m and (m.group(1), m.group(2)) == ("1", "253")
-    m2 = p.search("ЦДІАК 972-2-4. 1800-1838. Сповідальні розписи.pdf")
-    assert m2 and (m2.group(1), m2.group(2)) == ("2", "4")
+    codes = ("ЦДІАК",)
+    assert parse_shifra("ЦДІАК-972-1-253. Справа про призначення Лукаша Полюховича.pdf",
+                        codes, "972") == ("1", "253", "")
+    assert parse_shifra("ЦДІАК 972-2-4. 1800-1838. Сповідальні розписи.pdf",
+                        codes, "972") == ("2", "4", "")
 
 
 def test_a_glued_title_gives_no_shifra_instead_of_a_phantom_case() -> None:
@@ -93,11 +90,10 @@ def test_a_glued_title_gives_no_shifra_instead_of_a_phantom_case() -> None:
     без пробілу. Без запобіжника регекс відступав по цифрах і віддавав
     ФАНТОМНУ справу 26, якої у фонді немає; фантом гірший за пропуск, бо
     виглядає як відкриття. Правильна відповідь — «шифри не видно»."""
-    p = shifra_pattern("ЦДІАК", "972")
-    assert p.search("ЦДІАК-972-1-261Справа про призначення Теодора.pdf") is None
+    assert parse_shifra("ЦДІАК-972-1-261Справа про призначення Теодора.pdf",
+                        ("ЦДІАК",), "972") is None
     # а розділений пробілом номер із літерою лишається шифрою
-    ok = shifra_pattern("ДАХмО", "230").search("ДАХмО 230-1-24а. Опис.pdf")
-    assert ok and (ok.group(2), ok.group(3)) == ("24", "а")
+    assert parse_shifra("ДАХмО 230-1-24а. Опис.pdf", ("ДАХмО",), "230") == ("1", "24", "а")
 
 
 def test_spaces_between_fond_opys_and_case_are_still_a_shifra() -> None:
