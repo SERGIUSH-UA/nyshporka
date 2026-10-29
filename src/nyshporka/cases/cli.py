@@ -167,6 +167,16 @@ def cmd_list(
     console.print(f"[muted]показано {len(rows)}[/muted]")
 
 
+def _canon_key(case: str) -> str:
+    """Канонічний ключ шифри чи ключа, написаних будь-яким письмом; «» — не шифра."""
+    from nyshporka.pagestore import resolve_case
+
+    try:
+        return resolve_case(case).key
+    except Exception:  # noqa: BLE001 — підрядок назви, а не шифра
+        return ""
+
+
 @app.command("show")
 def cmd_show(
     case: str = typer.Argument(..., help="Шифра, ключ або підрядок назви"),
@@ -177,6 +187,13 @@ def cmd_show(
         _warn_stale()
     rows = db.query_rows(q=case, limit=0)
     exact = [r for r in rows if case.strip() in (r.get("key"), r.get("shifra"))]
+    if not exact:
+        # Ключ у реєстрі канонічний (`5dop`), а людина пише, як архів (`5доп`):
+        # підрядок тоді не збігається, тож шифру зводимо через той самий розбір.
+        key = _canon_key(case)
+        if key:
+            exact = db.query_rows(q=key, limit=0)
+            exact = [r for r in exact if r.get("key") == key]
     rows = exact or rows
     if not rows:
         console.print(f"[warn]не знайшов справу: {case}[/warn]")
