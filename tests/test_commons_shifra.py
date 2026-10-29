@@ -246,6 +246,8 @@ def test_align_names_use_shown_form(_ws):
     ("op3дод-spr-4", "3dod"), ("op3dod-spr-4", "3dod"), ("op5доп-spr-1", "5dop"),
     ("op1д-spr-406", "1d"), ("op2spr-148", "2"), ("op2-spr-148", "2"),
     ("op4а_x", "4a"),
+    # `spr` злите з літерним описом — теж роздільник, не частина опису
+    ("op1dspr-406", "1d"), ("op1дspr-406", "1d"), ("op5допspr-291", "5dop"),
 ])
 def test_op_prefix_any_suffix(stem, want):
     from nyshporka.library import _OP_PREFIX_RE, _norm_spr
