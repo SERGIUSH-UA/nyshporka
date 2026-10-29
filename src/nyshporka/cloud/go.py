@@ -33,6 +33,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import statistics
 import time
 from collections.abc import Callable, Sequence
@@ -107,6 +108,17 @@ class GoRefused(CloudError):
     def __init__(self, message: str, *, verdict: str = "refused") -> None:
         super().__init__(message)
         self.verdict = verdict
+
+
+def joined_remote(frames_dir: Path) -> bool:
+    """Маніфест бакета справи, зібраної з плівок: імена кадрів — не ті, що в архівах."""
+    from nyshporka.cloud.verify import REMOTE_FRAMES
+
+    try:
+        data = json.loads((Path(frames_dir) / REMOTE_FRAMES).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and bool(data.get("joined"))
 
 
 class Busy(GoRefused):
@@ -936,6 +948,10 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
         if rotate_landscape:
             raise GoRefused("кадри лежать у бакеті (`_r2_frames.json`) — `--rotate-landscape` "
                             "їх не поверне; докачайте кадри в теку або поверніть до заливки")
+        if joined_remote(ref.frames_dir):
+            raise GoRefused("справу зібрано з кількох плівок (`nysh cases join`): у бакеті кадри "
+                            "лежать в архівах плівок під іншими іменами, і хмара їх не розпакує. "
+                            "Перечитати можна, лише докачавши кадри в теку (`nysh get`)")
     say("frames", f"{rep.n} кадрів · {rep.total_mb:.0f} МБ "
                   f"(медіана {rep.median_mb:.1f} МБ)", **rep.as_dict())
     # кадри в бакеті: записи `_fs_meta.json` без файлів на диску — норма, не биті кадри

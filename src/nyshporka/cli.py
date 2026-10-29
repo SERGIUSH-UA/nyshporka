@@ -2492,12 +2492,21 @@ def cases_join_cmd(
     dry: bool = typer.Option(False, "--dry-run", help="лише показати, що ляже"),
     copy: bool = typer.Option(False, "--copy",
                               help="копіювати, якщо жорстке посилання не створюється"),
+    shifra: str = typer.Option("", "--shifra",
+                               help="шифра справи; плівки вже прочитано — текст переїде в справу"),
+    title: str = typer.Option("", "--title", help="назва справи для паспорта"),
+    years: str = typer.Option("", "--years", help="роки справи: «1795» або «1795-1797»"),
+    no_rebuild: bool = typer.Option(False, "--no-rebuild",
+                                    help="не перебудовувати каталог справ (пачка: один "
+                                         "nysh cases build у кінці)"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Зібрати справу, розірвану між плівками («CONTINUED ON ANOTHER ROLL»).
 
     Кадри не копіюються: у теці справи — жорсткі посилання з іменами
-    `<№>_<плівка>_<кадр>`; порядок кадрів — за порядком --part. Паспорт — далі `nysh case <тека>`.
+    `<№>_<плівка>_<кадр>` (кадри в бакеті — маніфест); порядок — за порядком
+    --part. З --shifra справа отримує паспорт, а прочитане плівок — прогони
+    справи з усіма голосами; без неї паспорт — далі `nysh case <тека>`.
     """
     from rich.markup import escape as _e
 
@@ -2505,13 +2514,18 @@ def cases_join_cmd(
     from nyshporka.cli_emit import answer, notes
 
     env = O.call("cases.join", {"dest": dest, "parts": part, "dry_run": dry,
-                                "copy_frames": copy})
+                                "copy_frames": copy, "shifra": shifra, "title": title,
+                                "years": years, "rebuild": not no_rebuild})
     if answer(env, as_json):
         return
     d = env.data or {}
     console.print(f"[bold]{_e(str(d.get('dest')))}[/bold] — {d.get('frames')} кадрів: "
                   f"{_e(str(d.get('first')))} … {_e(str(d.get('last')))}"
                   + (" · проба, нічого не змінено" if d.get("dry_run") else ""))
+    if d.get("runs"):
+        console.print(f"  справа {_e(str(d.get('key')))} · прогони: "
+                      + ", ".join(_e(str(r)) for r in d["runs"].values())
+                      + f" · нотаток сторінок перенесено: {d.get('notes_moved', 0)}")
     notes(env)
 
 

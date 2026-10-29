@@ -106,6 +106,37 @@ def remote_frames(case_dir: Path) -> list[dict[str, Any]]:
         return []
 
 
+def remote_manifest(case_dir: Path, local: list[str] | None = None) -> dict[str, Any] | None:
+    """Маніфест кадрів у бакеті — повністю, з архівами-частинами; без нього `None`.
+
+    Кадри в теці поруч із маніфестом бувають двох родів: плівку докачали цілою
+    (тоді справа — вони), або взяли кілька кадрів під кроп кандидата (29.10.2026:
+    у 20 плівках ф.127 лежало по 1–2 таких). Друге — частина маніфесту, і
+    справа — маніфест. `local` — імена кадрів у теці; `None` — подивитись самому.
+    Архіви, що не покривають перелік кадрів, — `ValueError`.
+    """
+    import json
+
+    path = Path(case_dir) / REMOTE_FRAMES
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or not data.get("frames"):
+        return None
+    if local is None:
+        local = [p.name for p in frames_in(case_dir)]
+    listed = {str(f.get("name")) for f in data["frames"]}
+    if local and not (set(local) < listed):
+        return None
+    in_parts = sorted(str(n) for part in data.get("parts") or [] for n in part.get("frames") or [])
+    if in_parts != sorted(listed):
+        raise ValueError(f"{path}: архіви маніфесту не збігаються з переліком кадрів")
+    return data
+
+
 def frames_in(case_dir: Path) -> list[Path]:
     """Кадри прямо в теці. Підтеки не рахуються — їх не бачить і раннер."""
     case_dir = Path(case_dir)

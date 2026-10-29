@@ -406,3 +406,85 @@ def test_kliuchi_teky_cherez_junction_i_rozkryti(tmp_path: Path) -> None:
     keys = _dir_keys(link)
     assert str(Path(os.path.abspath(link))) in keys
     assert str(real.resolve()) in keys
+
+
+# ── кадри в бакеті ───────────────────────────────────────────────────────────
+
+@pytest.fixture
+def plivka_r2(space: Path) -> Path:
+    """Та сама збірна тека, але кадри лежать архівами в бакеті: у теці лише маніфест.
+
+    Так приходить плівка FamilySearch, узята «лише прогнати» (`fs get --to-cloud`):
+    дві справи з восьми кадрів розкладено 29.10.2026 без жодного кадру на диску.
+    """
+    from nyshporka.cases import db
+
+    d = frames(space, OLD, 8)
+    REG.describe(d, shifra="RGIA 592-25-926-929")
+    _run(space, RUN, d, key="RGIA/592/25/926")
+    _run(space, VOICE, d, key="RGIA/592/25/926", voice=True)
+    names = sorted(p.name for p in d.glob("*.jpg"))
+    for p in d.glob("*.jpg"):
+        p.unlink()
+    (d / "_r2_frames.json").write_text(json.dumps({
+        "frames": [{"name": n, "size": 10, "w": 4, "h": 3, "sha256": n} for n in names],
+        "parts": [{"key": "cases/x/part-001.tar", "frames": names[:5], "bytes": 50},
+                  {"key": "cases/x/part-002.tar", "frames": names[5:], "bytes": 30}],
+        "bucket": "test-bucket", "dgs": "004471137"}, ensure_ascii=False), encoding="utf-8")
+    db.rebuild(rescan=True)
+    return d
+
+
+def test_kadry_v_bakieti_rozkladaiutsia_maniestom(space: Path, plivka_r2: Path) -> None:
+    got = SPL.split(plivka_r2, MAP)
+
+    assert [p["frames"] for p in got["parts"]] == [3, 2, 2, 1]
+    p927 = space / "data/raw/rgia_592/op25-spr-927"
+    assert not list(p927.glob("*.jpg")), "кадрів на диску не було — і не мало з'явитись"
+    man = json.loads((p927 / "_r2_frames.json").read_text(encoding="utf-8"))
+    assert [f["name"] for f in man["frames"]] == ["0004.jpg", "0005.jpg"]
+    assert man["parts"] == [{"key": "cases/x/part-001.tar", "frames": ["0004.jpg", "0005.jpg"],
+                             "bytes": 50, "frames_in_archive": 5}]
+    assert man["bucket"] == "test-bucket" and man["split_from"]["from"] == 4
+    # справа з одного архіву бере лише його
+    p928 = json.loads((space / "data/raw/rgia_592/op25-spr-928/_r2_frames.json").read_text(
+        encoding="utf-8"))
+    assert [x["key"] for x in p928["parts"]] == ["cases/x/part-002.tar"]
+    side = json.loads((p927 / "_source.json").read_text(encoding="utf-8"))
+    assert side["frames_remote"] is True and side["r2_keys"] == ["cases/x/part-001.tar"]
+    assert side["split_from"]["frames"] == 2
+
+    from nyshporka.cloud.verify import remote_frames
+
+    keys = _keys()
+    assert sorted(keys) == ["RGIA/592/25/926", "RGIA/592/25/927", "RGIA/592/25/928"]
+    assert {k: len(remote_frames(space / keys[k]["path"])) for k in keys} == {
+        "RGIA/592/25/926": 3, "RGIA/592/25/927": 2, "RGIA/592/25/928": 2}
+    meta = json.loads((space / "reports/htr/op25-spr-927/_htr_meta.json").read_text(
+        encoding="utf-8"))
+    assert (meta["frames_total"], meta["done"]) == (2, True)
+
+    SPL.undo(plivka_r2)
+    assert not p927.exists()
+    assert (plivka_r2 / "_r2_frames.json").is_file()
+    assert set(_runs()) == {RUN, VOICE}
+
+
+def test_kadry_v_bakieti_bez_vsikh_arkhiviv_vidmovliaie(space: Path, plivka_r2: Path) -> None:
+    f = plivka_r2 / "_r2_frames.json"
+    data = json.loads(f.read_text(encoding="utf-8"))
+    data["parts"] = data["parts"][:1]
+    f.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(SPL.SplitError, match="архіви маніфесту"):
+        SPL.plan(plivka_r2, MAP)
+
+
+def test_kadry_pid_krop_ne_zaminiaiut_maniestu(space: Path, plivka_r2: Path) -> None:
+    """Кадр, докачаний під кроп кандидата, не робить теку «локальною»."""
+    (plivka_r2 / "0004.jpg").write_bytes(b"jpg4")
+
+    got = SPL.plan(plivka_r2, MAP)
+
+    assert got.remote is not None and len(got.names) == 8
+    assert [len(p.names) for p in got.parts] == [3, 2, 2, 1]

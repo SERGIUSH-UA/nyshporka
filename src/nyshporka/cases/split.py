@@ -80,6 +80,9 @@ class Plan:
     old_key: str
     runs: list[str]            # прогони старої теки (разом із голосами)
     warnings: list[tuple[str, str]] = field(default_factory=list)
+    #: Маніфест кадрів у бакеті (`_r2_frames.json`), коли самих кадрів у теці
+    #: немає: плівку взяли «лише прогнати», і кадри лежать архівами хмари.
+    remote: dict[str, Any] | None = None
 
     def as_json(self, root: Path) -> dict[str, Any]:
         return {"case_dir": _rel(self.case_dir, root), "frames": len(self.names),
@@ -226,9 +229,15 @@ def plan(case_dir: str | Path, specs: list[tuple[str, str, str]]) -> Plan:
     if not d.is_dir():
         raise SplitError(f"теки немає: {d}")
     frames_dir = align._frames_dir(d)
-    if frames_dir is None:
+    local = [p.name for p in align.frames_sorted(frames_dir)] if frames_dir else []
+    remote = _remote_manifest(d, local)
+    if remote is not None:
+        frames_dir = d
+        names = sorted(str(f["name"]) for f in remote["frames"])
+    elif frames_dir is None:
         raise SplitError(f"у теці {d} немає кадрів")
-    names = [p.name for p in align.frames_sorted(frames_dir)]
+    else:
+        names = local
     if not specs:
         raise SplitError("карти немає: назвіть частини — --part "
                          "«<справа>=<перший файл>..<останній файл>» або --map <файл>")
@@ -285,7 +294,7 @@ def plan(case_dir: str | Path, specs: list[tuple[str, str, str]]) -> Plan:
 
     root = workspace().hub
     out = Plan(case_dir=d, frames_dir=frames_dir, names=names, parts=parts,
-               old_key=_old_key(d, meta), runs=[])
+               old_key=_old_key(d, meta), runs=[], remote=remote)
     by_dir = S.runs_by_case_dir()
     mains = {str(r.get("name") or "") for key in _dir_keys(frames_dir, d)
              for r in by_dir.get(key) or []} - {""}
@@ -309,6 +318,16 @@ def plan(case_dir: str | Path, specs: list[tuple[str, str, str]]) -> Plan:
     _count_notes(out)
     _foresee(out, root)
     return out
+
+
+def _remote_manifest(d: Path, local: list[str]) -> dict[str, Any] | None:
+    """Маніфест кадрів у бакеті (`cloud.verify.remote_manifest`) — з відмовою розбивки."""
+    from nyshporka.cloud.verify import remote_manifest
+
+    try:
+        return remote_manifest(d, local)
+    except ValueError as exc:
+        raise SplitError(f"{exc} — розкладати за ним не можна") from None
 
 
 def _old_key(d: Path, meta: dict[str, Any]) -> str:
@@ -401,8 +420,12 @@ def _foresee(pl: Plan, root: Path) -> None:
 
 def _ours(p: Part, pl: Plan) -> bool:
     """Чи все, що вже лежить у теці частини, — її власні кадри з цієї розбивки."""
+    from nyshporka.cloud.verify import REMOTE_FRAMES
+
     assert p.dir is not None
     ok = {JOURNAL, "_source.json", "_fs_meta.json"}
+    if pl.remote is not None:
+        ok.add(REMOTE_FRAMES)
     for f in p.dir.iterdir():
         if f.name in ok:
             continue
@@ -480,6 +503,9 @@ def _spans(parts: list[dict[str, Any]]) -> list[tuple[str, str]]:
 def _frames(pl: Plan, p: Part, *, copy: bool) -> None:
     assert p.dir is not None
     p.dir.mkdir(parents=True, exist_ok=True)
+    if pl.remote is not None:
+        _remote_part(pl, p)
+        return
     for name in p.names:
         src, dst = pl.frames_dir / name, p.dir / name
         if dst.exists():
@@ -493,6 +519,25 @@ def _frames(pl: Plan, p: Part, *, copy: bool) -> None:
                     f"частини на іншому томі або файлова система їх не вміє. "
                     f"Скопіювати кадри (місце на диску подвоїться) — --copy") from None
             shutil.copy2(src, dst)
+
+
+def _remote_part(pl: Plan, p: Part) -> None:
+    """Кадри в бакеті: частині — її рядки маніфесту й ті архіви, де вони лежать.
+
+    Архів плівки один на всі справи, тож у ньому лишаються й чужі кадри; хмара
+    бере з нього лише названі в маніфесті частини (`frames` архіву звужено).
+    """
+    from nyshporka.cloud.verify import REMOTE_FRAMES
+
+    assert p.dir is not None and pl.remote is not None
+    mine = set(p.names)
+    data = {k: v for k, v in pl.remote.items() if k not in ("frames", "parts")}
+    data["frames"] = [f for f in pl.remote["frames"] if str(f.get("name")) in mine]
+    data["parts"] = [{**part, "frames": [n for n in part["frames"] if n in mine],
+                      "frames_in_archive": len(part["frames"])}
+                     for part in pl.remote["parts"] if mine & set(part["frames"])]
+    data["split_from"] = {"first": p.first, "last": p.last, "from": p.pos[0], "to": p.pos[1]}
+    _write_json(p.dir / REMOTE_FRAMES, data)
 
 
 def _passport(pl: Plan, p: Part, root: Path) -> None:
@@ -515,6 +560,12 @@ def _passport(pl: Plan, p: Part, root: Path) -> None:
     meta["split_from"] = {"dir": _rel(pl.case_dir, root), "first": p.first,
                           "last": p.last, "frames": len(p.names),
                           "from": p.pos[0], "to": p.pos[1]}
+    if pl.remote is not None:
+        meta["frames_remote"] = True
+        if pl.remote.get("bucket"):
+            meta["r2_bucket"] = pl.remote["bucket"]
+        meta["r2_keys"] = [part["key"] for part in pl.remote["parts"]
+                           if set(p.names) & set(part["frames"])]
     meta.pop("spr_to", None)
     _write_json(side, meta)
 
@@ -710,6 +761,7 @@ def undo(case_dir: str | Path) -> dict[str, Any]:
     if not journal:
         raise SplitError(f"розбивки в теці немає (файла {JOURNAL} не знайдено): {d}")
     frames_dir = align._frames_dir(d) or d
+    from nyshporka.cloud.verify import REMOTE_FRAMES
     kept: list[str] = []
     gone_runs: list[str] = []
     src_ref = _pagestore_ref(str(journal.get("old_key") or ""))
@@ -730,7 +782,9 @@ def undo(case_dir: str | Path) -> dict[str, Any]:
         if src_ref is not None and part.get("shifra"):
             dst_ref = _pagestore_ref(str(part["shifra"]))
             if dst_ref is not None and pdir.is_dir():
-                names = [p.name for p in align.frames_sorted(pdir)]
+                names = [p.name for p in align.frames_sorted(pdir)] or [
+                    str(f.get("name")) for f in
+                    _read_json(pdir / REMOTE_FRAMES).get("frames") or []]
                 PS.move_pages(dst_ref, src_ref, names)
         if not pdir.is_dir():
             continue
@@ -738,7 +792,7 @@ def undo(case_dir: str | Path) -> dict[str, Any]:
         mine = str((side.get("split_from") or {}).get("dir") or "") == _rel(d, root)
         for f in list(pdir.iterdir()):
             frame = f.is_file() and (frames_dir / f.name).is_file()                 and _same(frames_dir / f.name, f)
-            if frame or (mine and f.name in ("_source.json", align.FS_META)):
+            if frame or (mine and f.name in ("_source.json", align.FS_META, REMOTE_FRAMES)):
                 f.unlink()
         with contextlib.suppress(OSError):
             pdir.rmdir()

@@ -12,6 +12,7 @@ import os
 import re
 import sys
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -824,7 +825,8 @@ def add_notes(ref: CaseRef, notes: list[CaseNote]) -> MergeReport:
     return report
 
 
-def move_pages(src: CaseRef, dst: CaseRef, scans: list[str]) -> dict[str, int]:
+def move_pages(src: CaseRef, dst: CaseRef, scans: list[str],
+               rename: dict[str, str] | None = None) -> dict[str, int]:
     """Перенести нотатки й записи названих кадрів з однієї справи в іншу.
 
     Потрібне розбивці збірної теки: нотатки всіх її справ лежали у файлі
@@ -833,8 +835,13 @@ def move_pages(src: CaseRef, dst: CaseRef, scans: list[str]) -> dict[str, int]:
 
     Запис переходить, лише коли ВСІ його кадри названо: запис через межу
     справ лишається, де був, і це видно у звіті розбивки числом.
+
+    `rename` — нове ім'я кадру в справі-приймачі (`cases join`: кадр плівки
+    `0672.jpg` стає `0005_007810475_0672.jpg`). Стем перейменовується так само:
+    у читаннях рядків сторінка зветься стемом.
     """
     want = {str(s).casefold() for s in scans}
+    ren = _renamer(rename or {})
     sp, dp = case_path(src), case_path(dst)
     if not want or not sp.is_file() or sp == dp:
         return {"pages": 0, "records": 0}
@@ -843,7 +850,7 @@ def move_pages(src: CaseRef, dst: CaseRef, scans: list[str]) -> dict[str, int]:
         return {"pages": 0, "records": 0}
     # Погляди проєктів їдуть разом зі сторінками: інакше коментар лишився б при
     # справі, де сторінки вже немає.
-    views = _move_views(src, dst, want)
+    views = _move_views(src, dst, want, ren)
     notes = [n for k, n in cf.pages.items() if k.casefold() in want]
     recs = [r for r in cf.records
             if r.scans and all(s.casefold() in want for s in r.scans)]
@@ -855,12 +862,14 @@ def move_pages(src: CaseRef, dst: CaseRef, scans: list[str]) -> dict[str, int]:
         return {"pages": 0, "records": 0, "notes": 0, "notes_kept": kept,
                 "views": views}
     if notes:
-        _put_pages(dst, notes)
+        _put_pages(dst, [n.model_copy(update={"scan": ren(n.scan)}) for n in notes])
     if recs:
-        add_records(dst, recs)
+        add_records(dst, [r.model_copy(update={"scans": [ren(x) for x in r.scans]})
+                          for r in recs])
     moved: set[str] = set()
     if reads:
-        rep = add_notes(dst, reads)
+        rep = add_notes(dst, [n.model_copy(update={"page": ren(n.page)}) if n.page else n
+                              for n in reads])
         # 🔴 Зі старої справи прибирається лише те, що в новій справді лягло:
         # відмовлений запис, прибраний «про всяк випадок», зникав з обох файлів.
         moved = set(rep.added) | set(rep.merged)
@@ -895,7 +904,18 @@ def _put_pages(ref: CaseRef, notes: list[PageNote]) -> None:
         _write(path, cf)
 
 
-def _move_views(src: CaseRef, dst: CaseRef, want: set[str]) -> int:
+def _renamer(rename: dict[str, str]) -> Callable[[str], str]:
+    """Ім'я чи стем кадру → нове; не назване лишається як було."""
+    by_name = {k.casefold(): v for k, v in rename.items()}
+    by_stem = {Path(k).stem.casefold(): Path(v).stem for k, v in rename.items()}
+
+    def ren(s: str) -> str:
+        return by_name.get(s.casefold()) or by_stem.get(s.casefold()) or s
+    return ren
+
+
+def _move_views(src: CaseRef, dst: CaseRef, want: set[str],
+                ren: Callable[[str], str] = str) -> int:
     """Перенести погляди названих сторінок у всіх проєктах; скільки перенесено.
 
     🔴 Спершу запис у нову справу, потім прибирання зі старої — як і сторінки.
@@ -914,6 +934,7 @@ def _move_views(src: CaseRef, dst: CaseRef, want: set[str]) -> int:
         with _lock(dp):
             dv = _load_view(dp) or ViewFile(key=dst.key)
             for scan, v in take.items():
+                scan = ren(scan)
                 old = dv.pages.get(scan)
                 dv.pages[scan] = v if old is None else _merge_view(old, v)
             _write_view(dp, dv)

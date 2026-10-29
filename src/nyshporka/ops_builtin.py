@@ -3651,6 +3651,11 @@ class CasesJoinArgs(BaseModel):
     dry_run: bool = Field(default=False, description="лише показати, що ляже")
     copy_frames: bool = Field(default=False, description="копіювати, якщо жорстке посилання "
                                                          "не створюється (інший том)")
+    shifra: str = Field(default="", description="шифра справи; плівки вже прочитано — з нею "
+                                                "текст переїжджає в справу")
+    title: str = Field(default="", description="назва справи для паспорта")
+    years: str = Field(default="", description="роки справи: «1795» або «1795-1797»")
+    rebuild: bool = Field(default=True, description="перебудувати каталог справ після збирання")
 
 
 @op("cases.join", summary="Зібрати справу, розірвану між плівками", args=CasesJoinArgs,
@@ -3659,23 +3664,33 @@ class CasesJoinArgs(BaseModel):
     when="справа розірвана між плівками — зібрати в одну")
 def cases_join(a: CasesJoinArgs) -> Envelope:
     """Справа на двох котушках («CONTINUED ON / FROM ANOTHER ROLL»): частини з
-    тек плівок лягають в одну теку справи жорсткими посиланнями з іменами
-    `<№>_<плівка>_<кадр>` (номер — за порядком частин). Паспорт — далі `nysh case <тека>`.
+    тек плівок лягають в одну теку справи під іменами `<№>_<плівка>_<кадр>`
+    (номер — за порядком частин): кадри на диску — жорсткими посиланнями, кадри
+    в бакеті — маніфестом. З `shifra` справа отримує паспорт, а прочитане плівок
+    — прогони справи з усіма голосами й нотатки сховища сторінок.
     """
     from nyshporka.cases import join as J
+    from nyshporka.share.card import CardError, parse_years
 
     try:
         pieces = [J.parse_piece(p) for p in a.parts]
+        ys = parse_years(a.years) if a.years.strip() else []
         if a.dry_run:
             rows = J.plan(a.dest, pieces)
             return ok({"dest": a.dest, "frames": len(rows), "dry_run": True,
                        "first": rows[0]["dst"], "last": rows[-1]["dst"]})
-        got = J.join(a.dest, pieces, copy=a.copy_frames)
-    except J.JoinError as exc:
+        got = J.join(a.dest, pieces, copy=a.copy_frames, shifra=a.shifra, title=a.title,
+                     years=(ys[0], ys[-1]) if ys else (None, None), rebuild=a.rebuild)
+    except (J.JoinError, CardError) as exc:
         return fail(str(exc))
     env = ok(got)
-    env.warn("passport", f"кадри зібрано; паспорт справи — nysh case {a.dest} --shifra … "
-                         f"--one-case, далі nysh cases build")
+    if not a.shifra:
+        env.warn("passport", f"кадри зібрано; паспорт справи — nysh case {a.dest} --shifra … "
+                             f"--one-case, далі nysh cases build")
+    for run in got.get("voices_skipped") or []:
+        env.warn("voice_skipped", f"голос «{run}» є не в усіх частинах — у справу не зведено")
+    for note in (got.get("index") or {}).get("notes") or []:
+        env.warn("index", note)
     return env
 
 
