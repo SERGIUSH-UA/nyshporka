@@ -168,6 +168,15 @@ def test_rozkladeno_kozhna_sprava_maie_svoie(space: Path, zbirka: Path) -> None:
     rows = {r["case_key"]: r["status"] for r in SG.nepodileni()}
     assert set(rows) == {"RGIA/592/25/926", "RGIA/592/25/927", "RGIA/592/25/928"}
     assert SG.ZBIRNA not in rows.values()
+    # частина, позначена в паспорті неповною, «готовою» не стоїть
+    pasport = space / "data/raw/rgia_592/op25-spr-927/_source.json"
+    pasport.write_text(json.dumps({**json.loads(pasport.read_text(encoding="utf-8")),
+                                   "incomplete": {"why": "решта на іншій плівці"}},
+                                  ensure_ascii=False), encoding="utf-8")
+    rows = {r["case_key"]: r for r in SG._nepodileni_now()}
+    assert rows["RGIA/592/25/927"]["status"] == SG.NEPOVNA
+    assert "іншій плівці" in rows["RGIA/592/25/927"]["chastyna"]
+    assert rows["RGIA/592/25/926"]["status"] == SG.GOTOVA
 
     # сховище сторінок: нотатки — у файлах своїх справ
     def _notes(shifra: str) -> list[str]:

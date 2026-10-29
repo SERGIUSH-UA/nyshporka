@@ -366,6 +366,15 @@ def _nepodileni_now() -> list[dict[str, Any]]:
             **_u_puli_poruch(key, stan),
             "status": BEZ_RAMOK if stan == "text" else _status(pages, frames),
         })
+        if out[-1]["status"] == GOTOVA:
+            # Та сама відповідь, що відмова пакування: прочитана повністю
+            # частина плівки — ще не прочитана справа.
+            from nyshporka.share.publish import chastyna_spravy
+
+            chastyna = chastyna_spravy(key, shifra, frames)
+            if chastyna:
+                out[-1]["status"] = NEPOVNA
+                out[-1]["chastyna"] = chastyna
         zbirna = _zbirna(row, progony.get(key, []))
         if zbirna is not None:
             # 🔴 «Не пропонувати як одну справу за першим числом» (звіт

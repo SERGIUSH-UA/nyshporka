@@ -1055,6 +1055,43 @@ def _ponad_steliu(files: int, *, nbytes: int = 0) -> str:
     return ""
 
 
+#: Менше кадрів на аркуш опису ціла справа мати не може: кадр — сторінка
+#: або розворот, тобто щонайбільше один аркуш. Запас — на хибу в описі й
+#: на чисті аркуші, яких не знімали.
+MIN_KADRIV_NA_ARKUSH = 0.75
+
+
+def chastyna_spravy(key: str, shifra: str, kadriv: int) -> str:
+    """Чому справа — частина, а не ціла; порожньо — ознак немає.
+
+    🔴 Знаменник частини плівки після `cases split` (і справи після `join`) —
+    її власні кадри, тож покриття виходить 100 % і там, де FS зняв справу на
+    кількох плівках, а скачано одну. 29.10.2026 так у партії ф.127 пішли б 40
+    шматків як повні справи (127-1012-2556: 72 кадри з 1354 арк.). Дві ознаки:
+    позначка `incomplete` у паспорті теки (вердикт людини чи звірки з
+    каталогом) і кадрів менше, ніж аркушів в описі архіву.
+    """
+    from nyshporka.cases.register import read_sidecar
+
+    home = align.case_home_for(key) if key else None
+    pomitka = read_sidecar(home).get("incomplete") if home is not None else None
+    if pomitka:
+        why = pomitka.get("why") if isinstance(pomitka, dict) else pomitka
+        return (f"справу позначено в паспорті неповною: {why}. Віддати як неповну: "
+                f"--partial \"що саме прочитано\"")
+    row = opys.registry_row(shifra) if shifra else None
+    try:
+        arkushiv = int(str((row or {}).get("folios") or "0").strip() or 0)
+    except ValueError:
+        arkushiv = 0
+    if arkushiv >= 10 and 0 < kadriv < MIN_KADRIV_NA_ARKUSH * arkushiv:
+        return (f"у справі {kadriv} кадрів, а в описі архіву {arkushiv} арк.: кадр — "
+                f"сторінка чи розворот, тож ціла справа має кадрів не менше, ніж "
+                f"аркушів. Це частина справи — решта, мабуть, на іншій плівці або не "
+                f"знята. Віддати як неповну: --partial \"кадри A–B з ~{arkushiv} арк.\"")
+    return ""
+
+
 def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
          hash_frames: bool = False, partial_why: str = "",
          dry_run: bool = False, **meta: Any) -> dict[str, Any]:
@@ -1128,6 +1165,10 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
     rozkladena = _rozkladena(run_dirs)
     if rozkladena:
         out.setdefault("pack_refusals", []).append(rozkladena)
+    chastyna = "" if partial_why.strip() else chastyna_spravy(
+        str(details.get("key") or ""), str(m.case.get("shifra") or ""), m.frames_total)
+    if chastyna:
+        out.setdefault("pack_refusals", []).append(chastyna)
     # 🔴 Стеля пулу — до запису, а не після заливки: пакет понад неї пул
     # відкидав уже тоді, коли байти доїхали.
     zavelykyi = _ponad_steliu(len(sketch["files"]))
@@ -1148,6 +1189,8 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
         raise PublishError(zbirna)
     if rozkladena:
         raise PublishError(rozkladena)
+    if chastyna:
+        raise PublishError(chastyna)
     if zavelykyi:
         raise PublishError(zavelykyi)
 

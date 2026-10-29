@@ -445,6 +445,50 @@ def test_chastyna_kadriv_i_chyslo_v_pasporti(space: Path, monkeypatch: Any) -> N
     assert "pack_refusals" not in proba
 
 
+# 29.10.2026: частина плівки після `cases split` має знаменником власні кадри, і
+# шматок справи з кількох плівок FS ішов як повна справа (127-1012-2556: 72 кадри
+# з 1354 арк.).
+
+def _chastyna_plivky(space: Path, monkeypatch: Any, pasport: dict[str, Any]) -> Any:
+    import json
+
+    from nyshporka.share import align
+
+    PUB = _chastyna_kadriv(space, monkeypatch, na_dysku=1)
+    teka = space / "kadry-chastyny"
+    (teka / "_source.json").write_text(json.dumps({"frames_got": 9, **pasport},
+                                                  ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(align, "case_home_for", lambda key, opys="": teka)
+    return PUB
+
+
+def test_nepovna_v_pasporti_ne_pakuietsia_bez_partial(space: Path, monkeypatch: Any) -> None:
+    PUB = _chastyna_plivky(space, monkeypatch, {"incomplete": {"why": "решта на плівці 004497909"}})
+
+    proba = PUB.pack("DAZHO/1/2149", geometry=False, dry_run=True)
+    assert any("004497909" in r and "--partial" in r for r in proba["pack_refusals"])
+    with pytest.raises(PUB.PublishError, match="неповною"):
+        PUB.pack("DAZHO/1/2149", geometry=False)
+
+    got = PUB.pack("DAZHO/1/2149", geometry=False, partial_why="кадри 1–9 з плівки 004498062")
+    assert "pack_refusals" not in got and Path(got["path"]).is_file()
+
+
+@pytest.mark.parametrize("arkushiv, vidmova", [("40", True), ("10", False), ("", False)])
+def test_kadriv_menshe_za_arkushi_opysu_tse_chastyna(
+        space: Path, monkeypatch: Any, arkushiv: str, vidmova: bool) -> None:
+    PUB = _chastyna_plivky(space, monkeypatch, {})
+    monkeypatch.setattr(PUB.opys, "registry_row", lambda shifra: {"folios": arkushiv})
+
+    proba = PUB.pack("DAZHO/1/2149", geometry=False, dry_run=True)
+
+    assert proba["manifest"]["frames"]["total"] == 9
+    got = [r for r in proba.get("pack_refusals") or [] if "арк." in r]
+    assert bool(got) is vidmova
+    if vidmova:
+        assert "9 кадрів" in got[0] and "40 арк." in got[0]
+
+
 def test_znamennyk_spravy_bere_plivku_z_pasporta(space: Path, monkeypatch: Any) -> None:
     """Перелік «Віддати» і пакування — одне число: плівка з паспорта, не три кадри теки."""
     import json
