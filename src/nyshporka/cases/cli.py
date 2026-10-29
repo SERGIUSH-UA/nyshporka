@@ -173,7 +173,7 @@ def _canon_key(case: str) -> str:
 
     try:
         return resolve_case(case).key
-    except Exception:  # noqa: BLE001 — підрядок назви, а не шифра
+    except Exception:  # підрядок назви, а не шифра
         return ""
 
 
