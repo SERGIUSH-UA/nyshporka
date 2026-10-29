@@ -37,52 +37,105 @@ def test_ne_vygadue(title):
 
 def test_z_adresy_commons():
     ref = "file:ДАХмО 227-2д-905 Объявления (1899).pdf"
-    assert shifra_of_ref("commons", ref) == _d("2д", "905")
+    assert shifra_of_ref("commons", ref) == "ДАХмО 227-2д-905"
     assert shifra_of_ref("commons", "https://commons.wikimedia.org/wiki/File:"
-                         "ДАХмО_227-1-6563а_Справи.pdf") == _d("1", "6563а")
-    assert shifra_of_ref("archium", ref) == {}
-    assert shifra_of_ref("commons", "щось без префікса") == {}
+                         "ДАХмО_227-1-6563а_Справи.pdf") == "ДАХмО 227-1-6563а"
+    assert shifra_of_ref("archium", ref) == ""
+    assert shifra_of_ref("commons", "щось без префікса") == ""
 
 
-def test_passport_gets_shifra(tmp_path):
+def _fetch(case_dir, title):
     import json
 
     from nyshporka.cases.acquire import record_fetch
     from nyshporka.sources.base import FetchResult
 
-    res = FetchResult(dest=tmp_path, frames=1)
-    record_fetch(tmp_path, res, source="commons",
-                 ref="file:ДАХмО 227-2д-905 Объявления (1899).pdf", want=1)
-    meta = json.loads((tmp_path / "meta.json").read_text(encoding="utf-8"))
-    assert (meta["archive"], meta["fond"], meta["inv"], meta["spr"]) == (
-        "DAHMO", "227", "2д", "905")
+    record_fetch(case_dir, FetchResult(dest=case_dir, frames=1), source="commons",
+                 ref=f"file:{title}", want=1)
+    return json.loads((case_dir / "meta.json").read_text(encoding="utf-8"))
 
 
-def test_passport_keeps_existing_shifra(tmp_path):
-    import json
+@pytest.mark.parametrize("title,key", [
+    ("ДАХмО 227-2д-905 Объявления (1899).pdf", "DAHMO/227/2d/905"),
+    ("ДАХмО 227-1d-356. 1851 рік. Метричні книги.pdf", "DAHMO/227/1d/356"),
+    ("ДАХмО Ф. 227 О. 5доп С. 291 Статистичний опис.pdf", "DAHMO/227/5dop/291"),
+    ("1845 год. ДАХМО. Фонд 227, опись 6д, дело 34. Метрическая книга.pdf",
+     "DAHMO/227/6d/34"),
+    ("ДАХмО 227-1-6563а Справи.pdf", "DAHMO/227/1/6563a"),
+])
+def test_get_folder_is_seen_by_library_under_its_key(_ws, title, key):
+    """🔴 Наскрізно: `nysh get commons … --out <будь-яка тека>` → бібліотека й
+    резолвер бачать теку під ключем із назви файла. Поля без рядка `shifra`
+    бібліотека не читала, і тека лишалась нічиєю (рецензія 29.10.2026)."""
+    from PIL import Image
 
-    from nyshporka.cases.acquire import record_fetch
-    from nyshporka.sources.base import FetchResult
+    from nyshporka import library as L
+    from nyshporka.core.workspace import workspace
+    from nyshporka.pagestore import resolve_case
 
-    (tmp_path / "meta.json").write_text(json.dumps(
-        {"archive": "DAHMO", "fond": "230", "inv": "1", "spr": "1539"}),
-        encoding="utf-8")
-    record_fetch(tmp_path, FetchResult(dest=tmp_path, frames=1), source="commons",
-                 ref="file:ДАХмО 227-2д-905 X.pdf", want=1)
-    meta = json.loads((tmp_path / "meta.json").read_text(encoding="utf-8"))
-    assert (meta["fond"], meta["inv"], meta["spr"]) == ("230", "1", "1539")
-
-
-def test_passport_without_shifra_writes_no_fields(tmp_path):
-    import json
-
-    from nyshporka.cases.acquire import record_fetch
-    from nyshporka.sources.base import FetchResult
-
-    record_fetch(tmp_path, FetchResult(dest=tmp_path, frames=1), source="commons",
-                 ref="file:ДАХмО фонд 227 опис 1 том 1.pdf", want=1)
-    meta = json.loads((tmp_path / "meta.json").read_text(encoding="utf-8"))
+    d = workspace().raw / "commons_get" / "moja_teka"
+    d.mkdir(parents=True)
+    Image.new("L", (20, 20)).save(d / "0001.jpg")
+    meta = _fetch(d, title)
+    assert meta["shifra_src"] == "назва файла Commons"
     assert not {"archive", "fond", "inv", "spr"} & meta.keys()
+    L._sidecar_case.cache_clear()
+    entries = L.build_library()
+    assert [e.key for e in entries] == [key]
+    L.write_library(entries)
+    assert resolve_case(key).path.endswith("commons_get/moja_teka")
+
+
+@pytest.mark.parametrize("have", [
+    {"archive": "DAHMO", "fond": "230", "inv": "1", "spr": "1539"},
+    {"archive": "DAHMO", "fond": "230"},                 # часткова — теж шифра
+    {"opis": "1", "spr": "356"},                          # синонім опису
+    {"repo": "DAHMO"},
+    {"archive": "?"},                                     # «архів невідомий» — відповідь
+    {"shifra": "ДАХмО 230-1-1539"},
+    {"delo": "Ф. 211 Оп. 3 Д. 140"},
+])
+@pytest.mark.parametrize("where", ["meta.json", "_source.json"])
+def test_passport_with_any_shifra_is_not_touched(tmp_path, have, where):
+    """Паспорт, де шифру (хоч частину) вже назвали, не дістає нічого з назви
+    файла: доповнення по полю складало справу з двох різних."""
+    import json
+
+    (tmp_path / where).write_text(json.dumps(have, ensure_ascii=False), encoding="utf-8")
+    meta = _fetch(tmp_path, "ДАХмО 227-2д-905 X.pdf")
+    if where == "meta.json":
+        assert {k: meta[k] for k in have} == have
+    assert "shifra_src" not in meta
+    assert ("shifra" in meta) == ("shifra" in have and where == "meta.json")
+
+
+def test_passport_without_shifra_writes_nothing(tmp_path):
+    meta = _fetch(tmp_path, "ДАХмО фонд 227 опис 1 том 1.pdf")
+    assert not {"shifra", "archive", "fond", "inv", "spr"} & meta.keys()
+
+
+def test_take_does_not_take_shifra_from_the_title(tmp_path):
+    """`cases take` знає шифру з реєстру опису — назва тому її не підміняє."""
+    import json
+    from types import SimpleNamespace
+
+    from nyshporka.cases import acquire as A
+    from nyshporka.sources.base import FetchResult
+
+    class _Src:
+        def fetch(self, ref, dest, on_progress=None):
+            name = ref.split(":", 1)[1]
+            (dest / name).write_bytes(b"%PDF-1.4\n%%EOF\n")
+            return FetchResult(dest=dest, frames=1)
+
+        def manifest(self, ref):
+            return SimpleNamespace(frames=1)
+
+    A.from_commons(tmp_path, "ДАХмО 227-2д-906 X.pdf", archive="DAHMO", fond="227",
+                   opys="2д", spr="905", source=_Src())
+    meta = json.loads((tmp_path / "meta.json").read_text(encoding="utf-8"))
+    assert "shifra" not in meta
+    assert (meta["fond"], meta["inv"], meta["spr"]) == ("227", "2д", "905")
 
 
 # ── ключ справи з літерним описом (`cases take DAHMO/227/1д/406`) ────────────
@@ -273,21 +326,6 @@ def test_registry_filter_opys_script_insensitive():
 def test_year_is_not_fond():
     assert shifra_of_title("ДАХмО 2021-1-12.pdf") == {}
     assert shifra_of_title("ДАХмО ф.2021-1-12.pdf")["fond"] == "2021"
-
-
-def test_passport_fills_only_missing_fields(tmp_path):
-    import json
-
-    from nyshporka.cases.acquire import record_fetch
-    from nyshporka.sources.base import FetchResult
-
-    (tmp_path / "meta.json").write_text(json.dumps(
-        {"archive": "DAHMO", "fond": "230"}), encoding="utf-8")
-    record_fetch(tmp_path, FetchResult(dest=tmp_path, frames=1), source="commons",
-                 ref="file:ДАХмО 227-2д-905 X.pdf", want=1)
-    meta = json.loads((tmp_path / "meta.json").read_text(encoding="utf-8"))
-    assert (meta["archive"], meta["fond"], meta["inv"], meta["spr"]) == (
-        "DAHMO", "230", "2д", "905")
 
 
 def test_write_meta_spr_shown_form(tmp_path):

@@ -197,7 +197,8 @@ def frame_files(case_dir: Path, dest: Path, *, source: str = "") -> list[dict[st
 
 def record_fetch(case_dir: Path, res: Any, *, source: str, ref: str, url: str = "",
                  want: int | None = None, why: str = "",
-                 extra: dict[str, Any] | None = None) -> Any:
+                 extra: dict[str, Any] | None = None,
+                 shifra_from_title: bool = True) -> Any:
     """Один паспорт завантаження для всіх входів: `nysh get`, `cases take`, демон.
 
     🔴 Доти кожен вхід писав своє: `nysh get` — «обіцяно / взято» без хешів і
@@ -210,6 +211,9 @@ def record_fetch(case_dir: Path, res: Any, *, source: str, ref: str, url: str = 
     каже «неповна, ось збої», — корисна; без паспорта — невідомого походження.
 
     Повертає вердикт `completeness`, щоб викликач вирішив сам.
+
+    `shifra_from_title=False` — шифру знає викликач (`cases take` бере її з
+    реєстру опису й пише `write_meta`), і розбір назви файла не потрібен.
     """
     from nyshporka.sources.base import completeness
 
@@ -228,30 +232,51 @@ def record_fetch(case_dir: Path, res: Any, *, source: str, ref: str, url: str = 
         "fetch_causes": dict(getattr(res, "causes", None) or {}),
         "files": frame_files(case_dir, Path(res.dest), source=source),
     })
-    # 🔴 Шифра з назви файла — щоб бібліотека могла прив'язати теку до справи
-    # без дописування полів руками. Лише коли паспорт ще шифри не має: те, що
-    # записав `cases take` чи людина, надійніше за розбір назви.
-    from nyshporka.sources.commons import shifra_of_ref
+    # 🔴 Шифра з назви файла — щоб бібліотека прив'язала теку до справи без
+    # дописування руками. ОДИН рядок `shifra` (саме його читає бібліотека,
+    # `library._sidecar_case`), і лише в теку, де шифри немає ЗОВСІМ: часткова
+    # шифра людини чи `cases take` + решта з назви файла складали б справу з
+    # двох різних (паспорт ф.230 + назва «227-2д-905» = «230-2д-905»).
+    # Назва файла Commons — транскрипція опису архіву, тобто те саме джерело,
+    # з якого реєстр опису дає шифру для `cases take`; тому це `shifra`, а не
+    # `shifra_claimed` (той — для плівок FS, де маніфест накриває кілька справ).
+    if shifra_from_title and not has_shifra(case_dir):
+        from nyshporka.sources.commons import shifra_of_ref
 
-    # Дописується лише те, чого в паспорті немає: наявне не перекривається.
-    shifra = shifra_of_ref(source, ref)
-    if shifra:
-        passport.update(_missing_shifra(case_dir, shifra))
+        line = shifra_of_ref(source, ref)
+        if line:
+            passport.update({"shifra": line, "shifra_src": "назва файла Commons"})
     passport.update(extra or {})
     patch_meta(case_dir, passport)
     return verdict
 
 
-SHIFRA_FIELDS = ("archive", "fond", "inv", "spr")
+#: Поля паспорта, будь-яке з яких означає «шифру вже хтось назвав»: рядок
+#: (`shifra`, `delo` з покажчика плівки), поля `cases take` і їхні синоніми
+#: (`inv`/`opys`/`opis` — три імена опису, `repo`/`archive`).
+SHIFRA_FIELDS = ("shifra", "delo", "archive", "repo", "fond", "inv", "opys", "opis", "spr")
 
 
-def _missing_shifra(case_dir: Path, shifra: dict[str, str]) -> dict[str, str]:
-    """Поля шифри з назви файла, яких у паспорті ще немає (усі чотири перевіряються)."""
-    from nyshporka.utils.atomic import read_json
+def has_shifra(case_dir: Path) -> bool:
+    """Чи паспорт теки (`meta.json` або `_source.json`) уже несе хоч частину шифри.
 
-    got = read_json(case_dir / "meta.json", default={})
-    got = got if isinstance(got, dict) else {}
-    return {k: v for k, v in shifra.items() if k in SHIFRA_FIELDS and not got.get(k)}
+    `"archive": "?"` — теж відповідь (людина сказала «архів невідомий»), тож
+    і вона перекривати себе не дає. Побитий файл — так само «є»: не знаємо, що
+    в ньому, то й не дописуємо поверх.
+    """
+    import json
+
+    for name in ("meta.json", "_source.json"):
+        f = case_dir / name
+        if not f.is_file():
+            continue
+        try:
+            m = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return True
+        if isinstance(m, dict) and any(str(m.get(k) or "").strip() for k in SHIFRA_FIELDS):
+            return True
+    return False
 
 
 def write_meta(case_dir: Path, *, archive: str, fond: str, opys: str, spr: str,
@@ -307,7 +332,7 @@ def from_commons(case_dir: Path, file_name: str | list[str], *, archive: str,
         res = src.fetch(ref, case_dir, on_progress=on_progress)
         want = _want_of(src, ref)
         verdict = record_fetch(case_dir, res, source="commons", ref=ref, url=url,
-                               want=want, why=why)
+                               want=want, why=why, shifra_from_title=False)
         if res.errors or verdict.state in ("partial", "empty"):
             raise AcquireError("; ".join(
                 [f"том «{name}»" if len(names) > 1 else ""]

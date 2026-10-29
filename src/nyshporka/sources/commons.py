@@ -172,11 +172,11 @@ def shifra_line_of_title(title: str) -> str:
     return f"{label} {got['fond']}-{got['inv']}-{got['spr']}"
 
 
-def shifra_of_ref(source: str, ref: str) -> dict[str, str]:
-    """Поля шифри для паспорта завантаження; не Commons чи не розібрано — `{}`."""
+def shifra_of_ref(source: str, ref: str) -> str:
+    """Шифра рядком для паспорта завантаження; не Commons чи не розібрано — порожньо."""
     if source != "commons":
-        return {}
-    return shifra_of_title(title_of_ref(ref))
+        return ""
+    return shifra_line_of_title(title_of_ref(ref))
 
 
 class CommonsSource:
