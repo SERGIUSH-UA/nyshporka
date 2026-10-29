@@ -260,7 +260,9 @@ def resolve_case(value: str) -> CaseRef:
         # опису, більше не відмовляються тут.
         addr = parse_address(v)
         if addr:
-            parsed = (_repo_for_write(addr, v), addr.fond, addr.opys, addr.spr)
+            # `_` — опис невідомий, як і в ключі: `None`, а не опис на ім'я «_».
+            parsed = (_repo_for_write(addr, v), addr.fond,
+                      None if addr.opys == casekey.UNKNOWN else addr.opys, addr.spr)
     if parsed is None:
         ms = _SHIFRA_RE.match(v)
         if ms:

@@ -153,6 +153,34 @@ def test_a_letter_opys_reaches_the_catalogue(tmp_path, monkeypatch) -> None:
     assert got is not None and got[1:] == ("210", "6d", "199")
 
 
+def test_unknown_opys_in_shifra_reaches_the_catalogue(tmp_path, monkeypatch) -> None:
+    """🔴 Шифру з невідомим описом («AGAD 0-_-1413») пише сама `nysh case`, а
+    бібліотека її не розбирала: тека лишалась без ключа й випадала з каталогу
+    мовчки (відгук №9 порталу, 0.37.8)."""
+    import json
+
+    from nyshporka import library as L
+    from nyshporka.pagestore import resolve_case
+
+    m = L._SHIFRA_RE.search("AGAD 301-_-1413")
+    assert m and m.groups() == ("301", "_", "1413")
+
+    case = tmp_path / "agad_301"
+    case.mkdir()
+    (case / "_source.json").write_text(json.dumps({"shifra": "AGAD 301-_-1413"}), encoding="utf-8")
+    monkeypatch.setattr(L, "case_base", lambda: tmp_path)
+    L._sidecar_case.cache_clear()
+    try:
+        got = L._sidecar_case("agad_301")
+    finally:
+        L._sidecar_case.cache_clear()
+    assert got is not None and got[1] == "301" and got[3] == "1413"
+
+    # Опис невідомий і в шифрі, і в ключі — однаково `None`, а не опис «_».
+    assert resolve_case("ДАЖО 301-_-1413").opys is None
+    assert resolve_case("DAZHO/301/_/1413").opys is None
+
+
 def test_a_soviet_source_id_parses_at_all() -> None:
     """Доти ID радянського фонду не розбирався ЗОВСІМ, і картка справи казала
     «канон: фактів 0» там, де канон цитує аркуш дослівно."""

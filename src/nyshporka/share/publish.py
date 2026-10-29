@@ -250,6 +250,7 @@ def _normalize_shifra(case: dict[str, Any], key: str) -> dict[str, Any]:
     якою її ніхто не знайде. Ключ справи відомий — тоді в маніфест іде його
     канонічна шифра, а запис паспорта лишається поруч довідково.
     """
+    from nyshporka.core.casekey import UNKNOWN
     from nyshporka.pagestore import resolve_case
 
     raw = str(case.get("shifra") or "")
@@ -257,7 +258,7 @@ def _normalize_shifra(case: dict[str, Any], key: str) -> dict[str, Any]:
         own = resolve_case(raw)
     except Exception:
         own = None
-    if own is not None and own.opys:
+    if own is not None and own.opys and own.opys != UNKNOWN:
         return case
     try:
         ref = resolve_case(key) if key else None
@@ -267,7 +268,7 @@ def _normalize_shifra(case: dict[str, Any], key: str) -> dict[str, Any]:
         ref = own
     if ref is None:
         return case
-    if not ref.opys:
+    if not ref.opys or ref.opys == UNKNOWN:
         # 🔴 Опис невідомий: шифру пул розбирає лише у формі ключа
         # (`HUNGARICANA/12/_/158`). Форму «HUNGARICANA 12-_-158» резолвер
         # клієнта приймає, а пул — ні, і заливка падала 400 «немає ні шифри,

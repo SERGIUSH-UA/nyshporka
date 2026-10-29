@@ -406,6 +406,16 @@ def test_opys_nevidomyi_shyfra_formoiu_kliucha(raw: str) -> None:
     assert got.get("shifra_pasport") == (raw or None)
 
 
+@pytest.mark.parametrize("key", ["DAZHO/0/_/1413", ""])
+def test_opys_nevidomyi_shyfra_z_pasporta_rozbyraietsia(key: str) -> None:
+    """Шифра «ДАЖО 0-_-1413» тепер розбирається, і опис у ній — невідомий, а не
+    опис «_»: інакше вона йшла б у пул формою з пробілом і пул відповідав 400
+    (відгук №9 порталу)."""
+    got = PUB._normalize_shifra({"shifra": "ДАЖО 0-_-1413"}, key)
+    assert got["shifra"] == "DAZHO/0/_/1413"
+    assert got["shifra_pasport"] == "ДАЖО 0-_-1413"
+
+
 def test_opys_nevidomyi_kliuch_uzhe_v_shyfri() -> None:
     case = {"shifra": "HUNGARICANA/12/_/158"}
     assert PUB._normalize_shifra(case, "HUNGARICANA/12/_/158") is case
