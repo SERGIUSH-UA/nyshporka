@@ -264,6 +264,12 @@ def resolve_case(value: str) -> CaseRef:
         ms = _SHIFRA_RE.match(v)
         if ms:
             label, fond, opys, spr = ms.groups()
+            if casekey.glued_word(spr):
+                # «ДАХмО 227-1-261Справа»: номер злитий зі словом — ключ
+                # `…/261sprava` був би фантомом, а не справою.
+                raise ValueError(
+                    f"після номера справи в «{v}» йде слово («{spr}») — відокремте "
+                    f"шифру від назви. Приймаю: {_ACCEPTED_FORMATS}")
             if not label:
                 raise ValueError(
                     f"шифра «{v}» без архіву неоднозначна — додай архів "

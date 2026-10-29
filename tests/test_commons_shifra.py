@@ -340,7 +340,32 @@ def test_prose_shifra_does_not_swallow_next_word():
 
     m = _SHIFRA_RE.search("див. 127-1-5 абв про щось")
     assert m.groups() == ("127", "1", "5")
+    # Злите слово не дає літери справи: не фантом `261С`, а справа 261.
     m = _SHIFRA_RE.search("ДАХмО 227-1-261Справа про призначення")
-    assert m.groups() == ("227", "1", "261С")     # справа - ОДНА літера (як і було), не «Спр»
+    assert m.groups() == ("227", "1", "261")
+    m = _SHIFRA_RE.search("ДАХмО 230-1-2а. Метрична")
+    assert m.groups() == ("230", "1", "2а")
+    m = _SHIFRA_RE.search("ЦДІАК 127-1-5і про")
+    assert m.groups() == ("127", "1", "5і")
     m = _SHIFRA_RE.search("227-5доп-291 книга")
     assert m.groups() == ("227", "5доп", "291")
+
+
+@pytest.mark.parametrize("text", ["ДАХмО 227-1-261Справа", "ДАХмО 227-1-261справа про"])
+def test_glued_word_is_not_a_case_key(_ws, text):
+    """Номер, злитий зі словом назви, ключем не стає ні в `nysh case`, ні в резолвері."""
+    from nyshporka.cases.register import RegisterError, parse_shifra
+    from nyshporka.pagestore import resolve_case
+
+    with pytest.raises(RegisterError, match="слово"):
+        parse_shifra(text)
+    with pytest.raises(ValueError):       # відмова, а не ключ `…/261sprava`
+        resolve_case(text)
+
+
+def test_glued_word_rule():
+    from nyshporka.core.casekey import glued_word
+
+    assert glued_word("261Справа") and glued_word("12bis")
+    assert not glued_word("2а") and not glued_word("8433") and not glued_word("@fuzovka")
+    assert not glued_word("pt1a") and not glued_word("7864_parish56_1846")
