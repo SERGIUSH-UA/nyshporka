@@ -297,3 +297,50 @@ def test_write_meta_spr_shown_form(tmp_path):
         write_meta(tmp_path, archive="DAHMO", fond="227", opys="1", spr=spr,
                    files=[], source="commons")
         assert json.loads((tmp_path / "meta.json").read_text(encoding="utf-8"))["spr"] == "6563а"
+
+
+# ── багатолітерний суфікс опису в усіх розборах шифри ────────────────────────
+
+@pytest.mark.parametrize("text,want", [
+    ("ДАХмО 227-5доп-291", ("DAHMO/227/5dop/291", "5доп", "291")),
+    ("ДАХмО 227-5dop-291", ("DAHMO/227/5dop/291", "5dop", "291")),
+    ("ДАХмО ф.227 оп.5доп спр.291", ("DAHMO/227/5dop/291", "5доп", "291")),
+    ("ДАХмО 227-5доп-291а", ("DAHMO/227/5dop/291a", "5доп", "291а")),
+    ("ДАХмО 227-3дод-4", ("DAHMO/227/3dod/4", "3дод", "4")),
+    ("ДАХмО 227-1d-406", ("DAHMO/227/1d/406", "1d", "406")),
+    ("ДАХмО 227-2d-355a", ("DAHMO/227/2d/355a", "2d", "355a")),
+    ("ДАХмО 227-6d-45", ("DAHMO/227/6d/45", "6d", "45")),
+    ("ДАХмО 230-1-43", ("DAHMO/230/1/43", "1", "43")),
+])
+def test_resolve_and_register_multiletter_opys(_ws, text, want):
+    from nyshporka.cases.register import parse_shifra
+    from nyshporka.pagestore import resolve_case
+
+    key, opys, spr = want
+    assert resolve_case(text).key == key
+    got = parse_shifra(text)
+    assert (got.opys, got.spr) == (opys, spr)
+
+
+def test_resolve_key_form_unchanged(_ws):
+    from nyshporka.pagestore import resolve_case
+
+    assert resolve_case("DAHMO/230/43").key == "DAHMO/230/1/43"
+
+
+def test_manifest_shifra_with_multiletter_opys_passes(_ws):
+    from nyshporka.share.publish import _normalize_shifra
+
+    case = {"shifra": "ДАХмО 227-5доп-291"}
+    assert _normalize_shifra(case, "DAHMO/227/5dop/291") == case
+
+
+def test_prose_shifra_does_not_swallow_next_word():
+    from nyshporka.library import _SHIFRA_RE
+
+    m = _SHIFRA_RE.search("див. 127-1-5 абв про щось")
+    assert m.groups() == ("127", "1", "5")
+    m = _SHIFRA_RE.search("ДАХмО 227-1-261Справа про призначення")
+    assert m.groups() == ("227", "1", "261С")     # справа - ОДНА літера (як і було), не «Спр»
+    m = _SHIFRA_RE.search("227-5доп-291 книга")
+    assert m.groups() == ("227", "5доп", "291")
