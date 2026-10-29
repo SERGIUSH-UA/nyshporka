@@ -129,6 +129,10 @@ def build(sets: list[str], *, out: Path, procedure: str = "arbiter",
                     # Без сторінки зведення можливе (кропи є), але без
                     # контексту: це має бачити власник до відправки.
                     rep.warnings.append(f"{n} {pg}: сторінки в пакеті не буде — {exc}")
+                    # Шлях і ключ машини власника — не в пакет: `take` відкидає
+                    # абсолютний шлях усього пакета, а не лише сторінки.
+                    pm["src"] = ""
+                    pm.pop("key", None)
                 new_cut["pages"][pg] = pm
                 crop_dir = reg.crops_of(spec) / pg
                 for f in sorted(crop_dir.glob("line_*.png")):

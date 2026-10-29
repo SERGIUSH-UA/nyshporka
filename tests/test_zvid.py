@@ -235,6 +235,24 @@ def test_private_set_never_packs(owner: W.Workspace, tmp_path: Path) -> None:
         OW.build(["x17-z4-0006L"], out=tmp_path / "out", ws=owner)
 
 
+def test_missing_page_image_leaves_no_local_path(owner: W.Workspace, tmp_path: Path) -> None:
+    """Сторінку не поклали — шлях машини власника в пакет не йде, `take` бере пакет."""
+    def no_image(spec, pm, pg):
+        raise FileNotFoundError("кадру немає")
+
+    ctx = tmp_path / "context.md"
+    ctx.write_text("# x\n", encoding="utf-8")
+    rep = OW.build(["x17-z4-0006L"], out=tmp_path / "out", procedure="crop-read", context=ctx,
+                   control=["x17-z5-0015R"], ws=owner, image_of=no_image)
+    assert any("сторінки в пакеті не буде" in w for w in rep.warnings)
+    with zipfile.ZipFile(rep.file) as zf:
+        for n in zf.namelist():
+            if n.endswith(S.CUT_META_FILE):
+                pages = json.loads(zf.read(n))["pages"].values()
+                assert all(not pm.get("src") and "key" not in pm for pm in pages)
+    H.take(rep.file, base=tmp_path / "helper")
+
+
 def test_take_refuses_zip_slip_and_newer_client(tmp_path: Path) -> None:
     bad = tmp_path / "bad.zvid"
     with zipfile.ZipFile(bad, "w") as zf:
