@@ -219,6 +219,43 @@ def test_r2_plivky_zvodiatsia_z_tekstom(space: Path, two: tuple[Path, Path]) -> 
     assert again["made"] == 0 and again["runs"] == got["runs"]
 
 
+def test_chastyny_spravy_tsilymy_plivkamy_znimaiutsia(space: Path) -> None:
+    """Частини однієї справи на окремих плівках («д. 502», «д. 502-2» каталогу FS)
+    після збирання справами не лишаються: в Супрягу пішли б і частини, і ціла
+    (29.10.2026: 12 частин ДАОО ф.37)."""
+    from nyshporka import library as L
+    from nyshporka.cases import db
+
+    a = _r2_film(space, "005685657", 4, shifra="ЦДІАК 127-1012-502", run="film-005685657")
+    b = _r2_film(space, "005685658", 3, shifra="ЦДІАК 127-1012-502_2", run="film-005685658")
+    db.rebuild(rescan=True)
+    dest = space / "data" / "raw" / "cdiak_127" / "op1012-spr-502"
+    pieces = [J.Piece(a, "0001.jpg", "0004.jpg"), J.Piece(b, "0001.jpg", "0003.jpg")]
+
+    got = J.join(dest, pieces, shifra="ЦДІАК 127-1012-502", rebuild=False)
+
+    assert sorted(got["retired"]) == sorted([str(a), str(b)])
+    for d, run in ((a, "film-005685657"), (b, "film-005685658")):
+        side = _json.loads((d / "_source.json").read_text(encoding="utf-8"))
+        assert side["joined_into"] == "CDIAK/127/1012/502"
+        assert sorted(side["joined_runs"]) == [run, run + "-diak_v10"]
+        meta = _json.loads((space / "reports/htr" / run / "_htr_meta.json").read_text(encoding="utf-8"))
+        assert meta["superseded"]["by"] == ["op1012-spr-502", "op1012-spr-502-diak_v10"]
+        assert L.split_into(str(d.relative_to(L.case_base())).replace("\\", "/")) == [
+            "CDIAK/127/1012/502"]
+
+    # повтор доробляє те саме: прогони частин — з паспорта, текст на місці
+    again = J.join(dest, pieces, shifra="ЦДІАК 127-1012-502", rebuild=False)
+    assert again["runs"] == got["runs"] and again["made"] == 0
+
+    # шматок плівки (не вся тека) нічого не знімає: решта плівки — інші справи
+    c = _r2_film(space, "005685700", 5, shifra="ЦДІАК 127-1012-510", run="film-005685700")
+    got = J.join(space / "data" / "raw" / "cdiak_127" / "op1012-spr-511",
+                 [J.Piece(c, "0004.jpg", "0005.jpg")], shifra="ЦДІАК 127-1012-511", rebuild=False)
+    assert got["retired"] == [] and "joined_into" not in _json.loads(
+        (c / "_source.json").read_text(encoding="utf-8"))
+
+
 def test_rozkladena_plivka_viddaie_tekst_z_zhurnalu(space: Path, two: tuple[Path, Path]) -> None:
     """Плівку вже розкладено, шматок справи лишився поза справами (`-`)."""
     from nyshporka.cases import split as SPL

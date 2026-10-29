@@ -60,6 +60,7 @@ class _Span:
     names: list[str]                       # кадри частини, у порядку плівки
     remote: dict[str, Any] | None = None   # маніфест бакета плівки
     runs: list[str] = field(default_factory=list)
+    whole: bool = False                    # частина — уся тека, а не шматок плівки
 
 
 def parse_piece(spec: str) -> Piece:
@@ -116,6 +117,11 @@ def _piece_runs(src: Path, frames_dir: Path) -> list[str]:
     journal = _read_json(src / SPL.JOURNAL)
     if journal.get("runs"):
         return sorted(str(r) for r in journal["runs"])
+    # Тека, що ввійшла в справу цілою, свої прогони вже заміщено (`_retire`):
+    # повтор бере їх із паспорта.
+    joined = _read_json(src / "_source.json").get("joined_runs")
+    if isinstance(joined, list) and joined:
+        return sorted(str(r) for r in joined)
     by_dir = S.runs_by_case_dir()
     mains = {str(r.get("name") or "") for key in SPL._dir_keys(frames_dir, src)
              for r in by_dir.get(key) or []} - {""}
@@ -152,7 +158,8 @@ def _spans(pieces: list[Piece]) -> list[_Span]:
         if a > b:
             raise JoinError(f"частина {piece.src.name}: «{piece.first}» стоїть після «{piece.last}»")
         spans.append(_Span(piece, piece.label or _label(piece.src), frames_dir,
-                           names[a:b + 1], remote, _piece_runs(piece.src, frames_dir)))
+                           names[a:b + 1], remote, _piece_runs(piece.src, frames_dir),
+                           whole=a == 0 and b == len(names) - 1))
     if len({s.remote is None for s in spans}) > 1:
         raise JoinError("частини змішано: одна плівка з кадрами на диску, інша — в бакеті "
                         "(`_r2_frames.json`). Зберіть однаково: докачайте кадри бакетної плівки")
@@ -246,10 +253,47 @@ def join(dest: str | Path, pieces: list[Piece], *, copy: bool = False, shifra: s
         out["voices_skipped"] = skipped
         out["notes_moved"] = _move_notes(spans, rows, shifra)
         out["key"] = key
+        out["retired"] = _retire(spans, runs, key)
         out["index"] = _reindex(sorted(runs.values()), rebuild=rebuild)
         journal.update({"shifra": shifra, "key": key, "runs": runs})
     _write_json(d / JOURNAL, journal)
     return out
+
+
+def _retire(spans: list[_Span], runs: dict[str, str], key: str) -> list[str]:
+    """Тека, що ввійшла в справу ЦІЛОЮ, справою більше не є.
+
+    🔴 Частина справи на окремій плівці («д. 502-2» у каталозі FS) — це тека з
+    власним паспортом і прогонами. Без цього кроку після збирання вона лишалась
+    би в бібліотеці окремою «справою» поруч із цілою, і в Супрягу пішли б обидві
+    (29.10.2026: 12 частин справ ДАОО ф.37). Так само, як `cases split` знімає
+    розкладену теку: `joined_into` у паспорті ховає її з бібліотеки
+    (`library.split_into`), `superseded` у меті — її прогони з підрахунку.
+    Шматок плівки (не вся тека) нічого не знімає: решта плівки — інші справи.
+    """
+    from nyshporka import htr_store as S
+    from nyshporka.cases import split as SPL
+    from nyshporka.cloud.verify import META_NAME
+
+    done: list[str] = []
+    by = sorted(runs.values())
+    for s in spans:
+        src = s.piece.src
+        if not s.whole or (src / SPL.JOURNAL).exists():
+            continue
+        side = src / "_source.json"
+        meta = _read_json(side)
+        if meta.get("joined_into") != key or meta.get("joined_runs") != s.runs:
+            _write_json(side, {**meta, "joined_into": key, "joined_runs": s.runs})
+        for run in s.runs:
+            f = S.htr_root() / run / META_NAME
+            m = _read_json(f)
+            if m and not m.get("superseded"):
+                m["superseded"] = {"by": by, "at": SPL._now(),
+                                   "why": f"теку зведено в справу {key}"}
+                _write_json(f, m)
+        done.append(str(src))
+    return done
 
 
 def _key_of(shifra: str) -> str:

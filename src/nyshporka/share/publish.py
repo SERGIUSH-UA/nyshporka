@@ -1060,6 +1060,9 @@ def _ponad_steliu(files: int, *, nbytes: int = 0) -> str:
 #: або розворот, тобто щонайбільше один аркуш. Запас — на хибу в описі й
 #: на чисті аркуші, яких не знімали.
 MIN_KADRIV_NA_ARKUSH = 0.75
+#: Номер справи з хвостом частини: «д. 502-2» каталогу FamilySearch лягав у
+#: ключ як справа `502_2`.
+_CHASTYNA_FS = re.compile(r"^(\d+[a-z]?)_(\d+)$")
 
 
 def chastyna_spravy(key: str, shifra: str, kadriv: int) -> str:
@@ -1080,6 +1083,15 @@ def chastyna_spravy(key: str, shifra: str, kadriv: int) -> str:
         why = pomitka.get("why") if isinstance(pomitka, dict) else pomitka
         return (f"справу позначено в паспорті неповною: {why}. Віддати як неповну: "
                 f"--partial \"що саме прочитано\"")
+    chastyna = next((m for m in (_CHASTYNA_FS.match(x) for x in (
+        key.rsplit("/", 1)[-1] if key else "", shifra.rsplit("-", 1)[-1] if shifra else ""))
+        if m), None)
+    if chastyna:
+        return (f"номер справи «{chastyna.group(0)}» — частина {chastyna.group(2)} справи "
+                f"{chastyna.group(1)} (так каталог FamilySearch зве частини однієї справи на "
+                f"різних плівках). Зведіть усі частини: nysh cases join <тека справи "
+                f"{chastyna.group(1)}> --part … --shifra «…-{chastyna.group(1)}»; віддати саму "
+                f"частину — лише з --partial \"частина {chastyna.group(2)}\"")
     row = opys.registry_row(shifra) if shifra else None
     try:
         arkushiv = int(str((row or {}).get("folios") or "0").strip() or 0)

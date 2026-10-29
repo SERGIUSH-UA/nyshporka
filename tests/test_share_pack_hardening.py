@@ -474,6 +474,26 @@ def test_nepovna_v_pasporti_ne_pakuietsia_bez_partial(space: Path, monkeypatch: 
     assert "pack_refusals" not in got and Path(got["path"]).is_file()
 
 
+@pytest.mark.parametrize("key, shifra, vidmova", [
+    ("DAOO/37/3/502_2", "ДАОО 37-3-502_2", True),
+    ("DAOO/37/3/487", "ДАОО 37-3-487_2", True),     # ключ теки плівки, шифра — частина
+    ("DAOO/37/3/502", "ДАОО 37-3-502", False),
+    ("DAHMO/227/5dop/291", "ДАХмО 227-5доп-291", False)])
+def test_nomer_z_khvostom_chastyny_fs(key: str, shifra: str, vidmova: bool,
+                                      monkeypatch: Any) -> None:
+    """«д. 502-2» каталогу FamilySearch лягав у ключ справою `502_2`, і в
+    Супрягу пішла друга частина справи як окрема справа (29.10.2026)."""
+    from nyshporka.share import align
+    from nyshporka.share import publish as PUB
+
+    monkeypatch.setattr(align, "case_home_for", lambda key, opys="": None)
+    monkeypatch.setattr(PUB.opys, "registry_row", lambda shifra: None)
+    why = PUB.chastyna_spravy(key, shifra, 400)
+    assert bool(why) is vidmova
+    if vidmova:
+        assert "cases join" in why and "--partial" in why
+
+
 @pytest.mark.parametrize("arkushiv, vidmova", [("40", True), ("10", False), ("", False)])
 def test_kadriv_menshe_za_arkushi_opysu_tse_chastyna(
         space: Path, monkeypatch: Any, arkushiv: str, vidmova: bool) -> None:

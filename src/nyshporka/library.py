@@ -661,10 +661,15 @@ def split_into(rel: str) -> list[str]:
     if not f.is_file():
         return []
     try:
-        got = json.loads(f.read_text(encoding="utf-8")).get("split_into")
+        side = json.loads(f.read_text(encoding="utf-8"))
     except Exception:
         return []
-    return [str(k) for k in got] if isinstance(got, list) else []
+    got = side.get("split_into") if isinstance(side, dict) else None
+    if isinstance(got, list):
+        return [str(k) for k in got]
+    # Тека, що ввійшла цілою в справу з кількох плівок (`cases join`), — так само.
+    joined = side.get("joined_into") if isinstance(side, dict) else None
+    return [str(joined)] if joined else []
 
 
 @lru_cache(maxsize=4096)
