@@ -156,6 +156,24 @@ def test_znamennyk_z_pereliku_pages_staroho_meta(tmp_path: Path) -> None:
     assert _znamennyk_z_pasporta({"total": 0, "listed": 0}, d)["total"] == 77
 
 
+def test_znamennyk_z_manifestu_r2(tmp_path: Path) -> None:
+    """Частина плівки після `cases split` чи справа після `cases join` має лише
+    маніфест кадрів у бакеті: `frames_got` у паспорті немає, число — з маніфесту.
+
+    29.10.2026: 282 справи ф.127 з розкладених плівок пакувались із «кадрів не
+    названо»."""
+    from nyshporka.share.publish import _znamennyk_z_pasporta
+
+    d = tmp_path / "op1012-spr-530"
+    d.mkdir()
+    names = [f"{i:04d}.jpg" for i in range(42, 86)]
+    (d / "_source.json").write_text(json.dumps({"frames_remote": True}), encoding="utf-8")
+    (d / "_r2_frames.json").write_text(json.dumps({
+        "bucket": "test-bucket", "frames": [{"name": n} for n in names],
+        "parts": [{"key": "a.tar", "frames": names}]}), encoding="utf-8")
+    assert _znamennyk_z_pasporta({"total": 0, "listed": 0}, d)["total"] == 44
+
+
 def test_znamennyk_z_markera_offloaded(tmp_path: Path) -> None:
     """Маркер `_offloaded.json` скриптів простору (кадри на копії) — теж знаменник."""
     from nyshporka.share.publish import _znamennyk_z_pasporta

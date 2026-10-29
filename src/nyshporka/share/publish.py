@@ -624,13 +624,24 @@ def _znamennyk_z_pasporta(frames_block: dict[str, Any],
     🔴 Лише знаменник: `listed` лишається нулем, бо прив'язувати текст нема
     до чого, і відбитка теж не буде. Але «кадрів не названо» там, де паспорт
     знає число, змушувало картку мовчати про повноту прочитаного.
+
+    Маніфест кадрів у бакеті (`_r2_frames.json`) — теж знаменник: частина
+    плівки після `cases split` і справа після `cases join` поля `frames_got`
+    у паспорті не мають, а перелік їхніх кадрів лежить саме там.
     """
     from nyshporka.cases.register import read_sidecar
+    from nyshporka.cloud.verify import remote_manifest
 
     if home is None or frames_block.get("total"):
         return frames_block
     for teka in _teky_pasportu(home):
         side = read_sidecar(teka)
+        try:
+            man = remote_manifest(teka)
+        except ValueError:
+            man = None
+        if man:
+            return {**frames_block, "total": len(man["frames"]), "on_disk": 0}
         removed: dict[str, Any] = {}
         f = teka / "_frames_removed.json"
         if f.is_file():
