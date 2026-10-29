@@ -55,6 +55,7 @@ __all__ = [
     "require_current",
     "show_letter",
     "show_part",
+    "show_shifra",
     "stem",
 ]
 
@@ -182,6 +183,32 @@ def show_part(s: object) -> str:
     low = str(s or "").strip().lower()
     m = re.match(r"^(\d+)([a-z]+)$", low)
     return m.group(1) + m.group(2).translate(_UNFOLD_TR) if m else low
+
+
+#: Латинський префікс фонду в ключі → кириличний, як його пише архів
+#: (обернене до `_FOND_PREFIX_TO_LAT`; латинська `C` лишається собою).
+_FOND_PREFIX_SHOW = {"R": "Р", "P": "П", "F": "Ф", "S": "С"}
+_SHOW_NUM_RE = re.compile(r"^\d+[a-z]+$", re.IGNORECASE)
+_CYR_RE = re.compile(r"[А-ЯҐЄІЇа-яґєії]")
+
+
+def show_shifra(label: str, fond: object, opys: object, spr: object) -> str:
+    """Шифра для ПОКАЗУ: «ДАХмО 227-2д-355а», «ДАВіО Р-6129-24-5», «LVVA 1-2-3a».
+
+    Архів із кириличною назвою — його номери кирилицею (так їх пише опис
+    архіву); архів із латинською (LVVA, ANRM) — як у ключі. Те саме правило,
+    що `pokaz` сервера Супряги: шифра на картці й шифра в маніфесті однакові.
+    Збірка (`@…`) і невідомий опис (`_`) не чіпаються.
+    """
+    lbl = str(label or "").strip()
+    f, o, sp = (str(x or "").strip() for x in (fond, opys, spr))
+    if _CYR_RE.search(lbl):
+        m = _FOND_PREFIX_RE.match(f)
+        if m and m.group(1).upper() in _FOND_PREFIX_SHOW:
+            f = f"{_FOND_PREFIX_SHOW[m.group(1).upper()]}-{m.group(2)}"
+        o, sp = (show_part(x) if _SHOW_NUM_RE.match(x) else x for x in (o, sp))
+    mid = f"{f}-{o}-{sp}" if o else f"{f}-{sp}"
+    return f"{lbl} {mid}".strip()
 
 
 def show_letter(s: object) -> str:

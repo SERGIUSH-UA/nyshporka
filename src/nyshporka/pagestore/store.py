@@ -361,7 +361,9 @@ def resolve_case(value: str) -> CaseRef:
     key = str(entry.get("key") or "") or _mk_key(repo, fond, spr, opys)
     if not key:
         raise ValueError(f"не зібрав ключ зі «{value}» (repo={repo} fond={fond} spr={spr})")
-    shifra = entry.get("shifra") or f"{label} {fond}-{opys or '?'}-{spr}"
+    # Шифра для показу — кирилицею для кириличного архіву, як у бібліотеці
+    # (`casekey.show_shifra`): за нею сервер Супряги пише картку книги.
+    shifra = entry.get("shifra") or casekey.show_shifra(label, fond, opys or "?", spr)
     return CaseRef(
         key=key, repo=repo, fond=fond, spr=spr, opys=opys, shifra=shifra,
         title=entry.get("title") or "",

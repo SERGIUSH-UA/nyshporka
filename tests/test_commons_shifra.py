@@ -463,3 +463,48 @@ def test_collector_reads_literal_opys():
     assert parse_shifra("ДАХмО 227-1d-356. X.pdf", codes, "227") == ("1д", "356", "")
     assert parse_shifra("ДАХмО Ф. 227 О. 5доп С. 291 X.pdf", codes, "227") == ("5доп", "291", "")
     assert parse_shifra("ДАХмО 227-2д-355a X.pdf", codes, "227") == ("2д", "355", "а")
+
+
+# ── шифра для показу: кирилицею для кириличного архіву ──────────────────────
+
+@pytest.mark.parametrize("args,want", [
+    (("ДАХмО", "227", "5dop", "291"), "ДАХмО 227-5доп-291"),
+    (("ДАХмО", "227", "2d", "355a"), "ДАХмО 227-2д-355а"),
+    (("ДАХмО", "315", "1", "7029a"), "ДАХмО 315-1-7029а"),
+    (("ДАВіО", "R-6129", "24", "5"), "ДАВіО Р-6129-24-5"),
+    (("ДАХмО", "315", "1", "7049ч"), "ДАХмО 315-1-7049ч"),
+    (("ДАОО", "37", "_", "1235"), "ДАОО 37-_-1235"),
+    (("ANRM", "211", "", "@fuzovka"), "ANRM 211-@fuzovka"),
+    (("ДАХмО", "211", "11", "@Razeni"), "ДАХмО 211-11-@Razeni"),
+    (("LVVA", "1407", "1", "5a"), "LVVA 1407-1-5a"),           # латинський архів — як є
+    (("ANRM", "211", "1d", "5"), "ANRM 211-1d-5"),
+])
+def test_show_shifra(args, want):
+    from nyshporka.core.casekey import show_shifra
+
+    assert show_shifra(*args) == want
+
+
+@pytest.mark.parametrize("folder,key,shifra", [
+    ("dahmo_227/op5доп-spr-291", "DAHMO/227/5dop/291", "ДАХмО 227-5доп-291"),
+    ("dahmo_227/op2д-spr-355а", "DAHMO/227/2d/355a", "ДАХмО 227-2д-355а"),
+    ("dahmo_315/op1-spr-7029a", "DAHMO/315/1/7029a", "ДАХмО 315-1-7029а"),
+])
+def test_library_shifra_is_shown_and_resolves_back(_ws, folder, key, shifra):
+    """Бібліотека показує шифру кирилицею, і резолвер (а за ним сервер Супряги)
+    розбирає її назад у той самий латинський ключ."""
+    from PIL import Image
+
+    from nyshporka import library as L
+    from nyshporka.core.workspace import workspace
+    from nyshporka.pagestore import resolve_case
+
+    d = workspace().raw / folder
+    d.mkdir(parents=True)
+    Image.new("L", (20, 20)).save(d / "0001.jpg")
+    entries = L.build_library()
+    got = [(e.key, e.shifra) for e in entries]
+    assert got == [(key, shifra)]
+    L.write_library(entries)
+    ref = resolve_case(shifra)
+    assert (ref.key, ref.shifra) == (key, shifra)

@@ -1750,9 +1750,10 @@ def _source_to_entry(src: Source) -> CaseEntry | None:
 
 def _shifra(repo: str | None, fond: str | None, opys: str | None,
             spr: str | None) -> str:
-    lbl = _REPO_LABEL.get(repo or "", repo or "")
-    mid = f"{fond}-{opys}-{spr}" if opys else f"{fond}-{spr}"
-    return f"{lbl} {mid}".strip()
+    """Шифра справи для показу (`casekey.show_shifra`): ключ латинський, а
+    шифра кириличного архіву — кирилицею, як в описі: «ДАХмО 227-5доп-291»,
+    не «227-5dop-291». Ця шифра їде в маніфести пулу й на картку справи."""
+    return _ck.show_shifra(_REPO_LABEL.get(repo or "", repo or ""), fond, opys, spr)
 
 
 def _rtypes_label(rtypes: list[str]) -> str:
