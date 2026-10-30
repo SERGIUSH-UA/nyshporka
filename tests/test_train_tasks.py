@@ -167,6 +167,7 @@ def test_export_cuts_by_pages_and_puts_notes_before_rows(space: W.Workspace) -> 
     assert "0002" not in txt.split("Рядки:")[1]
     assert rep.sheets["0001"] == ["0001.png"]
     assert (rep.out.parent / T.SHEETS_DIR / "0001.drafts.txt").is_file()
+    assert "0001_c.png" not in rep.sheets["0001"] and "_c1.png" in txt and "view ctx" in txt
 
 
 def test_export_folds_unanimous_and_needs_two_voices(space: W.Workspace) -> None:
@@ -256,9 +257,14 @@ def test_sheet_tiles_big_pages_and_caps_boxes(tmp_path: Path) -> None:
     boxes = [[100, 50 + i * 60, 3900, 100 + i * 60] for i in range(45)]
     files, note = SH.render_sheet(im, boxes, tmp_path, "big")
     assert len(files) > 1 and "тайлів" in note
+    for k, f in enumerate(files, 1):
+        bare = Image.open(tmp_path / f"big_c{k}.png")
+        assert bare.size == Image.open(f).size
+        assert bare.convert("L").getextrema() == (255, 255)  # без рамок і номерів
     small = Image.new("RGB", (800, 600), "white")
     files, note = SH.render_sheet(small, boxes[:5], tmp_path, "small")
     assert files == [tmp_path / "small.png"] and "одним аркушем" in note
+    assert (tmp_path / "small_c.png").is_file()
 
 
 # ── дивилка ──────────────────────────────────────────────────────────────────

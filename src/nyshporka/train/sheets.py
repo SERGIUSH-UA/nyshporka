@@ -153,6 +153,9 @@ def render_sheet(im: Any, boxes: list[Any], out: Path, page: str, *,
     if not bs:
         raise SheetError("немає рамок")
     im = im.convert("RGB")
+    # Рамки з номерами закривають текст: поруч кожного тайла лягає той самий
+    # шматок сторінки без них (`_c<k>`) — графи, шапки, сусідній запис.
+    clean = im.copy()
     d = ImageDraw.Draw(im)
     font = _font()
     band_of = bands(boxes)
@@ -168,11 +171,13 @@ def render_sheet(im: Any, boxes: list[Any], out: Path, page: str, *,
     x1 = min(im.width, max(b[2] for b in bs) + pad)
     y1 = min(im.height, max(b[3] for b in bs) + pad)
     block = im.crop((x0, y0, x1, y1))
+    bare = clean.crop((x0, y0, x1, y1))
     scale = min(1.0, VISION_LONG_SIDE / max(block.size))
     out.mkdir(parents=True, exist_ok=True)
     if scale >= min_scale:
         f = out / f"{page}.png"
         block.save(f)
+        bare.save(out / f"{page}_c.png")
         return [f], f"{block.size[0]}×{block.size[1]}, масштаб {scale:.2f}× — одним аркушем"
     limit = VISION_LONG_SIDE / min_scale
     xs, ys, cut_x, cut_y = grid_for(block.width, block.height, boxes, (x0, y0), limit)
@@ -192,6 +197,7 @@ def render_sheet(im: Any, boxes: list[Any], out: Path, page: str, *,
             worst = max(worst, tx1 - tx0, ty1 - ty0)
             f = out / f"{page}_t{k}.png"
             block.crop((tx0, ty0, tx1, ty1)).save(f)
+            bare.crop((tx0, ty0, tx1, ty1)).save(out / f"{page}_c{k}.png")
             files.append(f)
     tscale = min(1.0, VISION_LONG_SIDE / max(1, worst))
     note = (f"сітка {cols}×{rows} = {k} тайлів, найбільший бік {worst}px ({tscale:.2f}×), "
