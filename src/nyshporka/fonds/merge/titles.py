@@ -282,7 +282,8 @@ def fuse_catalog(reg: dict[Key, Row], rows: list[dict[str, str]],
 
 
 def fuse_fs(reg: dict[Key, Row], fs_rows: list[dict[str, str]],
-            wiki_rows: list[dict[str, str]]) -> None:
+            wiki_rows: list[dict[str, str]],
+            copy_rows: list[dict[str, str]] | None = None) -> None:
     """Плівки: DGS, тип запису, місце, кадри — і резервне джерело з опису.
 
     🔴 друге джерело — колонка В самій таблиці опису. Майстер-індекс плівок
@@ -290,6 +291,9 @@ def fuse_fs(reg: dict[Key, Row], fs_rows: list[dict[str, str]],
     транскрипція має колонку з плівкою для 1516 із 1526 справ опису 1. Через це
     реєстр писав «сканів онлайн немає — замовлення в архіві» про справи, які
     лежать онлайн. Рангом це джерело нижче: заповнює лише порожнє.
+
+    Третє — картки покажчика (`duck-copies`), найслабше: лише там, де плівки не
+    знає ніхто, і лише про справи, які в реєстрі вже є.
     """
     for row in fs_rows:
         key = key_of(row)
@@ -320,3 +324,16 @@ def fuse_fs(reg: dict[Key, Row], fs_rows: list[dict[str, str]],
         if not r["fs_url"]:
             r["fs_url"] = ("https://www.familysearch.org/records/images/"
                            f"search-results?imageGroupNumbers={film}")
+
+    for row in copy_rows or ():
+        found = reg.get(key_of(row) or ("", "", ""))
+        if found is None:
+            continue
+        url = (row.get("duck_copy_url") or "").strip()
+        if url:
+            found["duck_copy_url"] = found["duck_copy_url"] or url
+            found["duck_online"] = found["duck_online"] or "1"
+        dgs = (row.get("fs_dgs") or "").strip()
+        if dgs and not (found["fs_dgs"] or found["fs_film"]):
+            found["fs_dgs"] = dgs
+            found["fs_url"] = found["fs_url"] or (row.get("fs_url") or "").strip()

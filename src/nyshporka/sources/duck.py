@@ -129,6 +129,15 @@ def split_code(full_code: str) -> tuple[str, str, str, str]:
     return (parts[0].strip(), parts[1].strip(), parts[2].strip(), parts[3].strip())
 
 
+def _copies(data: dict[str, Any]) -> list[dict[str, str]]:
+    """Онлайн-копії з картки справи."""
+    return [{"url": str(c.get("url") or ""),
+             "availability": str(c.get("availability") or ""),
+             "checked": str(c.get("checked_availability_at") or "")[:10]}
+            for c in data.get("online_copies") or []
+            if isinstance(c, dict) and c.get("url")]
+
+
 def _years(raw: Any) -> str:
     """`[{start_year, end_year}]` → «1802-1841». Порожньо — коли років немає."""
     if not isinstance(raw, list) or not raw:
@@ -572,14 +581,7 @@ class DuckSource:
                 info=" ".join(str(raw.get("info") or "").split()),
                 lat=_num(raw.get("lat")), lng=_num(raw.get("lng")),
                 tags=tuple(str(t) for t in (raw.get("tags") or []))))
-        copies: list[dict[str, str]] = []
-        for c in data.get("online_copies") or []:
-            if not isinstance(c, dict) or not c.get("url"):
-                continue
-            copies.append({
-                "url": str(c.get("url") or ""),
-                "availability": str(c.get("availability") or ""),
-                "checked": str(c.get("checked_availability_at") or "")[:10]})
+        copies = _copies(data)
         code = str(data.get("full_code") or full_code)
         return {"code": code, "archive": arch, "fond": fond, "opys": opys,
                 "spr": spr, "repo": self._our_repo(arch),
@@ -589,6 +591,18 @@ class DuckSource:
                 "tags": [str(t) for t in (data.get("tags") or [])],
                 "updated": str(data.get("updated_at") or "")[:10],
                 "parishes": parishes, "copies": copies, "url": case_page(code)}
+
+    def copies_of(self, arch: str, fond: str, opys: str, spr: str) -> list[dict[str, str]]:
+        """Онлайн-копії однієї справи.
+
+        ⚠ Частинами, а не шифрою: номер групи справ («29-35») несе дефіс, і
+        `split_code` таку шифру навмисно не розбирає.
+        """
+        path = "/api/catalog/" + "/".join(quote(p) for p in (arch, fond, opys, spr))
+        data = self._fetch(path, what=path)
+        if not isinstance(data, dict) or not data.get("id"):
+            raise SourceError(f"у покажчику немає справи {arch}-{fond}-{opys}-{spr}")
+        return _copies(data)
 
     def _hit(self, x: Any) -> Hit | None:
         """Рядок видачі → знахідка. Не словник — пропускаємо, а не падаємо."""

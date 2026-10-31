@@ -71,7 +71,8 @@ def fuse(book: SourceBook, target: Target) -> tuple[dict[Any, dict[str, Any]],
 
     TT.fuse_covers(reg, book.rows.get("covers", []))
     TT.fuse_catalog(reg, book.rows.get("catalog", []), conflicts)
-    TT.fuse_fs(reg, book.rows.get("fs", []), book.rows.get("wikisource", []))
+    TT.fuse_fs(reg, book.rows.get("fs", []), book.rows.get("wikisource", []),
+               book.rows.get("duck_copies", []))
     return reg, conflicts, unresolved
 
 

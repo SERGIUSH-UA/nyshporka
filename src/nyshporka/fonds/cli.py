@@ -41,7 +41,7 @@ def cmd_sources() -> None:
 
 @app.command("plan")
 def cmd_plan(
-    collector: str = typer.Argument(..., help="archium | babynyar | catagrafii | commons | duck | wikisource"),
+    collector: str = typer.Argument(..., help="archium | babynyar | catagrafii | commons | duck | duck-copies | wikisource"),
     fond: str = typer.Option(..., "--fond", help="номер фонду"),
     repo: str = typer.Option("DAHMO", "--repo", help="код або назва архіву"),
     opys: str = typer.Option("", "--opys", help="описи через кому"),
@@ -103,7 +103,7 @@ def cmd_build(
 
 @app.command("collect")
 def cmd_collect(
-    collector: str = typer.Argument(..., help="archium | babynyar | catagrafii | commons | duck | wikisource"),
+    collector: str = typer.Argument(..., help="archium | babynyar | catagrafii | commons | duck | duck-copies | wikisource"),
     fond: str = typer.Option(..., "--fond", help="номер фонду"),
     repo: str = typer.Option("DAHMO", "--repo", help="код або назва архіву"),
     opys: str = typer.Option("", "--opys", help="описи через кому"),

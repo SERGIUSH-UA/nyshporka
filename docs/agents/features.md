@@ -135,6 +135,7 @@ nysh registry sources                                  # які збирачі �
 nysh registry plan  duck --repo ДАВіО --fond 904       # скільки це коштуватиме
 nysh registry collect archium --repo ЦДІАК --fond 224 --fond-id 198
 nysh registry collect wikisource --repo ДАЖО --fond 1 --opys 78   # таблиця опису з Вікіджерел
+nysh registry collect duck-copies --repo DAHMO --fond 315    # плівки FS справ, яких немає в переліку опису
 nysh registry rate                                     # чи витримали темп
 nysh registry merge --repo ЦДІАК --fond 224            # звести в один реєстр
 ```

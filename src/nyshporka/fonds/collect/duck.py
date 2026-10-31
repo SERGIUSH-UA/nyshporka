@@ -207,6 +207,8 @@ class DuckCollector:
             # 🔴 Копії з `file_id: null` описують увесь опис (плівка цілком), і
             # в рядок конкретної справи вони не належать: інакше кожна справа
             # опису виглядала б оцифрованою.
+            # ⚠ Живий сервіс віддає тут ЛИШЕ такі копії: копії справ — у картках,
+            # їх збирає `duck-copies`.
             by_file: dict[str, str] = {}
             for c in data.get("online_copies") or []:
                 fid, url = c.get("file_id"), str(c.get("url") or "")

@@ -87,6 +87,7 @@ SOURCES: tuple[Source, ...] = (
     Source("mirror", "mirror.tsv", why="дзеркало сканів"),
     Source("covers", "covers.tsv", why="обкладинка, прочитана оком"),
     Source("alfavitka", "alfavitka.tsv", why="прізвища роду за алфавіткою архіву"),
+    Source("duck_copies", "duck_copies.tsv", why="копії справ із карток покажчика"),
 )
 
 #: 🔴 Порядок обробки текстових джерел: слабкі → сильні. Він несе байти —
