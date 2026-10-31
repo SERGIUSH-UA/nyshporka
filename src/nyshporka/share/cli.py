@@ -1155,6 +1155,155 @@ def stats_cmd(
     _notes(env)
 
 
+def _pidkazka(d: dict[str, Any]) -> None:
+    """Підказка з паспорта, якщо сервер її дав; решти паспорта клієнт не читає."""
+    pasport = d.get("pasport")
+    if isinstance(pasport, dict) and pasport.get("pidkazka"):
+        console.print(f"  {_e(pasport['pidkazka'])}", highlight=False)
+
+
+@app.command("vyklyky")
+@route("share vyklyky", skill="share-case",
+       when="які операції пул виконує на сервері, що можна запустити")
+def vyklyky_cmd(
+    base: str = typer.Option("", "--base", help="інша адреса пулу"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Операції, які пул виконує на сервері: перелік і підписи дає сервер."""
+    from nyshporka import ops as O
+
+    env = O.call("share.vyklyky", {"base": base})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    if d.get("tekst"):
+        console.print(_e(d["tekst"]), highlight=False)
+    for o in d.get("operatsii") or []:
+        znak = "[ok]✓[/ok]" if o.get("dozvoleno") else "[dim]✗[/dim]"
+        console.print(f"{znak} [bold]{_e(o.get('kod'))}[/bold] — {_e(o.get('nazva'))}",
+                      highlight=False)
+        if o.get("opys"):
+            console.print(f"    {_e(o['opys'])}", highlight=False)
+        if o.get("povidomlennia"):
+            console.print(f"    {_e(o['povidomlennia'])}", highlight=False)
+    _notes(env)
+
+
+@app.command("vyklyk")
+@route("share vyklyk", skill="share-case",
+       when="запустити операцію пулу на сервері, стежити за нею й забрати файли")
+def vyklyk_cmd(
+    operatsiia: str = typer.Argument(..., help="код операції з `share vyklyky`"),
+    param: list[str] = typer.Option([], "--param", help="параметр ключ=значення (можна повторювати)"),
+    kliuch: str = typer.Option("", "--kliuch", help="ключ повторності (типово — свій, новий)"),
+    stezhyty: bool = typer.Option(False, "--stezhyty", help="дочекатись кінця й забрати файли"),
+    do: str = typer.Option("", "--do", help="тека для файлів з --stezhyty (типово supriaha-<номер>)"),
+    base: str = typer.Option("", "--base", help="інша адреса пулу"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Запустити іменовану операцію на сервері; друкує номер виклику й стан."""
+    from nyshporka import ops as O
+
+    env = O.call("share.vyklyk", {"operatsiia": operatsiia, "param": param, "kliuch": kliuch,
+                                  "stezhyty": stezhyty, "do": do, "base": base})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    v = d.get("vyklyk") if stezhyty else d
+    v = v or {}
+    console.print(f"виклик [bold]{_e(v.get('id'))}[/bold] · стан {_e(v.get('stan'))}", highlight=False)
+    if stezhyty:
+        z = d.get("zabrano") or {}
+        console.print(f"забрано архівів [bold]{_e(z.get('arkhiviv', 0))}[/bold] · файлів "
+                      f"{_e(z.get('fayliv', 0))} (нових {_e(z.get('novykh', 0))}) → {_e(z.get('teka'))}",
+                      highlight=False)
+        _pidkazka(z)
+    _notes(env)
+
+
+@app.command("vyklyk-stan")
+@route("share vyklyk-stan", skill="share-case", when="як там мій виклик на сервері Супряги")
+def vyklyk_stan_cmd(
+    vyklyk: int = typer.Argument(..., help="номер виклику"),
+    base: str = typer.Option("", "--base", help="інша адреса пулу"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Стан свого виклику."""
+    from nyshporka import ops as O
+
+    env = O.call("share.vyklyk_stan", {"vyklyk": vyklyk, "base": base})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    console.print(f"виклик [bold]{_e(d.get('id', vyklyk))}[/bold] · стан {_e(d.get('stan'))}",
+                  highlight=False)
+    _notes(env)
+
+
+@app.command("vyklyk-skasuvaty")
+@route("share vyklyk-skasuvaty", skill="share-case", when="скасувати свій виклик на сервері Супряги")
+def vyklyk_skasuvaty_cmd(
+    vyklyk: int = typer.Argument(..., help="номер виклику"),
+    base: str = typer.Option("", "--base", help="інша адреса пулу"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Скасувати свій виклик."""
+    from nyshporka import ops as O
+
+    env = O.call("share.vyklyk_skasuvaty", {"vyklyk": vyklyk, "base": base})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    console.print(f"виклик [bold]{_e(d.get('id', vyklyk))}[/bold] · стан {_e(d.get('stan'))}",
+                  highlight=False)
+    _notes(env)
+
+
+@app.command("dovidka")
+@route("share dovidka", skill="share-case",
+       when="інструкція сервера Супряги для агента: як користуватись операціями пулу")
+def dovidka_cmd(
+    base: str = typer.Option("", "--base", help="інша адреса пулу"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Інструкція від сервера для агента."""
+    from nyshporka import ops as O
+
+    env = O.call("share.dovidka", {"base": base})
+    if _answer(env, as_json):
+        return
+    console.print(_e((env.data or {}).get("tekst", "")), highlight=False)
+    _notes(env)
+
+
+@app.command("zabraty")
+@route("share zabraty", skill="share-case",
+       when="забрати готові файли свого виклику з Супряги в теку, зі звіркою кожного файла")
+def zabraty_cmd(
+    vyklyk: int = typer.Argument(..., help="номер свого виклику"),
+    do: str = typer.Option("", "--do", help="тека для файлів (типово supriaha-<номер>)"),
+    stezhyty: bool = typer.Option(False, "--stezhyty", help="чекати, доки виклик не скінчиться"),
+    base: str = typer.Option("", "--base", help="інша адреса пулу"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Забрати результат свого виклику: архіви, звірка sha256 кожного файла, «забрано».
+
+    Файл ляже в теку лише тоді, коли збігся з переліком сервера; після цього
+    сервер прибирає архів зі сховища. Повторний запуск бере лише нове.
+    """
+    from nyshporka import ops as O
+
+    env = O.call("share.zabraty", {"vyklyk": vyklyk, "do": do, "stezhyty": stezhyty, "base": base})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    console.print(f"забрано архівів [bold]{_e(d.get('arkhiviv', 0))}[/bold] · файлів "
+                  f"{_e(d.get('fayliv', 0))} (нових {_e(d.get('novykh', 0))}) → {_e(d.get('teka'))}",
+                  highlight=False)
+    _pidkazka(d)
+    _notes(env)
+
+
 @app.command("sync")
 def sync_cmd(
     fond: str = typer.Option("", "--fond", help="лише цей фонд (швидше)"),
