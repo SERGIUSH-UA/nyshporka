@@ -19,10 +19,11 @@
 
 ### Додано
 
-- Спеціалісти: підтримка моделей вузького письма в каталозі (`specialist`, `scope`, `avoid`, `launch`,
-  `license` у `packs.json`).
+- Спеціалісти: моделі вузького письма в каталозі (`specialist`, `scope`, `avoid`, `launch`,
+  `license` у `packs.json`). Логофет v11 у релізі `weights-v4`.
 - `nysh models list` друкує спеціалістів окремим розділом з описом.
 - `nysh models get --specialists`; op `models.get` з `specialists`.
+- `docs/specialists.md`.
 - `tools/make_release.py --only`: реліз лише названих ваг.
 - Супряга: виконання операцій на сервері й забір файлів архівами зі звіркою sha256; стан операції друкується словами сервера.
 - `nysh share hotove`, `nysh share zabraty --usi`, `nysh share vyklyk-pochaty`; помічник на старті

@@ -101,6 +101,7 @@ nav:
   - Для досвідчених:
       - Дотренувати модель: train.md
       - Прочитати на орендованій машині: cloud.md
+      - Спеціалісти: specialists.md
       - Нишпорка в Docker: docker.md
       - Обмінятись прочитаним (Супряга): share.md
   - Що нового: whats-new.md
@@ -140,6 +141,7 @@ plugins:
             Для досвідчених: Advanced
             Дотренувати модель: Fine-tune the model
             Прочитати на орендованій машині: Read on a rented machine
+            Спеціалісти: Specialists
             Нишпорка в Docker: Nyshporka in Docker
             Обмінятись прочитаним (Супряга): Share what you have read (Supriaha)
             Що нового: What's new
@@ -159,6 +161,7 @@ plugins:
             Для досвідчених: Dla zaawansowanych
             Дотренувати модель: Douczanie modelu
             Прочитати на орендованій машині: Odczyt na wynajętej maszynie
+            Спеціалісти: Specjaliści
             Нишпорка в Docker: Nyshporka w Dockerze
             Обмінятись прочитаним (Супряга): Wymiana odczytanych akt (Supriaha)
             Що нового: Co nowego
@@ -178,6 +181,7 @@ plugins:
             Для досвідчених: Pentru avansați
             Дотренувати модель: Antrenarea suplimentară a modelului
             Прочитати на орендованій машині: Citirea pe o mașină închiriată
+            Спеціалісти: Specialiști
             Нишпорка в Docker: Nyshporka în Docker
             Обмінятись прочитаним (Супряга): Schimbul de dosare citite (Supriaha)
             Що нового: Ce este nou
@@ -197,6 +201,7 @@ plugins:
             Для досвідчених: Pour les utilisateurs avancés
             Дотренувати модель: Affiner le modèle
             Прочитати на орендованій машині: Lire sur une machine louée
+            Спеціалісти: Spécialistes
             Нишпорка в Docker: Nyshporka dans Docker
             Обмінятись прочитаним (Супряга): Partager ce qui a été lu (Supriaha)
             Що нового: Nouveautés
@@ -216,6 +221,7 @@ plugins:
             Для досвідчених: Für Fortgeschrittene
             Дотренувати модель: Modell nachtrainieren
             Прочитати на орендованій машині: Auf einer gemieteten Maschine lesen
+            Спеціалісти: Spezialisten
             Нишпорка в Docker: Nyshporka in Docker
             Обмінятись прочитаним (Супряга): Gelesenes teilen (Supriaha)
             Що нового: Neuigkeiten
@@ -235,6 +241,7 @@ plugins:
             Для досвідчених: Для опытных
             Дотренувати модель: Дообучить модель
             Прочитати на орендованій машині: Прочитать на арендованной машине
+            Спеціалісти: Специалисты
             Нишпорка в Docker: Нышпорка в Docker
             Обмінятись прочитаним (Супряга): Обмен прочитанным (Супряга)
             Що нового: Что нового

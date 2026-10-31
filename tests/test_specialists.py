@@ -107,7 +107,9 @@ def test_models_list_describes_a_specialist(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_every_specialist_in_the_manifest_is_described() -> None:
     raw = json.loads(packs.manifest_path().read_text(encoding="utf-8"))["packs"]
-    for p in (p for p in raw if p.get("specialist")):
+    rows = [p for p in raw if p.get("specialist")]
+    assert rows
+    for p in rows:
         assert p["sha256"] and p["size"]
         assert all(p.get(k) for k in ("scope", "avoid", "launch", "license")), p["id"]
         # Основа PARSeq (Hukyl) під CC BY-SA: її ShareAlike переходить на спеціаліста цього рушія.

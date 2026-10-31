@@ -93,7 +93,7 @@ def test_an_old_workspace_has_the_migration_pending_until_done(space: Path) -> N
                                                "0.30.4", "0.31.0", "0.32.0", "0.33.0",
                                                "0.34.0", "0.35.0", "0.36.0", "0.36.1", "0.36.2",
                                                "0.37.0", "0.37.1", "0.37.2", "0.37.3", "0.37.4", "0.37.5", "0.37.6",
-                                               "0.37.7", "0.38.0", "0.38.2", "0.38.3", "0.38.4", "0.38.5", "0.38.6"]
+                                               "0.37.7", "0.38.0", "0.38.2", "0.38.3", "0.38.4", "0.38.5", "0.38.6", "0.39.0"]
     assert M.pending(space, "0.19.0") == [] and M.pending(space, "0.20.0") == []
     assert not any(w.code == "agent_migration" for w in O.call("workspace.info", {}).warnings)
 
@@ -257,7 +257,7 @@ def test_models_check_ignores_superseded_packs(space: Path, tmp_path: Path,
     monkeypatch.setattr(packs, "target_dir", lambda kind: tmp_path / "packs")
     got = M.run_check("models_current", space)
     assert got.state == "todo"
-    current = {p.id for p in packs.catalog() if p.kind == "model" and not p.superseded}
-    old = {p.id for p in packs.catalog() if p.superseded}
+    current = {p.id for p in packs.catalog() if p.kind == "model" and not p.superseded and not p.specialist}
+    old = {p.id for p in packs.catalog() if p.superseded or p.specialist}
     assert current and all(i in got.detail for i in current)
     assert not any(i in got.detail for i in old)
