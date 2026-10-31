@@ -37,6 +37,10 @@ COUNTER_TIMEOUT = 5.0
 
 MANIFEST_NAME = "packs.json"
 
+#: Ваги вузького письма за іменем файла. Те саме правило для власних файлів у
+#: `data/spotter/models`, яких у `packs.json` немає: спеціаліста не обирає автомат.
+SPECIALIST_PREFIXES = ("logofet_", "regent_", "pysar_x18_")
+
 
 @dataclass(frozen=True)
 class Pack:
@@ -58,6 +62,15 @@ class Pack:
     #: оновлений застосунок читає й тоді, коли нові ваги ще не довантажені
     #: (офлайн, обірване `nysh models get`): гірше, але не «читати нічим».
     superseded: bool = False
+    #: Спеціаліст: модель вузького письма. Не качається за замовчуванням і не
+    #: стає голосом сама, бо номер версії порівнюється між родинами: Логофет v11
+    #: обійшов би Дяка v10 і читав би російські книги, яких не вчив. Вмикає людина.
+    specialist: bool = False
+    #: На що спеціаліста брати й на що ні; команда запуску. Друкує `nysh models list`.
+    scope: str = ""
+    avoid: str = ""
+    launch: str = ""
+    license: str = ""
 
     @property
     def url(self) -> str:
@@ -66,6 +79,11 @@ class Pack:
     @property
     def counter_url(self) -> str:
         return f"{COUNTER_URL}/{self.release}/{self.filename}"
+
+
+def is_specialist_file(name: str) -> bool:
+    """Чи ці ваги — спеціаліст, за іменем файла (і для власних файлів поза `packs.json`)."""
+    return name.lower().startswith(SPECIALIST_PREFIXES)
 
 
 def manifest_path() -> Path:
@@ -163,10 +181,15 @@ def installed() -> list[str]:
 
 
 def missing(kind: str = "", *, include_superseded: bool = False) -> list[Pack]:
-    """Чого бракує. Замінені паки сюди не входять: їх ніхто не мусить качати."""
+    """Чого бракує. Замінені паки й спеціалісти сюди не входять: їх ніхто не мусить качати."""
     return [p for p in catalog()
             if (not kind or p.kind == kind) and (include_superseded or not p.superseded)
-            and not verify(p)]
+            and not p.specialist and not verify(p)]
+
+
+def specialists() -> list[Pack]:
+    """Спеціалісти з переліку: качаються лише на прохання людини."""
+    return [p for p in catalog() if p.specialist]
 
 
 #: Запас над розміром пака з маніфесту: розмір там може бути округлений.
@@ -343,6 +366,8 @@ def as_dict() -> dict[str, Any]:
             "id": p.id, "kind": p.kind, "label": p.label or p.id,
             "size": p.size, "script": p.script, "engine": p.engine,
             "superseded": p.superseded,
+            "specialist": p.specialist, "scope": p.scope, "avoid": p.avoid,
+            "launch": p.launch, "license": p.license,
             "state": ("ok" if verify(p)
                       else "broken" if path.exists()
                       else "superseded" if p.superseded else "absent"),

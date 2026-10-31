@@ -52,5 +52,5 @@ def test_current_packs_carry_hashes() -> None:
 def test_one_current_pack_per_role() -> None:
     """Один чинний пак на (письмо, рушій): інакше вибір моделі вирішує номер версії."""
     roles = [(p["script"], p["engine"]) for p in _packs()
-             if p["kind"] == "model" and not p.get("superseded")]
+             if p["kind"] == "model" and not p.get("superseded") and not p.get("specialist")]
     assert len(roles) == len(set(roles)), roles

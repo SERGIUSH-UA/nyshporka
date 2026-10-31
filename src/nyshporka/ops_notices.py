@@ -98,7 +98,8 @@ def notices_read(a: NoticesReadArgs) -> Envelope:
 
 
 class ModelsGetArgs(BaseModel):
-    ids: list[str] | None = Field(default=None, description="id паків; порожньо — усі, яких бракує")
+    ids: list[str] | None = Field(default=None, description="id паків; порожньо — усі бойові, яких бракує")
+    specialists: bool = Field(default=False, description="і всіх спеціалістів (інакше — лише за id)")
 
 
 @op("models.get", summary="Завантажити моделі, яких бракує (sha256 звіряється)",
@@ -110,7 +111,8 @@ def models_get(a: ModelsGetArgs) -> Envelope:
     from nyshporka.setup import packs
 
     known = [p for p in packs.catalog() if p.kind == "model" and not p.superseded]
-    want = [p for p in known if (not a.ids or p.id in a.ids) and not packs.verify(p)]
+    want = [p for p in known
+            if (p.id in a.ids if a.ids else (a.specialists or not p.specialist)) and not packs.verify(p)]
     if not want:
         return ok({"got": [], "failed": [], "note": "усе на місці"})
     got: list[str] = []

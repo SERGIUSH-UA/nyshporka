@@ -3883,6 +3883,8 @@ def models_list() -> None:
     manifest = _M.active()
     mark = {"ok": "✅", "absent": "▫️", "broken": "🔴", "superseded": "·"}
     for p in state["packs"]:
+        if p.get("specialist"):
+            continue
         size = f"{p['size'] / 2**20:.0f} МБ" if p["size"] else "?"
         # 🔴 Рушій визначається за іменем файлу через маніфест, а не за полем
         # `engine`: там лежить `kraken`, а `.mlmodel` буває двох письм — тобто
@@ -3896,6 +3898,24 @@ def models_list() -> None:
         console.print(f"  {mark.get(p['state'], '?')} {badge}[bold]{p['label']}[/bold] "
                       f"[accent]{p['id']}[/accent] "
                       f"[muted]{p['script']}/{p['engine']} · {size}[/muted]")
+    specialists = [p for p in state["packs"] if p.get("specialist")]
+    if specialists:
+        console.print("\n[bold]Спеціалісти[/bold] [muted]— вузьке письмо, лише на прохання: "
+                      "сам рушій їх не бере[/muted]")
+    for p in specialists:
+        size = f"{p['size'] / 2**20:.0f} МБ" if p["size"] else "?"
+        console.print(f"  {mark.get(p['state'], '?')} [bold]{p['label']}[/bold] "
+                      f"[accent]{p['id']}[/accent] [muted]{size}[/muted]")
+        if p.get("scope"):
+            console.print(f"      для чого: {p['scope']}")
+        if p.get("avoid"):
+            console.print(f"      не для: {p['avoid']}")
+        if p.get("launch"):
+            console.print(f"      запуск: [accent]{p['launch']}[/accent]")
+        if p.get("license"):
+            console.print(f"      ліцензія: {p['license']}")
+        if p["state"] != "ok":
+            console.print(f"      завантажити: [accent]nysh models get {p['id']}[/accent]")
     console.print(f"[muted]тека: {state['dir']}[/muted]")
 
 
@@ -3903,7 +3923,9 @@ def models_list() -> None:
 @route("models get", op="models.get", skill="read-case", mutates=True,
        when="завантажити ваги моделей читання")
 def models_get(
-    which: str = typer.Argument("", help="id пака; порожньо — усі, яких бракує"),
+    which: str = typer.Argument("", help="id пака; порожньо — усі бойові, яких бракує"),
+    specialists: bool = typer.Option(False, "--specialists",
+                                     help="усіх спеціалістів разом із бойовими (опис — `nysh models list`)"),
 ) -> None:
     """Завантажити ваги. sha256 звіряється завжди."""
     from nyshporka.setup import packs
@@ -3920,8 +3942,9 @@ def models_get(
         raise typer.Exit(code=1)
     # Замінені паки (попереднє покоління ваг) — лише на явне прохання за id:
     # «усі, яких бракує» означає бойові, а не всю історію.
+    # Спеціалісти — так само: вузьке письмо потрібне не кожному.
     want = ([p for p in known if p.id == which] if which
-            else [p for p in known if not p.superseded])
+            else [p for p in known if not p.superseded and (specialists or not p.specialist)])
     want = [p for p in want if not packs.verify(p)]
     if not want:
         console.print("✅ усе на місці")

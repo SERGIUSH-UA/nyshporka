@@ -357,11 +357,15 @@ def pick_model(script: str, *, second_voice: bool = False) -> tuple[Path, Path |
     # (шлях, письмо, рушій, замінений) — паки й локальні ваги в одному переліку.
     cands: list[tuple[Path, str, str, bool]] = []
     for pack in packs.catalog():
-        if packs.verify(pack):
+        # Спеціаліста автомат не бере: його вмикає людина (`--model`, `--with`).
+        if not pack.specialist and packs.verify(pack):
             cands.append((packs.path_of(pack), pack.script, pack.engine, pack.superseded))
     seen = {c[0] for c in cands}
+    named_files = {*production_choice().values(), *production_voice().values()}
     for path in local_models():
         if path in seen:
+            continue
+        if packs.is_specialist_file(path.name) and path.name not in named_files:
             continue
         eng = man.engine_for_model(path.name)
         if eng is not None:
@@ -839,6 +843,7 @@ def model_candidates() -> list[dict[str, str]]:
                               "замінено новим поколінням" if pack.superseded else
                               "не завантажено"),
                     "version": str(_version_of(p)),
+                    "specialist": str(pack.specialist),
                     "production": str(p.name == named.get(pack.script, ""))})
     for p in local_models():
         if p in seen:

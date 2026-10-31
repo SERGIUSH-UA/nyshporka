@@ -48,6 +48,7 @@ def sha256(path: Path) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("weights_dir", type=Path, help="тека з файлами ваг")
+    ap.add_argument("--only", default="", help="id паків через кому: реліз лише цих ваг, решта лишається у своєму")
     ap.add_argument("--release", default="", help="тег релізу (типово — з маніфесту)")
     ap.add_argument("--dry-run", action="store_true", help="лише показати, не писати")
     args = ap.parse_args()
@@ -59,7 +60,9 @@ def main() -> int:
             reconfigure(encoding="utf-8")
 
     data = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    packs = [p for p in data.get("packs") or [] if not p.get("superseded")]
+    only = {x for x in (args.only or "").split(",") if x}
+    packs = [p for p in data.get("packs") or [] if not p.get("superseded")
+             and (not only or p["id"] in only)]
     if not packs:
         print("🔴 у маніфесті немає чинних паків", file=sys.stderr)
         return 2

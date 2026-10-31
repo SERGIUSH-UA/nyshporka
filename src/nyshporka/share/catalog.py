@@ -571,7 +571,7 @@ def model_rank(row: Row) -> tuple[int, ...]:
 
     gen: dict[str, int] = {}
     for p in packs.catalog():
-        if p.kind == "model":
+        if p.kind == "model" and not p.specialist:
             gen[_model_stem(p.filename)] = _pack_generation(p.release, p.superseded)
     levels = sorted(set(gen.values()), reverse=True)
     have = {_model_stem(m) for m in (row.models or "").split(",") if m.strip()}
