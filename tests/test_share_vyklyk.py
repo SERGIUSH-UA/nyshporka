@@ -198,3 +198,14 @@ def test_zabraty_404_korotko(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
     monkeypatch.setattr(catalog, "_get", _get)
     env = O.call("share.zabraty", {"vyklyk": 7, "do": str(tmp_path / "s")})
     assert not env.ok and env.error == "у цього пулу такої операції немає"
+
+
+def test_stan_slovamy_servera_a_kod_lyshe_bez_sliv(capsys: pytest.CaptureFixture[str]) -> None:
+    from nyshporka.share.cli import _stan_vyklyku
+
+    _stan_vyklyku({"id": 7, "stan": "v_roboti", "povidomlennia": "У черзі · 40 з 200"})
+    vyvid = capsys.readouterr().out
+    assert "У черзі" in vyvid and "v_roboti" not in vyvid
+    _stan_vyklyku({"id": 7, "stan": "v_roboti"})
+    assert "v_roboti" in capsys.readouterr().out
+

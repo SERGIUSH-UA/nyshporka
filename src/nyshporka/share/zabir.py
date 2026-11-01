@@ -155,8 +155,10 @@ def zabraty(vid: int, teka: Path, *, base: str = "", stezhyty: bool = False,
         try:
             v = stan(vid, base)
             zvit["stan"] = v.get("stan")
+            zvit["povidomlennia"] = v.get("povidomlennia")
             if v.get("stan") not in (*ZHYVI, "hotovo", "skasovano"):
-                zvit["vidmova"] = (v.get("vidpovid") or {}).get("pomylka") or v.get("stan")
+                zvit["vidmova"] = (v.get("povidomlennia")
+                                   or (v.get("vidpovid") or {}).get("pomylka") or v.get("stan"))
                 return zvit
             try:
                 r = rezultat(vid, base)
@@ -164,7 +166,7 @@ def zabraty(vid: int, teka: Path, *, base: str = "", stezhyty: bool = False,
                 if exc.status != 409:
                     raise
                 if v.get("stan") not in ZHYVI:
-                    zvit["vidmova"] = v.get("stan")  # скасоване, з якого не скачано нічого
+                    zvit["vidmova"] = v.get("povidomlennia") or v.get("stan")  # скасоване, з якого не скачано нічого
                     return zvit
                 if not stezhyty:
                     return zvit  # ще нічого не готово: `shche_ide`

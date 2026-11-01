@@ -1162,6 +1162,12 @@ def _pidkazka(d: dict[str, Any]) -> None:
         console.print(f"  {_e(pasport['pidkazka'])}", highlight=False)
 
 
+def _stan_vyklyku(v: dict[str, Any]) -> None:
+    """Стан словами сервера; код лише тоді, коли слів немає (старіший сервер)."""
+    stan = v.get("povidomlennia") or v.get("stan")
+    console.print(f"виклик [bold]{_e(v.get('id'))}[/bold] · {_e(stan)}", highlight=False)
+
+
 @app.command("vyklyky")
 @route("share vyklyky", skill="share-case",
        when="які операції пул виконує на сервері, що можна запустити")
@@ -1210,8 +1216,7 @@ def vyklyk_cmd(
         return
     d = env.data or {}
     v = d.get("vyklyk") if stezhyty else d
-    v = v or {}
-    console.print(f"виклик [bold]{_e(v.get('id'))}[/bold] · стан {_e(v.get('stan'))}", highlight=False)
+    _stan_vyklyku(v or {})
     if stezhyty:
         z = d.get("zabrano") or {}
         console.print(f"забрано архівів [bold]{_e(z.get('arkhiviv', 0))}[/bold] · файлів "
@@ -1234,9 +1239,7 @@ def vyklyk_stan_cmd(
     env = O.call("share.vyklyk_stan", {"vyklyk": vyklyk, "base": base})
     if _answer(env, as_json):
         return
-    d = env.data or {}
-    console.print(f"виклик [bold]{_e(d.get('id', vyklyk))}[/bold] · стан {_e(d.get('stan'))}",
-                  highlight=False)
+    _stan_vyklyku({"id": vyklyk, **(env.data or {})})
     _notes(env)
 
 
@@ -1253,9 +1256,7 @@ def vyklyk_skasuvaty_cmd(
     env = O.call("share.vyklyk_skasuvaty", {"vyklyk": vyklyk, "base": base})
     if _answer(env, as_json):
         return
-    d = env.data or {}
-    console.print(f"виклик [bold]{_e(d.get('id', vyklyk))}[/bold] · стан {_e(d.get('stan'))}",
-                  highlight=False)
+    _stan_vyklyku({"id": vyklyk, **(env.data or {})})
     _notes(env)
 
 
@@ -1300,6 +1301,8 @@ def zabraty_cmd(
     console.print(f"забрано архівів [bold]{_e(d.get('arkhiviv', 0))}[/bold] · файлів "
                   f"{_e(d.get('fayliv', 0))} (нових {_e(d.get('novykh', 0))}) → {_e(d.get('teka'))}",
                   highlight=False)
+    if d.get("povidomlennia"):
+        console.print(_e(d["povidomlennia"]), highlight=False)
     _pidkazka(d)
     _notes(env)
 
