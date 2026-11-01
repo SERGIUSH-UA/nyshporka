@@ -219,6 +219,15 @@ def test_network_failure_keeps_the_reminder(
     assert W.state_all()[W.KEY_SUPRIAHA_OPERATSII] is True
 
 
+@pytest.mark.parametrize("zipsovane", [5, "x", {"a": 1}, None, True])
+def test_broken_state_does_not_cost_the_agent_its_session_start(
+    stan_mashyny: Path, zipsovane: Any
+) -> None:
+    W.state_set(**{W.KEY_SUPRIAHA_VYKLYKY: zipsovane})
+    env = O.call("project.status", {"agent": True})
+    assert env.ok and "незакритих" not in (env.data or {}).get("text", "")
+
+
 def test_collected_call_is_forgotten_and_a_partial_one_is_not(
     stan_mashyny: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

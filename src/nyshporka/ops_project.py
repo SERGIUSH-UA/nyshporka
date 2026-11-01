@@ -147,7 +147,8 @@ def project_status(a: ProjectStatusArgs) -> Envelope:
             text += ("\n\n🔔 Супряга: цьому учаснику відкрито операції на сервері. Перед роботою "
                      "над новим селом, фондом чи прізвищем прочитай `nysh share dovidka`.")
         vidkryti = stan_mashyny.get(W.KEY_SUPRIAHA_VYKLYKY)
-        if vidkryti:
+        # Зіпсований файл стану не мусить забирати в агента контекст старту сесії.
+        if isinstance(vidkryti, list) and vidkryti:
             text += (f"\n\n🔔 Супряга: незакритих викликів {len(vidkryti)}. Що готове: "
                      "`nysh share hotove`; забрати все: `nysh share zabraty --usi --do <тека>`.")
         text += "\n\n" + M.agent_map(MAP_BUDGET)
