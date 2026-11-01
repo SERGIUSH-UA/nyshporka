@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from nyshporka.core.workspace import Workspace
 
 #: Тека справи у просторі користувача (під `data/raw`).
@@ -35,6 +37,20 @@ RUN_SIDE = "sample-315-159-diak"
 CASE_KEY = "DAHMO/315/159"
 
 _VOICES = {"pysar": RUN_MAIN, "diak": RUN_SIDE}
+
+#: Ключ зразка в реєстрі й він же після `share card` (опис названо).
+_KEYS = frozenset({CASE_KEY, "DAHMO/315/1/159"})
+
+
+def tse_zrazok(key: str, runs: Iterable[str]) -> bool:
+    """Чи це прогони зразка, а не власне читання справи 315-1-159.
+
+    🔴 У теці зразка три кадри, тож пакет виходив «3 із 3» і йшов у Супрягу як повна
+    справа, хоча в ній 26 кадрів і вона там уже є (01.11.2026, двоє людей). Судимо за
+    іменами прогонів: хто прочитав цю справу сам, той віддає її як завжди.
+    """
+    names = list(runs)
+    return key in _KEYS and bool(names) and all(n.startswith("sample-") for n in names)
 
 
 def sample_dir() -> Path | None:

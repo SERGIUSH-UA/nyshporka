@@ -1182,6 +1182,11 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
         str(details.get("key") or ""), str(m.case.get("shifra") or ""), m.frames_total)
     if chastyna:
         out.setdefault("pack_refusals", []).append(chastyna)
+    from nyshporka.setup import sample as zrazok
+    if zrazok.tse_zrazok(str(details.get("key") or ""), [d.name for d in run_dirs]):
+        out.setdefault("pack_refusals", []).append(
+            "це зразкова справа з інсталятора: вона вчить працювати з Нишпоркою, а її "
+            "текст уже є в Супрязі. Віддавати її не треба")
     # 🔴 Стеля пулу — до запису, а не після заливки: пакет понад неї пул
     # відкидав уже тоді, коли байти доїхали.
     zavelykyi = _ponad_steliu(len(sketch["files"]))

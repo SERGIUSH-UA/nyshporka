@@ -281,13 +281,14 @@ def _refresh_later() -> None:
 def _nepodileni_now() -> list[dict[str, Any]]:
     """Прочитане своїми руками, чого ще немає в Супрязі.
 
-    Три відсіви, і кожен має причину:
+    Чотири відсіви, і кожен має причину:
 
     * **без `case_key`** — прогін нічий: шифри немає, пакувати нема чого;
     * **`shared`** — чужий прогін, прийнятий від когось. Перепаковувати
       чуже не можна: людина віддала його один раз, і другий раз за неї
       ніхто не вирішує;
-    * **без сторінок** — прогін, який нічого не прочитав.
+    * **без сторінок** — прогін, який нічого не прочитав;
+    * **зразок з інсталятора** — три кадри навчальної справи, що вже є в Супрязі.
 
     Що вже віддано, вирішує зріз пулу (`nysh share sync`), коли він покриває
     справу; інакше — журнал пакувань, і рядок `pool` тоді `None`: «не
@@ -297,6 +298,8 @@ def _nepodileni_now() -> list[dict[str, Any]]:
     from nyshporka import htr_store as S
 
     vzhe = vidmovleni()
+    from nyshporka.setup import sample as zrazok
+
     spakovani = viddani()
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -324,6 +327,8 @@ def _nepodileni_now() -> list[dict[str, Any]]:
         if key in vzhe or shifra in vzhe or key in seen:
             continue
         seen.add(key)
+        if zrazok.tse_zrazok(key, progony.get(key, [])):
+            continue
         stan = _u_puli(key)
         if stan is None and (key in spakovani or shifra in spakovani):
             continue

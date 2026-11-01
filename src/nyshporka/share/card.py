@@ -282,7 +282,9 @@ def apply(case: dict[str, Any], card: dict[str, Any]) -> dict[str, Any]:
     if card.get("title"):
         out["title"] = card["title"]
     if card.get("years"):
-        out["years"] = list(card["years"])
+        # Рядок із картки на диску: `list("1829")` розсипав би його на цифри (0.38.6).
+        roky = card["years"]
+        out["years"] = parse_years(roky) if isinstance(roky, str) else list(roky)
     if card.get("places"):
         out["places"] = list(card["places"])
     if card.get("doc_type"):
