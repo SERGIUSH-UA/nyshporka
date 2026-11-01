@@ -16,9 +16,16 @@ from __future__ import annotations
 
 import json
 import secrets
+from pathlib import Path
 from typing import Any
 
 from nyshporka.share import catalog as C
+from nyshporka.utils.atomic import atomic_write_text
+
+#: Тека скіла в агента. Ім'я нейтральне: текст приходить від сервера лише людині, якій він є.
+SKIL = "supriaha-operatsii"
+OPYS_MAKS = 1000
+TEKST_MAKS = 4000
 
 
 class Vidmova(C.PoolError):
@@ -122,6 +129,51 @@ def zapamiataty(vid: int) -> None:
 
 def zabuty(vid: int) -> None:
     _zapysaty([v for v in _vidkryti() if v != vid])
+
+
+def _teky_skila() -> list[Path]:
+    """Лише теки наявних агентів: тек, яких людина не заводила, ми не створюємо."""
+    from nyshporka import skills as S
+
+    out = []
+    if (Path.home() / ".claude").is_dir():
+        out.append(Path.home() / S.AGENT_DIRS["claude"] / SKIL)
+    if S.codex_present():
+        out.append(Path.home() / S.AGENT_DIRS["codex"] / SKIL)
+    return out
+
+
+def polozhyty_skil(skil: Any) -> list[str]:
+    """Скіл від сервера — у теки агентів: нова сесія знатиме про операції сама, без підказки людини.
+
+    Сервер дає лише опис і текст; ім'я й місце тут. Файл належить клієнту й оновлюється з кожною
+    довідкою. Пише його лише явна команда `share dovidka`, а не встановлення пакета.
+    """
+    if not isinstance(skil, dict) or not skil.get("opys") or not skil.get("tekst"):
+        return []
+    opys = " ".join(str(skil["opys"]).split())[:OPYS_MAKS]
+    tekst = str(skil["tekst"])[:TEKST_MAKS]
+    karta = (f"---\nname: {SKIL}\ndescription: {json.dumps(opys, ensure_ascii=False)}\n---\n\n"
+             f"{tekst.rstrip()}\n")
+    out = []
+    for teka in _teky_skila():
+        try:
+            teka.mkdir(parents=True, exist_ok=True)
+            atomic_write_text(teka / "SKILL.md", karta, newline="\n")
+        except OSError:
+            continue                      # нагадування хука лишається, це лише зручність
+        out.append(str(teka))
+    return out
+
+
+def prybraty_skil() -> None:
+    """Людину вивели з кола: двері зачинено, агентові нема чого їх шукати."""
+    for teka in _teky_skila():
+        try:
+            (teka / "SKILL.md").unlink(missing_ok=True)
+            teka.rmdir()
+        except OSError:
+            pass
 
 
 def hotove(base: str = "") -> dict[str, Any]:

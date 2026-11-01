@@ -132,6 +132,66 @@ def test_agent_of_a_new_session_learns_about_operations_only_after_the_first_gui
     assert "nysh share dovidka" in tekst()
 
 
+@pytest.fixture
+def domivka(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    return home
+
+
+def test_guide_lays_a_skill_for_the_agent_and_refreshes_it(
+    stan_mashyny: Path, domivka: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(V, "_get", lambda _url: {
+        "tekst": "довідка", "skil": {"opys": 'Use when: «що про село»\nsecond line', "tekst": "Run it."}})
+    env = O.call("share.dovidka", {})
+    karta = domivka / ".claude" / "skills" / V.SKIL / "SKILL.md"
+    text = karta.read_text(encoding="utf-8")
+    assert env.ok and env.data["skil"] == [str(karta.parent)]
+    assert text.startswith(f"---\nname: {V.SKIL}\ndescription: \"Use when: «що про село» second line\"\n---")
+    assert "Run it." in text
+    assert not (domivka / ".agents").exists(), "тек агента, якого немає, не заводимо"
+    monkeypatch.setattr(V, "_get", lambda _url: {
+        "tekst": "довідка", "skil": {"opys": "нове", "tekst": "Інше."}})
+    assert O.call("share.dovidka", {}).ok
+    assert "Інше." in karta.read_text(encoding="utf-8")
+
+
+def test_no_agent_folder_no_skill(
+    stan_mashyny: Path, domivka: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (domivka / ".claude").rmdir()
+    monkeypatch.setattr(V, "_get", lambda _url: {"tekst": "д", "skil": {"opys": "о", "tekst": "т"}})
+    env = O.call("share.dovidka", {})
+    assert env.ok and env.data["skil"] == [] and not (domivka / ".claude").exists()
+
+
+def test_old_server_without_a_skill_still_gives_the_guide(
+    stan_mashyny: Path, domivka: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(V, "_get", lambda _url: {"tekst": "довідка"})
+    env = O.call("share.dovidka", {})
+    assert env.ok and env.data["tekst"] == "довідка" and env.data["skil"] == []
+
+
+def test_final_refusal_takes_the_skill_away(
+    stan_mashyny: Path, domivka: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(V, "_get", lambda _url: {"tekst": "д", "skil": {"opys": "о", "tekst": "т"}})
+    assert O.call("share.dovidka", {}).ok
+    teka = domivka / ".claude" / "skills" / V.SKIL
+
+    def nema(_url: str) -> dict[str, Any]:
+        raise catalog.PoolError("немає", status=404)
+
+    monkeypatch.setattr(V, "_get", nema)
+    assert teka.is_dir()
+    O.call("share.dovidka", {})
+    assert not teka.exists()
+
+
 def test_guide_refused_for_good_removes_the_reminder(
     stan_mashyny: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
