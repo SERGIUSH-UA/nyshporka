@@ -1644,12 +1644,20 @@ class ShareDovidkaArgs(BaseModel):
     skill="share-case",
     when="інструкція сервера Супряги для агента: як користуватись операціями пулу")
 def share_dovidka(a: ShareDovidkaArgs) -> Envelope:
+    """Перша успішна довідка лишає слід на машині: нова сесія агента без нього не знала б, що
+    людині відкрито операції. Сервер відмовив остаточно (404) — слід знімається."""
+    from nyshporka.core import workspace as W
+    from nyshporka.share import catalog as C
     from nyshporka.share import vyklyky as V
 
     try:
-        return ok(V.dovidka(a.base))
+        d = V.dovidka(a.base)
     except (RuntimeError, OSError) as exc:
+        if isinstance(exc, C.PoolError) and exc.status == 404:
+            W.state_set(**{W.KEY_SUPRIAHA_OPERATSII: False})
         return _vidmova_pulu(exc)
+    W.state_set(**{W.KEY_SUPRIAHA_OPERATSII: True})
+    return ok(d)
 
 
 class ShareZabratyArgs(BaseModel):

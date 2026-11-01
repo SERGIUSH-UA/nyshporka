@@ -142,7 +142,11 @@ def project_status(a: ProjectStatusArgs) -> Envelope:
         from nyshporka.core import routemap as M
 
         # Лише локальний запис, без мережі: сервер питає сам агент, явною командою.
-        vidkryti = W.state_all().get(W.KEY_SUPRIAHA_VYKLYKY)
+        stan_mashyny = W.state_all()
+        if stan_mashyny.get(W.KEY_SUPRIAHA_OPERATSII):
+            text += ("\n\n🔔 Супряга: цьому учаснику відкрито операції на сервері. Перед роботою "
+                     "над новим селом, фондом чи прізвищем прочитай `nysh share dovidka`.")
+        vidkryti = stan_mashyny.get(W.KEY_SUPRIAHA_VYKLYKY)
         if vidkryti:
             text += (f"\n\n🔔 Супряга: незакритих викликів {len(vidkryti)}. Що готове: "
                      "`nysh share hotove`; забрати все: `nysh share zabraty --usi --do <тека>`.")

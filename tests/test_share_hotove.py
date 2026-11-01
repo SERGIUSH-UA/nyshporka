@@ -8,8 +8,8 @@ import pytest
 
 from nyshporka import ops as O
 from nyshporka.core import workspace as W
+from nyshporka.share import catalog, zabir
 from nyshporka.share import vyklyky as V
-from nyshporka.share import zabir
 
 
 @pytest.fixture
@@ -117,6 +117,46 @@ def test_agent_status_names_open_calls_without_touching_the_network(
     V.zapamiataty(28)
     text = (O.call("project.status", {"agent": True}).data or {}).get("text", "")
     assert "незакритих викликів 1" in text and "nysh share hotove" in text
+
+
+def test_agent_of_a_new_session_learns_about_operations_only_after_the_first_guide(
+    stan_mashyny: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def tekst() -> str:
+        return (O.call("project.status", {"agent": True}).data or {}).get("text", "")
+
+    assert "nysh share dovidka" not in tekst()
+    monkeypatch.setattr(V, "_get", lambda _url: {"tekst": "довідка"})
+    assert O.call("share.dovidka", {}).ok
+    monkeypatch.setattr(V, "_get", lambda _url: pytest.fail("хук не ходить у мережу"))
+    assert "nysh share dovidka" in tekst()
+
+
+def test_guide_refused_for_good_removes_the_reminder(
+    stan_mashyny: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    W.state_set(**{W.KEY_SUPRIAHA_OPERATSII: True})
+
+    def nema(_url: str) -> dict[str, Any]:
+        raise catalog.PoolError("немає", status=404)
+
+    monkeypatch.setattr(V, "_get", nema)
+    assert not O.call("share.dovidka", {}).ok
+    assert "nysh share dovidka" not in (
+        O.call("project.status", {"agent": True}).data or {}).get("text", "")
+
+
+def test_network_failure_keeps_the_reminder(
+    stan_mashyny: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    W.state_set(**{W.KEY_SUPRIAHA_OPERATSII: True})
+
+    def zbii(_url: str) -> dict[str, Any]:
+        raise OSError("мережа")
+
+    monkeypatch.setattr(V, "_get", zbii)
+    assert not O.call("share.dovidka", {}).ok
+    assert W.state_all()[W.KEY_SUPRIAHA_OPERATSII] is True
 
 
 def test_collected_call_is_forgotten_and_a_partial_one_is_not(
