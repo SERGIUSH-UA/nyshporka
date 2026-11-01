@@ -1243,6 +1243,56 @@ def vyklyk_stan_cmd(
     _notes(env)
 
 
+@app.command("vyklyk-pochaty")
+@route("share vyklyk-pochaty", skill="share-case",
+       when="людина побачила перелік виклику й згодна його почати")
+def vyklyk_pochaty_cmd(
+    vyklyk: int = typer.Argument(..., help="номер свого виклику"),
+    base: str = typer.Option("", "--base", help="інша адреса пулу"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Почати виклик, що чекав на згоду людини."""
+    from nyshporka import ops as O
+
+    env = O.call("share.vyklyk_pochaty", {"vyklyk": vyklyk, "base": base})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    console.print(f"виклик {_e(d.get('id'))} · {_e(d.get('povidomlennia') or d.get('stan'))}",
+                  highlight=False)
+    _notes(env)
+
+
+@app.command("hotove")
+@route("share hotove", skill="share-case",
+       when="на старті сесії: чи є незабрані файли зі своїх викликів на сервері Супряги")
+def hotove_cmd(
+    base: str = typer.Option("", "--base", help="інша адреса пулу"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Що чекає на вас: готове до забору й те, що ще йде."""
+    from nyshporka import ops as O
+
+    env = O.call("share.hotove", {"base": base})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    hotovo, zhyvi = d.get("hotovo", []), d.get("zhyvi", [])
+    if not hotovo and not zhyvi:
+        console.print("усе забрано, нічого не чекає", highlight=False)
+    for r in hotovo:
+        kvapno = " · [warn]строк спливає[/warn]" if r.get("kvapno") else ""
+        console.print(f"✓ виклик {_e(r['id'])} · плівка {_e(r.get('plivka'))} · кадрів "
+                      f"{_e(r.get('kadriv'))} · забрати до {_e(str(r.get('do'))[:10])}{kvapno}",
+                      highlight=False)
+    for r in zhyvi:
+        console.print(f"… виклик {_e(r['id'])} · {_e(r.get('povidomlennia') or r.get('operatsiia'))}",
+                      highlight=False)
+    if hotovo:
+        console.print("Забрати все: nysh share zabraty --usi --do <тека>", highlight=False)
+    _notes(env)
+
+
 @app.command("vyklyk-skasuvaty")
 @route("share vyklyk-skasuvaty", skill="share-case", when="скасувати свій виклик на сервері Супряги")
 def vyklyk_skasuvaty_cmd(
@@ -1281,8 +1331,9 @@ def dovidka_cmd(
 @route("share zabraty", skill="share-case",
        when="забрати готові файли свого виклику з Супряги в теку, зі звіркою кожного файла")
 def zabraty_cmd(
-    vyklyk: int = typer.Argument(..., help="номер свого виклику"),
+    vyklyk: int = typer.Argument(0, help="номер свого виклику"),
     do: str = typer.Option("", "--do", help="тека для файлів (типово supriaha-<номер>)"),
+    usi: bool = typer.Option(False, "--usi", help="усе готове, кожен виклик у свою підтеку --do"),
     stezhyty: bool = typer.Option(False, "--stezhyty", help="чекати, доки виклик не скінчиться"),
     base: str = typer.Option("", "--base", help="інша адреса пулу"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
@@ -1294,6 +1345,21 @@ def zabraty_cmd(
     """
     from nyshporka import ops as O
 
+    if usi:
+        env = O.call("share.zabraty_usi", {"do": do, "stezhyty": stezhyty, "base": base})
+        if _answer(env, as_json):
+            return
+        d = env.data or {}
+        for r in d.get("zabrano", []):
+            console.print(f"✓ {_e(r.get('plivka'))} · файлів {_e(r.get('fayliv'))} → {_e(r.get('teka'))}",
+                          highlight=False)
+        console.print(f"забрано викликів {len(d.get('zabrano', []))} · ще йде {len(d.get('zhyvi', []))}",
+                      highlight=False)
+        _notes(env)
+        return
+    if not vyklyk:
+        console.print("назвіть номер виклику або додайте --usi", highlight=False)
+        raise typer.Exit(2)
     env = O.call("share.zabraty", {"vyklyk": vyklyk, "do": do, "stezhyty": stezhyty, "base": base})
     if _answer(env, as_json):
         return

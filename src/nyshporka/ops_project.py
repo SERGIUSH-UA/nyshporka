@@ -141,6 +141,11 @@ def project_status(a: ProjectStatusArgs) -> Envelope:
     if a.agent:
         from nyshporka.core import routemap as M
 
+        # Лише локальний запис, без мережі: сервер питає сам агент, явною командою.
+        vidkryti = W.state_all().get(W.KEY_SUPRIAHA_VYKLYKY)
+        if vidkryti:
+            text += (f"\n\n🔔 Супряга: незакритих викликів {len(vidkryti)}. Що готове: "
+                     "`nysh share hotove`; забрати все: `nysh share zabraty --usi --do <тека>`.")
         text += "\n\n" + M.agent_map(MAP_BUDGET)
         mem = "" if a.no_memory else _hub_memory(ws.hub)
         if mem:

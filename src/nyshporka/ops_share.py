@@ -1557,6 +1557,8 @@ def share_vyklyk(a: ShareVyklykArgs) -> Envelope:
         v = V.zapustyty(a.operatsiia, parametry, a.kliuch, a.base)
     except (RuntimeError, OSError) as exc:
         return _vidmova_pulu(exc)
+    if v.get("id") and v.get("stan") in ("chekaie", "v_roboti"):
+        V.zapamiataty(int(v["id"]))
     env = ok(v)
     if a.stezhyty:
         vid = int(v.get("id") or 0)
@@ -1586,6 +1588,36 @@ def share_vyklyk_stan(a: ShareVyklykIdArgs) -> Envelope:
 
     try:
         return ok(V.stan(a.vyklyk, a.base))
+    except (RuntimeError, OSError) as exc:
+        return _vidmova_pulu(exc)
+
+
+@op("share.vyklyk_pochaty", summary="Згода людини почати виклик, що чекав на перегляд",
+    args=ShareVyklykIdArgs, mutates=True, section=SECTION, private=True,
+    skill="share-case",
+    when="людина побачила перелік виклику й згодна його почати")
+def share_vyklyk_pochaty(a: ShareVyklykIdArgs) -> Envelope:
+    from nyshporka.share import vyklyky as V
+
+    try:
+        return ok(V.pochaty(a.vyklyk, a.base))
+    except (RuntimeError, OSError) as exc:
+        return _vidmova_pulu(exc)
+
+
+class ShareHotoveArgs(BaseModel):
+    base: str = Field(default="", description="інша адреса пулу")
+
+
+@op("share.hotove", summary="Що чекає на вас на сервері Супряги: готове до забору й те, що ще йде",
+    args=ShareHotoveArgs, mutates=False, section=SECTION, private=True,
+    skill="share-case",
+    when="на старті сесії: чи є незабрані файли зі своїх викликів на сервері Супряги")
+def share_hotove(a: ShareHotoveArgs) -> Envelope:
+    from nyshporka.share import vyklyky as V
+
+    try:
+        return ok(V.hotove(a.base))
     except (RuntimeError, OSError) as exc:
         return _vidmova_pulu(exc)
 
@@ -1639,6 +1671,7 @@ def share_zabraty(a: ShareZabratyArgs) -> Envelope:
     import tarfile
 
     from nyshporka.share import catalog as C
+    from nyshporka.share import vyklyky as V
     from nyshporka.share import zabir
     from nyshporka.sources.http import HttpError
 
@@ -1653,6 +1686,8 @@ def share_zabraty(a: ShareZabratyArgs) -> Envelope:
         return fail(f"виклик {a.vyklyk}: {exc}")
     if zvit.get("vidmova"):
         return fail(f"виклик {a.vyklyk}: забирати нічого ({zvit['vidmova']})")
+    if zvit["stan"] not in zabir.ZHYVI and not zvit["ne_zbihlos"] and not zvit["konflikty"]:
+        V.zabuty(a.vyklyk)
     env = ok(zvit)
     if zvit["ne_zbihlos"] or zvit["konflikty"]:
         # забрано не все: скрипт і агент мусять відрізнити це від успіху за кодом виходу
@@ -1666,6 +1701,69 @@ def share_zabraty(a: ShareZabratyArgs) -> Envelope:
     if zvit["stan"] in zabir.ZHYVI:
         env.warn("shche_ide", "виклик ще йде — решту заберіть пізніше або з --stezhyty")
     return env
+
+
+class ShareZabratyUsiArgs(BaseModel):
+    do: str = Field(default="", description="тека для підтек виклику (типово supriaha у поточній)")
+    stezhyty: bool = Field(default=False, description="чекати, доки не закінчиться все, що ще йде")
+    base: str = Field(default="", description="інша адреса пулу")
+
+
+def _pidteka(ryadok: dict[str, Any]) -> str:
+    """Підтека виклику: ім'я приходить із сервера, тож лише безпечне, інакше номер виклику."""
+    from nyshporka.share import zabir
+
+    imia = str(ryadok.get("plivka") or "")
+    return imia if zabir._ime_bezpechne(imia) else f"vyklyk-{ryadok['id']}"
+
+
+@op("share.zabraty_usi", summary="Забрати все готове зі своїх викликів, кожен у свою підтеку",
+    args=ShareZabratyUsiArgs, mutates=True, section=SECTION, private=True,
+    skill="share-case",
+    when="забрати все, що готове на сервері Супряги, не перебираючи викликів")
+def share_zabraty_usi(a: ShareZabratyUsiArgs) -> Envelope:
+    """Кожен виклик береться окремо, тож збій одного не зупиняє решти. Виклик, який не вдалось
+    забрати, у цьому запуску не повторюється: наступний запуск спробує знову."""
+    import time
+
+    from nyshporka.share import vyklyky as V
+    from nyshporka.share import zabir
+
+    baza = Path(a.do) if a.do else Path.cwd() / "supriaha"
+    zvit: dict[str, Any] = {"teka": str(baza), "zabrano": [], "nevdachi": [], "zhyvi": []}
+    bachyv: set[int] = set()
+    zboiv = 0
+    while True:
+        try:
+            d = V.hotove(a.base)
+            zboiv = 0
+        except (RuntimeError, OSError) as exc:
+            zboiv += 1
+            if not a.stezhyty or not zabir._zbii(exc) or zboiv >= zabir.ZBOIV_POSPIL:
+                return _vidmova_pulu(exc)
+            time.sleep(zabir.PAUZA_S)
+            continue
+        for r in d.get("hotovo", []):
+            vid = int(r["id"])
+            if vid in bachyv:
+                continue
+            bachyv.add(vid)
+            env = share_zabraty(ShareZabratyArgs(vyklyk=vid, do=str(baza / _pidteka(r)), base=a.base))
+            if env.ok:
+                zvit["zabrano"].append({"id": vid, "plivka": r.get("plivka"),
+                                        "teka": (env.data or {}).get("teka"),
+                                        "fayliv": (env.data or {}).get("fayliv", 0),
+                                        "pasport": (env.data or {}).get("pasport")})
+            else:
+                zvit["nevdachi"].append({"id": vid, "plivka": r.get("plivka"), "chomu": env.error})
+        zvit["zhyvi"] = d.get("zhyvi", [])
+        if not a.stezhyty or not zvit["zhyvi"]:
+            break
+        time.sleep(zabir.PAUZA_S)
+    if zvit["nevdachi"]:
+        return Envelope(ok=False, data=zvit,
+                        error=f"забрано не все: не вдалось {len(zvit['nevdachi'])}")
+    return ok(zvit)
 
 
 class ShareSyncArgs(BaseModel):

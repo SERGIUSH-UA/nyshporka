@@ -25,6 +25,8 @@
 - `nysh models get --specialists`; op `models.get` з `specialists`.
 - `tools/make_release.py --only`: реліз лише названих ваг.
 - Супряга: виконання операцій на сервері й забір файлів архівами зі звіркою sha256; стан операції друкується словами сервера.
+- `nysh share hotove`, `nysh share zabraty --usi`, `nysh share vyklyk-pochaty`; помічник на старті
+  сесії бачить, що є незакриті виклики, без запиту в мережу.
 
 ### Змінено
 

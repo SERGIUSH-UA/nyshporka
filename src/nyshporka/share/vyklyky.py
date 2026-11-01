@@ -4,6 +4,10 @@
 відмов приходять від сервера як є. Тут лише транспорт — запит, ключ
 повторності й розбір відмови.
 
+🔴 Номери незакритих викликів лежать у стані користувача, щоб хук старту сесії міг сказати про
+них БЕЗ мережі: `PRIVACY.md` обіцяє, що `nysh` сам у мережу не ходить. Дізнається, що готове,
+агент уже явним запитом `nysh share hotove`.
+
 🔴 `pasport` у результаті — непрозорий словник від сервера. Клієнт пише його
 цілком у `_supriaha_vyklyk.json` і не читає жодного поля, крім `pidkazka`
 (текст для людини).
@@ -97,6 +101,40 @@ def zapustyty(operatsiia: str, parametry: dict[str, str], kliuch: str = "",
     return _post(f"{C.base_url(base)}/m/vyklyky",
                  {"operatsiia": operatsiia, "parametry": parametry,
                   "kliuch": kliuch or novyi_kliuch()})
+
+
+def _vidkryti() -> list[int]:
+    from nyshporka.core import workspace as W
+
+    got = W.state_all().get(W.KEY_SUPRIAHA_VYKLYKY)
+    return [int(x) for x in got if isinstance(x, int)] if isinstance(got, list) else []
+
+
+def _zapysaty(vidkryti: list[int]) -> None:
+    from nyshporka.core import workspace as W
+
+    W.state_set(**{W.KEY_SUPRIAHA_VYKLYKY: sorted(set(vidkryti))})
+
+
+def zapamiataty(vid: int) -> None:
+    _zapysaty([*_vidkryti(), vid])
+
+
+def zabuty(vid: int) -> None:
+    _zapysaty([v for v in _vidkryti() if v != vid])
+
+
+def hotove(base: str = "") -> dict[str, Any]:
+    """Що чекає на людину: скачане й те, що ще в роботі. Відповідь сервера правдивіша за локальний
+    запис, тож він оновлюється з неї: виклик, закритий з іншої машини, більше не нагадає про себе."""
+    d = _get(f"{C.base_url(base)}/m/hotove")
+    _zapysaty([int(r["id"]) for r in [*d.get("hotovo", []), *d.get("zhyvi", [])]])
+    return d
+
+
+def pochaty(vid: int, base: str = "") -> dict[str, Any]:
+    """Згода людини на роботу, що чекала на перегляд."""
+    return _post(f"{C.base_url(base)}/m/vyklyky/{vid}/pochaty", {})
 
 
 def stan(vid: int, base: str = "") -> dict[str, Any]:

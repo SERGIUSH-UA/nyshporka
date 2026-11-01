@@ -679,6 +679,10 @@ def _load_last_used() -> Path | None:
     return Path(val) if val else None
 
 
+#: Номери своїх незакритих викликів на сервері Супряги: хук старту сесії каже про них без мережі.
+KEY_SUPRIAHA_VYKLYKY = "supriaha_vidkryti"
+
+
 def state_all() -> dict[str, Any]:
     """Увесь файл стану користувача. Немає — порожньо, і це не помилка."""
     path = _state_path()
