@@ -58,7 +58,9 @@ def test_ops_with_key_or_journal_are_private() -> None:
     """Усе, що бачить профіль, журнал чи ключ, — не для чужої вкладки."""
     want_private = {"share.setup", "share.suggest", "share.publish", "share.autoshare",
                     "share.inspect", "share.import", "share.geometry", "share.list",
-                    "share.stats", "share.sync", "share.pull", "share.card"}
+                    "share.stats", "share.sync", "share.pull", "share.card",
+                    "share.vyklyky", "share.vyklyk", "share.vyklyk_stan",
+                    "share.vyklyk_skasuvaty", "share.zabraty", "share.dovidka"}
     got = {o.name: o for o in ops.REGISTRY.all() if o.name.startswith("share.")}
     for name in want_private:
         assert got[name].private, f"{name}: private=False"

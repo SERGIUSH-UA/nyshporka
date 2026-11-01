@@ -1487,6 +1487,187 @@ def share_stats(a: ShareStatsArgs) -> Envelope:
     return env
 
 
+NEMAE_OPERATSII = "у цього пулу такої операції немає"
+
+
+def _vidmova_pulu(exc: Exception) -> Envelope:
+    """Відмова пулу людським текстом: 404 — коротко, решта — слова сервера."""
+    from nyshporka.share import catalog as C
+
+    if isinstance(exc, C.PotribenKliuch):
+        return fail(str(exc))
+    if getattr(exc, "status", None) == 404:
+        return fail(NEMAE_OPERATSII)
+    tekst = str(exc)
+    pauza = getattr(exc, "retry_after", None)
+    if pauza:
+        tekst += f" (повторіть за {pauza} с)"
+    return fail(tekst)
+
+
+class ShareVyklykyArgs(BaseModel):
+    base: str = Field(default="", description="інша адреса пулу")
+
+
+@op("share.vyklyky", summary="Операції, які пул виконує на сервері: перелік від сервера",
+    args=ShareVyklykyArgs, mutates=False, section=SECTION, private=True,
+    skill="share-case",
+    when="які операції пул виконує на сервері, що можна запустити")
+def share_vyklyky(a: ShareVyklykyArgs) -> Envelope:
+    """Перелік і підписи — від сервера як є; клієнт нічого не додає."""
+    from nyshporka.share import vyklyky as V
+
+    try:
+        return ok(V.perelik(a.base))
+    except (RuntimeError, OSError) as exc:
+        return _vidmova_pulu(exc)
+
+
+class ShareVyklykArgs(BaseModel):
+    operatsiia: str = Field(description="код операції з `share vyklyky`")
+    param: list[str] = Field(default_factory=list, description="параметри `ключ=значення`")
+    kliuch: str = Field(default="", description="ключ повторності (типово — свій, новий)")
+    stezhyty: bool = Field(default=False, description="дочекатись кінця й забрати файли")
+    do: str = Field(default="", description="тека для файлів з `stezhyty`")
+    base: str = Field(default="", description="інша адреса пулу")
+
+
+def _parametry(param: list[str]) -> dict[str, str] | None:
+    out: dict[str, str] = {}
+    for p in param:
+        k, sep, v = p.partition("=")
+        if not sep or not k.strip():
+            return None
+        out[k.strip()] = v
+    return out
+
+
+@op("share.vyklyk", summary="Запустити іменовану операцію на сервері Супряги",
+    args=ShareVyklykArgs, mutates=True, section=SECTION, private=True,
+    skill="share-case",
+    when="запустити операцію пулу на сервері, стежити за нею й забрати файли")
+def share_vyklyk(a: ShareVyklykArgs) -> Envelope:
+    """Повтор з тим самим `kliuch` дає той самий виклик, а не новий."""
+    from nyshporka.share import vyklyky as V
+
+    parametry = _parametry(a.param)
+    if parametry is None:
+        return fail("параметр має вигляд ключ=значення")
+    try:
+        v = V.zapustyty(a.operatsiia, parametry, a.kliuch, a.base)
+    except (RuntimeError, OSError) as exc:
+        return _vidmova_pulu(exc)
+    env = ok(v)
+    if a.stezhyty:
+        vid = int(v.get("id") or 0)
+        if not vid:
+            return fail("пул не назвав номера виклику")
+        zabrano = share_zabraty(ShareZabratyArgs(vyklyk=vid, do=a.do, stezhyty=True, base=a.base))
+        if not zabrano.ok:
+            return Envelope(ok=False, data={"vyklyk": v, "zabrano": zabrano.data},
+                            error=zabrano.error, warnings=zabrano.warnings)
+        env = ok({"vyklyk": v, "zabrano": zabrano.data})
+        for w in zabrano.warnings:
+            env.warn(w.code, w.text, w.level)
+    return env
+
+
+class ShareVyklykIdArgs(BaseModel):
+    vyklyk: int = Field(description="номер виклику")
+    base: str = Field(default="", description="інша адреса пулу")
+
+
+@op("share.vyklyk_stan", summary="Стан свого виклику на сервері Супряги",
+    args=ShareVyklykIdArgs, mutates=False, section=SECTION, private=True,
+    skill="share-case",
+    when="як там мій виклик на сервері Супряги")
+def share_vyklyk_stan(a: ShareVyklykIdArgs) -> Envelope:
+    from nyshporka.share import vyklyky as V
+
+    try:
+        return ok(V.stan(a.vyklyk, a.base))
+    except (RuntimeError, OSError) as exc:
+        return _vidmova_pulu(exc)
+
+
+@op("share.vyklyk_skasuvaty", summary="Скасувати свій виклик на сервері Супряги",
+    args=ShareVyklykIdArgs, mutates=True, section=SECTION, private=True,
+    skill="share-case",
+    when="скасувати свій виклик на сервері Супряги")
+def share_vyklyk_skasuvaty(a: ShareVyklykIdArgs) -> Envelope:
+    from nyshporka.share import vyklyky as V
+
+    try:
+        return ok(V.skasuvaty(a.vyklyk, a.base))
+    except (RuntimeError, OSError) as exc:
+        return _vidmova_pulu(exc)
+
+
+class ShareDovidkaArgs(BaseModel):
+    base: str = Field(default="", description="інша адреса пулу")
+
+
+@op("share.dovidka", summary="Інструкція від сервера Супряги для агента",
+    args=ShareDovidkaArgs, mutates=False, section=SECTION, private=True,
+    skill="share-case",
+    when="інструкція сервера Супряги для агента: як користуватись операціями пулу")
+def share_dovidka(a: ShareDovidkaArgs) -> Envelope:
+    from nyshporka.share import vyklyky as V
+
+    try:
+        return ok(V.dovidka(a.base))
+    except (RuntimeError, OSError) as exc:
+        return _vidmova_pulu(exc)
+
+
+class ShareZabratyArgs(BaseModel):
+    vyklyk: int = Field(description="номер свого виклику (з `share vyklyk` чи кабінету)")
+    do: str = Field(default="", description="тека, куди покласти файли (типово supriaha-<номер>)")
+    stezhyty: bool = Field(default=False, description="чекати, доки виклик не скінчиться")
+    base: str = Field(default="", description="інша адреса пулу")
+
+
+@op("share.zabraty", summary="Забрати результат свого виклику з Супряги: архіви, звірка sha256",
+    args=ShareZabratyArgs, mutates=True, section=SECTION, private=True,
+    skill="share-case",
+    when="забрати готові файли свого виклику з Супряги в теку, зі звіркою кожного файла")
+def share_zabraty(a: ShareZabratyArgs) -> Envelope:
+    """Файл стає на місце лише зі збіглим sha256, і лише тоді йде «забрано».
+
+    Що за файли й звідки — каже сервер (`pasport`); клієнт його не розбирає.
+    """
+    import tarfile
+
+    from nyshporka.share import catalog as C
+    from nyshporka.share import zabir
+    from nyshporka.sources.http import HttpError
+
+    teka = Path(a.do) if a.do else Path.cwd() / f"supriaha-{a.vyklyk}"
+    try:
+        zvit = zabir.zabraty(a.vyklyk, teka, base=a.base, stezhyty=a.stezhyty)
+    except C.PoolError as exc:
+        if isinstance(exc, C.PotribenKliuch) or exc.status == 404:
+            return _vidmova_pulu(exc)
+        return fail(f"виклик {a.vyklyk}: {exc}")
+    except (HttpError, OSError, tarfile.TarError) as exc:
+        return fail(f"виклик {a.vyklyk}: {exc}")
+    if zvit.get("vidmova"):
+        return fail(f"виклик {a.vyklyk}: забирати нічого ({zvit['vidmova']})")
+    env = ok(zvit)
+    if zvit["ne_zbihlos"] or zvit["konflikty"]:
+        # забрано не все: скрипт і агент мусять відрізнити це від успіху за кодом виходу
+        env = Envelope(ok=False, data=zvit, error=f"виклик {a.vyklyk}: забрано не все")
+    if zvit["ne_zbihlos"]:
+        env.warn("ne_zbihlos", f"не збіглися з переліком сервера: {len(zvit['ne_zbihlos'])} "
+                               "файлів — їх не покладено й не підтверджено; повторіть команду")
+    if zvit["konflikty"]:
+        env.warn("konflikty", f"у теці вже лежать інші файли з тими самими іменами: "
+                              f"{len(zvit['konflikty'])} — їх не затерто; заберіть в іншу теку (--do)")
+    if zvit["stan"] in zabir.ZHYVI:
+        env.warn("shche_ide", "виклик ще йде — решту заберіть пізніше або з --stezhyty")
+    return env
+
+
 class ShareSyncArgs(BaseModel):
     fond: str = Field(default="", description="лише цей фонд")
     repo: str = Field(default="", description="лише цей архів")
