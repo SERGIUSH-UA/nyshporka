@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import time
 from pathlib import Path
 from typing import Any
 
@@ -26,15 +27,21 @@ from nyshporka.utils.atomic import atomic_write_text
 SKIL = "supriaha-operatsii"
 OPYS_MAKS = 1000
 TEKST_MAKS = 4000
+#: Причини, за яких новий запит не змінить відповіді: повтор лише стукає в сервер.
+PAUZA_PRYCHYNY = ("odnochasno", "chasto")
 
 
 class Vidmova(C.PoolError):
     """Відмова сервера з текстом для людини (`povidomlennia`) і паузою (`retry_after`)."""
 
     def __init__(self, message: str, *, status: int | None = None,
-                 retry_after: int | None = None) -> None:
+                 retry_after: int | None = None, prychyna: str = "",
+                 vycherpano: bool = False) -> None:
         super().__init__(message, status=status)
         self.retry_after = retry_after
+        self.prychyna = prychyna
+        #: Вікно заповнене до краю. Неповне не тримає паузи: менший обсяг ще може пройти.
+        self.vycherpano = vycherpano
 
 
 def _vidmova(exc: Exception) -> Vidmova:
@@ -45,14 +52,20 @@ def _vidmova(exc: Exception) -> Vidmova:
         detail = json.loads(str(getattr(exc, "body", "") or "")).get("detail")
     except (ValueError, AttributeError):
         detail = None
-    tekst, pauza = "", None
+    tekst, pauza, prychyna, vycherpano = "", None, "", False
     if isinstance(detail, dict):
         tekst = str(detail.get("povidomlennia") or "")
+        prychyna = str(detail.get("prychyna") or "")
         if str(detail.get("retry_after") or "").isdigit():
             pauza = int(detail["retry_after"])
+        vikna = detail.get("vikna")
+        vycherpano = isinstance(vikna, dict) and any(
+            isinstance(v, dict) and int(v.get("vykorystano") or 0) >= int(v.get("mezha") or 0) > 0
+            for v in vikna.values())
     elif isinstance(detail, str):
         tekst = detail
-    return Vidmova(tekst or C.reason(exc), status=status, retry_after=pauza)
+    return Vidmova(tekst or C.reason(exc), status=status, retry_after=pauza, prychyna=prychyna,
+                   vycherpano=vycherpano)
 
 
 def _rozibraty(resp: Any) -> dict[str, Any]:
@@ -104,10 +117,52 @@ def dovidka(base: str = "") -> dict[str, Any]:
 
 def zapustyty(operatsiia: str, parametry: dict[str, str], kliuch: str = "",
               base: str = "") -> dict[str, Any]:
-    """Новий виклик (201) або повтор за ключем (200). Ключ без вказівки — свій."""
-    return _post(f"{C.base_url(base)}/m/vyklyky",
-                 {"operatsiia": operatsiia, "parametry": parametry,
-                  "kliuch": kliuch or novyi_kliuch()})
+    """Новий виклик (201) або повтор за ключем (200). Ключ без вказівки — свій.
+
+    Поки сервер велів чекати, запит не йде: відмову дає сам клієнт, і ця стриманість не залежить
+    від того, що вирішить агент."""
+    _pereviryty_pauzu(operatsiia)
+    try:
+        return _post(f"{C.base_url(base)}/m/vyklyky",
+                     {"operatsiia": operatsiia, "parametry": parametry,
+                      "kliuch": kliuch or novyi_kliuch()})
+    except Vidmova as exc:
+        _zapamiataty_pauzu(operatsiia, exc)
+        raise
+
+
+def _pauzy() -> dict[str, Any]:
+    from nyshporka.core import workspace as W
+
+    got = W.state_all().get(W.KEY_SUPRIAHA_PAUZY)
+    return dict(got) if isinstance(got, dict) else {}
+
+
+def _pereviryty_pauzu(operatsiia: str) -> None:
+    zapys = _pauzy().get(operatsiia)
+    if not isinstance(zapys, dict):
+        return
+    zalyshok = int(float(zapys.get("do") or 0) - time.time()) + 1
+    if zalyshok > 1:
+        raise Vidmova(str(zapys.get("tekst") or "сервер велів зачекати"), status=429,
+                      retry_after=zalyshok, prychyna=str(zapys.get("prychyna") or ""))
+
+
+def _zapamiataty_pauzu(operatsiia: str, exc: Vidmova) -> None:
+    if not exc.retry_after or not (exc.prychyna in PAUZA_PRYCHYNY or exc.vycherpano):
+        return
+    from nyshporka.core import workspace as W
+
+    W.state_set(**{W.KEY_SUPRIAHA_PAUZY: {**_pauzy(), operatsiia: {
+        "do": time.time() + exc.retry_after, "tekst": str(exc), "prychyna": exc.prychyna}}})
+
+
+def zniaty_pauzy() -> None:
+    """Забране чи скасоване звільнило місце: чекати більше нема чого."""
+    from nyshporka.core import workspace as W
+
+    if _pauzy():
+        W.state_set(**{W.KEY_SUPRIAHA_PAUZY: {}})
 
 
 def _vidkryti() -> list[int]:

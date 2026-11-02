@@ -1633,9 +1633,11 @@ def share_vyklyk_skasuvaty(a: ShareVyklykIdArgs) -> Envelope:
     from nyshporka.share import vyklyky as V
 
     try:
-        return ok(V.skasuvaty(a.vyklyk, a.base))
+        zvit = V.skasuvaty(a.vyklyk, a.base)
     except (RuntimeError, OSError) as exc:
         return _vidmova_pulu(exc)
+    V.zniaty_pauzy()
+    return ok(zvit)
 
 
 class ShareDovidkaArgs(BaseModel):
@@ -1703,6 +1705,7 @@ def share_zabraty(a: ShareZabratyArgs) -> Envelope:
     povnyi = zvit["stan"] not in zabir.ZHYVI and not zvit["ne_zbihlos"] and not zvit["konflikty"]
     if povnyi:
         V.zabuty(a.vyklyk)
+        V.zniaty_pauzy()
     if povnyi and not a.bez_rozkladky and teka.is_dir():
         zvit["rozkladka"] = rozklad.rozklasty(teka, a.arkhiv)
     env = ok(zvit)

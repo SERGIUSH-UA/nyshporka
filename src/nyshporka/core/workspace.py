@@ -681,6 +681,8 @@ def _load_last_used() -> Path | None:
 
 #: Номери своїх незакритих викликів на сервері Супряги: хук старту сесії каже про них без мережі.
 KEY_SUPRIAHA_VYKLYKY = "supriaha_vidkryti"
+#: Операція → до якої миті сервер велів не питати: клієнт тримає паузу сам.
+KEY_SUPRIAHA_PAUZY = "supriaha_pauzy"
 #: Сервер уже дав цій людині довідку про операції: хук нагадує про неї в кожній новій сесії.
 KEY_SUPRIAHA_OPERATSII = "supriaha_operatsii"
 

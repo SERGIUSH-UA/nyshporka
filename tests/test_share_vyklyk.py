@@ -209,3 +209,95 @@ def test_stan_slovamy_servera_a_kod_lyshe_bez_sliv(capsys: pytest.CaptureFixture
     _stan_vyklyku({"id": 7, "stan": "v_roboti"})
     assert "v_roboti" in capsys.readouterr().out
 
+
+@pytest.fixture
+def stan(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    from nyshporka.core import workspace as W
+
+    sklad: dict[str, Any] = {}
+    monkeypatch.setattr(W, "state_all", lambda: dict(sklad))
+    monkeypatch.setattr(W, "state_set", lambda **kw: sklad.update(kw))
+    return sklad
+
+
+def _mistsia_zaniati(pul: Pul) -> None:
+    pul.post["/m/vyklyky"] = vyklyky.Vidmova(
+        "All your places are taken", status=429, retry_after=600, prychyna="odnochasno")
+
+
+def test_pauza_ne_puskaie_zapyt_u_merezhu(
+    monkeypatch: pytest.MonkeyPatch, stan: dict[str, Any]
+) -> None:
+    pul = Pul(monkeypatch)
+    _mistsia_zaniati(pul)
+    with pytest.raises(vyklyky.Vidmova):
+        vyklyky.zapustyty("a.b", {})
+    pislia_pershoho = len(pul.zapyty)
+    with pytest.raises(vyklyky.Vidmova) as vidmova:
+        vyklyky.zapustyty("a.b", {})
+    assert len(pul.zapyty) == pislia_pershoho, "друга спроба пішла на сервер"
+    assert "places" in str(vidmova.value) and 0 < (vidmova.value.retry_after or 0) <= 601
+
+
+def test_pauza_odniiei_operatsii_ne_chipaie_inshoi(
+    monkeypatch: pytest.MonkeyPatch, stan: dict[str, Any]
+) -> None:
+    pul = Pul(monkeypatch)
+    _mistsia_zaniati(pul)
+    with pytest.raises(vyklyky.Vidmova):
+        vyklyky.zapustyty("a.b", {})
+    with pytest.raises(vyklyky.Vidmova):
+        vyklyky.zapustyty("c.d", {})
+    assert len(pul.zapyty) == 2
+
+
+def test_pauza_mynaie_sama_i_znimaietsia_zaborom(
+    monkeypatch: pytest.MonkeyPatch, stan: dict[str, Any]
+) -> None:
+    pul = Pul(monkeypatch)
+    _mistsia_zaniati(pul)
+    with pytest.raises(vyklyky.Vidmova):
+        vyklyky.zapustyty("a.b", {})
+    vyklyky.zniaty_pauzy()
+    pul.post["/m/vyklyky"] = {"id": 1, "stan": "chekaie"}
+    assert vyklyky.zapustyty("a.b", {})["id"] == 1
+
+    _mistsia_zaniati(pul)
+    with pytest.raises(vyklyky.Vidmova):
+        vyklyky.zapustyty("a.b", {"x": "1"})
+    pauzy = stan["supriaha_pauzy"]
+    pauzy["a.b"]["do"] = 1.0
+    pul.post["/m/vyklyky"] = {"id": 2, "stan": "chekaie"}
+    assert vyklyky.zapustyty("a.b", {})["id"] == 2
+
+
+def test_nepovne_vikno_pauzy_ne_trymaie(
+    monkeypatch: pytest.MonkeyPatch, stan: dict[str, Any]
+) -> None:
+    """Плівка не влізла в залишок норми, але менший діапазон ще може пройти."""
+    pul = Pul(monkeypatch)
+    pul.post["/m/vyklyky"] = vyklyky.Vidmova(
+        "limit", status=429, retry_after=3600, prychyna="vikno", vycherpano=False)
+    with pytest.raises(vyklyky.Vidmova):
+        vyklyky.zapustyty("a.b", {})
+    assert not stan
+
+
+def test_povne_vikno_trymaie_pauzu(
+    monkeypatch: pytest.MonkeyPatch, stan: dict[str, Any]
+) -> None:
+    pul = Pul(monkeypatch)
+    pul.post["/m/vyklyky"] = vyklyky.Vidmova(
+        "limit", status=429, retry_after=3600, prychyna="vikno", vycherpano=True)
+    with pytest.raises(vyklyky.Vidmova):
+        vyklyky.zapustyty("a.b", {})
+    assert stan["supriaha_pauzy"]["a.b"]["prychyna"] == "vikno"
+
+
+def test_vidmova_rozbyraie_prychynu_i_vikna() -> None:
+    tilo = json.dumps({"detail": {
+        "povidomlennia": "x", "prychyna": "vikno", "retry_after": 60,
+        "vikna": {"doba": {"vykorystano": 3000, "mezha": 3000}}}})
+    exc = HttpError("429", status=429, body=tilo)
+    v = vyklyky._vidmova(exc)
+    assert (v.prychyna, v.retry_after, v.vycherpano) == ("vikno", 60, True)
