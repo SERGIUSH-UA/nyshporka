@@ -1205,13 +1205,16 @@ def vyklyk_cmd(
     stezhyty: bool = typer.Option(False, "--stezhyty", help="дочекатись кінця й забрати файли"),
     do: str = typer.Option("", "--do", help="тека для файлів з --stezhyty (типово supriaha-<номер>)"),
     base: str = typer.Option("", "--base", help="інша адреса пулу"),
+    arkhiv: str = typer.Option("", "--arkhiv", help="архів для шифрів плівки, якщо джерело його не назвало"),
+    bez_rozkladky: bool = typer.Option(False, "--bez-rozkladky", help="лишити плівку цілою текою"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Запустити іменовану операцію на сервері; друкує номер виклику й стан."""
     from nyshporka import ops as O
 
     env = O.call("share.vyklyk", {"operatsiia": operatsiia, "param": param, "kliuch": kliuch,
-                                  "stezhyty": stezhyty, "do": do, "base": base})
+                                  "stezhyty": stezhyty, "do": do, "base": base,
+                                  "arkhiv": arkhiv, "bez_rozkladky": bez_rozkladky})
     if _answer(env, as_json):
         return
     d = env.data or {}
@@ -1223,6 +1226,7 @@ def vyklyk_cmd(
                       f"{_e(z.get('fayliv', 0))} (нових {_e(z.get('novykh', 0))}) → {_e(z.get('teka'))}",
                       highlight=False)
         _pidkazka(z)
+        _druk_rozkladky(z.get("rozkladka"))
     _notes(env)
 
 
@@ -1336,6 +1340,8 @@ def zabraty_cmd(
     usi: bool = typer.Option(False, "--usi", help="усе готове, кожен виклик у свою підтеку --do"),
     stezhyty: bool = typer.Option(False, "--stezhyty", help="чекати, доки виклик не скінчиться"),
     base: str = typer.Option("", "--base", help="інша адреса пулу"),
+    arkhiv: str = typer.Option("", "--arkhiv", help="архів для шифрів плівки, якщо джерело його не назвало"),
+    bez_rozkladky: bool = typer.Option(False, "--bez-rozkladky", help="лишити плівку цілою текою"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Забрати результат свого виклику: архіви, звірка sha256 кожного файла, «забрано».
@@ -1346,7 +1352,8 @@ def zabraty_cmd(
     from nyshporka import ops as O
 
     if usi:
-        env = O.call("share.zabraty_usi", {"do": do, "stezhyty": stezhyty, "base": base})
+        env = O.call("share.zabraty_usi", {"do": do, "stezhyty": stezhyty, "base": base,
+                                           "arkhiv": arkhiv, "bez_rozkladky": bez_rozkladky})
         if _answer(env, as_json):
             return
         d = env.data or {}
@@ -1360,7 +1367,8 @@ def zabraty_cmd(
     if not vyklyk:
         console.print("назвіть номер виклику або додайте --usi", highlight=False)
         raise typer.Exit(2)
-    env = O.call("share.zabraty", {"vyklyk": vyklyk, "do": do, "stezhyty": stezhyty, "base": base})
+    env = O.call("share.zabraty", {"vyklyk": vyklyk, "do": do, "stezhyty": stezhyty, "base": base,
+                                   "arkhiv": arkhiv, "bez_rozkladky": bez_rozkladky})
     if _answer(env, as_json):
         return
     d = env.data or {}
@@ -1370,6 +1378,43 @@ def zabraty_cmd(
     if d.get("povidomlennia"):
         console.print(_e(d["povidomlennia"]), highlight=False)
     _pidkazka(d)
+    _druk_rozkladky(d.get("rozkladka"))
+    _notes(env)
+
+
+def _druk_rozkladky(r: dict[str, Any] | None) -> None:
+    if not r or r.get("stan") not in ("rozkladeno", "odna", "plan"):
+        return
+    spravy = r.get("spravy") or []
+    console.print(f"справ: [bold]{len(spravy)}[/bold]", highlight=False)
+    for s in spravy:
+        napys = f"{s.get('shifra')} · {s.get('kadriv')} кадрів → {s.get('teka')}" if isinstance(s, dict) else s
+        console.print(f"  {_e(napys)}", highlight=False)
+
+
+@app.command("rozklasty")
+@route("share rozklasty", skill="share-case",
+       when="плівка забрана цілою текою, а сервер назвав справи на ній")
+def rozklasty_cmd(
+    teka: str = typer.Argument(..., help="тека забраного виклику"),
+    arkhiv: str = typer.Option("", "--arkhiv", help="архів, якщо джерело його не назвало"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="лише показати, які справи вийдуть"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Розкласти забрану плівку на справи за межами, які назвав сервер.
+
+    Кадри не рухаються: справи дістають жорсткі посилання на ті самі файли, а
+    зняти розкладку можна `nysh cases split <тека> --undo`.
+    """
+    from nyshporka import ops as O
+
+    env = O.call("share.rozklasty", {"teka": teka, "arkhiv": arkhiv, "dry_run": dry_run})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    if d.get("prychyna"):
+        console.print(_e(d["prychyna"]), highlight=False)
+    _druk_rozkladky(d)
     _notes(env)
 
 

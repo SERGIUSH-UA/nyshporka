@@ -1530,6 +1530,8 @@ class ShareVyklykArgs(BaseModel):
     stezhyty: bool = Field(default=False, description="дочекатись кінця й забрати файли")
     do: str = Field(default="", description="тека для файлів з `stezhyty`")
     base: str = Field(default="", description="інша адреса пулу")
+    arkhiv: str = Field(default="", description="архів для шифрів плівки, якщо джерело його не назвало")
+    bez_rozkladky: bool = Field(default=False, description="лишити плівку цілою текою, не розкладати на справи")
 
 
 def _parametry(param: list[str]) -> dict[str, str] | None:
@@ -1564,7 +1566,8 @@ def share_vyklyk(a: ShareVyklykArgs) -> Envelope:
         vid = int(v.get("id") or 0)
         if not vid:
             return fail("пул не назвав номера виклику")
-        zabrano = share_zabraty(ShareZabratyArgs(vyklyk=vid, do=a.do, stezhyty=True, base=a.base))
+        zabrano = share_zabraty(ShareZabratyArgs(vyklyk=vid, do=a.do, stezhyty=True, base=a.base,
+                                                 arkhiv=a.arkhiv, bez_rozkladky=a.bez_rozkladky))
         if not zabrano.ok:
             return Envelope(ok=False, data={"vyklyk": v, "zabrano": zabrano.data},
                             error=zabrano.error, warnings=zabrano.warnings)
@@ -1666,6 +1669,8 @@ class ShareZabratyArgs(BaseModel):
     do: str = Field(default="", description="тека, куди покласти файли (типово supriaha-<номер>)")
     stezhyty: bool = Field(default=False, description="чекати, доки виклик не скінчиться")
     base: str = Field(default="", description="інша адреса пулу")
+    arkhiv: str = Field(default="", description="архів для шифрів плівки, якщо джерело його не назвало")
+    bez_rozkladky: bool = Field(default=False, description="лишити плівку цілою текою, не розкладати на справи")
 
 
 @op("share.zabraty", summary="Забрати результат свого виклику з Супряги: архіви, звірка sha256",
@@ -1680,8 +1685,8 @@ def share_zabraty(a: ShareZabratyArgs) -> Envelope:
     import tarfile
 
     from nyshporka.share import catalog as C
+    from nyshporka.share import rozklad, zabir
     from nyshporka.share import vyklyky as V
-    from nyshporka.share import zabir
     from nyshporka.sources.http import HttpError
 
     teka = Path(a.do) if a.do else Path.cwd() / f"supriaha-{a.vyklyk}"
@@ -1695,9 +1700,15 @@ def share_zabraty(a: ShareZabratyArgs) -> Envelope:
         return fail(f"виклик {a.vyklyk}: {exc}")
     if zvit.get("vidmova"):
         return fail(f"виклик {a.vyklyk}: забирати нічого ({zvit['vidmova']})")
-    if zvit["stan"] not in zabir.ZHYVI and not zvit["ne_zbihlos"] and not zvit["konflikty"]:
+    povnyi = zvit["stan"] not in zabir.ZHYVI and not zvit["ne_zbihlos"] and not zvit["konflikty"]
+    if povnyi:
         V.zabuty(a.vyklyk)
+    if povnyi and not a.bez_rozkladky and teka.is_dir():
+        zvit["rozkladka"] = rozklad.rozklasty(teka, a.arkhiv)
     env = ok(zvit)
+    rozkl = zvit.get("rozkladka") or {}
+    if rozkl.get("prychyna") and rozkl.get("stan") != "nemaie":
+        env.warn("rozkladka", str(rozkl.get("prychyna") or ""))
     if zvit["ne_zbihlos"] or zvit["konflikty"]:
         # забрано не все: скрипт і агент мусять відрізнити це від успіху за кодом виходу
         env = Envelope(ok=False, data=zvit, error=f"виклик {a.vyklyk}: забрано не все")
@@ -1716,6 +1727,8 @@ class ShareZabratyUsiArgs(BaseModel):
     do: str = Field(default="", description="тека для підтек виклику (типово supriaha у поточній)")
     stezhyty: bool = Field(default=False, description="чекати, доки не закінчиться все, що ще йде")
     base: str = Field(default="", description="інша адреса пулу")
+    arkhiv: str = Field(default="", description="архів для шифрів плівки, якщо джерело його не назвало")
+    bez_rozkladky: bool = Field(default=False, description="лишити плівки цілими теками")
 
 
 def _pidteka(ryadok: dict[str, Any]) -> str:
@@ -1757,12 +1770,14 @@ def share_zabraty_usi(a: ShareZabratyUsiArgs) -> Envelope:
             if vid in bachyv:
                 continue
             bachyv.add(vid)
-            env = share_zabraty(ShareZabratyArgs(vyklyk=vid, do=str(baza / _pidteka(r)), base=a.base))
+            env = share_zabraty(ShareZabratyArgs(vyklyk=vid, do=str(baza / _pidteka(r)), base=a.base,
+                                                 arkhiv=a.arkhiv, bez_rozkladky=a.bez_rozkladky))
             if env.ok:
                 zvit["zabrano"].append({"id": vid, "plivka": r.get("plivka"),
                                         "teka": (env.data or {}).get("teka"),
                                         "fayliv": (env.data or {}).get("fayliv", 0),
-                                        "pasport": (env.data or {}).get("pasport")})
+                                        "pasport": (env.data or {}).get("pasport"),
+                                        "rozkladka": (env.data or {}).get("rozkladka")})
             else:
                 zvit["nevdachi"].append({"id": vid, "plivka": r.get("plivka"), "chomu": env.error})
         zvit["zhyvi"] = d.get("zhyvi", [])
@@ -1772,6 +1787,26 @@ def share_zabraty_usi(a: ShareZabratyUsiArgs) -> Envelope:
     if zvit["nevdachi"]:
         return Envelope(ok=False, data=zvit,
                         error=f"забрано не все: не вдалось {len(zvit['nevdachi'])}")
+    return ok(zvit)
+
+
+class ShareRozklastyArgs(BaseModel):
+    teka: str = Field(description="тека забраного виклику")
+    arkhiv: str = Field(default="", description="архів для шифрів, якщо джерело його не назвало")
+    dry_run: bool = Field(default=False, description="лише показати, які справи вийдуть")
+
+
+@op("share.rozklasty", summary="Розкласти забрану плівку на справи за картою сервера",
+    args=ShareRozklastyArgs, mutates=True, section=SECTION, private=True,
+    skill="share-case",
+    when="плівка забрана цілою текою, а сервер назвав справи на ній: розкласти без читання карток")
+def share_rozklasty(a: ShareRozklastyArgs) -> Envelope:
+    """Обгортка `share.rozklad.rozklasty`: кадри не рухаються, зняти — `cases split --undo`."""
+    from nyshporka.share import rozklad
+
+    zvit = rozklad.rozklasty(a.teka, a.arkhiv, dry_run=a.dry_run)
+    if zvit["stan"] in ("ne_mozhna", "potriben_arkhiv"):
+        return Envelope(ok=False, data=zvit, error=str(zvit["prychyna"]))
     return ok(zvit)
 
 
