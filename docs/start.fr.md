@@ -122,7 +122,7 @@ vos propres scans.
   catalogue récapitulatif du ЦДІАК (4566 localités), le catalogue du ДАХмО,
   l'index des microfilms FamilySearch pour la Moldavie, les églises vers 1772.
 * **Catalogues des sites d'archives** — ARCHIUM, « Бабин Яр », Wikimedia Commons,
-  Duck Inspector, ridni.org, Чтиво, Internet Archive.
+  Duck Inspector, Чтиво, Internet Archive.
 * **Dépouillement des actes en tableau** — dates, noms, rôles, condition, âge — et
   export vers Excel. C'est l'assistant lui-même qui dépouille, donc aux frais de
   votre abonnement.

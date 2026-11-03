@@ -60,7 +60,6 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     from nyshporka.sources.martyrolog import MartyrologSource
     from nyshporka.sources.opysy import OpysySource
     from nyshporka.sources.reabilitovani import ReabilitovaniSource
-    from nyshporka.sources.ridni import RidniSource
     from nyshporka.sources.skanoteka import SkanotekaSource
     from nyshporka.sources.sks import SksPersonsSource, SksPlacesSource
     from nyshporka.sources.szukaj import SzukajSource
@@ -87,10 +86,6 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     # бачить справу незалежно від того, чи її оцифровано, — тобто відповідає
     # там, де решта віддає нуль на голій установці.
     out.append(cast("Source", DuckSource(workspace)))
-    # 🗺 Каталог за СЕЛОМ. Питання «які книги є про моє село» описи фондів не
-    # ставлять узагалі: вони перелічують справи фонду. Тут же відповідь приходить
-    # разом із прямими адресами копій — і, головне, з роками, яких у фонді немає.
-    out.append(cast("Source", RidniSource(workspace)))
     # 🕯 Онлайн-архів «Бабин Яр»: 21 архів України однією адресою, і майже все
     # там — те, чого самі архіви онлайн не показують (зокрема книги РАЦС
     # 1921-1946, закриті 75-річним обмеженням). Пошуку майданчик не має взагалі,

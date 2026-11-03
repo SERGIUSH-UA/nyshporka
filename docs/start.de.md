@@ -123,7 +123,7 @@ und Suche, noch bevor Sie eigene Scans mitbringen.
   Sammelkatalog des ЦДІАК (4566 Orte), der Katalog des ДАХмО, das Register der
   FamilySearch-Filme zu Moldau, Kirchen um 1772.
 * **Kataloge von Archivwebsites** — ARCHIUM, „Бабин Яр“, Wikimedia Commons,
-  Duck Inspector, ridni.org, Чтиво, Internet Archive.
+  Duck Inspector, Чтиво, Internet Archive.
 * **Akten in eine Tabelle auswerten** — Daten, Namen, Rollen, Stand, Alter —
   und nach Excel exportieren. Die Auswertung macht der Assistent selbst, also
   auf Kosten Ihres Abos.

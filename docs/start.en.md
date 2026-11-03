@@ -112,7 +112,7 @@ you bring your own scans.
   (Central State Historical Archive of Ukraine in Kyiv; 4566 settlements), the catalogue of the ДАХмО, the index of FamilySearch films for Moldova,
   churches around 1772.
 * **Catalogues of archive websites** — ARCHIUM, «Бабин Яр» (Babyn Yar), Wikimedia Commons,
-  Duck Inspector, ridni.org, Чтиво (Chtyvo), Internet Archive.
+  Duck Inspector, Чтиво (Chtyvo), Internet Archive.
 * **Parsing entries into a table** — dates, names, roles, status, age — and exporting to
   Excel. The assistant does the parsing itself, that is, at the cost of your subscription.
 * **Fine-tune the model** on your own handwriting — [more](train.md).

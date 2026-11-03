@@ -120,7 +120,7 @@ aduceți propriile scanări.
   consolidat al ЦДІАК (4566 de localități), catalogul ДАХмО, indexul
   microfilmelor FamilySearch pentru Moldova, bisericile din jurul anului 1772.
 * **Cataloagele site-urilor arhivelor** — ARCHIUM, «Бабин Яр», Wikimedia
-  Commons, Duck Inspector, ridni.org, Чтиво, Internet Archive.
+  Commons, Duck Inspector, Чтиво, Internet Archive.
 * **Analiza actelor într-un tabel** — date, nume, roluri, stare civilă, vârstă
   — și exportul în Excel. Analiza o face asistentul însuși, adică pe seama
   abonamentului dumneavoastră.

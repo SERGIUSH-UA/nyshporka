@@ -36,7 +36,6 @@
 | `archium.dahmo.gov.ua`, `archium.cdiak.archives.gov.ua`, `cdiak.archives.gov.ua` | переглядачі державних архівів України |
 | `babynyar.org` | онлайн-архів «Бабин Яр» |
 | `inspector.duckarchive.com` | зведений покажчик архівних справ |
-| `ridni.org` | каталог книг за селом |
 | `shron.org` | архівна копія е-бібліотеки «Чтиво» |
 | `archive.org`, `iiif.archive.org`, `ia*.us.archive.org` | Internet Archive: пошук по тексту, текст і кадри сторінок |
 | `familysearch.org`, `fsfiles.ru` | дзеркало плівок і поаркушевий покажчик |

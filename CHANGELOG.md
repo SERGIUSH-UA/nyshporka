@@ -76,6 +76,15 @@
   `nyshporka.htr.layout`: `geometry_path`, `read_geometry`, `write_geometry`,
   `geometry_stems`. Сторожить це `tests/test_geometry_one_door.py`.
 
+### Прибрано
+
+- ⚠ **Джерело `ridni` (каталог книг за селом ridni.org) — ламка зміна.** Сайт не
+  відповідає з 25.10.2026 (Cloudflare 522 на каталозі, API й «Карті прізвищ»), і загальний
+  `nysh find` щоразу чекав на нього до дедлайну. `nysh find --source ridni` тепер відмовляє:
+  «джерела 'ridni' немає». Метрики села — `nysh parish metrics "<село>, <повіт>"` (пак
+  `metrics`, ті самі першоджерела, без мережі), він же тепер перший канал у скілах
+  `find-parish` і `where-to-dig`. Копія справи — `nysh parish in-case`.
+
 ## [0.39.2] — 2026-11-02
 
 ### Змінено

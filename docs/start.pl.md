@@ -112,7 +112,7 @@ skany.
   (4566 miejscowości), katalog ДАХмО, indeks mikrofilmów FamilySearch dla
   Mołdawii, cerkwie z około 1772 roku.
 * **Katalogi stron archiwalnych** — ARCHIUM, „Babi Jar”, Wikimedia Commons,
-  Duck Inspector, ridni.org, „Chtyvo”, Internet Archive.
+  Duck Inspector, „Chtyvo”, Internet Archive.
 * **Opracowanie aktów w tabeli** — daty, imiona, role, stan, wiek — i eksport do
   Excela. Opracowuje sam asystent, czyli w ramach Twojej subskrypcji.
 * **Douczanie modelu** na własnym piśmie — [więcej](train.md).
