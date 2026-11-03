@@ -2757,9 +2757,47 @@ GEOMETRY_PLAIN_SUFFIX = ".lines.json"
 GEOMETRY_GZ_LEVEL = 6
 
 
+def _geom_redundant(a, b, c) -> bool:
+    """Дзеркало `geom_simplify._redundant`: b строго між a і c на осьовому чи 45°
+    відрізку (лише там растр маски той самий за побудовою)."""
+    dx, dy = c[0] - a[0], c[1] - a[1]
+    if not (dx == 0 or dy == 0 or abs(dx) == abs(dy)):
+        return False
+    if (b[0] - a[0]) * dy - (b[1] - a[1]) * dx != 0:
+        return False
+    return ((b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1]) > 0
+            and (b[0], b[1]) != (a[0], a[1]) and (b[0], b[1]) != (c[0], c[1]))
+
+
+def drop_collinear(poly):
+    """Дзеркало `nyshporka.htr.geom_simplify.drop_collinear` (раннер їде без пакета):
+    геть точки полігона, що лежать на прямій між сусідами, — контур і маска ті самі.
+    Збіг сторожить `tests/test_geometry_gz.py`."""
+    if not isinstance(poly, list) or len(poly) < 4:
+        return poly
+    pts = list(poly)
+    changed = True
+    while changed and len(pts) > 3:
+        changed = False
+        i = 0
+        while i < len(pts) and len(pts) > 3:
+            if _geom_redundant(pts[i - 1], pts[i], pts[(i + 1) % len(pts)]):
+                del pts[i]
+                changed = True
+                if i > 0:
+                    i -= 1
+            else:
+                i += 1
+    return pts
+
+
 def write_geometry(out_dir: Path, stem: str, payload: dict) -> None:
     """`<стем>.lines.json.gz` атомарно; проста копія сторінки (старий прогін) — геть,
-    інакше на диску лишились би дві різні правди про ті самі рамки."""
+    інакше на диску лишились би дві різні правди про ті самі рамки. Полігони —
+    без точок на прямій (`drop_collinear`)."""
+    if isinstance(payload.get("polys"), list):
+        payload = {**payload, "polys": [drop_collinear(p) if p else p
+                                        for p in payload["polys"]]}
     path = out_dir / f"{stem}{GEOMETRY_GZ_SUFFIX}"
     blob = gzip.compress(json.dumps(payload, ensure_ascii=False).encode("utf-8"),
                          compresslevel=GEOMETRY_GZ_LEVEL, mtime=0)

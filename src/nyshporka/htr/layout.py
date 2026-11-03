@@ -139,10 +139,31 @@ def write_geometry_bytes(directory: Path, stem: str, raw: bytes) -> Path:
 
 
 def write_geometry(directory: Path, stem: str, payload: dict[str, Any]) -> Path:
-    """Записати геометрію сторінки (стиснутою). Простий файл тієї самої сторінки
-    прибирається: інакше лишилися б дві різні правди про одні рамки."""
+    """Записати геометрію сторінки (стиснутою, полігони без точок на прямій).
+    Простий файл тієї самої сторінки прибирається: інакше лишилися б дві різні
+    правди про одні рамки."""
+    from nyshporka.htr.geom_simplify import simplify_payload
+
     return write_geometry_bytes(
-        directory, stem, json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+        directory, stem,
+        json.dumps(simplify_payload(payload), ensure_ascii=False).encode("utf-8"))
+
+
+def thinned_bytes(raw: bytes) -> bytes:
+    """Сирий JSON геометрії з прорідженими полігонами (`htr.geom_simplify`).
+
+    Нічого викинути — ті самі байти, а не переписаний JSON: старий прогін, у
+    якого прорідити нічого, стискається байт у байт.
+    """
+    from nyshporka.htr.geom_simplify import simplify_payload
+
+    data = json.loads(raw.decode("utf-8"))
+    if not isinstance(data, dict):
+        return raw
+    thin = simplify_payload(data)
+    if thin == data:
+        return raw
+    return json.dumps(thin, ensure_ascii=False).encode("utf-8")
 
 
 def remove_geometry(directory: Path, stem: str) -> None:

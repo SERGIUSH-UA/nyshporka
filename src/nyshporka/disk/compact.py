@@ -32,6 +32,7 @@ gzip лишає ~28 %). Ця команда стискає їх один раз.
 from __future__ import annotations
 
 import gzip
+import json
 import os
 import time
 from collections.abc import Callable
@@ -101,21 +102,26 @@ def compact_file(plain: Path) -> tuple[int, int]:
     gz = plain.with_name(HL.geometry_name(stem))
     st = plain.stat()
     raw = plain.read_bytes()
+    # Полігони — без точок на прямій (`htr.geom_simplify`): контур і маска ті самі,
+    # а коли прорідити нічого — ті самі байти.
+    want = HL.thinned_bytes(raw)
     if gz.is_file():
         # Пара після обриву (або писач уже дописав стиснуту): простий файл
-        # прибирається, лише якщо `.gz` має ТОЙ САМИЙ вміст. Інакше — дві
-        # різні правди, і вирішувати, котра справжня, тут не можна.
-        if HL.geometry_bytes(gz) != raw:
+        # прибирається, лише якщо `.gz` має ТОЙ САМИЙ вміст — до проріджування
+        # чи після. Інакше — дві різні правди, і вирішувати, котра справжня, тут
+        # не можна.
+        if HL.geometry_bytes(gz) not in (raw, want):
             raise ValueError(f"{plain.name}: поруч лежить {gz.name} з іншим вмістом — "
                              f"не чіпаю жодного")
         size = gz.stat().st_size
         plain.unlink()
         return len(raw), size
-    blob = HL.gz_blob(raw)
+    check_thinning(plain.name, raw, want)
+    blob = HL.gz_blob(want)
     tmp = gz.with_name(f"{gz.name}.{os.getpid()}.tmp")
     try:
         tmp.write_bytes(blob)
-        if gzip.decompress(tmp.read_bytes()) != raw:
+        if gzip.decompress(tmp.read_bytes()) != want:
             raise ValueError(f"{plain.name}: стиснуте не розтискається в той самий вміст")
         os.utime(tmp, ns=(st.st_atime_ns, st.st_mtime_ns))
         os.replace(tmp, gz)
@@ -124,6 +130,53 @@ def compact_file(plain: Path) -> tuple[int, int]:
         raise
     plain.unlink()
     return len(raw), len(blob)
+
+
+def check_thinning(name: str, raw: bytes, want: bytes) -> None:
+    """🔴 Друга рука над проріджуванням, незалежна від його коду: усе, крім
+    полігонів, те саме; кожен полігон — підпослідовність свого оригіналу, а
+    кожна викинута точка лежить на відрізку між лишеними сусідами."""
+    if want == raw:
+        return
+    a, b = json.loads(raw.decode("utf-8")), json.loads(want.decode("utf-8"))
+    rest_a = {k: v for k, v in a.items() if k != "polys"}
+    rest_b = {k: v for k, v in b.items() if k != "polys"}
+    if rest_a != rest_b:
+        raise ValueError(f"{name}: проріджування зачепило не лише полігони")
+    pa, pb = a.get("polys") or [], b.get("polys") or []
+    if len(pa) != len(pb):
+        raise ValueError(f"{name}: після проріджування інше число полігонів")
+    for p, q in zip(pa, pb, strict=True):
+        if p != q and not _thin_ok(p, q):
+            raise ValueError(f"{name}: проріджений полігон — не той самий контур")
+
+
+def _on_segment(a: Any, b: Any, c: Any) -> bool:
+    """Чи точка b на відрізку a–c (включно з кінцями)."""
+    if (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]) != 0:
+        return False
+    return bool(min(a[0], c[0]) <= b[0] <= max(a[0], c[0])
+                and min(a[1], c[1]) <= b[1] <= max(a[1], c[1]))
+
+
+def _thin_ok(orig: Any, thin: Any) -> bool:
+    if not isinstance(orig, list) or not isinstance(thin, list) or len(thin) < 3:
+        return False
+    keep: list[int] = []
+    j = 0
+    for i, pt in enumerate(orig):
+        if j < len(thin) and pt == thin[j]:
+            keep.append(i)
+            j += 1
+    if j != len(thin):
+        return False
+    for k, i in enumerate(keep):
+        nxt = keep[(k + 1) % len(keep)]
+        span = (list(range(i + 1, nxt)) if nxt > i
+                else list(range(i + 1, len(orig))) + list(range(nxt)))
+        if not all(_on_segment(orig[i], orig[m], orig[nxt]) for m in span):
+            return False
+    return True
 
 
 # ── тека прогону ─────────────────────────────────────────────────────────────
