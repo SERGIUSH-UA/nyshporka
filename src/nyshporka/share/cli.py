@@ -1247,6 +1247,86 @@ def vyklyk_stan_cmd(
     _notes(env)
 
 
+#: Блоки результату, що їх клієнт уміє друкувати рядками: (ключ, підпис).
+BLOKY_REZULTATU = (("repeated", "кілька разів або кількома голосами"), ("single", "поодинокі"),
+                   ("weak", "слабкі"), ("noise", "шум"), ("rejected", "позначені вами"))
+
+
+@app.command("vyklyk-rezultat")
+@route("share vyklyk-rezultat", skill="share-case",
+       when="виклик готовий, і людина хоче побачити весь результат, а не лише перші рядки")
+def vyklyk_rezultat_cmd(
+    vyklyk: int = typer.Argument(..., help="номер виклику"),
+    base: str = typer.Option("", "--base", help="інша адреса пулу"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Повний результат готового виклику. Групи друкуються рядками з номером для вердикту."""
+    import json
+
+    from nyshporka import ops as O
+
+    env = O.call("share.vyklyk_rezultat", {"vyklyk": vyklyk, "base": base})
+    if _answer(env, as_json):
+        return
+    r = (env.data or {}).get("rezultat") or {}
+    if not any(k in r for k, _ in BLOKY_REZULTATU):
+        console.print(_e(json.dumps(r, ensure_ascii=False, indent=1)), highlight=False)
+        _notes(env)
+        return
+    console.print(f"[bold]{_e(r.get('surname'))}[/bold] · {_e(r.get('status'))}", highlight=False)
+    for kliuch, pidpys in BLOKY_REZULTATU:
+        hrupy = r.get(kliuch) or []
+        if not hrupy:
+            continue
+        console.print(f"\n[bold]{_e(pidpys)}[/bold] ({len(hrupy)})", highlight=False)
+        for g in hrupy:
+            kn = g.get("book") or {}
+            st = g.get("pages") or [None, None]
+            vyrok = f" · [ok]{_e(g['verdict'])}[/ok]" if g.get("verdict") else ""
+            console.print(f"  #{_e(g.get('group_id'))} {_e(kn.get('shifra'))} · "
+                          f"[bold]{_e(g.get('word'))}[/bold] ×{_e(g.get('times'))} · "
+                          f"голосів {_e(g.get('voices'))} · стор. {_e(st[0])}–{_e(st[1])}{vyrok}",
+                          highlight=False)
+            pr = (g.get("example") or {}).get("line")
+            if pr:
+                console.print(f"    [dim]{_e(pr)}[/dim]", highlight=False)
+    if r.get("noise_total", 0) > len(r.get("noise") or []):
+        console.print(f"\nшуму всього {_e(r['noise_total'])}", highlight=False)
+    d = r.get("denominator")
+    if d:
+        console.print(f"\nпройдено пакетів {_e(d.get('packages_searched'))} з "
+                      f"{_e(d.get('packages_in_pool'))}, сторінок {_e(d.get('pages_searched'))}",
+                      highlight=False)
+    _notes(env)
+
+
+@app.command("vyklyk-dia")
+@route("share vyklyk-dia", skill="share-case",
+       when="людина подивилась скан: «там інше слово» (шум) чи «це не той» (сховати), або відпускає виклик")
+def vyklyk_dia_cmd(
+    vyklyk: int = typer.Argument(..., help="номер виклику"),
+    hrupa: int | None = typer.Option(None, "--hrupa", help="номер групи з vyklyk-rezultat"),
+    vyrok: str = typer.Option("", "--vyrok", help="shum (на скані інше слово) · skhovaty (не той) · znyaty"),
+    zakryty: bool = typer.Option(False, "--zakryty", help="закрити виклик: сервер більше його не веде"),
+    base: str = typer.Option("", "--base", help="інша адреса пулу"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Позначка групі результату (слово людини, не агента) або закрити свій виклик."""
+    from nyshporka import ops as O
+
+    env = O.call("share.vyklyk_dia", {"vyklyk": vyklyk, "hrupa": hrupa, "vyrok": vyrok,
+                                      "zakryty": zakryty, "base": base})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    if d.get("closed"):
+        console.print(f"виклик {_e(vyklyk)} закрито", highlight=False)
+    else:
+        console.print(f"група {_e(d.get('group_id'))} · {_e(d.get('verdict') or 'позначку знято')}",
+                      highlight=False)
+    _notes(env)
+
+
 @app.command("vyklyk-pochaty")
 @route("share vyklyk-pochaty", skill="share-case",
        when="людина побачила перелік виклику й згодна його почати")

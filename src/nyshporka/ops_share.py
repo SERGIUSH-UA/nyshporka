@@ -1608,6 +1608,55 @@ def share_vyklyk_pochaty(a: ShareVyklykIdArgs) -> Envelope:
         return _vidmova_pulu(exc)
 
 
+@op("share.vyklyk_rezultat", summary="Повний результат свого виклику на сервері Супряги",
+    args=ShareVyklykIdArgs, mutates=False, section=SECTION, private=True,
+    skill="share-case",
+    when="виклик готовий, і людина хоче побачити весь результат, а не лише перші рядки")
+def share_vyklyk_rezultat(a: ShareVyklykIdArgs) -> Envelope:
+    from nyshporka.share import vyklyky as V
+
+    try:
+        return ok(V.rezultat(a.vyklyk, a.base))
+    except (RuntimeError, OSError) as exc:
+        return _vidmova_pulu(exc)
+
+
+#: Позначка людини → що йде на сервер. `shum` — на скані не це слово (рушій помилився; допомагає
+#: всім, хто шукає те саме), `skhovaty` — слово справжнє, але не те, що шукає людина (лише її
+#: список), `znyaty` — зняти позначку. «Не той Іван» — `skhovaty`, не `shum`.
+VYROKY = {"shum": "shum", "skhovaty": "skhovaty", "znyaty": ""}
+
+
+class ShareVyklykDiaArgs(BaseModel):
+    vyklyk: int = Field(description="номер виклику")
+    hrupa: int | None = Field(default=None, description="номер групи з результату виклику")
+    vyrok: str = Field(default="", description="позначка групі: shum, skhovaty або znyaty")
+    zakryty: bool = Field(default=False, description="закрити виклик: сервер більше його не веде")
+    base: str = Field(default="", description="інша адреса пулу")
+
+
+@op("share.vyklyk_dia", summary="Позначити рядок результату (шум, сховати) або закрити свій виклик",
+    args=ShareVyklykDiaArgs, mutates=True, section=SECTION, private=True,
+    skill="share-case",
+    when="людина подивилась скан: «там інше слово» (шум) чи «це не той» (сховати), або відпускає виклик")
+def share_vyklyk_dia(a: ShareVyklykDiaArgs) -> Envelope:
+    """Позначку ставить людина, а не агент: агент лише передає її слово."""
+    from nyshporka.share import vyklyky as V
+
+    if a.zakryty == (a.hrupa is not None):
+        return fail("потрібне щось одне: --hrupa з --vyrok або --zakryty")
+    if a.zakryty:
+        tilo: dict[str, Any] = {"close": True}
+    else:
+        if a.vyrok not in VYROKY:
+            return fail("позначка: shum (на скані інше слово), skhovaty (не той) або znyaty")
+        tilo = {"group_id": a.hrupa, "verdict": VYROKY[a.vyrok]}
+    try:
+        return ok(V.dia(a.vyklyk, tilo, a.base))
+    except (RuntimeError, OSError) as exc:
+        return _vidmova_pulu(exc)
+
+
 class ShareHotoveArgs(BaseModel):
     base: str = Field(default="", description="інша адреса пулу")
 

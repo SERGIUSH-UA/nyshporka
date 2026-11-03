@@ -250,3 +250,14 @@ def stan(vid: int, base: str = "") -> dict[str, Any]:
 
 def skasuvaty(vid: int, base: str = "") -> dict[str, Any]:
     return _post(f"{C.base_url(base)}/m/vyklyky/{vid}/skasuvaty", {})
+
+
+def rezultat(vid: int, base: str = "") -> dict[str, Any]:
+    """Повний результат готового виклику — у тому вигляді, який дає сервер."""
+    return _get(f"{C.base_url(base)}/m/vyklyky/{vid}/rezultat")
+
+
+def dia(vid: int, tilo: dict[str, Any], base: str = "") -> dict[str, Any]:
+    """Дія людини над результатом свого виклику (вердикт рядкові, закрити). Що вміє виклик,
+    вирішує сервер: виклик без дій відповідає 404."""
+    return _post(f"{C.base_url(base)}/m/vyklyky/{vid}/dia", tilo)

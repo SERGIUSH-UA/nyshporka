@@ -301,3 +301,62 @@ def test_vidmova_rozbyraie_prychynu_i_vikna() -> None:
     exc = HttpError("429", status=429, body=tilo)
     v = vyklyky._vidmova(exc)
     assert (v.prychyna, v.retry_after, v.vycherpano) == ("vikno", 60, True)
+
+
+# ── повний результат і дія над викликом ──────────────────────────────────
+
+REZULTAT: dict[str, Any] = {
+    "vyklyk": {"id": 7, "stan": "hotovo"},
+    "rezultat": {
+        "surname": "Тарасюк", "status": "done",
+        "repeated": [{"group_id": 41, "book": {"shifra": "ДАХмО 315-1-1"}, "word": "Тарасюкъ",
+                      "times": 12, "voices": 2, "pages": [3, 90], "verdict": "",
+                      "example": {"line": "Стефанъ Тарасюкъ Кумъ"}}],
+        "single": [], "rejected": [],
+    },
+}
+
+
+def test_rezultat_hrupy_riadkamy(pul: Pul) -> None:
+    pul.get["/m/vyklyky/7/rezultat"] = REZULTAT
+    r = _cli("vyklyk-rezultat", "7")
+    assert r.exit_code == 0, r.output
+    for slovo in ("Тарасюк", "#41", "ДАХмО 315-1-1", "×12", "Стефанъ Тарасюкъ Кумъ"):
+        assert slovo in r.output
+    env = O.call("share.vyklyk_rezultat", {"vyklyk": 7})
+    assert env.ok and env.data == REZULTAT
+
+
+def test_rezultat_inshoi_operatsii_yak_ye(pul: Pul) -> None:
+    pul.get["/m/vyklyky/8/rezultat"] = {"rezultat": {"pidkazky": [{"zaholovok": "Покажчик"}]}}
+    r = _cli("vyklyk-rezultat", "8")
+    assert r.exit_code == 0 and "Покажчик" in r.output
+
+
+@pytest.mark.parametrize(("args", "tilo"), [
+    (["--hrupa", "41", "--vyrok", "shum"], {"group_id": 41, "verdict": "shum"}),
+    (["--hrupa", "41", "--vyrok", "skhovaty"], {"group_id": 41, "verdict": "skhovaty"}),
+    (["--hrupa", "41", "--vyrok", "znyaty"], {"group_id": 41, "verdict": ""}),
+    (["--zakryty"], {"close": True}),
+])
+def test_dia_shle_te_shcho_skazala_liudyna(pul: Pul, args: list[str], tilo: dict[str, Any]) -> None:
+    pul.post["/m/vyklyky/7/dia"] = {"group_id": 41, "verdict": tilo.get("verdict")} \
+        if "group_id" in tilo else {"closed": True}
+    r = _cli("vyklyk-dia", "7", *args)
+    assert r.exit_code == 0, r.output
+    assert pul.zapyty[-1] == ("POST", f"{catalog.DEFAULT_BASE}/m/vyklyky/7/dia", tilo)
+
+
+@pytest.mark.parametrize("parametry", [
+    {"vyklyk": 7}, {"vyklyk": 7, "hrupa": 1, "zakryty": True},
+    {"vyklyk": 7, "hrupa": 1, "vyrok": "moze"}, {"vyklyk": 7, "hrupa": 1, "vyrok": "ne_mii"},
+])
+def test_dia_bez_zrozumiloho_slova_ne_ide_na_server(pul: Pul, parametry: dict[str, Any]) -> None:
+    env = O.call("share.vyklyk_dia", parametry)
+    assert not env.ok and not pul.zapyty
+
+
+def test_dia_neznana_operatsii_koroktko(pul: Pul) -> None:
+    pul.post["/m/vyklyky/9/dia"] = HttpError("404", status=404)
+    env = O.call("share.vyklyk_dia", {"vyklyk": 9, "zakryty": True})
+    assert not env.ok and "Traceback" not in (env.error or "")
