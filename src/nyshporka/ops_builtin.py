@@ -1102,7 +1102,7 @@ def _address_answer(a: CatalogSearchArgs, addr: Any) -> Envelope | None:
         y2 = str(reg_row.get("year_to") or "")
         years = y1 if y1 == y2 else "-".join(x for x in (y1, y2) if x)
         url = str(reg_row.get("archium_url") or reg_row.get("commons_url")
-                  or reg_row.get("duck_url") or "")
+                  or reg_row.get("site_url") or reg_row.get("duck_url") or "")
         hits.append({"source": f"registry:{f['id']}", "ref": f"case:{addr.as_text()}",
                      "title": str(reg_row.get("title") or ""),
                      "years": years, "place": str(reg_row.get("cat_place") or ""),

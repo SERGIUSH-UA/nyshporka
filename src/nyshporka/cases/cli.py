@@ -688,6 +688,9 @@ def cmd_fond(
             scan_mark = "[ok]A[/ok]"
         elif cs.isdigit() and int(cs):
             scan_mark = f"C {int(cs) / 2**20:.0f}М"
+        elif r.get("site_ref"):
+            # 🗂 сторінка «оцифровані справи» сайту архіву — `cases take` візьме
+            scan_mark = "[ok]S[/ok]"
         elif r.get("mirror_url"):
             scan_mark = "[warn]дзерк.[/warn]"
         if r.get("truncated_mirror"):

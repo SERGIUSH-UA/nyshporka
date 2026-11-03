@@ -359,6 +359,7 @@ function cardHtml(env) {
     [t('fonds.card.types'), r.record_types, ''],
     [t('fonds.card.commons'), r.commons_url, ''],
     [t('fonds.card.archium'), r.archium_url, ''],
+    [t('fonds.card.site'), r.site_url, ''],
     [t('fonds.card.mirror'), r.mirror_url, ''],
     [t('fonds.card.film'), r.fs_film || r.fs_dgs,
       [r.fs_frames ? `${r.fs_frames} ${t('fonds.scan.frames')}` : '',
@@ -414,6 +415,7 @@ function size(bytes) {
 function scanCell(r) {
   const bits = [];
   if (r.archium_url) bits.push(`<b title="${t('fonds.scan.archium')}">A</b>`);
+  if (r.site_url) bits.push(`<b title="${t('fonds.scan.site')}">S</b>`);
   if (r.commons_url) {
     const parts = [size(r.commons_size), r.commons_pages
       ? `${esc(r.commons_pages)} ${t('fonds.scan.pages')}` : ''].filter(Boolean);
@@ -525,7 +527,7 @@ function fondRow(r, bySurname) {
     acts.push(`<button class="ctl-sm" data-act="fond.lib" data-arg="${esc(r.key)}"
       title="${t('fonds.act.lib')}">${ic('books', 'ic-o ic-sm')}</button>`);
   }
-  const url = safeHref(r.archium_url) || safeHref(r.commons_url);
+  const url = safeHref(r.archium_url) || safeHref(r.commons_url) || safeHref(r.site_url);
   if (url) {
     acts.push(`<a class="ctl-sm" href="${url}" target="_blank" rel="noopener"
       title="${t('fonds.act.ext')}">${ic('link', 'ic-o ic-sm')}</a>`);

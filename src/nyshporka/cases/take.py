@@ -146,7 +146,12 @@ def _plan_from(repo: str, fond: str, opys: str, spr: str, letter: str,
 
     film = fs_head(row)
     mirror = str(row.get("mirror_url") or "").strip()
-    channel = "archium" if archium else ("commons" if name else "")
+    site_ref = str(row.get("site_ref") or "").strip()
+    site_src = str(row.get("site_source") or "").strip()
+    # 🗂 Сайт архіву — після Commons: там, де є обидва, лишається давній вибір,
+    # а справа лише на сайті більше не падає в «замовлення».
+    channel = ("archium" if archium else "commons" if name
+               else "site" if (site_ref and site_src) else "")
     parts: list[str] = []
     conflict = ""
     if channel == "commons":
@@ -156,13 +161,17 @@ def _plan_from(repo: str, fond: str, opys: str, spr: str, letter: str,
             # 🔴 Не кидаємо: `plan` читають і черга, і консоль, і для них це не
             # «справи немає в реєстрі», а «каналу немає, поки людина не вибрала».
             conflict, channel, name = str(exc), "", ""
+    ref = archium or (parts[0] if len(parts) == 1 else name)
+    if channel == "site":
+        ref = site_ref
     return {
         "parts": parts, "conflict": conflict,
         "key": _mk_key(repo, fond, f"{spr}{letter}", opys) or "", "repo": repo,
         "fond": fond,
         "opys": opys, "spr": f"{spr}{letter}",
         "title": str(row.get("title") or ""),
-        "channel": channel, "ref": archium or (parts[0] if len(parts) == 1 else name),
+        "channel": channel, "ref": ref,
+        "site_source": site_src if channel == "site" else "",
         "case_dir": str(case_dir_for(repo, fond, spr, letter, opys)),
         "film": film, "mirror": mirror,
         # DGS окремо від номера плівки: це різні числа FamilySearch, і порада
@@ -271,6 +280,8 @@ def _why(channel: str, film: str, mirror: str) -> str:
         return ("переглядач архіву: посторінкові JPG, найшвидший канал")
     if channel == "commons":
         return "Wikimedia Commons: один файл на всю справу"
+    if channel == "site":
+        return "сайт архіву: файли справи зі сторінки «оцифровані справи»"
     if film:
         return (f"каналу для автоматичного взяття немає, але є плівка "
                 f"FamilySearch DGS {film} — вона береться джерелом «плівки FS» "
@@ -314,6 +325,10 @@ def take(key: str, *, force: bool = False, reindex: bool = True,
                                  opys=opys, spr=spr, repo=repo,
                                  title=p["title"], year=year,
                                  on_progress=on_progress)
+        elif p["channel"] == "site":
+            got = A.from_site(case_dir, p["site_source"], p["ref"], archive=repo,
+                              fond=fond, opys=opys, spr=spr, title=p["title"],
+                              year=year, on_progress=on_progress)
         else:
             got = A.from_commons(case_dir, p["parts"] or p["ref"], archive=repo, fond=fond,
                                  opys=opys, spr=spr, title=p["title"],

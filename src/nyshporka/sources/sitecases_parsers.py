@@ -158,6 +158,10 @@ def norm_num(s: str) -> str:
 
 def rows(html_text: str) -> list[list[str]]:
     """Таблиці сторінки → рядки → сирий HTML клітинок."""
+    # Рядок без відкривного `<tr>` (ДАМО ф.218: `<tbody>` одразу з `<td>`)
+    # губився — дописуємо пропущений тег.
+    html_text = re.sub(r"(<tbody\b[^>]*>|</tr>)(\s*)(?=<t[dh]\b)", r"\1\2<tr>",
+                       html_text, flags=re.I)
     out = []
     for tr in re.findall(r"<tr\b[^>]*>(.*?)</tr>", html_text, re.S | re.I):
         cells = re.findall(r"<t[dh]\b[^>]*>(.*?)</t[dh]>", tr, re.S | re.I)
@@ -369,7 +373,7 @@ def parse_damo_opys(base: str, page: str, fond: str) -> list[CaseEntry]:
     out = []
     for cells in rows(page):
         ls = links(base, "".join(cells))
-        case = next(((u, t) for u, t in ls if re.search(r"/\d{3,5}-[\w]+-[\w]+/?$", u)), None)
+        case = next(((u, t) for u, t in ls if re.search(r"/[a-z]?\d{3,5}-[\w]+-[\w]+/?$", u, re.I)), None)
         zips = [CaseFile(url=u, kind="zip") for u, _ in ls if _kind(u) == "zip"]
         if case is None:
             continue

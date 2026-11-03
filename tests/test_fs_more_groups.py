@@ -28,8 +28,10 @@ def _copy(dgs: str, more: str = "") -> dict[str, str]:
 def test_the_column_is_carried_from_merge_to_reader() -> None:
     assert "fs_more" in S.COLUMNS
     assert "fs_more" in REGISTRY_FIELDS
-    # Останньою — позиційні читачі давніх реєстрів не мусять зсунутись.
-    assert S.COLUMNS[-1] == "fs_more" and REGISTRY_FIELDS[-1] == "fs_more"
+    # У хвості, після всіх давніх колонок — позиційні читачі давніх реєстрів не
+    # мусять зсунутись. Після неї стоять лише новіші колонки сайту архіву.
+    tail = ("fs_more", "site_source", "site_ref", "site_url", "site_kind")
+    assert S.COLUMNS[-len(tail):] == tail and REGISTRY_FIELDS[-len(tail):] == tail
 
 
 def test_every_group_of_the_case_reaches_the_registry() -> None:

@@ -11,7 +11,7 @@ from nyshporka.fonds.merge import scans as S
 from nyshporka.fonds.merge import titles as TT
 from nyshporka.fonds.merge import write as W
 from nyshporka.fonds.merge.sources import SourceBook, read_book
-from nyshporka.fonds.registry import babynyar_online
+from nyshporka.fonds.registry import babynyar_online, site_online
 
 
 class MergeError(RuntimeError):
@@ -84,7 +84,7 @@ def _channels(reg: dict[Any, dict[str, Any]]) -> dict[str, int]:
     неправдою.
     """
     out = {"disk": 0, "free": 0, "order": 0,
-           "archium": 0, "babynyar": 0, "commons": 0, "mirror": 0, "film": 0}
+           "archium": 0, "site": 0, "babynyar": 0, "commons": 0, "mirror": 0, "film": 0}
     for r in reg.values():
         if r.get("on_disk"):
             out["disk"] += 1
@@ -92,6 +92,10 @@ def _channels(reg: dict[Any, dict[str, Any]]) -> dict[str, int]:
         if r.get("archium_file"):
             out["free"] += 1
             out["archium"] += 1
+        elif site_online(r):
+            # 🗂 Сайт архіву: файли справи бере джерело `site-<архів>`.
+            out["free"] += 1
+            out["site"] += 1
         elif babynyar_online(r):
             # ⚠ Саме число кадрів, а не `babynyar_url`: адреса є в КОЖНОЇ справи
             # опису, зокрема неоцифрованої, і по ній черга рахувала б

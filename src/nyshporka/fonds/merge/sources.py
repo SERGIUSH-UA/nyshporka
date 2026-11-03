@@ -55,6 +55,12 @@ SOURCES: tuple[Source, ...] = (
     # під рукою, зникали б із кожною перезбіркою — реєстр будується з нуля.
     Source("legacy", "legacy.tsv", rank=55,
            why="знімок попереднього реєстру"),
+    # 🗂 Сторінки «оцифровані справи» на сайті самого архіву (ДАОО, ДАДнО, ДАХО,
+    # ДАМО, ДАХеО). Слова архіву, але набрані для вебсторінки й часто
+    # скорочені, тож нижче за транскрипцію таблиці опису (60) і друкований
+    # каталог (58). Головне в ньому — адреса справи для завантаження.
+    Source("site", "site.tsv", rank=56,
+           why="сторінка сайту архіву: оцифрована справа + адреса файлів"),
     Source("ukrfamily", "ukrfamily.tsv", rank=50,
            why="чужа транскрипція опису"),
     # 🕯 Онлайн-архів «Бабин Яр»: анотації описів приходять від самих архівів у
@@ -94,7 +100,7 @@ SOURCES: tuple[Source, ...] = (
 #: черга розбіжностей будується в цьому ж порядку, тож будь-яка перестановка
 #: змінить її вміст. Ніколи не `set` і не порядок словника.
 TEXT_ORDER: tuple[str, ...] = ("fs", "ocr", "duck", "catagrafii", "babynyar",
-                               "catalog", "ukrfamily", "legacy", "wikisource",
+                               "catalog", "ukrfamily", "legacy", "site", "wikisource",
                                "archium", "manual")
 
 TITLE_RANK: dict[str, int] = {s.name: s.rank for s in SOURCES if s.rank is not None}
@@ -122,7 +128,10 @@ COLUMNS: tuple[str, ...] = (
     "spr_to",
     # 🎞 Інші групи FamilySearch справи, DGS через «;» (перша — `fs_dgs`).
     # Опис — у `fonds/registry.py` FIELDS. Останнім з тієї самої причини.
-    "fs_more")
+    "fs_more",
+    # 🗂 Справа на сайті архіву: джерело, адреса для `nysh get`, сторінка, вид
+    # файлів. У хвості з тієї самої причини, що й `spr_to`.
+    "site_source", "site_ref", "site_url", "site_kind")
 
 
 @dataclass

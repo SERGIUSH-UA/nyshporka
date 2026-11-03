@@ -473,7 +473,8 @@ def fond_rows(a: FondRowsArgs) -> Envelope:
                     # самі адреси. Браузер бачить лише `commons_url`, а качає
                     # застосунок за `archium_url`/`commons_title`; вгадування на
                     # тому боці дало б кнопку, яка відмовляє після кліку.
-                    "takeable": bool(r.get("archium_url") or r.get("commons_title")),
+                    "takeable": bool(r.get("archium_url") or r.get("commons_title")
+                                     or (r.get("site_ref") and r.get("site_source"))),
                     "flags": st["flags"], "conflicts": st["conflicts"],
                     # 🔴 Розходження порядково, а не лише числом у зведенні.
                     # «17 справ розходяться» не каже, які саме, — і людина
@@ -488,6 +489,7 @@ def fond_rows(a: FondRowsArgs) -> Envelope:
                     "mirror_size": r.get("mirror_size"),
                     "truncated_mirror": r.get("truncated_mirror"),
                     "archium_url": r.get("archium_url"),
+                    "site_url": r.get("site_url"),
                     # ⚠ `None` тут означає «схема цього фонду такого поля не
                     # знає», а `""` — «знає, порожньо». Зводити їх до одного
                     # означало б показати прочерк там, де насправді незнання.
@@ -645,7 +647,7 @@ class CollectorsArgs(BaseModel):
 
 
 class CollectArgs(BaseModel):
-    collector: str = Field(..., description="id збирача: archium | babynyar | catagrafii | commons | duck | wikisource")
+    collector: str = Field(..., description="id збирача: archium | babynyar | catagrafii | commons | duck | site | wikisource")
     repo: str = Field(..., description="код архіву: CDIAK, ДАХмО…")
     fond: str = Field(..., description="номер фонду")
     opys: str = Field("", description="описи через кому; порожньо — всі")

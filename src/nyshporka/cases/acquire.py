@@ -405,6 +405,48 @@ def from_archium(case_dir: Path, viewer: str, *, archive: str, fond: str,
     return Acquired(case_dir=case_dir, files=files, skipped=res.skipped)
 
 
+def from_site(case_dir: Path, source_id: str, ref: str, *, archive: str, fond: str,
+              opys: str, spr: str, title: str = "", year: str = "", why: str = "",
+              on_progress: ProgressFn | None = None,
+              source: Any = None) -> Acquired:
+    """Завантажити справу зі сторінки «оцифровані справи» сайту архіву.
+
+    Джерело — `site-<архів>` з каталогом обходу в просторі. Файли (PDF, DjVu)
+    чи кадри з ZIP і галерей лягають у теку справи; знаменник — маніфест
+    джерела (файли або кадри), тож неповна справа не пройде як повна.
+    """
+    if source is None:
+        from nyshporka.core.workspace import WorkspaceError, workspace
+        from nyshporka.sources import load
+
+        try:
+            root: Path | None = workspace().hub
+        except WorkspaceError:
+            root = None
+        source = load(root).get(source_id)
+        if source is None:
+            raise AcquireError(f"джерела {source_id} немає — сторінки сайту для цього "
+                               f"архіву в паку не описано")
+    guard_inventory(case_dir, opys)
+    case_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        man = source.manifest(ref)
+        res = source.fetch(ref, case_dir, on_progress=on_progress)
+    except Exception as exc:          # SourceError і мережа — людською мовою
+        raise AcquireError(f"{source_id} {ref}: {exc}") from None
+    want = int(man.frames) if man.frames is not None else None
+    verdict = record_fetch(case_dir, res, source=source_id, ref=ref,
+                           url=str(man.meta.get("page") or ""), want=want, why=why,
+                           shifra_from_title=False)
+    if res.errors or verdict.state in ("partial", "empty"):
+        raise AcquireError("; ".join([x for x in (verdict.message(res),) if x]
+                                     + res.errors[:3]))
+    files = frame_files(case_dir, case_dir, source=source_id)
+    write_meta(case_dir, archive=archive, fond=fond, opys=opys, spr=spr,
+               files=files, source=f"сайт архіву ({source_id})", title=title, year=year)
+    return Acquired(case_dir=case_dir, files=files, skipped=res.skipped)
+
+
 def _want_of(src: Any, ref: str) -> int | None:
     """Знаменник із маніфесту джерела; не вдалося — `None` («не знаємо»).
 

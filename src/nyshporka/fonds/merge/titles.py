@@ -156,6 +156,13 @@ def _fuse_fields(r: Row, row: dict[str, str], name: str) -> None:
             if v:
                 r[fld] = v
 
+    if name == "site":
+        # Адреса справи на сайті архіву — за нею `cases take` бере файли.
+        for fld in ("site_source", "site_ref", "site_url", "site_kind"):
+            v = (row.get(fld) or "").strip()
+            if v:
+                r[fld] = v
+
     if name == "babynyar":
         # Адреса справи на майданчику й число вже викладених кадрів — не ще один
         # заголовок: саме за ними вирішують, качати чи замовляти в архіві.

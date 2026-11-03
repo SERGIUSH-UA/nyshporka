@@ -301,6 +301,36 @@ def test_damo_case_without_zip_falls_back_to_the_gallery() -> None:
     assert e.files[0].url.endswith("/0035-001-001/")
 
 
+DAMO_LETTERED = """<table class="striped-table"><tr><td>2</td>
+<td><a href="/digital-archive/r0398/r0398-001/r0398-001-002/">Листування</a></td>
+<td><a href="/resources/digital-archive/after-1917/r0398-001/r0398-001-002.zip">zip</a></td></tr></table>"""
+
+
+def test_damo_lettered_case_slug_is_a_case() -> None:
+    """🔴 Справи радянських і нотаріальних фондів адресуються з літерою
+    (`r0398-001-002`). Розбір чекав цифр на початку, і 32 описи ДАМО виходили
+    порожніми (обхід 03.11.2026)."""
+    (e,) = P.parse_damo_opys("https://archive.mk.ua/digital-archive/r0398/r0398-001/",
+                             DAMO_LETTERED, "Р-398")
+    assert (e.fond, e.opys, e.sprava) == ("Р-398", "1", "2")
+    assert [f.kind for f in e.files] == ["zip"]
+
+
+DAMO_NO_TR = """<table class="striped-table"><thead><tr><td>№ справи</td><td>Назва справи</td></tr></thead>
+<tbody>
+<td>1</td>
+<td><a href="/digital-archive/f0218/0218-001-001/">Ревізькі казки</a></td>
+</tr>
+</tbody></table>"""
+
+
+def test_row_without_opening_tr_is_read() -> None:
+    """ДАМО ф.218: після `<tbody>` одразу `<td>`, без `<tr>` — рядок справи губився."""
+    (e,) = P.parse_damo_opys("https://archive.mk.ua/digital-archive/f0218/0218-001/",
+                             DAMO_NO_TR, "218")
+    assert (e.opys, e.sprava, e.title) == ("1", "1", "Ревізькі казки")
+
+
 def test_gallery_images_are_unique_and_in_name_order() -> None:
     got = P.gallery_images("https://archive.mk.ua/x/", GALLERY)
     assert [u.rsplit("/", 1)[-1] for u in got] == ["0035-001-001-001.jpg", "0035-001-001-002.jpg"]

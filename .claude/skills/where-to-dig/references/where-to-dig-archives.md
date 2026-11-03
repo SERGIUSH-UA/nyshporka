@@ -43,13 +43,14 @@
 Ці архіви викладають скани не в ARCHIUM, а таблицями на своєму сайті. Нишпорка
 обходить сторінки й збирає каталог справ (`nysh crawl <id>`), далі — `nysh find`,
 `nysh browse`, `nysh get <id> <фонд>/<опис>/<справа>`; картка каналу — `sitecases`.
+У реєстр опису фонду — `nysh registry collect site --repo <архів> --fond <фонд>`.
 
 | архів | сторінки | що за посиланням | id джерела | справ в обході 03.11.2026 |
 |---|---|---|---|---|
 | ДАОО | `archive.od.gov.ua`, проєкт «Метрика» (ф.37, 39, 894, 909, 924) | PDF і DjVu; велика справа — частинами «ч.1…» | `site-daoo` | 1634 |
 | ДАДнО | `dp.archives.gov.ua/index.php/digitized-documents/metryka` | PDF частинами («Арк. 1-33») на Google Drive | `site-dadno` | 646 |
 | ДАХО | `archives.kh.gov.ua/?page_id=25402` (ф.40 оп.105) | ZIP із JPG (до 7 частин по ~1 ГБ) або DjVu на `daho.archives.gov.ua` | `site-daho` | 277 |
-| ДАМО | `archive.mk.ua/digital-archive/` (до 1917, після 1917) | ZIP із JPG на справу; частина описів — лише галерея на сторінці справи | `site-damo` | 15 034 |
+| ДАМО | `archive.mk.ua/digital-archive/` (до 1917, після 1917) | ZIP із JPG на справу; частина описів — лише галерея на сторінці справи | `site-damo` | 17 613 |
 | ДАХеО | `kherson.archives.gov.ua/fondy-ta-dovidkovyj-aparat/oczyfrovani-dokumenty/` | PDF на Google Drive, посилання в тексті сторінки опису | `site-daheo` | 15 235 |
 
 ## Центральні архіви

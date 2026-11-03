@@ -106,7 +106,12 @@ FIELDS = ("opys", "spr_int", "spr_letter", "spr", "shifra", "title", "title_src"
           # друге число, а реєстр — ні: другий том справи 906 справ ф.631 і
           # 2164 ф.127 не мав де лягти, і картка виглядала повною на пів справи.
           # Останнім — з тієї самої причини, що й `spr_to`.
-          "fs_more")
+          "fs_more",
+          # 🗂 Справа на сторінці «оцифровані справи» сайту архіву (ДАОО, ДАДнО,
+          # ДАХО, ДАМО, ДАХеО): `site_ref` — адреса для `nysh get <site_source>`,
+          # тобто вільний канал нарівні з ARCHIUM. Без цих колонок такі справи
+          # стояли в черзі замовлення.
+          "site_source", "site_ref", "site_url", "site_kind")
 
 def fs_head(row: dict[str, Any] | dict[str, str]) -> str:
     """Одна група FamilySearch справи — та, що в картці й у плані завантаження.
@@ -131,6 +136,16 @@ def babynyar_online(row: dict[str, Any] | dict[str, str]) -> bool:
     архіві, тобто з єдиного місця, де її ще можна дістати.
     """
     return (str(row.get("babynyar_scans") or "").strip() or "0") != "0"
+
+
+def site_online(row: dict[str, Any] | dict[str, str]) -> bool:
+    """Чи лежить справа на сторінці «оцифровані справи» сайту архіву.
+
+    Ознака — адреса для завантаження (`site_ref`) разом із джерелом, а не
+    сторінка: без джерела адресу нема чим узяти.
+    """
+    return bool(str(row.get("site_ref") or "").strip()
+                and str(row.get("site_source") or "").strip())
 
 
 #: поля, яких стара схема не має → `None`
@@ -571,7 +586,7 @@ def row_status(row: dict[str, Any],
 
     if on_live:
         state = "disk"
-    elif (row.get("archium_file") or babynyar_online(row)
+    elif (row.get("archium_file") or babynyar_online(row) or site_online(row)
           or row.get("commons_url")):
         # 🔴 ARCHIUM і Commons — обидва «бери сам», і саме тому стоять в одній
         # гілці: черга `--todo` питає «чи можна завантажити», а не «звідки».
@@ -714,7 +729,8 @@ def filter_rows(rows: list[dict[str, Any]], *, opys: str = "", q: str = "", surn
         if fs and not (r.get("fs_dgs") or r.get("fs_film")):
             return False
         if scan and not (r.get("commons_url") or r.get("mirror_url")
-                         or r.get("archium_file") or babynyar_online(r)):
+                         or r.get("archium_file") or babynyar_online(r)
+                         or site_online(r)):
             return False
         # ⏱ `row_status` рахується лише якщо про нього справді питають. Раніше він
         # будувався для кожного рядка беззастережно — тобто повний зайвий прохід
@@ -733,6 +749,7 @@ def filter_rows(rows: list[dict[str, Any]], *, opys: str = "", q: str = "", surn
             # Commons (ф.315: 12 794 плівки проти 882 сканів).
             if order and ((r.get("on_disk") or st["on_disk_live"])
                           or r.get("archium_file") or babynyar_online(r)
+                          or site_online(r)
                           or r.get("commons_url") or r.get("mirror_url")
                           or r.get("fs_dgs") or r.get("fs_film")):
                 return False
@@ -742,7 +759,7 @@ def filter_rows(rows: list[dict[str, Any]], *, opys: str = "", q: str = "", surn
             if (state and st["disk_state"] != state
                     and not (state == "scan"
                              and (r.get("archium_file") or r.get("commons_url")
-                                  or r.get("mirror_url")))):
+                                  or r.get("mirror_url") or site_online(r)))):
                 return False
             if want_flags and not want_flags.issubset(set(st["flags"])):
                 return False
@@ -769,7 +786,7 @@ def summarize(rows: list[dict[str, Any]],
     live = live if live is not None else {}
     # `archium` — переглядач самого архіву: найшвидший канал, і рахується
     # окремо від Commons, бо дія інша (`cdiak_download.py` за `file_id`).
-    s = {"rows": len(rows), "archium": 0, "commons": 0, "mirror_only": 0,
+    s = {"rows": len(rows), "archium": 0, "site": 0, "commons": 0, "mirror_only": 0,
          "truncated": 0,
          # `film` — вільний канал нарівні з `todo`, лише інший (плівка FS за
          # DGS, а не файл на Commons). Рахується окремо, бо дія інша: не
@@ -787,6 +804,8 @@ def summarize(rows: list[dict[str, Any]],
             s["disk_mismatch"] += 1
         if r.get("archium_file"):
             s["archium"] += 1
+        if site_online(r):
+            s["site"] += 1
         if r.get("commons_url"):
             s["commons"] += 1
         elif r.get("mirror_url"):

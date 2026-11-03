@@ -105,7 +105,7 @@ def test_processing_order_is_not_the_rank_order() -> None:
     файли-виходи.
     """
     assert TEXT_ORDER == ("fs", "ocr", "duck", "catagrafii", "babynyar",
-                          "catalog", "ukrfamily", "legacy", "wikisource",
+                          "catalog", "ukrfamily", "legacy", "site", "wikisource",
                           "archium", "manual")
 
 

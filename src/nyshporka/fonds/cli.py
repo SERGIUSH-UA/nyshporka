@@ -41,7 +41,7 @@ def cmd_sources() -> None:
 
 @app.command("plan")
 def cmd_plan(
-    collector: str = typer.Argument(..., help="archium | babynyar | catagrafii | commons | duck | duck-copies | wikisource"),
+    collector: str = typer.Argument(..., help="archium | babynyar | catagrafii | commons | duck | duck-copies | site | wikisource"),
     fond: str = typer.Option(..., "--fond", help="номер фонду"),
     repo: str = typer.Option("DAHMO", "--repo", help="код або назва архіву"),
     opys: str = typer.Option("", "--opys", help="описи через кому"),
@@ -103,7 +103,7 @@ def cmd_build(
 
 @app.command("collect")
 def cmd_collect(
-    collector: str = typer.Argument(..., help="archium | babynyar | catagrafii | commons | duck | duck-copies | wikisource"),
+    collector: str = typer.Argument(..., help="archium | babynyar | catagrafii | commons | duck | duck-copies | site | wikisource"),
     fond: str = typer.Option(..., "--fond", help="номер фонду"),
     repo: str = typer.Option("DAHMO", "--repo", help="код або назва архіву"),
     opys: str = typer.Option("", "--opys", help="описи через кому"),
@@ -176,7 +176,8 @@ def cmd_merge(
         console.print(f"  черга: на диску {ch.get('disk', 0)} · "
                       f"можна взяти самому {ch.get('free', 0)} · "
                       f"тільки замовлення {ch.get('order', 0)}")
-        by = [f"{k} {ch[k]}" for k in ("archium", "commons", "mirror", "film")
+        by = [f"{k} {ch[k]}" for k in ("archium", "site", "babynyar", "commons",
+                                       "mirror", "film")
               if ch.get(k)]
         if by:
             console.print(f"    каналами: {' · '.join(by)}")
