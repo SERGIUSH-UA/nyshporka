@@ -118,6 +118,12 @@ def links(base: str, fragment: str) -> list[tuple[str, str]]:
         # 🔴 Невидимі знаки напрямку (`‎`) і пробіли в кінці адреси — з
         # копіювання в редакторі сайту; з ними сервер відповідає 404 (ДАХеО р-1887).
         href = _INVISIBLE.sub("", _html.unescape(m.group(1) or m.group(2))).strip()
+        # 🔴 Шматок JavaScript у розмітці (`href='" + href + "'`, ДАОО): у справжній
+        # адресі в одинарних лапках подвійної лапки не буває. Узятий за посилання,
+        # він ставав «підсторінкою» фонду й заступав саму сторінку: каталог ДАОО
+        # 03.11.2026 вийшов лише з ф.37 замість п'яти фондів.
+        if m.group(2) is not None and '"' in href:
+            continue
         if href:
             out.append((urljoin(base, href), text(m.group(3))))
     return out

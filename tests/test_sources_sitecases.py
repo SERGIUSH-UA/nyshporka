@@ -49,6 +49,23 @@ def test_daoo_parts_become_one_case_with_several_files() -> None:
     assert "[" not in djvu.title
 
 
+def test_daoo_fond_page_with_js_link_is_read_itself() -> None:
+    """🔴 Сторінка фонду ДАОО несе шматок JavaScript `href='" + href + "'`: узятий
+    за підсторінку, він заступав саму сторінку, і справи ф.39, 894, 909, 924 у
+    каталог не потрапляли (03.11.2026: 1438 справ лише ф.37)."""
+    root = "https://archive.od.gov.ua" + P.DAOO_INDEX
+    js = """<script>var a = "<a href='" + href + "'></a>";</script>"""
+    pages = {
+        root: f'<a href="{root}metryka-fond-924/">Ф.924</a>',
+        root + "metryka-fond-924/": js + DAOO,
+    }
+    stats = P.CrawlStats()
+    got = list(P.crawl_daoo(lambda u: (u, pages[u]), "https://archive.od.gov.ua", stats))
+    assert ("924", "1", "9") in {(e.fond, e.opys, e.sprava) for e in got}
+    assert not stats.empty_pages
+    assert P.links(root, js) == []
+
+
 DADNO = """<table><tr><td>&nbsp;</td><td>номер фонду</td><td>номер опису</td><td>номер справи</td><td>назва</td></tr>
 <tr><td>&nbsp;</td><td style="x">193</td><td>3</td><td>679</td>
 <td><span><strong>Метрична книга про народження, шлюб, смерть. Свято-Троїцька церква, с. Довгалівка. </strong></span><br />
