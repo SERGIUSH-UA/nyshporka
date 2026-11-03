@@ -550,7 +550,7 @@ def build_opys(merged_tsv: Path, out: Path, *, fond: str, pack_id: str,
         "mirror_size", "truncated_mirror", "src_page", "page_quality", "num_src",
         "surnames", "cover_place", "cover_letters", "cover_note",
         "fs_dgs", "fs_film", "fs_url", "fs_record_type", "fs_place", "fs_frames",
-        "sources")]
+        "sources", "fs_more")]
     placeholders = ",".join("?" * len(cols_out))
 
     from nyshporka.utils.translit import normalize_for_matching

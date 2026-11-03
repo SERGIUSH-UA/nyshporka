@@ -124,6 +124,7 @@ CREATE TABLE cases (
     fs_dgs TEXT, fs_film TEXT, fs_url TEXT, fs_record_type TEXT,
     fs_place TEXT, fs_frames INTEGER,
     sources TEXT,
+    fs_more TEXT,
     PRIMARY KEY (opys, spr_int, spr_letter)
 );
 CREATE INDEX ix_opys_year ON cases(year_from, year_to);

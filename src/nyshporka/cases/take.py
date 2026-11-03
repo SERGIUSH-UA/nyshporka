@@ -169,7 +169,10 @@ def _plan_from(repo: str, fond: str, opys: str, spr: str, letter: str,
         # 🔴 Номер справи, відновлений інтерполяцією, мусить їхати разом із
         # планом: узяти можна, вірити шифрі — ні, доки її не звірили оком.
         "shifra_needs_eye": row.get("num_src") == "interp",
-        "why": conflict or _why(channel, film, mirror),
+        "why": (conflict or _why(channel, film, mirror)) + _more_groups(row),
+        # 🎞 Інші групи FS справи (томи, плівки): план бере першу, але людина
+        # мусить знати, що це не вся справа.
+        "fs_more": [d for d in str(row.get("fs_more") or "").split(";") if d.strip()],
     }
 
 
@@ -249,6 +252,15 @@ def commons_volumes(row: dict[str, Any], commons_file: str = "") -> list[str]:
     # Порядок томів — за назвою: «Частина 1» лягає раніше за «Частину 2», і
     # кадри, розгорнуті з теки, ідуть у порядку справи.
     return sorted(vols) or ([name] if name else [])
+
+
+def _more_groups(row: dict[str, Any]) -> str:
+    """Хвіст пояснення, коли справа лежить на кількох групах FS."""
+    more = [d.strip() for d in str(row.get("fs_more") or "").split(";") if d.strip()]
+    if not more:
+        return ""
+    return (f"; ⚠ на FamilySearch справа на {len(more) + 1} групах: ще "
+            + ", ".join(more) + " — їх беруть окремо")
 
 
 def _why(channel: str, film: str, mirror: str) -> str:

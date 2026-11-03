@@ -522,7 +522,16 @@ def cmd_opys(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
                       + (f" · {row['fs_frames']} кадрів" if row.get("fs_frames") else ""))
         console.print("    https://www.familysearch.org/records/images/"
                       f"search-results?imageGroupNumbers={film}")
-    if not cs and not ms and not film and not arch:
+    # 🎞 Справа на кількох групах FS — томи або плівки. Без цього рядка картка
+    # виглядала повною на пів справи: ДАІФО 631-3-5 показувала т.II, а т.I
+    # (116959390) лишався поза карткою.
+    more = [d for d in str(row.get("fs_more") or "").split(";") if d.strip()]
+    if more:
+        console.print(f"  [ok]ще групи FS:[/ok] {len(more)} — справа не на одній групі")
+        for d in more:
+            console.print("    https://www.familysearch.org/records/images/"
+                          f"search-results?imageGroupNumbers={d.strip()}")
+    if not cs and not ms and not film and not arch and not more:
         console.print("  [warn]сканів онлайн немає — замовлення в архіві[/warn]")
     console.print(f"  на диску: {row.get('on_disk') or '[muted]—[/muted]'}")
 

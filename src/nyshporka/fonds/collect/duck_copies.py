@@ -194,15 +194,13 @@ class DuckCopiesCollector:
         if failed:
             blind.append(Blind(kind="cards_failed", count=failed, why=(
                 "карток не отримано — ці справи перевірить наступний запуск")))
-        several = sum(1 for r in rows if r.get("fs_more"))
-        if several:
-            blind.append(Blind(kind="several_films", count=several, why=(
-                "справ лежать на кількох плівках: у реєстр іде перша, решта — "
-                "`fs_more` у файлі збирача")))
+        # Справи на кількох групах FS сліпою зоною більше не є: злиття кладе
+        # першу в `fs_dgs`, решту — у колонку реєстру `fs_more` (0.39.3).
         return CollectResult(
             collector=self.id, out=out, rows=len(rows), opys_collected=tuple(wanted),
             quality={"перевірено": len(rows),
                      "з плівкою FS": sum(1 for r in rows if r.get("fs_dgs")),
+                     "на кількох групах FS": sum(1 for r in rows if r.get("fs_more")),
                      "інша копія": sum(1 for r in rows if r.get("duck_copy_url")
                                        and not r.get("fs_dgs"))},
             blind=tuple(blind))

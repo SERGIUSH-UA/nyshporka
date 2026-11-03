@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from nyshporka.fonds.merge.sources import (
@@ -308,6 +309,9 @@ def fuse_fs(reg: dict[Key, Row], fs_rows: list[dict[str, str]],
                 r[fld] = v
         if r["fs_dgs"] and not r["fs_url"]:
             r["fs_url"] = f"https://www.familysearch.org/search/film/{r['fs_dgs']}"
+        _add_groups(r, [(row.get("dgs") or "").strip(),
+                        *(row.get("fs_film") or "").split(";")])
+        _widen_years(r, row)
 
     for row in wiki_rows:
         key = key_of(row)
@@ -337,3 +341,58 @@ def fuse_fs(reg: dict[Key, Row], fs_rows: list[dict[str, str]],
         if dgs and not (found["fs_dgs"] or found["fs_film"]):
             found["fs_dgs"] = dgs
             found["fs_url"] = found["fs_url"] or (row.get("fs_url") or "").strip()
+        _add_groups(found, [dgs, *(row.get("fs_more") or "").split(";")])
+
+
+#: Номер групи кадрів FamilySearch: 9 цифр, буває з хвостом пункту
+#: (`007803695_002_M9MV-LVL`). Номер мікроплівки — 7 цифр (2268975), і в групи
+#: справи він не йде: це інша нумерація того самого, тож дав би дубль.
+_RE_DGS = re.compile(r"^\d{9}(?:_\w+(?:-\w+)*)?$")
+
+
+def _add_groups(r: Row, dgs: list[str]) -> None:
+    """Дописати групи FS справи: перша лишається в `fs_dgs`, решта — у `fs_more`.
+
+    🔴 Справа буває на кількох групах — томами або плівками (ДАІФО 631-3-5:
+    т.II 116959441 і т.I 116959390). Без цього реєстр знав лише першу, і т.I
+    справи 906 справ ф.631 видно було тільки в живому покажчику.
+
+    Наявний `fs_dgs` не витісняється (ранг джерел), а коли в ньому стоїть номер
+    мікроплівки, а не DGS, групи не дописуються: який DGS є тією самою плівкою,
+    з рядка не видно.
+    """
+    head = str(r.get("fs_dgs") or "").strip()
+    if head and not _RE_DGS.match(head):
+        return
+    more = [d for d in str(r.get("fs_more") or "").split(";") if d]
+    for d in (x.strip() for x in dgs):
+        if not d or not _RE_DGS.match(d):
+            continue
+        if not head:
+            head = r["fs_dgs"] = d
+        elif d != head and d not in more:
+            more.append(d)
+    r["fs_more"] = ";".join(more)
+
+
+def _widen_years(r: Row, row: dict[str, str]) -> None:
+    """Роки справи — ширші з груп FS, якщо опис чи покажчик дали вужчі.
+
+    🔴 Каталог FS описує кожну групу справи окремо, а опис чи Качка — часто
+    лише перший том: ДАІФО 631-3-5 значилась 1866–1900, а т.I на FS — 1901–1931.
+    Рішення дослідника 03.11.2026: брати межі груп FS, коли вони ширші, з
+    позначкою джерела `fs`. Вужчі роки FS нічого не звужують.
+    """
+    got: list[str] = []
+    for fld, wider in (("year_from", lambda a, b: a < b), ("year_to", lambda a, b: a > b)):
+        v = (row.get(fld) or "").strip()[:4]
+        cur = str(r.get(fld) or "").strip()[:4]
+        if not v.isdigit():
+            continue
+        if not cur.isdigit() or wider(int(v), int(cur)):
+            r[fld] = v
+            got.append(fld)
+    if len(got) == 2:
+        r["years_src"] = "fs"      # обидві межі тепер із FS — старе джерело вже нічого не каже
+    elif got:
+        _name_years_src(r, "fs", got)
