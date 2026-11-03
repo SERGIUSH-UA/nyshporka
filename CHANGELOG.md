@@ -76,6 +76,12 @@
   `nyshporka.htr.layout`: `geometry_path`, `read_geometry`, `write_geometry`,
   `geometry_stems`. Сторожить це `tests/test_geometry_one_door.py`.
 
+### Виправлено
+
+- Картка справи й план `nysh cases take` показують одну групу FS, а не «DGS a;b» з битим
+  посиланням і неіснуючим номером для завантаження. Голий DGS плівки і її пункт
+  (`007803695` / `007803695_002_M9MV-LVL`) більше не дають другої групи.
+
 ### Прибрано
 
 - ⚠ **Джерело `ridni` (каталог книг за селом ridni.org) — ламка зміна.** Сайт не
@@ -84,9 +90,13 @@
   «джерела 'ridni' немає». Метрики села — `nysh parish metrics "<село>, <повіт>"` (пак
   `metrics`, ті самі першоджерела, без мережі), він же тепер перший канал у скілах
   `find-parish` і `where-to-dig`. Копія справи — `nysh parish in-case`. Ridni.org прибрано
-  й зі «Старту» (сім мов), `PRIVACY.md` і карток каналів. Міграція агента — теза
-  `ridni-removed` у `migrate/data/0.40.0.md`: якщо реліз матиме інший номер, перейменувати
-  файл і поле `version`.
+  й зі «Старту» (сім мов), `PRIVACY.md` і карток каналів.
+
+### Міграція агента
+
+- `migrate/data/0.40.0.md`: тези `ridni-removed`, `lines-json-plain-only` (глоб
+  `*.lines.json` на стиснутих прогонах дає нуль), `fs-one-group-per-case`; кроки — скіли,
+  скан пам'яті, `nysh disk compact` лише зі слова людини.
 
 ## [0.39.2] — 2026-11-02
 
