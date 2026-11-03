@@ -112,6 +112,10 @@ repositories:
     sites:
       web:
         url: https://archive.od.gov.ua
+      cases:
+        url: https://archive.od.gov.ua
+        parser: daoo
+        # Проєкт «Метрика»: PDF і DjVu справ ф.37, 39, 894, 909, 924 (обхід 03.11.2026 — 1634 справи).
     codes:
       babynyar: "44"
 
@@ -284,7 +288,17 @@ repositories:
     codes:
       babynyar: "46"
 
-  DADNO: {label: ДАДнО, name: Державний архів Дніпропетровської області, country: UA, sites: {web: {url: https://dp.archives.gov.ua}}}
+  DADNO:
+    label: ДАДнО
+    name: Державний архів Дніпропетровської області
+    country: UA
+    sites:
+      web:
+        url: https://dp.archives.gov.ua
+      cases:
+        url: https://dp.archives.gov.ua
+        parser: dadno
+        # «Метрика»: PDF частинами на Google Drive, ф.193 та ін. (обхід 03.11.2026 — 646 справ).
   DADOO:
     label: ДАДоО
     name: Державний архів Донецької області
@@ -368,6 +382,10 @@ repositories:
     sites:
       web:
         url: https://archive.mk.ua
+      cases:
+        url: https://archive.mk.ua
+        parser: damo
+        # «Цифровий архів»: ZIP із JPG на справу, фонди до 1917, після 1917 і партархіву.
     codes:
       babynyar: "36"
   DAPO:
@@ -403,9 +421,23 @@ repositories:
     sites:
       web:
         url: https://archives.kh.gov.ua
+      cases:
+        url: https://archives.kh.gov.ua
+        parser: daho
+        # Метрики ф.40 оп.105: ZIP із JPG і DjVu на daho.archives.gov.ua (обхід 03.11.2026 — 277 справ).
     codes:
       babynyar: "40"
-  DAHEO: {label: ДАХеО, name: Державний архів Херсонської області, country: UA, sites: {web: {url: https://kherson.archives.gov.ua}}}
+  DAHEO:
+    label: ДАХеО
+    name: Державний архів Херсонської області
+    country: UA
+    sites:
+      web:
+        url: https://kherson.archives.gov.ua
+      cases:
+        url: https://kherson.archives.gov.ua
+        parser: daheo
+        # «Оцифровані документи»: посилання на Google Drive у тексті сторінок описів.
   DACHKO:
     label: ДАЧкО
     name: Державний архів Черкаської області

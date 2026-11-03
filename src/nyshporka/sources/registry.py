@@ -76,6 +76,11 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
         out += [ArchiumSource(workspace, site=site, repo=repo) for repo, site in sites]
     else:
         out.append(ArchiumSource(workspace))   # пак без майданчиків — старий шлях
+    # 🗂 Сайти обласних архівів зі своїми сторінками «оцифровані справи» —
+    # по джерелу на майданчик `cases` у паку (ДАОО, ДАДнО, ДАХО, ДАМО, ДАХеО).
+    from nyshporka.sources.sitecases import sources_from_pack
+
+    out += list(sources_from_pack(workspace))
     out.append(CommonsSource(workspace))
     out.append(FilmMirrorSource(workspace))
     # 🦆 Зведений покажчик. Єдине джерело, яке шукає без попереднього обходу і

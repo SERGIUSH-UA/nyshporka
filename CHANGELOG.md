@@ -19,6 +19,14 @@
 
 ### Додано
 
+- **Сайти обласних архівів як джерела (`sitecases`):** `site-daoo`, `site-dadno`,
+  `site-daho`, `site-damo`, `site-daheo` — сторінки «оцифровані справи», де архів
+  викладає скани поза ARCHIUM. `nysh crawl <id>` збирає каталог справ (шифра, назва,
+  роки, файли), далі пошук, перегляд, пошук за шифрою й `nysh get`. PDF і DjVu лягають
+  файлом (з Google Drive теж), ZIP — кадрами поштучно через `Range` (можна
+  `--frames`), галерея ДАМО — кадрами. Частини однієї справи зводяться в одну.
+  Майданчик у паку — `sites: {cases: {url, parser}}`.
+
 - **Сім нових майданчиків ARCHIUM у паку архівів:** ЦДАВО (`archium-cdavo`), ЦДАГОУ
   (`archium-cdahou`), ЦДАМЛМ (`archium-cdamlm`, новий код архіву `CDAMLM`), ДАКО
   (`archium-dako`), ДАКрО (`archium-dakro`), ДАЛО (`archium-dalo`), ДАПО (`archium-dapo`).

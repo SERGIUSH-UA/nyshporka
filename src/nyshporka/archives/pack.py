@@ -88,6 +88,10 @@ class Site:
     #: справа ДАКрО, скопійована з Качки як `185.250.20.62/file-viewer/…`, лягла
     #: б у теку з чужим id джерела.
     aliases: tuple[str, ...] = ()
+    #: Чим розбирати сторінки сайту (`cases`): ім'я з `sitecases_parsers.CRAWLERS`.
+    #: Рушій тут — не програма сайту, а сам сайт: кожен архів викладає справи
+    #: по-своєму, тож розбір обирається явно, а не вгадується за хостом.
+    parser: str = ""
 
 
 @dataclass(frozen=True)
@@ -454,7 +458,8 @@ def _build(raw: dict[str, Any], sources: tuple[Path, ...]) -> ArchivesPack:
                 bundled=str(sb.get("bundled") or ""),
                 shield=str(sb.get("shield") or ""), page=str(sb.get("page") or ""),
                 aliases=tuple(str(h).strip().lower() for h in (sb.get("aliases") or [])
-                              if str(h).strip()))
+                              if str(h).strip()),
+                parser=str(sb.get("parser") or ""))
         codes = {}
         for system, val in (b.get("codes") or {}).items():
             listed = val if isinstance(val, list) else [val]
