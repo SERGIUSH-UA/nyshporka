@@ -83,7 +83,10 @@
   `nysh find` щоразу чекав на нього до дедлайну. `nysh find --source ridni` тепер відмовляє:
   «джерела 'ridni' немає». Метрики села — `nysh parish metrics "<село>, <повіт>"` (пак
   `metrics`, ті самі першоджерела, без мережі), він же тепер перший канал у скілах
-  `find-parish` і `where-to-dig`. Копія справи — `nysh parish in-case`.
+  `find-parish` і `where-to-dig`. Копія справи — `nysh parish in-case`. Ridni.org прибрано
+  й зі «Старту» (сім мов), `PRIVACY.md` і карток каналів. Міграція агента — теза
+  `ridni-removed` у `migrate/data/0.40.0.md`: якщо реліз матиме інший номер, перейменувати
+  файл і поле `version`.
 
 ## [0.39.2] — 2026-11-02
 
