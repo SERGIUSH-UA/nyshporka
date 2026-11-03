@@ -571,6 +571,14 @@ def test_zip_of_pdf_parts_gives_files_not_zero_frames() -> None:
         "P-303_Op3_C-6_1.pdf", "P-303_Op3_C-6_2.pdf", "P-303_Op3_C-6_10.pdf"]
 
 
+def test_zip_frames_without_leading_zeros_keep_page_order() -> None:
+    """`1, 2, 10`, а не `1, 10, 2`: номер `--frames` мусить бути номером сторінки."""
+    ms = [S.ZipMember(name=n, offset=0, csize=1, usize=1, method=0)
+          for n in ("sp/10.jpg", "sp/2.jpg", "sp/1.jpg", "sp/0003.jpg")]
+    assert [m.name for m in S.frames_of(ms)] == ["sp/1.jpg", "sp/2.jpg", "sp/0003.jpg",
+                                                 "sp/10.jpg"]
+
+
 def test_zip_of_pdf_parts_is_planned_as_files(tmp_path: Path,
                                               monkeypatch: pytest.MonkeyPatch) -> None:
     """Джерело справді бере PDF із ZIP: маніфест — 2 файли, а не 0 кадрів."""

@@ -124,7 +124,15 @@ def fs_head(row: dict[str, Any] | dict[str, str]) -> str:
     parts = [p.strip() for p in str(row.get("fs_film") or "").split(";") if p.strip()]
     if dgs and (not parts or dgs in parts or len(parts) > 1):
         return dgs
+    # Інший DGS у `fs_film` — друга група справи, і вона вже лежить у `fs_more`
+    # (злиття лишає першою `fs_dgs`): картка показала б її двічі, а `fs_dgs` загубила б.
+    # Пункт тієї самої плівки (`007803695_002_…`) і номер мікроплівки — як були.
+    if dgs and _DGS_LIKE.match(parts[0]) and parts[0].split("_")[0] != dgs.split("_")[0]:
+        return dgs
     return parts[0] if parts else dgs
+
+
+_DGS_LIKE = re.compile(r"^\d{9}(?:_|$)")
 
 
 def babynyar_online(row: dict[str, Any] | dict[str, str]) -> bool:

@@ -241,6 +241,42 @@ def test_compact_skips_a_case_read_right_now(space: Path,
     assert len(list(space.glob("*.lines.json"))) == 2
 
 
+def test_compact_skips_a_live_read_without_case_key(space: Path,
+                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    """Живе читання без `--case-key` реєструє лише ІМ'Я теки справи, а мета прогону
+    несе повний шлях: збіг за іменем, інакше тека живого читання стискалась би."""
+    from nyshporka import htr_store as S
+    from nyshporka.disk import compact as C
+    from nyshporka.htr import runs as R
+
+    meta = space / "_htr_meta.json"
+    data = json.loads(meta.read_text(encoding="utf-8"))
+    data["case_key"] = ""
+    data["case_dir"] = str(space.parent.parent.parent / "data" / "raw" / "DAHMO" / "315-1-1")
+    meta.write_text(json.dumps(data), encoding="utf-8")
+    os.utime(meta, (OLD, OLD))
+    os.utime(space, (OLD, OLD))
+    S._CACHE.clear()
+    S._RUNS_CACHE = None
+    monkeypatch.setattr(R, "alive", lambda: [R.Live(pid=1, created=0.0, case="315-1-1",
+                                                    case_key="", shard="", since=0.0)])
+    rep = C.compact(apply=True).as_json()
+    assert rep["done"] == 0 and rep["skipped"], rep
+    assert len(list(space.glob("*.lines.json"))) == 2
+
+
+def test_broken_gz_next_to_plain_does_not_blind_and_is_repaired(tmp_path: Path) -> None:
+    """Обірваний `.gz` поруч із цілим простим: читач бере простий, compact переписує."""
+    from nyshporka.disk import compact as C
+
+    plain = _plain(tmp_path, "0001")
+    (tmp_path / HL.geometry_name("0001")).write_bytes(b"\x1f\x8b\x08\x00obryv")
+    assert HL.load_geometry(tmp_path, "0001") == GEO
+    C.compact_file(plain)
+    assert not plain.exists()
+    assert HL.read_geometry(tmp_path / HL.geometry_name("0001")) == GEO
+
+
 def test_compact_refuses_when_cloud_state_is_unknown(space: Path,
                                                      monkeypatch: pytest.MonkeyPatch) -> None:
     from nyshporka import disk as D

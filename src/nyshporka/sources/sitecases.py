@@ -207,9 +207,17 @@ class _NoRange(Exception):
 
 
 def frames_of(members: list[ZipMember]) -> list[ZipMember]:
-    """Кадри справи в ZIP: зображення, у порядку імен (каталог ZIP порядку не обіцяє)."""
+    """Кадри справи в ZIP: зображення, у порядку імен (каталог ZIP порядку не обіцяє).
+
+    Порядок природний: `1.jpg, 2.jpg, 10.jpg`, а не `1, 10, 2` — номери `--frames`
+    мусять збігатися зі сторінками й без нулів попереду.
+    """
     imgs = [m for m in members if m.name.lower().endswith(IMAGE_EXT) and not m.name.endswith("/")]
-    return sorted(imgs, key=lambda m: m.name)
+    return sorted(imgs, key=lambda m: _natural(m.name))
+
+
+def _natural(name: str) -> list[Any]:
+    return [int(t) if i % 2 else t for i, t in enumerate(re.split(r"(\d+)", name))]
 
 
 #: Документи всередині ZIP — коли архів пакує в нього не кадри, а файли справи.
@@ -713,8 +721,10 @@ class SiteCasesSource:
                 continue
             try:
                 blob = fr.read()
-            except SourceError as exc:
-                res.errors.append(str(exc))
+            except (SourceError, _NoRange) as exc:
+                # `_NoRange` посеред справи — сервер раптом перестав віддавати шматки:
+                # кадр у збої, а не трасування; повтор догрузить решту.
+                res.errors.append(str(exc) or f"{fr.name}: сервер не віддав шматка файла")
                 continue
             atomic_write_bytes(out, blob)
             res.frames += 1

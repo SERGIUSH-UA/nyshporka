@@ -33,7 +33,7 @@ def test_years_parse_point_window_and_refuse_garbage() -> None:
     assert NR.parse_years(" 1795 – 1858 ") == (1795, 1858)
     with pytest.raises(ValueError, match="перевернуте"):
         NR.parse_years("1858..1795")
-    with pytest.raises(ValueError, match="1795..1858"):
+    with pytest.raises(ValueError, match=r"1795\.\.1858"):
         NR.parse_years("XIX ст.")
 
 

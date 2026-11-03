@@ -105,25 +105,40 @@ def compact_file(plain: Path) -> tuple[int, int]:
     # Полігони — без точок на прямій (`htr.geom_simplify`): контур і маска ті самі,
     # а коли прорідити нічого — ті самі байти.
     want = HL.thinned_bytes(raw)
-    if gz.is_file():
+    gz_was = gz.is_file()
+    if gz_was:
         # Пара після обриву (або писач уже дописав стиснуту): простий файл
         # прибирається, лише якщо `.gz` має ТОЙ САМИЙ вміст — до проріджування
         # чи після. Інакше — дві різні правди, і вирішувати, котра справжня, тут
-        # не можна.
-        if HL.geometry_bytes(gz) not in (raw, want):
-            raise ValueError(f"{plain.name}: поруч лежить {gz.name} з іншим вмістом — "
-                             f"не чіпаю жодного")
-        size = gz.stat().st_size
-        plain.unlink()
-        return len(raw), size
+        # не можна. Битий `.gz` (обрив запису) переписується з цілого простого.
+        try:
+            have: bytes | None = HL.geometry_bytes(gz)
+        except ValueError:
+            have = None
+        if have is not None:
+            if have not in (raw, want):
+                raise ValueError(f"{plain.name}: поруч лежить {gz.name} з іншим вмістом — "
+                                 f"не чіпаю жодного")
+            size = gz.stat().st_size
+            plain.unlink()
+            return len(raw), size
     check_thinning(plain.name, raw, want)
     blob = HL.gz_blob(want)
     tmp = gz.with_name(f"{gz.name}.{os.getpid()}.tmp")
     try:
-        tmp.write_bytes(blob)
+        # 🔴 fsync перед заміною: оригінал далі видаляється, і без нього збій
+        # живлення лишає порожній `.gz` на місці стертого простого файлу.
+        with open(tmp, "wb") as fh:
+            fh.write(blob)
+            fh.flush()
+            os.fsync(fh.fileno())
         if gzip.decompress(tmp.read_bytes()) != want:
             raise ValueError(f"{plain.name}: стиснуте не розтискається в той самий вміст")
         os.utime(tmp, ns=(st.st_atime_ns, st.st_mtime_ns))
+        if not gz_was and gz.exists():
+            # Писач дописав стиснуту, поки ми стискали: його версія новіша.
+            raise ValueError(f"{plain.name}: поки стискав, з'явився {gz.name} — "
+                             f"не чіпаю; повтор розбере пару")
         os.replace(tmp, gz)
     except BaseException:
         tmp.unlink(missing_ok=True)
@@ -230,7 +245,9 @@ def compact_run(run_dir: Path, *, apply: bool, now: float | None = None,
         try:
             was, now_b = compact_file(f)
         except (OSError, ValueError) as exc:
-            res.errors.append(str(exc))
+            # Ім'я файлу — завжди: `json` і ОС кажуть лише «line 1 column 1».
+            msg = str(exc)
+            res.errors.append(msg if f.name in msg else f"{f.name}: {msg}")
             continue
         res.done += 1
         res.before += was
@@ -279,7 +296,10 @@ def _busy() -> tuple[Callable[[str, dict[str, Any]], str], bool]:
         local = None
     cloud = D._live_runs()
     loc_keys = {str(x.case_key) for x in local or [] if x.case_key}
-    loc_dirs = {os.path.normcase(str(x.case)) for x in local or [] if x.case}
+    # Живе читання реєструє лише ІМ'Я теки справи (`htr.session`), а мета прогону
+    # несе повний шлях: порівнюються імена. Однойменна тека іншого архіву теж
+    # пропуститься — для руйнівної команди це дешевше, ніж стиснути живу.
+    loc_dirs = {os.path.normcase(Path(str(x.case)).name) for x in local or [] if x.case}
     cl_names = {Path(str(s.out_dir)).name for s in cloud or [] if getattr(s, "out_dir", "")}
     cl_keys = {str(s.case_key) for s in cloud or [] if getattr(s, "case_key", "")}
 
@@ -287,7 +307,7 @@ def _busy() -> tuple[Callable[[str, dict[str, Any]], str], bool]:
         if local is None:
             return "реєстр живих читань не прочитався"
         key = str(row.get("case_key") or "")
-        cdir = os.path.normcase(str(row.get("case_dir") or ""))
+        cdir = os.path.normcase(Path(str(row.get("case_dir") or "")).name)
         if (key and key in loc_keys) or (cdir and cdir in loc_dirs):
             return "справу зараз читають на цій машині"
         base = name.rsplit("-", 1)[0]
@@ -325,7 +345,8 @@ def compact(*, case: list[str] | None = None, apply: bool = False,
     rep = Report(apply=apply)
     sample: list[Path] = []
     total = len(rows)
-    n_workers = _auto_workers() if workers <= 0 else workers
+    # 61 — стеля `ProcessPoolExecutor` на Windows; більше дає трасування, а не захід.
+    n_workers = min(_auto_workers() if workers <= 0 else workers, 61)
     if apply and n_workers > 1 and not limit:
         _compact_parallel(rows, root, why, rep, n_workers, progress)
         return rep

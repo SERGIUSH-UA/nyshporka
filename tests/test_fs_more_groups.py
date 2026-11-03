@@ -101,4 +101,9 @@ def test_the_card_and_the_download_get_one_group() -> None:
     # одна плівка: номер мікроплівки з опису, як і досі, важить більше за DGS
     assert fs_head({"fs_dgs": "005610174", "fs_film": "2268600"}) == "2268600"
     assert fs_head({"fs_dgs": "116959441", "fs_film": ""}) == "116959441"
+    # Інший DGS у fs_film — друга група (вона в fs_more), головна лишається fs_dgs.
+    assert fs_head({"fs_dgs": "116959390", "fs_film": "116959441"}) == "116959390"
+    # Пункт тієї самої плівки — як був.
+    assert fs_head({"fs_dgs": "007803695",
+                    "fs_film": "007803695_002_M9MV-LVL"}) == "007803695_002_M9MV-LVL"
     assert fs_head({}) == ""

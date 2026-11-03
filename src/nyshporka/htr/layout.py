@@ -114,14 +114,17 @@ def read_geometry(path: Path) -> dict[str, Any]:
 
 
 def load_geometry(directory: Path, stem: str) -> dict[str, Any] | None:
-    """Геометрія сторінки цієї теки; немає або не читається — `None`."""
-    f = geometry_path(directory, stem)
-    if f is None:
-        return None
-    try:
-        return read_geometry(f)
-    except (OSError, ValueError):
-        return None
+    """Геометрія сторінки цієї теки; немає або не читається — `None`.
+
+    Битий `.gz` (обірваний запис) поруч із цілим простим файлом не сліпить:
+    читається наступна форма.
+    """
+    for f in geometry_files(directory, stem):
+        try:
+            return read_geometry(f)
+        except (OSError, ValueError):
+            continue
+    return None
 
 
 def gz_blob(raw: bytes) -> bytes:
