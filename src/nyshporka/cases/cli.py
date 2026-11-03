@@ -516,7 +516,7 @@ def cmd_opys(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
     # ЦДІАК ф.224 має DGS у 1827 справах (колонка «Посилання на FamilySearch»
     # у таблиці опису), а Commons — лише в 42. Саме так метрики с. Слюсарева
     # (224-1-1190, DGS 110032617) числились недоступними.
-    film = (row.get("fs_film") or row.get("fs_dgs") or "").strip()
+    film = _fonds.fs_head(row)
     if film:
         console.print(f"  [ok]FamilySearch:[/ok] DGS {film}"
                       + (f" · {row['fs_frames']} кадрів" if row.get("fs_frames") else ""))

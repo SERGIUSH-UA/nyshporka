@@ -80,3 +80,23 @@ def test_narrower_fs_years_change_nothing() -> None:
     TT.fuse_fs(reg, fs, [], [])
     r = reg[KEY]
     assert (r["year_from"], r["year_to"], r["years_src"]) == ("1850", "1935", "wikisource")
+
+
+def test_one_film_twice_is_not_a_second_group() -> None:
+    """Голий DGS плівки і її пункт — та сама плівка (`007803695`/`…_002_M9MV-LVL`)."""
+    reg = _reg()
+    fs = [{"opys": "3", "spr": "5", "dgs": "007803695", "fs_film": "007803695;116959390"}]
+    TT.fuse_fs(reg, fs, [], [_copy("116959441", "007803695_002_M9MV-LVL;116959390")])
+    assert reg[KEY]["fs_dgs"] == "007803695"
+    assert reg[KEY]["fs_more"] == "116959390;116959441"
+
+
+def test_the_card_and_the_download_get_one_group() -> None:
+    """`fs_film` через «;» не мусить доїхати до картки й завантаження як «номер»."""
+    from nyshporka.fonds.registry import fs_head
+
+    assert fs_head({"fs_dgs": "116959390", "fs_film": "116959390;116959441"}) == "116959390"
+    # одна плівка: номер мікроплівки з опису, як і досі, важить більше за DGS
+    assert fs_head({"fs_dgs": "005610174", "fs_film": "2268600"}) == "2268600"
+    assert fs_head({"fs_dgs": "116959441", "fs_film": ""}) == "116959441"
+    assert fs_head({}) == ""

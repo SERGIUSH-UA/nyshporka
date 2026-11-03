@@ -108,6 +108,20 @@ FIELDS = ("opys", "spr_int", "spr_letter", "spr", "shifra", "title", "title_src"
           # Останнім — з тієї самої причини, що й `spr_to`.
           "fs_more")
 
+def fs_head(row: dict[str, Any] | dict[str, str]) -> str:
+    """Одна група FamilySearch справи — та, що в картці й у плані завантаження.
+
+    🔴 `fs_film` справи на кількох плівках — DGS через «;» (так пише майстер-індекс
+    плівок), і взятий як є він давав картці «DGS a;b» з битим посиланням, а
+    завантаженню — неіснуючий номер. Решта груп — у `fs_more`.
+    """
+    dgs = str(row.get("fs_dgs") or "").strip()
+    parts = [p.strip() for p in str(row.get("fs_film") or "").split(";") if p.strip()]
+    if dgs and (not parts or dgs in parts or len(parts) > 1):
+        return dgs
+    return parts[0] if parts else dgs
+
+
 def babynyar_online(row: dict[str, Any] | dict[str, str]) -> bool:
     """Чи справді є що качати з «Бабиного Яру».
 

@@ -368,9 +368,12 @@ def _add_groups(r: Row, dgs: list[str]) -> None:
     for d in (x.strip() for x in dgs):
         if not d or not _RE_DGS.match(d):
             continue
+        # Та сама плівка двома записами — голим DGS і пунктом (`007803695` і
+        # `007803695_002_M9MV-LVL`): друга група з неї не робиться.
+        base = d.split("_")[0]
         if not head:
             head = r["fs_dgs"] = d
-        elif d != head and d not in more:
+        elif base != head.split("_")[0] and base not in {m.split("_")[0] for m in more}:
             more.append(d)
     r["fs_more"] = ";".join(more)
 

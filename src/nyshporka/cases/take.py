@@ -142,7 +142,9 @@ def _plan_from(repo: str, fond: str, opys: str, spr: str, letter: str,
 
     archium = str(row.get("archium_url") or "").strip()
     name = str(row.get("commons_title") or "").strip()
-    film = str(row.get("fs_film") or row.get("fs_dgs") or "").strip()
+    from nyshporka.fonds.registry import fs_head
+
+    film = fs_head(row)
     mirror = str(row.get("mirror_url") or "").strip()
     channel = "archium" if archium else ("commons" if name else "")
     parts: list[str] = []
