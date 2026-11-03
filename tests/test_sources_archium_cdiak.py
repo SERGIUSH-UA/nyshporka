@@ -9,11 +9,16 @@
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from nyshporka.archives import active
 from nyshporka.sources import archium as A
+from nyshporka.sources import load
 from nyshporka.sources.base import SourceError
+from nyshporka.sources.http import Fetcher
 
 
 def _cdiak() -> A.ArchiumSource:
@@ -57,17 +62,130 @@ def test_each_site_keeps_its_own_catalogue() -> None:
     assert "cdiak_archium" in cdiak.catalog_rel.as_posix()
 
 
-def test_a_site_without_a_group_tree_refuses_instead_of_showing_a_foreign_one() -> None:
+class _JsonResp:
+    status_code = 200
+
+    def __init__(self, view: str) -> None:
+        self.headers: dict[str, str] = {}
+        self._view = view
+        self.text = json.dumps({"Status": 1, "View": view})
+
+    def raise_for_status(self) -> None:
+        pass
+
+    def json(self) -> dict[str, object]:
+        return {"Status": 1, "View": self._view}
+
+
+class _Api:
+    """Двійник API ARCHIUM: відповідь за підрядком адреси. Мережі нема."""
+
+    def __init__(self, pages: dict[str, str]) -> None:
+        self.pages = pages
+        self.asked: list[str] = []
+
+    def get(self, url: str) -> _JsonResp:
+        self.asked.append(url)
+        for key, view in self.pages.items():
+            if key in url:
+                return _JsonResp(view)
+        raise AssertionError(f"тест не готував відповіді на {url}")
+
+
+_FONDS_VIEW = """<table class="fond-groups"><tbody>
+<tr><td>13</td><td><a href="/fonds/3625/">Гадяцький повітовий суд</a></td>
+    <td>1782-1873</td><td>120</td></tr>
+<tr><td>16</td><td><a href="/fonds/3626/">Зіньківський повітовий земський суд</a></td>
+    <td></td><td>40</td></tr>
+</tbody></table>"""
+
+
+def _cdiak_with(api: _Api) -> A.ArchiumSource:
+    site = active().site("CDIAK", "archium")
+    assert site is not None
+    return A.ArchiumSource(site=site, repo="CDIAK",
+                           fetcher=Fetcher(base=site.url, delay=0.0, client=api))
+
+
+def test_a_site_without_a_group_tree_lists_its_own_fonds_flat() -> None:
     """🔴 Дві однаково погані відповіді, яких тут немає.
 
-    Порожній список читався б як «архів порожній» — а це неправда: у цього
-    майданчика просто немає запиту на дерево груп (він віддає 500). Показати ж
-    чотири групи сусіднього архіву означало б чуже дерево під іменем цього.
+    Чотири групи сусіднього архіву — чуже дерево під іменем цього. Відмова, як
+    було доти, лишала перегляд без початку: `fond:<id>` — id сайту, а не номер
+    фонду, і знати його наперед людина не може. Тож корінь — суцільний перелік
+    фондів (`/api/v1/fonds/`), той самий, яким іде обхід; групи не питаються.
     """
+    api = _Api({"/api/v1/fonds/": _FONDS_VIEW})
+    nodes = _cdiak_with(api).browse()
+
+    assert [n.ref for n in nodes] == ["fond:3625", "fond:3626"]
+    assert nodes[0].label.startswith("ф.13 Гадяцький")
+    assert not any("fond-groups" in u for u in api.asked), "груп у майданчика немає"
+
+
+def test_an_empty_flat_list_is_not_read_as_an_empty_archive() -> None:
+    """Порожній перелік — ознака зміненої розмітки, а не порожнього архіву."""
     with pytest.raises(SourceError) as exc:
-        _cdiak().browse()
-    assert "груп" in str(exc.value)
+        _cdiak_with(_Api({"/api/v1/fonds/": "<p>нічого</p>"})).browse()
     assert "archium-cdiak" in str(exc.value), "відмова не каже, чим шукати далі"
+
+
+#: Майданчики, вписані за дайджестом Укрдержархіву за жовтень 2026 (перевірено
+#: живими запитами 03.11.2026): код архіву → підрядок хоста й мітка.
+NEW_SITES = {
+    "CDAVO": ("e-resource.tsdavo.gov.ua", "ЦДАВО"),
+    "CDAHOU": ("e.tsdahou.archives.gov.ua", "ЦДАГОУ"),
+    "CDAMLM": ("ksi-csamm.archives.gov.ua", "ЦДАМЛМ"),
+    "DALO": ("e.archivelviv.gov.ua", "ДАЛО"),
+    "DAKO": ("archium.dako.gov.ua", "ДАКО"),
+    "DAKRO": ("archium.krop.archives.gov.ua", "ДАКрО"),
+    "DAPO": ("e-resource.poltava.archives.gov.ua", "ДАПО"),
+}
+
+
+@pytest.mark.parametrize("code", sorted(NEW_SITES))
+def test_new_site_is_its_own_archium_source(code: str) -> None:
+    host, label = NEW_SITES[code]
+    site = active().site(code, "archium")
+    assert site is not None, f"майданчик {code} зник із паку"
+    src = A.ArchiumSource(site=site, repo=code)
+
+    assert src.id == f"archium-{code.lower()}"
+    assert host in src.base and src.base != A.BASE
+    assert label in src.label
+    assert not site.fond_groups, "дерево груп у цих майданчиків віддає 500"
+
+
+def test_archium_source_ids_are_unique_in_the_registry(tmp_path: Path) -> None:
+    """`id` їде в «де шукали»: два архіви під одним ім'ям — неправдивий знаменник."""
+    ids = [s.id for s in load(tmp_path).all() if isinstance(s, A.ArchiumSource)]
+    assert len(ids) == len(set(ids))
+    assert {f"archium-{c.lower()}" for c in NEW_SITES} <= set(ids)
+
+
+def test_cdamlm_is_not_the_chisinau_archive() -> None:
+    """Код `CSAMM` зайнятий кишинівським архівом; шифра «ЦДАМЛМ» мусить лягати
+    в український архів-музей, а не туди."""
+    assert active().site("CSAMM", "archium") is None
+    assert active().site("CDAMLM", "archium") is not None
+
+
+def test_mirror_host_of_a_site_routes_to_its_source(tmp_path: Path) -> None:
+    """Посилання на голий IP того самого переглядача — це та сама справа ДАКрО,
+    а не тимчасовий майданчик з чужим id. Мережі тут не треба: хост відомий."""
+    got = A.route_viewer_url(load(tmp_path), "archium",
+                             "http://185.250.20.62/file-viewer/26106")
+    assert got is not None
+    src, ref, note = got
+    assert src.id == "archium-dakro" and ref == "file:26106" and note == ""
+
+
+def test_source_accepts_a_viewer_url_of_its_mirror_host() -> None:
+    """Перевірка «чужий хост» не мусить відкидати власне дзеркало."""
+    site = active().site("DAKRO", "archium")
+    assert site is not None
+    src = A.ArchiumSource(site=site, repo="DAKRO")
+    assert src._ident("http://185.250.20.62/file-viewer/26106") == "26106"
 
 
 def test_the_bundled_snapshot_belongs_to_its_own_site() -> None:

@@ -14,6 +14,30 @@
 - Архів, що в місяці нічого не звітував, у випуску відсутній. Це нічого не каже про наявність у нього е-ресурсу.
 - Колонка «оцифровано» — приклад того, що архів викладає. Це не повний перелік.
 
+## Майданчики ARCHIUM, які Нишпорка знає
+
+Ці е-ресурси стоять на одному рушії (ARCHIUM). Для кожного є своє джерело:
+`nysh browse <id>` дає перелік фондів, далі описи й справи, `nysh get <id> file:<id справи>`
+качає кадри, `nysh crawl <id>` збирає каталог для пошуку за назвою. Посилання
+`…/file-viewer/<id>` з браузера `nysh get` сам відправляє в потрібне джерело за хостом.
+
+| архів | хост | id джерела |
+|---|---|---|
+| ДАХмО | `archium.dahmo.gov.ua` | `archium` |
+| ЦДІАК | `archium.cdiak.archives.gov.ua` | `archium-cdiak` |
+| ЦДІАЛ | `archium.tsdial.archives.gov.ua` | `archium-cdial` |
+| ЦДАВО | `e-resource.tsdavo.gov.ua` | `archium-cdavo` |
+| ЦДАГОУ | `e.tsdahou.archives.gov.ua` | `archium-cdahou` |
+| ЦДАМЛМ | `ksi-csamm.archives.gov.ua` | `archium-cdamlm` |
+| ДАКО | `archium.dako.gov.ua` | `archium-dako` |
+| ДАКрО | `archium.krop.archives.gov.ua` (лише http; дзеркало `185.250.20.62`) | `archium-dakro` |
+| ДАЛО | `e.archivelviv.gov.ua` | `archium-dalo` |
+| ДАПО | `e-resource.poltava.archives.gov.ua` («Міжархівний пошуковий портал») | `archium-dapo` |
+
+Хост, якого тут немає, але який відповідає як ARCHIUM, береться на одне завантаження
+тимчасовим майданчиком; щоб він став постійним, його вписують в `archives.yaml`
+під його архівом *(звірено 03.11.2026)*.
+
 ## Центральні архіви
 
 | архів | вхід до е-ресурсу | шаблон адреси | оцифровано в серпні 2026 |

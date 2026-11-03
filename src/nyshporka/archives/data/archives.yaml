@@ -323,6 +323,11 @@ repositories:
     sites:
       web:
         url: https://dako.gov.ua
+      archium:
+        url: https://archium.dako.gov.ua
+        # Перевірено 03.11.2026: справа file:248035 — 173 кадри (ф.782 оп.1). `/api/v1/fond-groups/` віддає 500,
+        # тож груп фондів не показуємо, як у ЦДІАК.
+        fond_groups: false
     codes:
       babynyar: "15"
       commons: ДАКО
@@ -333,9 +338,28 @@ repositories:
     sites:
       web:
         url: https://dakiro.kr-admin.gov.ua
+      archium:
+        url: http://archium.krop.archives.gov.ua
+        # Перевірено 03.11.2026: справа file:26106 — 48 кадрів. Лише http: https хоста не відповідає. `/api/v1/fond-groups/` віддає 500,
+        # тож груп фондів не показуємо, як у ЦДІАК.
+        fond_groups: false
+        # Той самий «е-ресурс ДАКірО» стоїть і на голому IP; посилання з Качки
+        # бувають саме такі, і вони мусять вести сюди, а не в тимчасовий майданчик.
+        aliases: [185.250.20.62]
     codes:
       babynyar: "45"
-  DALO: {label: ДАЛО, name: Державний архів Львівської області, country: UA, sites: {web: {url: https://archivelviv.gov.ua}}}
+  DALO:
+    label: ДАЛО
+    name: Державний архів Львівської області
+    country: UA
+    sites:
+      web:
+        url: https://archivelviv.gov.ua
+      archium:
+        url: https://e.archivelviv.gov.ua
+        # Перевірено 03.11.2026: справа file:609260 — 26 кадрів (inventory 1571). `/api/v1/fond-groups/` віддає 500,
+        # тож груп фондів не показуємо, як у ЦДІАК.
+        fond_groups: false
   DALUO: {label: ДАЛуО, name: Державний архів Луганської області, country: UA, sites: {web: {url: https://lg.archives.gov.ua}}}
   DAMO:
     label: ДАМО
@@ -346,7 +370,20 @@ repositories:
         url: https://archive.mk.ua
     codes:
       babynyar: "36"
-  DAPO: {label: ДАПО, name: Державний архів Полтавської області, country: UA, sites: {web: {url: https://poltava.archives.gov.ua}}}
+  DAPO:
+    label: ДАПО
+    name: Державний архів Полтавської області
+    country: UA
+    sites:
+      web:
+        url: https://poltava.archives.gov.ua
+      archium:
+        url: https://e-resource.poltava.archives.gov.ua
+        # Перевірено 03.11.2026: «Міжархівний пошуковий портал» ДАПО, каталог читається
+        # (6646 фондів), але серед 300 перших справ ф.1011 жодної з кадрами — де лежать
+        # оцифровані, не встановлено. `/api/v1/fond-groups/` віддає 500,
+        # тож груп фондів не показуємо, як у ЦДІАК.
+        fond_groups: false
   DARO: {label: ДАРО, name: Державний архів Рівненської області, country: UA, sites: {web: {url: https://rv.archives.gov.ua}}}
   DAS: {label: ДАС, name: Державний архів міста Севастополя, country: UA}
   DASO:
@@ -417,6 +454,11 @@ repositories:
     sites:
       web:
         url: https://tsdavo.gov.ua
+      archium:
+        url: https://e-resource.tsdavo.gov.ua
+        # Перевірено 03.11.2026: справа file:165931 — 61 кадр. `/api/v1/fond-groups/` віддає 500,
+        # тож груп фондів не показуємо, як у ЦДІАК.
+        fond_groups: false
     codes:
       babynyar: "17"
   CDAHOU:
@@ -426,8 +468,27 @@ repositories:
     sites:
       web:
         url: https://tsdahou.archives.gov.ua
+      archium:
+        url: https://e.tsdahou.archives.gov.ua
+        # Перевірено 03.11.2026: справа file:151149 — 303 кадри (ф.9 оп.2). `/api/v1/fond-groups/` віддає 500,
+        # тож груп фондів не показуємо, як у ЦДІАК.
+        fond_groups: false
     codes:
       babynyar: "20"
+  CDAMLM:
+    # 🔴 Не плутати з `CSAMM`: той код уже зайнятий кишинівським архівом
+    # (мікрофільми, MD). Шифра «ЦДАМЛМ» мусить лягати сюди, а не туди.
+    label: ЦДАМЛМ
+    name: Центральний державний архів-музей літератури і мистецтва України
+    country: UA
+    sites:
+      web:
+        url: https://csamm.archives.gov.ua
+      archium:
+        url: https://ksi-csamm.archives.gov.ua
+        # Перевірено 03.11.2026: справа file:156122 — 11 кадрів. `/api/v1/fond-groups/` віддає 500,
+        # тож груп фондів не показуємо, як у ЦДІАК.
+        fond_groups: false
 
   # ── галузеві й відомчі ──────────────────────────────────────────────────────
   DASU:

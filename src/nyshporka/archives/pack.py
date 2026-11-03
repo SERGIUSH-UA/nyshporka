@@ -83,6 +83,11 @@ class Site:
     shield: str = ""
     #: Сторінка-каталог на хості (відносно `url`), якщо джерело читає її: `index5.html`.
     page: str = ""
+    #: Інші хости того самого переглядача (голий IP, старе ім'я). Посилання на
+    #: такий хост веде в це ж джерело, а не в тимчасовий майданчик. Без цього
+    #: справа ДАКрО, скопійована з Качки як `185.250.20.62/file-viewer/…`, лягла
+    #: б у теку з чужим id джерела.
+    aliases: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -447,7 +452,9 @@ def _build(raw: dict[str, Any], sources: tuple[Path, ...]) -> ArchivesPack:
                 groups=tuple((str(g.get("id")), str(g.get("label") or ""))
                              for g in (sb.get("groups") or [])),
                 bundled=str(sb.get("bundled") or ""),
-                shield=str(sb.get("shield") or ""), page=str(sb.get("page") or ""))
+                shield=str(sb.get("shield") or ""), page=str(sb.get("page") or ""),
+                aliases=tuple(str(h).strip().lower() for h in (sb.get("aliases") or [])
+                              if str(h).strip()))
         codes = {}
         for system, val in (b.get("codes") or {}).items():
             listed = val if isinstance(val, list) else [val]

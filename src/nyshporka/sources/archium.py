@@ -291,7 +291,7 @@ def route_viewer_url(registry: Any, source_id: str, ref: str, *,
     scheme, host, ident = parsed
     known = [s for s in registry.all() if isinstance(s, ArchiumSource)]
     for s in known:
-        if _host(s.base) == host:
+        if _host(s.base) == host or host in s.site.aliases:
             return s, f"file:{ident}", ""
 
     base = f"{scheme}://{host}"
@@ -837,13 +837,19 @@ class ArchiumSource:
                         Node(ref="group:2", label="Фонди радянського періоду"),
                         Node(ref="group:3", label="Фонди особового походження"),
                         Node(ref="group:4", label="Колекції")]
-            # 🔴 Порожній список тут читався б як «архів порожній», а це неправда:
-            # у цього майданчика просто немає запиту на дерево груп (він віддає
-            # 500). Фонд тут знаходять за номером або за назвою.
-            raise SourceError(
-                f"{self.label}: переліку груп фондів у цього архіву немає — "
-                f"його API на такий запит відповідає помилкою. Фонд шукайте за "
-                f"номером: `nysh browse {self.id} fond:<id>`.")
+            # Дерева груп у цього майданчика немає (`/api/v1/fond-groups/` віддає
+            # 500), але суцільний перелік `/api/v1/fonds/` є — той самий, яким
+            # іде обхід. Доти тут стояла відмова, і в ЦДІАК та шести інших
+            # архівах перегляд не мав звідки почати: `fond:<id>` — це id сайту, а
+            # не номер фонду, і знати його наперед людина не може.
+            fonds = self._fonds(None)
+            # 🔴 Порожній список читався б як «архів порожній», а це неправда.
+            if not fonds:
+                raise SourceError(
+                    f"{self.label}: перелік фондів прийшов порожнім — розмітка "
+                    f"сайту могла змінитись. Фонд можна відкрити за id сайту: "
+                    f"`nysh browse {self.id} fond:<id>`.")
+            return fonds
         kind, _, ident = ref.partition(":")
         if kind == "group":
             return self._group_fonds(ident)
@@ -1022,7 +1028,7 @@ class ArchiumSource:
             raise SourceError(f"завантажувати можна лише справу, а не {ref!r}")
         # 🔴 Чужий хост — відмова, а не тихе качання з власного: id справ на
         # різних майданчиках збігаються, і той самий номер означав би чужу справу.
-        if parsed[1] != _host(self.base):
+        if parsed[1] != _host(self.base) and parsed[1] not in self.site.aliases:
             raise SourceError(
                 f"адреса з {parsed[1]}, а джерело {self.id} працює з "
                 f"{_host(self.base)}; `nysh get` сам обирає джерело за хостом")
