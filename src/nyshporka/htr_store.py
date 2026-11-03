@@ -1641,12 +1641,14 @@ def page_lines(name: str, page: str) -> dict[str, Any] | None:
     info = (meta.get("pages") or {}).get(page)
     if info is None:
         return None
+    from nyshporka.htr import layout as HL
+
     d = _case_dir(name)
-    f = d / (Path(page).stem + ".lines.json") if d else None
-    if f is None or not f.is_file() or f.parent != d:
+    f = HL.geometry_path(d, Path(page).stem) if d else None
+    if f is None or f.parent != d:
         return {"page": page, "has": False}
     try:
-        data = json.loads(f.read_text(encoding="utf-8"))
+        data = HL.read_geometry(f)
     except (OSError, ValueError):
         return {"page": page, "has": False}
     if not isinstance(data, dict) or not isinstance(data.get("boxes"), list):

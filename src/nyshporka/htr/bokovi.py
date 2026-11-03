@@ -36,6 +36,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from nyshporka.htr import layout as HL
+
 #: Тека в прогоні, куди відкладено прочитане з бокових кадрів.
 ASIDE = "_bokom"
 
@@ -182,7 +184,7 @@ def _norm(path: str | Path) -> str:
 def _read_stems(run_dir: Path, stems: set[str]) -> set[str]:
     """Які з цих сторінок прогін має прочитаними (файлом чи в меті)."""
     got = {s for s in stems
-           if (run_dir / f"{s}.txt").is_file() or (run_dir / f"{s}.lines.json").is_file()}
+           if (run_dir / f"{s}.txt").is_file() or HL.has_geometry(run_dir, s)}
     for path in [run_dir / "_htr_meta.json", *run_dir.glob("_htr_meta.part*.json")]:
         try:
             pages = json.loads(path.read_text(encoding="utf-8")).get("pages")
@@ -215,7 +217,7 @@ def _aside(run_dir: Path, stems: set[str], rep: Bokovi, failed: set[str]) -> int
     """
     moved: set[str] = set()
     for stem in sorted(stems):
-        for name in (f"{stem}.txt", f"{stem}.lines.json"):
+        for name in (f"{stem}.txt", *(f.name for f in HL.geometry_files(run_dir, stem))):
             src = run_dir / name
             if not src.is_file():
                 continue

@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 from nyshporka.core import workspace as W
+from nyshporka.htr import layout as HL
 from nyshporka.share import bundle, publish, segment
 
 KEY = "ANRM/134/2/257"
@@ -367,8 +368,7 @@ def test_tsila_plivka_z_apid_exact(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     # Рамки рядків лягають під ті самі місцеві імена.
     geo = accept.accept_geometry(seg["geom"]["path"], reindex=False)
     assert geo["pages"] == 5
-    assert sorted(p.name for p in run.glob("*.lines.json")) == \
-        [f"{k:05d}.lines.json" for k in range(670, 675)]
+    assert sorted(HL.geometry_stems(run)) == [f"{k:05d}" for k in range(670, 675)]
 
 
 def test_tsila_plivka_lyshe_nomer_kadru_by_position(tmp_path: Path,

@@ -999,8 +999,9 @@ def _content_of(voices: list[bundle.Voice]) -> str:
 
 def _geometry_pages(run_dirs: list[Path]) -> int:
     """Скільки сторінок має рамки рядків — у найповнішому голосі."""
-    return max((sum(1 for _ in d.glob(bundle.PACKED_GEOMETRY)) for d in run_dirs),
-               default=0)
+    from nyshporka.htr import layout as HL
+
+    return max((len(HL.geometry_stems(d)) for d in run_dirs), default=0)
 
 
 #: Поле `extra` маніфесту: чому число кадрів справи невідоме.

@@ -44,6 +44,28 @@ from pathlib import Path
 RUNNER = Path(__file__).resolve().parents[1] / "runner.py"
 
 
+def _geometry_files(run: Path) -> dict[str, Path]:
+    """Стем → файл геометрії теки; стиснута форма первинна."""
+    out: dict[str, Path] = {}
+    if not run.is_dir():
+        return out
+    for f in run.iterdir():
+        for suf in (".lines.json.gz", ".lines.json"):
+            if f.name.endswith(suf):
+                stem = f.name[: -len(suf)]
+                if suf.endswith(".gz") or stem not in out:
+                    out[stem] = f
+                break
+    return out
+
+
+def _read_geometry(f: Path) -> object:
+    raw = f.read_bytes()
+    if f.name.endswith(".gz"):
+        raw = gzip.decompress(raw)
+    return json.loads(raw.decode("utf-8"))
+
+
 def _clean_env() -> dict[str, str]:
     """Середовище підпроцесу без чужого PYTHONHOME/PYTHONPATH.
 
@@ -178,23 +200,27 @@ def _compare(out: Path) -> dict:
     same = diff = 0
     diffs = []
     a_run, b_run = a_root / "run", b_root / "run"
-    for pa in sorted(a_run.glob("*.lines.json")):
-        pb = b_run / pa.name
-        if not pb.is_file():
+    # 🗜 Звіряється вміст, а не файл: старе середовище могло писати простий
+    # `.lines.json`, нове — стиснутий; байти різні, рамки ті самі. Пакет тут не
+    # імпортується (патчі їдуть без нього), тож дві форми розбираються на місці —
+    # дзеркало `nyshporka.htr.layout.GEOMETRY_SUFFIXES`.
+    a_geo, b_geo = _geometry_files(a_run), _geometry_files(b_run)
+    for stem in sorted(a_geo):
+        name = f"{stem}.lines.json"
+        if stem not in b_geo:
             diff += 1
-            diffs.append({"file": pa.name, "why": "лише в A"})
+            diffs.append({"file": name, "why": "лише в A"})
             continue
-        ja = json.loads(pa.read_text(encoding="utf-8"))
-        jb = json.loads(pb.read_text(encoding="utf-8"))
+        ja = _read_geometry(a_geo[stem])
+        jb = _read_geometry(b_geo[stem])
         if ja == jb:
             same += 1
         else:
             diff += 1
-            diffs.append({"file": pa.name, "why": _first_diff(ja, jb)})
-    for pb in sorted(b_run.glob("*.lines.json")):
-        if not (a_run / pb.name).is_file():
-            diff += 1
-            diffs.append({"file": pb.name, "why": "лише в B"})
+            diffs.append({"file": name, "why": _first_diff(ja, jb)})
+    for stem in sorted(set(b_geo) - set(a_geo)):
+        diff += 1
+        diffs.append({"file": f"{stem}.lines.json", "why": "лише в B"})
     rep["lines"] = {"same": same, "diff": diff, "diffs": diffs[:50]}
 
     # ── тексти: основна тека й кожна тека голосу ──

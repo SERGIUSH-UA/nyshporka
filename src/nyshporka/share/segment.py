@@ -35,6 +35,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import Any
 
+from nyshporka.htr import layout as HL
 from nyshporka.share import align, bundle
 
 #: Стелі пулу (`nyshporka-online`: `app/tekst.py` MAX_CHLENIV, `app/config.py`
@@ -379,8 +380,8 @@ def stage(seg: Segment, root: Path, *, geometry: bool = False) -> list[Path]:
                     # Рамки рядків — під тим самим префіксом, що й текст: у
                     # текстовий пакет вони не йдуть (`bundle.PACKED`), тож хеш
                     # змісту від них не змінюється.
-                    geo = run / (Path(name).stem + GEOM_EXT)
-                    if geo.is_file():
+                    geo = HL.geometry_path(run, Path(name).stem)
+                    if geo is not None:
                         _link_or_copy(geo, d / f"{part.slug}{SEP}{geo.name}")
             m = metas[model]
             for img, row in src_pages.items():

@@ -63,7 +63,11 @@ def main(argv=None):
     from PIL import Image
 
     R = _load_runner(args.runner)
-    want = json.loads(args.lines_json.read_text(encoding="utf-8"))
+    # 🗜 Геометрія буває стиснутою (`.lines.json.gz`, з 0.40.0) — за суфіксом.
+    raw = args.lines_json.read_bytes()
+    if args.lines_json.name.endswith(".gz"):
+        raw = gzip.decompress(raw)
+    want = json.loads(raw.decode("utf-8"))
     want_boxes = want.get("boxes") or []
     if not want_boxes:
         print(json.dumps({"ok": False, "why": "у .lines.json немає рамок"}))

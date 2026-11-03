@@ -35,9 +35,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from nyshporka.htr import layout as HL
+
 JOURNAL = "_join.json"
 #: Сторінка прогону — ці файли на кадр.
-_PAGE_FILES = (".txt", ".lines.json")
+#: Текст і геометрія в обох формах (стиснута з 0.40.0, проста — старі прогони).
+_PAGE_FILES = (".txt", *HL.GEOMETRY_SUFFIXES)
 
 
 class JoinError(RuntimeError):

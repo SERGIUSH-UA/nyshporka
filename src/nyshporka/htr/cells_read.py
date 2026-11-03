@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import sys
 import time
@@ -154,6 +155,37 @@ def _write(path: Path, text: str) -> None:
     tmp.replace(path)
 
 
+#: 🗜 Геометрія — стиснутою; дзеркало `nyshporka.htr.layout` (модуль їде поруч
+#: із раннером без пакета). Збіг сторожить `tests/test_geometry_one_door.py`.
+GEOMETRY_GZ_SUFFIX = ".lines.json.gz"
+GEOMETRY_PLAIN_SUFFIX = ".lines.json"
+
+
+def _geometry_files(out_dir: Path, stem: str) -> tuple[Path, Path]:
+    return (out_dir / f"{stem}{GEOMETRY_GZ_SUFFIX}",
+            out_dir / f"{stem}{GEOMETRY_PLAIN_SUFFIX}")
+
+
+def _write_geometry(out_dir: Path, stem: str, geo: dict[str, Any]) -> None:
+    gz, plain = _geometry_files(out_dir, stem)
+    tmp = gz.with_name(gz.name + ".tmp")
+    tmp.write_bytes(gzip.compress(json.dumps(geo).encode("utf-8"), compresslevel=6, mtime=0))
+    tmp.replace(gz)
+    plain.unlink(missing_ok=True)
+
+
+def _read_geometry(out_dir: Path, stem: str) -> dict[str, Any]:
+    gz, plain = _geometry_files(out_dir, stem)
+    try:
+        if gz.is_file():
+            got = json.loads(gzip.decompress(gz.read_bytes()).decode("utf-8"))
+        else:
+            got = json.loads(plain.read_text(encoding="utf-8"))
+    except (OSError, ValueError, EOFError):
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
 def write_page(out_dir: Path, stem: str, got: tuple[list[str], dict[str, Any]] | None,
                *, orient: int = 0) -> int:
     """Записати сторінку голосу: текст і рамки, або позначку «сітки немає».
@@ -161,12 +193,12 @@ def write_page(out_dir: Path, stem: str, got: tuple[list[str], dict[str, Any]] |
     out_dir.mkdir(parents=True, exist_ok=True)
     mark = out_dir / f"{stem}{NOGRID}"
     if got is None:
-        for f in (out_dir / f"{stem}.txt", out_dir / f"{stem}.lines.json"):
+        for f in (out_dir / f"{stem}.txt", *_geometry_files(out_dir, stem)):
             f.unlink(missing_ok=True)
         _write(mark, "")
         return 0
     texts, geo = got
-    _write(out_dir / f"{stem}.lines.json", json.dumps({**geo, "orient": orient}))
+    _write_geometry(out_dir, stem, {**geo, "orient": orient})
     _write(out_dir / f"{stem}.txt", "\n".join(texts) + "\n")
     mark.unlink(missing_ok=True)
     return len(texts)
@@ -193,10 +225,7 @@ def finish(out_dir: Path, *, names: dict[str, str] | None = None, started: str =
     pages: dict[str, dict[str, Any]] = {}
     for f in sorted(out_dir.glob("*.txt")):
         body = f.read_text(encoding="utf-8").splitlines()
-        try:
-            geo = json.loads((out_dir / f"{f.stem}.lines.json").read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            geo = {}
+        geo = _read_geometry(out_dir, f.stem)
         pages[names.get(f.stem, f"{f.stem}.jpg")] = {
             "orient": int(geo.get("orient") or 0), "detector": "form-cells",
             "retried": False, "guarded": False, "lines": len(body),

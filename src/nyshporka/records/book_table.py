@@ -28,13 +28,14 @@
 """
 from __future__ import annotations
 
-import json
 import re
 import statistics
 from dataclasses import dataclass, field
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
+
+from nyshporka.htr import layout as HL
 
 Box = tuple[int, int, int, int]
 
@@ -111,7 +112,10 @@ class Table:
 
 
 def _load(run_dir: Path, stem: str) -> tuple[dict[str, Any], list[str]]:
-    geo = json.loads((run_dir / f"{stem}.lines.json").read_text(encoding="utf-8"))
+    f = HL.geometry_path(run_dir, stem)
+    if f is None:
+        raise FileNotFoundError(f"немає {HL.geometry_name(stem)} у {run_dir}")
+    geo = HL.read_geometry(f)
     texts = (run_dir / f"{stem}.txt").read_text(encoding="utf-8").splitlines()
     return geo, texts
 

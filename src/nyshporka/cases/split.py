@@ -27,6 +27,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from nyshporka.htr import layout as HL
+
 JOURNAL = "_split.json"
 #: «Лишити поза справами» в карті: обкладинки плівки, чужі аркуші.
 LEFTOVER = "-"
@@ -37,7 +39,8 @@ _RUN_AGGREGATES = ("stages_total", "stages_pages", "geom_lost_pages", "missing",
 #: теж: інакше частина приватної справи ставала б відкритою саме розбивкою.
 _PROVENANCE = ("fetched", "fetched_by", "fetched_from", "fetched_ref", "fetched_url",
                "film", "dgs", "private")
-_PAGE_FILES = (".txt", ".lines.json")
+#: Текст і геометрія в обох формах (стиснута з 0.40.0, проста — старі прогони).
+_PAGE_FILES = (".txt", *HL.GEOMETRY_SUFFIXES)
 
 
 class SplitError(RuntimeError):

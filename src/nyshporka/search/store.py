@@ -475,21 +475,19 @@ def _geometry_for(run_dir: Path, run: str, stem: str, nlines: int,
     другий голос лишався б без геометрії, а з нею у стора склейка за колонкою.
     Береться лише при збігу кількості рядків: інакше це інша нарізка.
     """
-    own = run_dir / f"{stem}.lines.json"
-    cands = [own]
+    from nyshporka.htr import layout as HL
+
+    dirs = [run_dir]
     if "-" in run:
         base = run_dir.parent / run.rsplit("-", 1)[0]
         # 🔴 Побратим — лише прогін ТІЄЇ САМОЇ справи. Обрізання імені по
         # останньому дефісу з «met1863-904-25» давало «met1863-904» — іншу
         # справу, чиї рамки на коротких сторінках збігались числом рядків.
         if base.is_dir() and _same_case(meta, base):
-            cands.append(base / f"{stem}.lines.json")
-    for f in cands:
-        if not f.is_file():
-            continue
-        try:
-            data = json.loads(f.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            dirs.append(base)
+    for d in dirs:
+        data = HL.load_geometry(d, stem)
+        if data is None:
             continue
         boxes = data.get("boxes") or []
         if boxes and len(boxes) == nlines:

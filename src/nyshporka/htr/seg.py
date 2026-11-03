@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from nyshporka.htr import layout as HL
+
 if TYPE_CHECKING:  # pragma: no cover — лише для перевірки типів
     from collections.abc import Sequence
 
@@ -146,11 +148,11 @@ def geometry_problem(frames: Sequence[Path], base_out: Path, *,
 
     checked = 0
     for frame in frames:
-        lines = base_out / f"{frame.stem}.lines.json"
-        if not lines.is_file():
+        lines = HL.geometry_path(base_out, frame.stem)
+        if lines is None:
             continue
         try:
-            size = json.loads(lines.read_text(encoding="utf-8")).get("size")
+            size = HL.read_geometry(lines).get("size")
             with Image.open(frame) as im:
                 got = list(im.size)
         except (OSError, ValueError):
@@ -171,7 +173,7 @@ def geometry_problem(frames: Sequence[Path], base_out: Path, *,
             break
     if require and not checked:
         return ("розмір кадрів, з яких знято кеш, звірити нема з чим (у "
-                f"{base_out} немає `.lines.json` із розміром), а читатиметься "
+                f"{base_out} немає геометрії рядків із розміром), а читатиметься "
                 "стиснута копія — кеш може дати рядки не з тих місць")
     return ""
 

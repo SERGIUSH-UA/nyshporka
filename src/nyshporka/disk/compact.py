@@ -1,0 +1,301 @@
+"""🗜 `nysh disk compact`: перевести геометрію старих прогонів у стиснуту форму.
+
+З 0.40.0 прогін пише рамки рядків як `<стор>.lines.json.gz` (`nyshporka.htr.layout`).
+Старі прогони лежать із простим `<стор>.lines.json`, і саме ці файли — найбільша
+частина простору (ідея №11 порталу: 21 ГБ із 33; у Майстерні — 46 КБ на сторінку,
+gzip лишає ~28 %). Ця команда стискає їх один раз.
+
+🔴 Порядок на кожен файл — щоб обрив на будь-якому кроці не втратив рамок:
+
+1. прочитати байти простого файлу;
+2. стиснути й записати `<стор>.lines.json.gz.<pid>.tmp`;
+3. розтиснути записане й звірити з оригіналом байт у байт;
+4. перенести на `.gz` час оригіналу (`os.utime`) і атомарно перейменувати;
+5. лише тоді видалити простий файл.
+
+Між 4 і 5 на диску лежать обидва — читачі беруть `.gz` (`layout.GEOMETRY_SUFFIXES`),
+а повтор команди звірить пару й доприбере простий.
+
+🔴 Стор тексту від цього не перебудовується. Штамп прогону — мета плюс час
+теки, і поява `.gz` той час міняє; тому після теки її час повертається. А навіть
+якби штамп змінився, `search.store._text_unchanged` дивиться на час КОЖНОГО файлу
+— і бачить час оригіналу, тобто «текст той самий».
+
+🔴 За сумніву — лишити (правило всього `disk`). Не чіпаються:
+
+* прогони живих локальних читань (`htr.runs.alive()`) і живих хмарних заходів
+  (`disk._live_runs()`); стан хмари не прочитався — `--apply` відмовляє;
+* теки, де простий файл геометрії свіжіший за `FRESH_SEC`: його міг щойно
+  покласти хтось, кого реєстри не бачать (`cloud fetch`, сторонній скрипт), і
+  наступна його копія лягла б поруч зі стиснутою старою.
+"""
+from __future__ import annotations
+
+import gzip
+import os
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from nyshporka.htr import layout as HL
+
+#: Простий файл геометрії, свіжіший за це, означає, що в теку ще пишуть.
+FRESH_SEC = 600
+
+
+class CompactError(RuntimeError):
+    """Захід не почато — з причиною для людини."""
+
+
+@dataclass
+class RunResult:
+    run: str
+    files: int = 0            # простих файлів геометрії знайдено
+    done: int = 0             # стиснуто (або доприбрано пару)
+    before: int = 0           # байтів простих файлів
+    after: int = 0            # байтів стиснутих (оцінка на --dry-run — з вибірки)
+    skipped: str = ""         # чому тека не чіпалась
+    errors: list[str] = field(default_factory=list)
+
+    def as_json(self) -> dict[str, Any]:
+        return {"run": self.run, "files": self.files, "done": self.done,
+                "before": self.before, "after": self.after, "skipped": self.skipped,
+                "errors": self.errors}
+
+
+@dataclass
+class Report:
+    runs: list[RunResult] = field(default_factory=list)
+    apply: bool = False
+    #: Частка стиснення з вибірки на --dry-run (без запису).
+    ratio: float | None = None
+
+    def as_json(self) -> dict[str, Any]:
+        live = [r for r in self.runs if not r.skipped]
+        return {
+            "apply": self.apply,
+            "runs": len(self.runs),
+            "runs_with_plain": sum(1 for r in live if r.files),
+            "files": sum(r.files for r in live),
+            "done": sum(r.done for r in live),
+            "before": sum(r.before for r in live),
+            "after": sum(r.after for r in live),
+            "ratio": self.ratio,
+            "skipped": [{"run": r.run, "why": r.skipped} for r in self.runs if r.skipped],
+            "errors": [f"{r.run}: {e}" for r in self.runs for e in r.errors],
+        }
+
+
+# ── один файл ────────────────────────────────────────────────────────────────
+
+def compact_file(plain: Path) -> tuple[int, int]:
+    """Стиснути один простий файл геометрії. Повертає (байтів було, байтів стало).
+
+    Будь-яка невдача — виняток, і простий файл тоді лишається на місці.
+    """
+    stem = HL.geometry_stem(plain.name)
+    if stem is None or not plain.name.endswith(HL.PLAIN_SUFFIX):
+        raise ValueError(f"{plain.name}: це не простий файл геометрії")
+    gz = plain.with_name(HL.geometry_name(stem))
+    st = plain.stat()
+    raw = plain.read_bytes()
+    if gz.is_file():
+        # Пара після обриву (або писач уже дописав стиснуту): простий файл
+        # прибирається, лише якщо `.gz` має ТОЙ САМИЙ вміст. Інакше — дві
+        # різні правди, і вирішувати, котра справжня, тут не можна.
+        if HL.geometry_bytes(gz) != raw:
+            raise ValueError(f"{plain.name}: поруч лежить {gz.name} з іншим вмістом — "
+                             f"не чіпаю жодного")
+        size = gz.stat().st_size
+        plain.unlink()
+        return len(raw), size
+    blob = HL.gz_blob(raw)
+    tmp = gz.with_name(f"{gz.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_bytes(blob)
+        if gzip.decompress(tmp.read_bytes()) != raw:
+            raise ValueError(f"{plain.name}: стиснуте не розтискається в той самий вміст")
+        os.utime(tmp, ns=(st.st_atime_ns, st.st_mtime_ns))
+        os.replace(tmp, gz)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    plain.unlink()
+    return len(raw), len(blob)
+
+
+# ── тека прогону ─────────────────────────────────────────────────────────────
+
+def _plain_files(run_dir: Path) -> list[Path]:
+    out: list[Path] = []
+    try:
+        with os.scandir(run_dir) as it:
+            for e in it:
+                if e.name.endswith(HL.PLAIN_SUFFIX) and e.is_file():
+                    out.append(Path(e.path))
+    except OSError:
+        pass
+    return sorted(out)
+
+
+def compact_run(run_dir: Path, *, apply: bool, now: float | None = None,
+                sample: list[Path] | None = None) -> RunResult:
+    """Стиснути геометрію однієї теки. Без `apply` — лише порахувати.
+
+    `sample` — куди класти кілька файлів для оцінки частки на --dry-run.
+    """
+    res = RunResult(run=run_dir.name)
+    files = _plain_files(run_dir)
+    res.files = len(files)
+    if not files:
+        return res
+    t = time.time() if now is None else now
+    try:
+        stats = [(f, f.stat()) for f in files]
+    except OSError as exc:
+        res.skipped = f"не читається: {exc}"
+        return res
+    fresh = [f for f, st in stats if t - st.st_mtime < FRESH_SEC]
+    if fresh:
+        res.skipped = (f"{len(fresh)} файл(ів) геометрії змінено менше ніж "
+                       f"{FRESH_SEC // 60} хв тому ({fresh[0].name}) — у теку ще пишуть")
+        return res
+    res.before = sum(st.st_size for _, st in stats)
+    if not apply:
+        if sample is not None and len(sample) < 64:
+            sample.extend(files[:2])
+        return res
+    try:
+        dst = run_dir.stat()
+    except OSError as exc:
+        res.skipped = f"не читається: {exc}"
+        return res
+    res.before = 0
+    for f in files:
+        try:
+            was, now_b = compact_file(f)
+        except (OSError, ValueError) as exc:
+            res.errors.append(str(exc))
+            continue
+        res.done += 1
+        res.before += was
+        res.after += now_b
+    # Час теки — назад: інакше штамп стору (мета + тека) назвав би прогін зміненим.
+    try:
+        os.utime(run_dir, ns=(dst.st_atime_ns, dst.st_mtime_ns))
+    except OSError as exc:
+        res.errors.append(f"час теки не повернуто: {exc}")
+    return res
+
+
+# ── вибір прогонів ───────────────────────────────────────────────────────────
+
+def _run_rows(case: list[str]) -> list[dict[str, Any]]:
+    from nyshporka import htr_store as S
+
+    if not case:
+        return list(S.list_cases())
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for scope in case:
+        try:
+            got = S.runs_for_scope(scope)
+        except ValueError as exc:
+            raise CompactError(str(exc)) from exc
+        found = got.get("rows") or []
+        if not found:
+            raise CompactError(f"для «{scope}» прогонів не знайдено (nysh text state)")
+        for r in found:
+            name = str(r.get("name") or "")
+            if name and name not in seen:
+                seen.add(name)
+                rows.append(r)
+    return rows
+
+
+def _busy() -> tuple[Callable[[str, dict[str, Any]], str], bool]:
+    """Перевірка «у цю теку зараз пишуть» і чи стан хмари прочитався."""
+    from nyshporka import disk as D
+    from nyshporka.htr import runs as R
+
+    try:
+        local = R.alive()
+    except Exception:
+        local = None
+    cloud = D._live_runs()
+    loc_keys = {str(x.case_key) for x in local or [] if x.case_key}
+    loc_dirs = {os.path.normcase(str(x.case)) for x in local or [] if x.case}
+    cl_names = {Path(str(s.out_dir)).name for s in cloud or [] if getattr(s, "out_dir", "")}
+    cl_keys = {str(s.case_key) for s in cloud or [] if getattr(s, "case_key", "")}
+
+    def why(name: str, row: dict[str, Any]) -> str:
+        if local is None:
+            return "реєстр живих читань не прочитався"
+        key = str(row.get("case_key") or "")
+        cdir = os.path.normcase(str(row.get("case_dir") or ""))
+        if (key and key in loc_keys) or (cdir and cdir in loc_dirs):
+            return "справу зараз читають на цій машині"
+        base = name.rsplit("-", 1)[0]
+        if name in cl_names or base in cl_names or (key and key in cl_keys):
+            return "справа в живому хмарному заході"
+        return ""
+
+    return why, cloud is not None
+
+
+def compact(*, case: list[str] | None = None, apply: bool = False,
+            limit: int = 0, progress: Callable[[int, int, str], None] | None = None
+            ) -> Report:
+    """Стиснути геометрію прогонів простору (або названих справ)."""
+    from nyshporka.core.workspace import workspace
+
+    rows = _run_rows(list(case or []))
+    why, cloud_ok = _busy()
+    if apply and not cloud_ok:
+        raise CompactError("стан хмарних заходів не прочитався — не знаю, куди зараз "
+                           "забирають результати, тож нічого не стискаю. Подивіться "
+                           "nysh cloud state і повторіть")
+    root = workspace().htr_reports
+    rep = Report(apply=apply)
+    sample: list[Path] = []
+    total = len(rows)
+    done_runs = 0
+    for i, row in enumerate(rows, 1):
+        name = str(row.get("name") or "")
+        if not name:
+            continue
+        d = root / name
+        if progress:
+            progress(i, total, name)
+        if not d.is_dir():
+            continue
+        busy = why(name, row)
+        if busy:
+            r = RunResult(run=name, files=len(_plain_files(d)), skipped=busy)
+            if r.files:
+                rep.runs.append(r)
+            continue
+        r = compact_run(d, apply=apply, sample=sample)
+        if r.files or r.skipped or r.errors:
+            rep.runs.append(r)
+        if r.files and not r.skipped:
+            done_runs += 1
+            if limit and done_runs >= limit:
+                break
+    if not apply and sample:
+        was = got = 0
+        for f in sample:
+            try:
+                raw = f.read_bytes()
+            except OSError:
+                continue
+            was += len(raw)
+            got += len(HL.gz_blob(raw))
+        if was:
+            rep.ratio = got / was
+            for r in rep.runs:
+                if not r.skipped:
+                    r.after = int(r.before * rep.ratio)
+    return rep

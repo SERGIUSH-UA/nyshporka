@@ -158,12 +158,12 @@ def _synonimy(repo: str) -> list[str]:
 def _ye_ramky(run_name: str) -> bool:
     """Чи лежать рамки рядків у теці прогону. Один `glob` до першого збігу."""
     from nyshporka.core.workspace import workspace
-    from nyshporka.share.bundle import PACKED_GEOMETRY
+    from nyshporka.share.bundle import has_geometry
 
     if not run_name:
         return False
     d = workspace().htr_reports / run_name
-    return d.is_dir() and next(d.glob(PACKED_GEOMETRY), None) is not None
+    return d.is_dir() and has_geometry(d)
 
 
 def _zbirna(row: dict[str, Any], runs: list[str]) -> Any:

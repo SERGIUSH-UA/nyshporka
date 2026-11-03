@@ -32,7 +32,7 @@ from typing import Any
 from nyshporka.core.workspace import Workspace, WorkspaceError, workspace
 from nyshporka.htr import layout as HL
 from nyshporka.train import sets as S
-from nyshporka.utils.atomic import read_json, write_json
+from nyshporka.utils.atomic import CorruptFileError, read_json, write_json
 
 CUT_META_VERSION = 3
 
@@ -109,8 +109,12 @@ def page_geometry(run: str, page: str, ws: Workspace | None = None) -> dict[str,
     f, _why = HL.resolve_geometry(run_dir(run, ws), page)
     if f is None:
         return None
-    got = read_json(f, default=None)
-    return got if isinstance(got, dict) and got.get("boxes") else None
+    try:
+        got = HL.read_geometry(f)
+    except ValueError as e:
+        # Як і `read_json` до стиснення: побитий файл — не «рамок немає».
+        raise CorruptFileError(f, str(e)) from e
+    return got if got.get("boxes") else None
 
 
 def page_keys(meta: dict[str, Any]) -> dict[str, str]:

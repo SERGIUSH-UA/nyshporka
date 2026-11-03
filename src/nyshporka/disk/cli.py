@@ -104,3 +104,36 @@ def offload_cmd(
     if not apply:
         console.print("[muted]справді зняти: та сама команда з --apply[/muted]")
     _notes(env)
+
+
+@app.command("compact")
+def compact_cmd(
+    case: list[str] = typer.Option([], "--case",
+                                   help="справа, шифра чи прогін; можна кілька разів; "
+                                        "без нього — увесь простір"),
+    apply: bool = typer.Option(False, "--apply", help="справді стиснути"),
+    limit: int = typer.Option(0, "--limit", help="не більше стількох прогонів за раз"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Стиснути рамки рядків старих прогонів. Без --apply — лише скільки звільнить."""
+    from nyshporka import ops as O
+
+    env = O.call("disk.compact", {"case": case, "apply": apply, "limit": limit})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    before, after = int(d.get("before") or 0), int(d.get("after") or 0)
+    if not d.get("files"):
+        console.print("простих файлів геометрії немає — стискати нічого")
+    elif apply:
+        console.print(f"стиснуто {d.get('done')} із {d.get('files')} файлів у "
+                      f"{d.get('runs_with_plain')} прогонах: {_gb(before)} → "
+                      f"[bold]{_gb(after)}[/bold], звільнено {_gb(before - after)}")
+    else:
+        part = f" (≈{d['ratio'] * 100:.0f} % з вибірки)" if d.get("ratio") else ""
+        console.print(f"{d.get('files')} файлів у {d.get('runs_with_plain')} прогонах: "
+                      f"{_gb(before)} → ≈[bold]{_gb(after)}[/bold]{part}, звільнить "
+                      f"≈{_gb(before - after)}")
+        console.print("[muted]справді стиснути: та сама команда з --apply "
+                      "(частинами — --limit N)[/muted]")
+    _notes(env)

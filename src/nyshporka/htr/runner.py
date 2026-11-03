@@ -2749,6 +2749,32 @@ def atomic_write(path: Path, text: str) -> None:
 #: Паузи між спробами `os.replace` в `atomic_write`; `None` — здатись.
 _REPLACE_PAUSES = (0.2, 0.3, 0.5, 1.0, 2.0, 3.0, 3.0, None)
 
+#: 🗜 Геометрія сторінки пишеться стиснутою — дзеркало `nyshporka.htr.layout`
+#: (`GZ_SUFFIX`, `GZ_LEVEL`): раннер їде без пакета, тож імпортувати не може.
+#: Збіг сторожить `tests/test_geometry_one_door.py`.
+GEOMETRY_GZ_SUFFIX = ".lines.json.gz"
+GEOMETRY_PLAIN_SUFFIX = ".lines.json"
+GEOMETRY_GZ_LEVEL = 6
+
+
+def write_geometry(out_dir: Path, stem: str, payload: dict) -> None:
+    """`<стем>.lines.json.gz` атомарно; проста копія сторінки (старий прогін) — геть,
+    інакше на диску лишились би дві різні правди про ті самі рамки."""
+    path = out_dir / f"{stem}{GEOMETRY_GZ_SUFFIX}"
+    blob = gzip.compress(json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                         compresslevel=GEOMETRY_GZ_LEVEL, mtime=0)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp.write_bytes(blob)
+    for pause in _REPLACE_PAUSES:
+        try:
+            os.replace(tmp, path)
+            break
+        except PermissionError:
+            if pause is None:
+                raise
+            time.sleep(pause)
+    (out_dir / f"{stem}{GEOMETRY_PLAIN_SUFFIX}").unlink(missing_ok=True)
+
 
 def parse_shard(spec: str) -> tuple[int, int]:
     """'2/3' → (1, 3): 0-based індекс воркера і скільки їх усього."""
@@ -4993,8 +5019,7 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
             payload = {"size": res.get("size") or None, "boxes": _boxes}
             if len(_polys) == len(_boxes):
                 payload["polys"] = _polys
-            atomic_write(out_dir / f"{stem}.lines.json",
-                         json.dumps(payload, ensure_ascii=False))
+            write_geometry(out_dir, stem, payload)
         # 🛟 Кропи відібраних рядків — на диск, а Дяк пройде ними одним заходом у
         # кінці справи. Чому не тут-і-зараз: карта одна, 4 ГБ, а черга крутить
         # прогін трьома воркерами й сама тримає ~3.7 ГБ — друга модель у пам'яті

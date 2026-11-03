@@ -13,13 +13,14 @@
 """
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from nyshporka.htr import layout as HL
 
 PACKAGED = Path(__file__).resolve().parent / "data" / "forms.yaml"
 #: Свої шаблони — у просторі; накладаються за іменем шаблону.
@@ -112,10 +113,7 @@ def read_page(run_dir: Path, stem: str) -> list[Cell]:
     if not txt.is_file():
         return []
     texts = txt.read_text(encoding="utf-8").splitlines()
-    try:
-        geo = json.loads((run_dir / f"{stem}.lines.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        geo = {}
+    geo = HL.load_geometry(run_dir, stem) or {}
     addrs = [tuple(a) for a in geo.get("cells") or []]
     cells = [Cell(line=i + 1, addr=addrs[i] if i < len(addrs) else (0, i, 0), text=t)
              for i, t in enumerate(texts)]

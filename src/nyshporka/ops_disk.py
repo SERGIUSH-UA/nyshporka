@@ -21,7 +21,8 @@ class DiskReportArgs(BaseModel):
                            "можна зняти кадри",
     args=DiskReportArgs,
     next_hints=(("disk.clean", "прибрати відтворюване"),
-                ("disk.offload", "зняти кадри прочитаної й відданої справи")),
+                ("disk.offload", "зняти кадри прочитаної й відданої справи"),
+                ("disk.compact", "стиснути рамки рядків старих прогонів")),
     when="місце на диску: скільки зайнято, що відтворюване, що можна зняти")
 def disk_report(a: DiskReportArgs) -> Envelope:
     from nyshporka import disk as D
@@ -88,4 +89,35 @@ def disk_offload(a: DiskOffloadArgs) -> Envelope:
         env.warn("not_removed", f"{e['path']}: {e['error']}")
     if not a.apply:
         env.suggest("disk.offload", "те саме з apply — справді зняти")
+    return env
+
+
+class DiskCompactArgs(BaseModel):
+    case: list[str] = Field(default_factory=list,
+                            description="справа, шифра чи прогін; можна кілька; порожньо — "
+                                        "увесь простір")
+    apply: bool = Field(default=False, description="справді стиснути; без цього — лише "
+                                                   "скільки файлів і скільки звільнить")
+    limit: int = Field(default=0, ge=0, description="стиснути не більше стількох прогонів "
+                                                    "за раз (0 — усі)")
+
+
+@op("disk.compact", summary="Стиснути геометрію рядків старих прогонів "
+                            "(`.lines.json` → `.lines.json.gz`), вміст той самий",
+    args=DiskCompactArgs, mutates=True,
+    when="прочитане (reports/htr) займає забагато місця — стиснути рамки рядків")
+def disk_compact(a: DiskCompactArgs) -> Envelope:
+    from nyshporka.disk import compact as C
+
+    try:
+        rep = C.compact(case=a.case, apply=a.apply, limit=a.limit)
+    except C.CompactError as exc:
+        return fail(str(exc))
+    env = ok(rep.as_json())
+    for s in env.data["skipped"][:20]:
+        env.warn("skipped", f"{s['run']}: {s['why']}")
+    for e in env.data["errors"][:20]:
+        env.warn("not_compacted", e)
+    if not a.apply and env.data["files"]:
+        env.suggest("disk.compact", "те саме з apply — справді стиснути")
     return env

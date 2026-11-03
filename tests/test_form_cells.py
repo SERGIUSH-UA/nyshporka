@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageDraw
 
+from nyshporka.htr import layout as HL
+
 W, H = 2400, 3200
 ROW_YS = [400 + i * 200 for i in range(9)]            # 9 горизонталей → 8 рядків
 COL_XS = [150, 700, 1300, 1800, 2250]                 # 5 вертикалей → 4 колонки + поля
@@ -203,10 +205,10 @@ def test_cells_run_layout_and_meta(space: Path) -> None:
     meta, out = _run_cells(case_dir, base)
     assert out.name == "проба-cells"
     # сторінка з сіткою — файли є; книжкова — жодного файла, а не порожній
-    assert (out / "0001.txt").is_file() and (out / "0001.lines.json").is_file()
-    assert not (out / "0002.txt").exists() and not (out / "0002.lines.json").exists()
+    assert (out / "0001.txt").is_file() and HL.has_geometry(out, "0001")
+    assert not (out / "0002.txt").exists() and not HL.has_geometry(out, "0002")
     assert len((out / "0001.txt").read_text(encoding="utf-8").splitlines()) == 48
-    geo = json.loads((out / "0001.lines.json").read_text(encoding="utf-8"))
+    geo = HL.load_geometry(out, "0001") or {}
     assert geo["size"] == [W, H] and len(geo["boxes"]) == 48
     disk = json.loads((out / "_htr_meta.json").read_text(encoding="utf-8"))
     assert disk == meta
@@ -239,7 +241,7 @@ def test_cells_voice_is_searchable_and_crop_hits_the_cell(space: Path) -> None:
     hits = ST.grep("клітинка 007", ["проба-cells"])
     assert hits, "голос -cells не знайдено текстовим пошуком"
 
-    geo = json.loads((out / "0001.lines.json").read_text(encoding="utf-8"))
+    geo = HL.load_geometry(out, "0001") or {}
     crop = T.crop("проба-cells", "1", 8, with_next=False, pad=0, out=space / "c.png")
     assert not crop.get("error"), crop
     assert crop["text"] == "клітинка 007"

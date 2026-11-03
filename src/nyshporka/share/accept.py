@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from nyshporka.htr import layout as HL
 from nyshporka.share import align, bundle, gates, journal
 from nyshporka.share.bundle import Manifest
 
@@ -455,7 +456,7 @@ def _rename_dir(src: Path, dest: Path) -> None:
 def _is_packed(name: str) -> bool:
     """Чи файл того роду, що приїжджає пакетом (текст, мета, геометрія)."""
     return (name == bundle.META_NAME or name.endswith(".txt")
-            or name.endswith(".lines.json"))
+            or HL.geometry_stem(name) is not None)
 
 
 def _carry_extras(old: Path, new: Path) -> None:
@@ -755,11 +756,12 @@ def _accept_geometry_at(path: Path, src: str, *, force: bool, reindex: bool,
         stems[r] = {str(a): str(b) for a, b in got.items()} if isinstance(got, dict) else {}
 
     def _misceve(run: str, name: str) -> str:
+        """Стем місцевого кадру для файлу геометрії з пакета."""
         stem = name[: -len(".lines.json")]
-        return f"{stems[run].get(stem, stem)}.lines.json"
+        return stems[run].get(stem, stem)
 
-    poverkh = sorted(f"{run}/{_misceve(run, name)}" for run, name in lezhyt
-                     if (htr_root / run / _misceve(run, name)).is_file())
+    poverkh = sorted(f"{run}/{HL.geometry_name(_misceve(run, name))}" for run, name in lezhyt
+                     if HL.has_geometry(htr_root / run, _misceve(run, name)))
     if poverkh and not force:
         raise AcceptError(
             f"геометрія для цих сторінок уже є ({len(poverkh)}, напр. "
@@ -777,7 +779,10 @@ def _accept_geometry_at(path: Path, src: str, *, force: bool, reindex: bool,
         dirs = []
         for d in staged:
             for f in sorted(d.iterdir()):
-                f.replace(htr_root / d.name / _misceve(d.name, f.name))
+                # 🗜 У пакеті геометрія проста, на диск лягає стиснутою.
+                HL.write_geometry_bytes(htr_root / d.name, _misceve(d.name, f.name),
+                                        f.read_bytes())
+                f.unlink()
             dirs.append(htr_root / d.name)
     finally:
         shutil.rmtree(stage, ignore_errors=True)
@@ -884,7 +889,7 @@ def _page_film(frames: list[dict[str, Any]], names: dict[str, str]) -> dict[str,
 
 
 #: Файли однієї сторінки прогону: текст і рамки рядків.
-_PAGE_SUFFIXES = (".txt", ".lines.json")
+_PAGE_SUFFIXES = (".txt", *HL.GEOMETRY_SUFFIXES)
 
 
 def _stamp_run(run_dir: Path, m: Manifest, src: Path, *, voice: dict[str, Any],

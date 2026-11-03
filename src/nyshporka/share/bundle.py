@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from nyshporka.htr import layout as HL
 from nyshporka.utils import tarsafe
 
 #: Розширення пакета. Одне слово, щоб його впізнавали й ті, хто Нишпорки не має.
@@ -85,6 +86,10 @@ SCHEMA_PLAIN = 2
 #: Що взагалі їде в пакет. Решта — ні, і це рішення, а не недогляд.
 PACKED_TEXT = "*.txt"
 PACKED_GEOMETRY = "*.lines.json"
+#: 🗜 Геометрія на диску з 0.40.0 стиснута (`nyshporka.htr.layout`), а в пакет
+#: їде розтиснутою під ім'ям `*.lines.json`: формат пулу не міняється, бо
+#: старі клієнти учасників інакше пакета не приймуть. Сам пакет і так tar.gz.
+PACKED_GEOMETRY_GZ = "*.lines.json.gz"
 
 #: Два ВЗАЄМОВИКЛЮЧНІ набори: текстовий пакет і пакет геометрії.
 #:
@@ -100,7 +105,7 @@ PACKED = (PACKED_TEXT, META_NAME)
 #: перетерло б цей доказ іменем geom-файла: прогін тихо став би «прийнятим із
 #: geom.nyshtext», тобто джерело тексту зникло б. Та сама причина, через яку
 #: приймач геометрії не кличе `_stamp_shared`.
-PACKED_GEOM = (PACKED_GEOMETRY,)
+PACKED_GEOM = (PACKED_GEOMETRY_GZ, PACKED_GEOMETRY)
 
 #: Поля мети, які не переживають переїзд: шлях чужої машини й сліди її диска.
 #: Ворота (`gates._gate_payload`) шукають їх у маніфесті як ознаку того, що
@@ -400,7 +405,15 @@ def content_sha256(run_dir: Path) -> str:
 
 def has_geometry(run_dir: Path) -> bool:
     """Чи лежить у теці прогону геометрія рядків."""
-    return any(Path(run_dir).glob(PACKED_GEOMETRY))
+    return bool(HL.geometry_stems(Path(run_dir)))
+
+
+def arc_name(f: Path) -> str:
+    """Ім'я файлу в пакеті: стиснута геометрія їде під простим ім'ям."""
+    name = f.name
+    if name.endswith(HL.GZ_SUFFIX):
+        return name[: -len(".gz")]
+    return name
 
 
 def geom_path(text_path: Path) -> Path:
@@ -452,12 +465,14 @@ def _members(run_dir: Path, patterns: tuple[str, ...]) -> list[Path]:
     два окремі пакети, і набори в них взаємовиключні: спільний прапорець
     описував би стан «і те, й те», якого більше немає.
     """
-    seen: list[Path] = []
+    seen: dict[str, Path] = {}
     for pat in patterns:
         for f in sorted(run_dir.glob(pat)):
-            if f.is_file() and f not in seen:
-                seen.append(f)
-    return seen
+            # Сторінка з обома формами (обірване стиснення) їде один раз —
+            # стиснутою, вона первинна (`htr.layout.GEOMETRY_SUFFIXES`).
+            if f.is_file() and arc_name(f) not in seen:
+                seen[arc_name(f)] = f
+    return list(seen.values())
 
 
 def plan(run_dirs: list[Path], *, patterns: tuple[str, ...] = PACKED) -> dict[str, Any]:
@@ -475,7 +490,7 @@ def plan(run_dirs: list[Path], *, patterns: tuple[str, ...] = PACKED) -> dict[st
                 size = f.stat().st_size
             except OSError:
                 continue
-            files.append({"arc": f"{RUNS_SUB}/{d.name}/{f.name}",
+            files.append({"arc": f"{RUNS_SUB}/{d.name}/{arc_name(f)}",
                           "src": str(f), "bytes": size})
     return {"files": files, "voices": [v.as_json() for v in voices],
             "bytes": sum(int(f["bytes"]) for f in files),
@@ -512,9 +527,11 @@ def write(dest: Path, manifest: Manifest, run_dirs: list[Path], *,
             _add_bytes(tar, FRAMES_NAME, (rows + "\n").encode("utf-8"))
         for d in run_dirs:
             for f in _members(d, patterns):
-                arc = f"{RUNS_SUB}/{d.name}/{f.name}"
+                arc = f"{RUNS_SUB}/{d.name}/{arc_name(f)}"
                 if f.name == META_NAME:
                     _add_bytes(tar, arc, _clean_meta_bytes(f))
+                elif f.name.endswith(HL.GZ_SUFFIX):
+                    _add_bytes(tar, arc, HL.geometry_bytes(f))
                 else:
                     tar.add(f, arcname=arc)
     tmp.replace(dest)

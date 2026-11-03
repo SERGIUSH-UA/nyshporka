@@ -22,6 +22,7 @@ import pytest
 from _share import manifest_for
 
 from nyshporka.core import workspace as W
+from nyshporka.htr import layout as HL
 from nyshporka.share import accept, align, bundle, catalog, journal, upload
 
 BASE = "https://nyshporka.online/v1"
@@ -244,9 +245,8 @@ def test_heometriia_liahaie_pid_ti_sami_imena(tmp_path: Path, pul: Pul) -> None:
     accept.accept_geometry(str(bundle.geom_path(dest)), reindex=False)
 
     run = b / "reports" / "htr" / "spr-8433"
-    assert sorted(p.name for p in run.glob("*.lines.json")) == [
-        "0101_f9001.lines.json", "0102_f9002.lines.json", "0103_f9003.lines.json"]
-    ramky = json.loads((run / "0102_f9002.lines.json").read_text(encoding="utf-8"))
+    assert sorted(HL.geometry_stems(run)) == ["0101_f9001", "0102_f9002", "0103_f9003"]
+    ramky = HL.load_geometry(run, "0102_f9002") or {}
     assert ramky["boxes"][0][1] == 20, "рамки другого аркуша — на другому аркуші"
 
 

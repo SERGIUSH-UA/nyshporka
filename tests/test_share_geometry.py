@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 from _share import make_run, manifest_for
 
+from nyshporka.htr import layout as HL
 from nyshporka.share import accept, bundle, journal
 
 #: Кадрів у тестовій справі немає — пакування мусить про це сказати вголос.
@@ -117,12 +118,15 @@ def test_heometriia_liahaie_na_pryiniatyi_tekst(space: Path, tmp_path: Path) -> 
     text, geom = _pakety(space, tmp_path)
     accept.accept(str(text))
     run_dir = space / "reports" / "htr" / "spr-8433"
-    assert not list(run_dir.glob("*.lines.json"))
+    assert not HL.geometry_stems(run_dir)
 
     got = accept.accept_geometry(str(geom))
     assert got["runs"] == ["spr-8433"]
     assert got["pages"] == 3
-    assert len(list(run_dir.glob("*.lines.json"))) == 3
+    assert len(HL.geometry_stems(run_dir)) == 3
+    # 🗜 На диск рамки лягають стиснутими, хоч у пакеті вони прості.
+    assert len(list(run_dir.glob("*.lines.json.gz"))) == 3
+    assert not list(run_dir.glob("*.lines.json"))
 
 
 def test_heometriia_ne_chipaie_dokazu_pokhodzhennia(space: Path, tmp_path: Path) -> None:
@@ -219,7 +223,7 @@ def test_paket_skhemy_1_nese_ramky_vseredyni(space: Path, tmp_path: Path) -> Non
 
     got = accept.accept(str(staryi))
     assert got["schema"] == 1
-    assert len(list((src / "spr-8433").glob("*.lines.json"))) == 3, (
+    assert len(HL.geometry_stems(src / "spr-8433")) == 3, (
         "рамки старого пакета мусять лягти разом із текстом"
     )
 
