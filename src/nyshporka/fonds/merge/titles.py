@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import operator
 import re
 from typing import Any
 
@@ -387,7 +388,7 @@ def _widen_years(r: Row, row: dict[str, str]) -> None:
     позначкою джерела `fs`. Вужчі роки FS нічого не звужують.
     """
     got: list[str] = []
-    for fld, wider in (("year_from", lambda a, b: a < b), ("year_to", lambda a, b: a > b)):
+    for fld, wider in (("year_from", operator.lt), ("year_to", operator.gt)):
         v = (row.get(fld) or "").strip()[:4]
         cur = str(r.get(fld) or "").strip()[:4]
         if not v.isdigit():
