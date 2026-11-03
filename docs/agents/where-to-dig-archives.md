@@ -52,6 +52,9 @@
 | ДАХО | `archives.kh.gov.ua/?page_id=25402` (ф.40 оп.105) | ZIP із JPG (до 7 частин по ~1 ГБ) або DjVu на `daho.archives.gov.ua` | `site-daho` | 277 |
 | ДАМО | `archive.mk.ua/digital-archive/` (до 1917, після 1917) | ZIP із JPG на справу; частина описів — лише галерея на сторінці справи | `site-damo` | 17 613 |
 | ДАХеО | `kherson.archives.gov.ua/fondy-ta-dovidkovyj-aparat/oczyfrovani-dokumenty/` | PDF на Google Drive, посилання в тексті сторінки опису | `site-daheo` | 15 235 |
+| ДАЛуО | `lg.archives.gov.ua`: «Е-архів» (вкладка публікацій) і «Страховий фонд» (`/fonds/`) | книги РАЦС ф.Р-303 1939–1954 — ZIP із PDF-частинами; ревізькі казки 1811–1858 та ін. — PDF | `site-daluo` | 136 |
+| ДАРО | `rv.archives.gov.ua/ocifrovani-sprav` | метричні книги ф.Р-740, PDF (частинами «ч.1…»); шифри на сторінці немає — описи зіставлено вручну, опис з `annotation=13` поза каталогом | `site-daro` | 2 504 |
+| ДАСО | `46.201.250.75` («Документи on-line», лише http) | PDF і DjVu на справу: фонди до 1917, радянські, книги РАЦС ф.Р-7720 за районами; метрики там — за плівками FS, без шифри, у каталог не йдуть | `site-daso` | 683 |
 
 ## Центральні архіви
 

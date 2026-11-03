@@ -76,7 +76,7 @@ def _builtin(workspace: Path | None = None) -> list[Source]:
     else:
         out.append(ArchiumSource(workspace))   # пак без майданчиків — старий шлях
     # 🗂 Сайти обласних архівів зі своїми сторінками «оцифровані справи» —
-    # по джерелу на майданчик `cases` у паку (ДАОО, ДАДнО, ДАХО, ДАМО, ДАХеО).
+    # по джерелу на майданчик `cases` у паку (ДАОО, ДАДнО, ДАХО, ДАМО, ДАХеО, ДАЛуО, ДАРО, ДАСО).
     from nyshporka.sources.sitecases import sources_from_pack
 
     out += list(sources_from_pack(workspace))

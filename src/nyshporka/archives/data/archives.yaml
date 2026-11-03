@@ -374,7 +374,19 @@ repositories:
         # Перевірено 03.11.2026: справа file:609260 — 26 кадрів (inventory 1571). `/api/v1/fond-groups/` віддає 500,
         # тож груп фондів не показуємо, як у ЦДІАК.
         fond_groups: false
-  DALUO: {label: ДАЛуО, name: Державний архів Луганської області, country: UA, sites: {web: {url: https://lg.archives.gov.ua}}}
+  DALUO:
+    label: ДАЛуО
+    name: Державний архів Луганської області
+    country: UA
+    sites:
+      web:
+        url: https://lg.archives.gov.ua
+      cases:
+        url: https://lg.archives.gov.ua
+        parser: daluo
+        # «Е-архів» (вкладка публікацій): книги РАЦС ф.Р-303 1939–1954, ZIP на справу;
+        # «Страховий фонд» (`/fonds/`): ревізькі казки й літописи 1811–1927, PDF.
+        # Обхід 03.11.2026 — 136 справ. Метрики в кінці вкладки — без опису й справи.
   DAMO:
     label: ДАМО
     name: Державний архів Миколаївської області
@@ -404,7 +416,18 @@ repositories:
         # не обходом. `/api/v1/fond-groups/` віддає 500,
         # тож груп фондів не показуємо, як у ЦДІАК.
         fond_groups: false
-  DARO: {label: ДАРО, name: Державний архів Рівненської області, country: UA, sites: {web: {url: https://rv.archives.gov.ua}}}
+  DARO:
+    label: ДАРО
+    name: Державний архів Рівненської області
+    country: UA
+    sites:
+      web:
+        url: https://rv.archives.gov.ua
+      cases:
+        url: https://rv.archives.gov.ua
+        parser: daro
+        # «Оцифровані справи»: метричні книги ф.Р-740, PDF. Шифри на сторінці немає —
+        # описи зіставлено вручну (`DARO_OPYSY` у розборі, з обґрунтуванням).
   DAS: {label: ДАС, name: Державний архів міста Севастополя, country: UA}
   DASO:
     label: ДАСО
@@ -413,6 +436,12 @@ repositories:
     sites:
       web:
         url: https://daso.archives.gov.ua
+      cases:
+        # «Документи on-line» — окремий сайт на голому IP, лише http.
+        url: http://46.201.250.75
+        parser: daso
+        # Розділи фондів до 1917 і радянських, книги РАЦС ф.Р-7720 за районами; PDF і
+        # DjVu на справу. Метрики (`metrika1.php`) — за плівками FS, без фонду й опису.
     codes:
       babynyar: "33"
   DATO: {label: ДАТО, name: Державний архів Тернопільської області, country: UA, sites: {web: {url: https://archives.te.gov.ua}}}

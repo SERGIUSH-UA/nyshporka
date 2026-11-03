@@ -212,6 +212,16 @@ def frames_of(members: list[ZipMember]) -> list[ZipMember]:
     return sorted(imgs, key=lambda m: m.name)
 
 
+#: Документи всередині ZIP — коли архів пакує в нього не кадри, а файли справи.
+DOC_EXT = (".pdf", ".djvu")
+
+
+def docs_of(members: list[ZipMember]) -> list[ZipMember]:
+    """PDF і DjVu в ZIP, у порядку імен (`…_1.pdf`, `…_2.pdf` — частини справи)."""
+    docs = [m for m in members if m.name.lower().endswith(DOC_EXT) and not m.name.endswith("/")]
+    return sorted(docs, key=lambda m: (len(m.name), m.name))
+
+
 # ── джерело ──────────────────────────────────────────────────────────────────
 
 class SiteCasesSource:
@@ -227,7 +237,7 @@ class SiteCasesSource:
                   "шару читаються окремо",
         where_class="переглядач архіву",
         scope=SourceScope(note="лише сторінки «оцифровані справи» сайтів, для яких є "
-                               "розбір: ДАОО, ДАДнО, ДАХО, ДАМО, ДАХеО"),
+                               "розбір: ДАОО, ДАДнО, ДАХО, ДАМО, ДАХеО, ДАЛуО, ДАРО, ДАСО"),
         match_on=("title",), match_how="normalized",
         zero_means="на сторінках сайту на дату обходу справи з таким словом у назві не "
                    "було — не «не оцифровано»",
@@ -552,7 +562,10 @@ class SiteCasesSource:
             prefix = f"p{p}_" if multi else ""
             if f.kind == "zip":
                 rz = RemoteZip(self._get_range, f.url)
-                for m in frames_of(rz.members()):
+                members = rz.members()
+                # ДАЛуО кладе в ZIP не кадри, а PDF-частини справи (`…_C-6_1.pdf`):
+                # тоді одиниця — файл частини, поштучно так само через `Range`.
+                for m in frames_of(members) or docs_of(members):
                     out.append(_Frame(name=prefix + m.name.rsplit("/", 1)[-1], size=m.usize,
                                       read=_zip_reader(rz, m)))
             else:
@@ -583,7 +596,10 @@ class SiteCasesSource:
         note = ""
         if kinds <= FRAME_KINDS:
             try:
-                frames, unit = len(self._frame_plan(e)), "кадр"
+                plan = self._frame_plan(e)
+                frames = len(plan)
+                unit = ("файл" if plan and all(fr.name.lower().endswith(DOC_EXT) for fr in plan)
+                        else "кадр")
             except _NoRange:
                 frames, note = None, "сервер не віддає шматків ZIP — архів ляже цілим і розпакується"
         else:

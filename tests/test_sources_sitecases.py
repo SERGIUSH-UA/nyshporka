@@ -197,10 +197,11 @@ def _source(tmp_path: Path, parser: str = "daho") -> S.SiteCasesSource:
 
 def test_every_cases_site_in_the_pack_has_a_known_parser(tmp_path: Path) -> None:
     sites = dict(active().sites("cases"))
-    assert set(sites) == {"DAOO", "DADNO", "DAHO", "DAMO", "DAHEO"}
+    assert set(sites) == {"DAOO", "DADNO", "DAHO", "DAMO", "DAHEO", "DALUO", "DARO", "DASO"}
     assert all(s.parser in P.CRAWLERS for s in sites.values())
     ids = [s.id for s in load(tmp_path).all() if isinstance(s, S.SiteCasesSource)]
-    assert sorted(ids) == ["site-dadno", "site-daheo", "site-daho", "site-damo", "site-daoo"]
+    assert sorted(ids) == ["site-dadno", "site-daheo", "site-daho", "site-daluo", "site-damo",
+                           "site-daoo", "site-daro", "site-daso"]
 
 
 def test_without_a_catalog_zero_is_refused(tmp_path: Path) -> None:
@@ -456,3 +457,142 @@ def test_range_body_is_cut_at_the_asked_length(tmp_path: Path) -> None:
 def test_one_inconsistent_cache_reply_is_retried(tmp_path: Path) -> None:
     src = _with_client(tmp_path, _StreamClient([_Stream(200, b"", 0), _Stream(206, b"PK", 5)]))
     assert src._get_range("https://daho.archives.gov.ua/a.zip", 0, 1)[1] == b"PK"
+
+
+# ── ДАЛуО, ДАРО, ДАСО ────────────────────────────────────────────────────────
+
+DALUO_PUB = """<div id="tab19">реєстри <a href="../download/fonds/fonds_1.zip">zip</a></div>
+<div id="tab60" class="tab_v"><h3>Фонд №303 «Колекція книг ДРАЦС»</h3>
+<p>Опис №3 справ постійного зберігання, Біловодського районного відділу ДРАЦС за 1939-1945 роки</p>
+справа № 6 <a href="../download/digital_files/P-303_Op3_C-6.zip">у форматі ZIP</a>
+справа № 7 <a href="../download/digital_files/P-303_Op3_C-7.zip">у форматі ZIP</a>
+<p>Опис №18 справ постійного зберігання Старобільського відділу ДРАЦС за 1944 рік</p>
+справа № 39 <a href="../download/digital_files/P-303_Op18_C-39.zip">у форматі ZIP</a>
+<p>Метричні книги</p> Фонд 3, Метрична книга … 1883-1885 <a href="../download/2021/mb1883.pdf">PDF</a>
+</div><div id="tab20">збірники</div>"""
+
+DALUO_SFD = """<table><tr><th>Номер фонду</th><th>Номер опису</th><th>Номер справи</th><th>Склад</th>
+<th colspan='2'>Дати</th><th>Аркушів</th><th>PDF</th></tr>
+<tr><td>Ф-62</td><td>1</td><td>4</td><td><a href='gallery.php?p=2'>Ревізькі казки села Михайлівки</a></td>
+<td>березень 1816 р.</td><td>березень 1816 р.</td><td>22 / 22</td>
+<td><a target='_blank' href='MF-SFD/pdf/ДА_Луганської_обл.Ф.Ф-62.Оп.1.Спр.4.pdf'>24.9 Мб</a></td></tr>
+<tr><td>Р-332</td><td>невідомо</td><td>3</td><td>Без опису</td><td>1920</td><td>1921</td><td>5</td>
+<td><a href='MF-SFD/pdf/x.pdf'>1 Мб</a></td></tr></table>"""
+
+
+def test_daluo_racs_zip_shifra_comes_from_the_file_name() -> None:
+    got = P.parse_daluo_pub("https://lg.archives.gov.ua/pages/fonds-publications.html", DALUO_PUB)
+    assert [(e.fond, e.opys, e.sprava) for e in got] == [
+        ("Р-303", "3", "6"), ("Р-303", "3", "7"), ("Р-303", "18", "39")]
+    assert got[0].title.startswith("Біловодського") and got[0].years == "1939–1945"
+    assert got[0].files[0].url == "https://lg.archives.gov.ua/download/digital_files/P-303_Op3_C-6.zip"
+
+
+def test_daluo_insurance_table_single_quoted_links_and_unknown_opys() -> None:
+    """`href='…'` в одинарних лапках; опис «невідомо» — без шифри, не справа."""
+    (e,) = P.parse_daluo_sfd("https://lg.archives.gov.ua/fonds/", DALUO_SFD)
+    assert (e.fond, e.opys, e.sprava, e.years) == ("62", "1", "4", "1816")
+    assert e.files[0].kind == "pdf" and "Спр.4.pdf" in e.files[0].url
+
+
+DARO = """<table><tr><th>Номер справи</th><th>Заголовок справи</th><th>Завантажити</th></tr>
+<tr><td> 1</td><td><a href="/upload/a1.pdf"><p>Метрична книга, м. Березне, 1931-1932 рр., ч.1</p></a></td>
+<td><a href="/upload/a1.pdf">dl</a></td></tr>
+<tr><td> 1</td><td><a href="/upload/a2.pdf"><p>Метрична книга, м. Березне, 1931-1932 рр., ч.2</p></a></td>
+<td><a href="/upload/a2.pdf">dl</a></td></tr>
+<tr><td> 3</td><td><a href="/upload/b.pdf"><p>Метрична книга, с. Балашівка, 1932р.</p></a></td>
+<td><a href="/upload/b.pdf">dl</a></td></tr></table>"""
+
+
+def test_daro_parts_of_one_case_are_one_case() -> None:
+    got = P.parse_daro_opys("https://rv.archives.gov.ua/ocifrovani-sprav", DARO, "Р-740", "7")
+    assert [(e.sprava, len(e.files)) for e in got] == [("1", 2), ("3", 1)]
+    assert [f.label for f in got[0].files] == ["ч.1", "ч.2"]
+    assert got[0].title == "Метрична книга, м. Березне, 1931-1932 рр"
+
+
+def test_daro_opys_map_never_guesses() -> None:
+    """🔴 Сторінка не несе шифри. Опис 13 (277 од. проти 270 в оп.16) — поза картою."""
+    assert (5, 5, 13) not in P.DARO_OPYSY
+    assert P.DARO_OPYSY[(5, 5, 14)] == ("Р-740", "7")
+
+
+DASO = """<p><span class="text1"> Фонд 437</span><span class="text2">- Путивльське казначейство</span>
+<span class="text1"> Опис 1 </span><blockquote>Окладні аркуші. 1890-1900 рр.</blockquote>
+<a href="./storage/fonds/F437/x-437-1-10_1.pdf" class="button">Справа 10-1</a>
+<a href="./storage/fonds/F437/x-437-1-10_2.pdf" class="button">10-2</a>
+<a href="./storage/fonds/F437/x-437-1-11.pdf" class="button">11</a></p>
+<p>Фонд 814 Конотопська міська управа <a href="./storage/opus/do1917/005/f814o1L.pdf">Опис 1Л</a>
+<a href="./storage/fonds/F814/x-814-1л-1.pdf">1</a></p>
+<p>Фонд Р 1655 - Народний суд Опис 1 Судові справи. 1920-1923 рр.
+<a href="./storage/fonds/R1655/x-r1655-1-232.pdf">232</a>
+<a href="./storage/fonds/R1655/y.djvu">619 Виконавчі комітети волосних рад, 1921</a></p>
+<p>Фонд - P-7720 Опис 1 Білопільський район
+<a href="./storage/fonds/P7720/p7720op1d412.pdf">Справа №412</a></p>"""
+
+
+def test_daso_walks_fond_opys_and_case_buttons() -> None:
+    got = P.parse_daso_page("http://46.201.250.75/r1p07.php", DASO)
+    by = {(e.fond, e.opys, e.sprava): e for e in got}
+    assert set(by) == {("437", "1", "10"), ("437", "1", "11"), ("814", "1л", "1"),
+                       ("Р-1655", "1", "232"), ("Р-1655", "1", "619"), ("Р-7720", "1", "412")}
+    # «10-1», «10-2» — частини однієї справи
+    assert [f.label for f in by[("437", "1", "10")].files] == ["ч.1", "ч.2"]
+    assert by[("437", "1", "11")].years == "1890–1900"
+    # назва в самій кнопці, DjVu — теж файл справи
+    e = by[("Р-1655", "1", "619")]
+    assert e.title.startswith("Виконавчі комітети") and e.files[0].kind == "djvu"
+
+
+@pytest.mark.parametrize(("raw", "fond"), [("Р 1655", "Р-1655"), ("P-7720", "Р-7720"),
+                                           ("П-4459", "П-4459"), ("442", "442")])
+def test_daso_fond_letters(raw: str, fond: str) -> None:
+    assert P.daso_fond(raw) == fond
+
+
+def test_daso_same_files_on_two_pages_are_one_case() -> None:
+    page = """<p>Фонд 992 Опис 1 Справи <a href="./storage/fonds/F992/a.pdf">1</a></p>"""
+    more = page + """<p>Фонд 993 Опис 1 Інше <a href="./storage/fonds/F993/b.pdf">5</a></p>"""
+    # меню з незакритим `<a>` — як на живому сайті: друга сторінка мусить знайтись
+    pages = {"http://h/": '<li><a href="./r1p10.php">a <li><a href="./r1p14.php">b</a>',
+             "http://h/r1p10.php": page, "http://h/r1p14.php": more}
+    stats = P.CrawlStats()
+    got = list(P.crawl_daso(lambda u: (u, pages[u]), "http://h", stats))
+    assert [(e.fond, e.sprava) for e in got] == [("992", "1"), ("993", "5")]
+    assert stats.pages == 3
+
+
+def test_zip_of_pdf_parts_gives_files_not_zero_frames() -> None:
+    """ДАЛуО кладе в ZIP PDF-частини справи: без цього маніфест казав «0 кадрів»."""
+    ms = [S.ZipMember(name=n, offset=0, csize=1, usize=1, method=0)
+          for n in ("P-303_Op3_C-6_10.pdf", "P-303_Op3_C-6_2.pdf", "P-303_Op3_C-6_1.pdf")]
+    assert S.frames_of(ms) == []
+    assert [m.name for m in S.docs_of(ms)] == [
+        "P-303_Op3_C-6_1.pdf", "P-303_Op3_C-6_2.pdf", "P-303_Op3_C-6_10.pdf"]
+
+
+def test_zip_of_pdf_parts_is_planned_as_files(tmp_path: Path,
+                                              monkeypatch: pytest.MonkeyPatch) -> None:
+    """Джерело справді бере PDF із ZIP: маніфест — 2 файли, а не 0 кадрів."""
+    ms = [S.ZipMember(name=n, offset=0, csize=1, usize=1, method=0)
+          for n in ("C-6_2.pdf", "C-6_1.pdf", "readme.txt")]
+
+    class _Zip:
+        def __init__(self, get_range: object, url: str) -> None:
+            pass
+
+        def members(self) -> list[S.ZipMember]:
+            return ms
+
+        def read(self, m: S.ZipMember) -> bytes:
+            return b"%PDF"
+
+    monkeypatch.setattr(S, "RemoteZip", _Zip)
+    src = _source(tmp_path)
+    e = P.CaseEntry(fond="Р-303", opys="3", sprava="6", title="", years="", page="x",
+                    files=[P.CaseFile(url="https://h/a.zip", kind="zip")])
+    monkeypatch.setattr(src, "_resolve", lambda ref: e)
+    monkeypatch.setattr(src, "_online", lambda: None)
+    m = src.manifest("Р-303/3/6")
+    assert (m.frames, m.meta["unit"]) == (2, "файл")
+    assert [f.name for f in src._frame_plan(e)] == ["C-6_1.pdf", "C-6_2.pdf"]

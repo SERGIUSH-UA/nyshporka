@@ -112,12 +112,14 @@ def text(fragment: str) -> str:
 def links(base: str, fragment: str) -> list[tuple[str, str]]:
     """(абсолютна адреса, текст) усіх посилань уривка, у порядку появи."""
     out = []
-    for m in re.finditer(r'<a\b[^>]*href="([^"#]+)"[^>]*>(.*?)</a>', fragment, re.S | re.I):
+    # Лапки будь-які: таблиця ДАЛуО пише `href='…'`.
+    for m in re.finditer(r"""<a\b[^>]*href=(?:"([^"#]+)"|'([^'#]+)')[^>]*>(.*?)</a>""",
+                         fragment, re.S | re.I):
         # 🔴 Невидимі знаки напрямку (`‎`) і пробіли в кінці адреси — з
         # копіювання в редакторі сайту; з ними сервер відповідає 404 (ДАХеО р-1887).
-        href = _INVISIBLE.sub("", _html.unescape(m.group(1))).strip()
+        href = _INVISIBLE.sub("", _html.unescape(m.group(1) or m.group(2))).strip()
         if href:
-            out.append((urljoin(base, href), text(m.group(2))))
+            out.append((urljoin(base, href), text(m.group(3))))
     return out
 
 
@@ -506,7 +508,7 @@ def crawl_daheo(get: GetPage, site_url: str, stats: CrawlStats,
             tick(i, len(fonds), unquote(f).rstrip("/").rsplit("/", 1)[-1][:50])
 
 
-_PART = re.compile(r"[,;\s]*\(?\s*(?:ч\.|част\.|частина)\s*(\d+)\s*\)?\s*$", re.I)
+_PART = re.compile(r"[,;\s]*\(?\s*(?:ч\.|част\.|частина)\s*(\d+|[IVX]+)\s*\)?\s*$", re.I)
 
 
 def merge_parts(entries: Iterator[CaseEntry] | list[CaseEntry]) -> list[CaseEntry]:
@@ -542,10 +544,253 @@ def merge_parts(entries: Iterator[CaseEntry] | list[CaseEntry]) -> list[CaseEntr
     return out
 
 
+# ── ДАЛуО: «Е-архів» (ф.Р-303, ZIP) і страховий фонд (`/fonds/`, PDF) ─────────
+
+DALUO_PUB = "/pages/fonds-publications.html"
+DALUO_SFD = "/fonds/"
+_DALUO_ZIP = re.compile(r"/P-(\d+)_Op(\d+[а-яa-z]?)_C-(\d+[а-яa-z]?)\.zip$", re.I)
+
+
+def daluo_fond(raw: str) -> str:
+    """«Ф-54» → «54» (дореволюційний), «Р-303» / «P-303» → «Р-303»."""
+    v = re.sub(r"\s+", "", raw).replace("‑", "-")
+    m = re.fullmatch(r"([ФфРрPpПп])?-?(\d+[а-яa-z]?)", v)
+    if not m:
+        return norm_num(v)
+    letter = (m.group(1) or "").upper()
+    if letter in ("", "Ф"):
+        return norm_num(m.group(2))
+    return f"{'П' if letter == 'П' else 'Р'}-{norm_num(m.group(2))}"
+
+
+def parse_daluo_pub(base: str, page: str) -> list[CaseEntry]:
+    """Вкладка «Е-архів»: книги РАЦС ф.Р-303, ZIP на справу.
+
+    Шифра — з імені файла (`P-303_Op3_C-6.zip`): у тексті поруч лише «справа № 6»,
+    а фонд і опис — у заголовку блока. Назва справи — заголовок опису (відділ РАЦС
+    і роки), бо окремої назви сайт не дає.
+    ⚠ Метрики й сповідні в кінці вкладки підписано лише фондом, без опису й справи:
+    шифри немає, тож у каталог вони не йдуть.
+    """
+    a = page.find('id="tab60"')
+    if a < 0:
+        return []
+    b = page.find('id="tab', a + 10)
+    seg = page[a: b if b > 0 else len(page)]
+    out: list[CaseEntry] = []
+    for blk in re.split(r"(?=Опис\s*№)", seg)[1:]:
+        head = re.sub(r"^Опис\s*№\s*\S+\s*", "", text(blk.split("<a", 1)[0]))
+        head = re.sub(r"\s*справа\s*№.*$", "", head).strip(" ,.")
+        head = re.sub(r"^справ\s+постійного\s+зберігання[,\s]*", "", head, flags=re.I)
+        for u, _t in links(base, blk):
+            m = _DALUO_ZIP.search(u)
+            if not m:
+                continue
+            out.append(CaseEntry(fond=f"Р-{m.group(1)}", opys=norm_num(m.group(2)),
+                                 sprava=norm_num(m.group(3)), title=head,
+                                 years=years_of(head), page=base,
+                                 files=[CaseFile(url=u, kind="zip")]))
+    return out
+
+
+def parse_daluo_sfd(base: str, page: str) -> list[CaseEntry]:
+    """Таблиця страхового фонду: фонд · опис · справа · склад · дати · аркуші · PDF."""
+    out: list[CaseEntry] = []
+    for cells in rows(page):
+        if len(cells) < 8:
+            continue
+        fond, opys, spr = (text(c) for c in cells[:3])
+        if not (re.search(r"\d", fond) and re.fullmatch(r"\d+[а-яa-z]?", opys)
+                and re.fullmatch(r"\d+[а-яa-z]?", spr)):
+            continue
+        pdf = [u for u, _ in links(base, cells[-1]) if _kind(u) == "pdf"]
+        if not pdf:
+            continue
+        title = text(cells[3])
+        out.append(CaseEntry(fond=daluo_fond(fond), opys=norm_num(opys), sprava=norm_num(spr),
+                             title=title, years=years_of(" ".join(text(c) for c in cells[4:6])),
+                             page=base, files=[CaseFile(url=pdf[0], kind="pdf")]))
+    return out
+
+
+def crawl_daluo(get: GetPage, site_url: str, stats: CrawlStats,
+                tick: Tick | None = None) -> Iterator[CaseEntry]:
+    root = site_url.rstrip("/")
+    for i, (rel, parse) in enumerate(((DALUO_PUB, parse_daluo_pub),
+                                      (DALUO_SFD, parse_daluo_sfd)), 1):
+        pb, pt = get(root + rel)
+        stats.pages += 1
+        got = parse(pb, pt)
+        if not got:
+            stats.empty_pages.append(root + rel)
+        yield from got
+        if tick:
+            tick(i, 2, rel)
+
+
+# ── ДАРО: «Оцифровані справи» — таблиця «номер справи · заголовок · PDF» ─────
+
+#: Сторінка опису на сайті (`period`, `fund`, `annotation`) → (фонд, опис).
+#: 🔴 Шифри на сторінці НЕМАЄ — ні фонду, ні опису, лише номер справи. Відповідність
+#: звірено 03.11.2026 з розділом «Оцифровані описи» (`/ocifrovani-opisi/5`) за
+#: кількістю одиниць і роками опису: 6→оп.4 (825, 1842–1925), 10→оп.5 (28,
+#: 1873–1925), 11→оп.6 (701, 1870–1931), 12→оп.15 (131, 1859–1944; оп.10 має ті
+#: самі 131, але 1883–1944), 14→оп.7 (220, 1882–1933; дайджест Укрдержархіву
+#: жовтня 2026 — р-740 оп.7 спр.11–40). 9→оп.2: роки 1840–1914 збігаються, на
+#: сайті 785 од. проти 786 в описі, але номери справ ідуть до 786.
+#: ⚠ `annotation=13` (метрики 1939–1948) свідомо поза переліком: «277 од. зб.»
+#: проти 270 в оп.16, а номери справ ідуть до 282 — шифра не доведена. Невідомий
+#: опис не вгадується: краще без справи, ніж справа під чужою шифрою.
+DARO_OPYSY: dict[tuple[int, int, int], tuple[str, str]] = {
+    (5, 5, 6): ("Р-740", "4"), (5, 5, 9): ("Р-740", "2"), (5, 5, 10): ("Р-740", "5"),
+    (5, 5, 11): ("Р-740", "6"), (5, 5, 12): ("Р-740", "15"), (5, 5, 14): ("Р-740", "7"),
+}
+
+
+def parse_daro_opys(base: str, page: str, fond: str, opys: str) -> list[CaseEntry]:
+    out: list[CaseEntry] = []
+    for cells in rows(page):
+        if len(cells) < 2:
+            continue
+        num = text(cells[0])
+        if not re.fullmatch(r"\d+[а-яa-z]?", num):
+            continue
+        pdf = [u for u, _ in links(base, "".join(cells[1:])) if _kind(u) == "pdf"]
+        if not pdf:
+            continue
+        title = text(cells[1])
+        out.append(CaseEntry(fond=fond, opys=opys, sprava=norm_num(num), title=title,
+                             years=years_of(title), page=base,
+                             files=[CaseFile(url=pdf[0], kind="pdf")]))
+    return merge_parts(out)
+
+
+def crawl_daro(get: GetPage, site_url: str, stats: CrawlStats,
+               tick: Tick | None = None) -> Iterator[CaseEntry]:
+    root = site_url.rstrip("/")
+    for i, ((p, f, a), (fond, opys)) in enumerate(DARO_OPYSY.items(), 1):
+        url = f"{root}/ocifrovani-sprav?period={p}&&fund={f}&&annotation={a}"
+        pb, pt = get(url)
+        stats.pages += 1
+        got = parse_daro_opys(pb, pt, fond, opys)
+        if not got:
+            stats.empty_pages.append(url)
+        yield from got
+        if tick:
+            tick(i, len(DARO_OPYSY), f"ф.{fond} оп.{opys}")
+
+
+# ── ДАСО: «Документи on-line» — «Фонд … Опис … Справа 1, 2, 3» з PDF ─────────
+
+#: Сторінки розділів зі справами. `metrika1.php` (метрики) — поза ними: книги там
+#: підписано плівкою FamilySearch і справою, без фонду й опису, шифри немає.
+#: `dracs3.php` дає лише скани описів.
+_DASO_PAGE = re.compile(r"/(?:r\d+p\d+|r5[a-z]+\d?)\.php$")
+_DASO_TOKEN = re.compile(
+    r"Фонд\s*[-–]?\s*(?P<f>(?:[РрPpПпRr]\s*[-–]?\s*)?\d+[а-яa-z]?)\b"
+    r"|Опис\s*№?\s*(?P<o>\d+[а-яa-z]?)\b"
+    r"|⟦(?P<l>\d+)⟧", re.I)   # «Опис 1Л» — літера велика
+#: Кнопка справи: «Справа 1», «2», «10-1» / «17-II» (справа частинами), «619 Назва».
+_DASO_CASE = re.compile(r"(?:Справа\s*№?\s*)?(?P<n>\d+[а-яa-z]?)"
+                        r"(?:\s*[-_]\s*(?P<p>\d+|[IVX]+)\b|\s*[(,]?\s*ч\.?\s*(?P<c>\d+)\)?)?"
+                        r"(?:\s+(?P<rest>\D.*))?", re.I)
+
+
+def daso_fond(raw: str) -> str:
+    """«Р 1655», «P-7720» (латиницею) → «Р-1655»; «П-4459» → «П-4459»; «442» → «442»."""
+    v = re.sub(r"[\s–-]+", "", raw)
+    m = re.fullmatch(r"([РрPpПпRr]?)(\d+[а-яa-z]?)", v)
+    if not m:
+        return norm_num(v)
+    letter = m.group(1)
+    if not letter:
+        return norm_num(m.group(2))
+    return f"{'П' if letter in 'Пп' else 'Р'}-{norm_num(m.group(2))}"
+
+
+def parse_daso_page(base: str, page: str) -> list[CaseEntry]:
+    """Обійти текст сторінки: поточні фонд і опис, далі кожна кнопка-PDF — справа.
+
+    Назва справи — опис складу опису (текст між «Опис N» і першою кнопкою): назв
+    окремих справ сайт не дає.
+    """
+    body = re.sub(r"<script.*?</script>|<style.*?</style>", "", page, flags=re.S | re.I)
+    found: list[tuple[str, str]] = []
+
+    def mark(m: re.Match[str]) -> str:
+        # 🔴 Скан опису (`storage/opus/`) — не справа, але напис на ньому («Опис 1Л»)
+        # і є номером опису: вирізаний разом із посиланням, він губився, і справи
+        # опису лишались без шифри (ф.721, ф.814).
+        if "/storage/opus/" in m.group(0):
+            return " " + m.group(1) + " "
+        found.append((m.group(0), ""))
+        return f" ⟦{len(found) - 1}⟧ "
+
+    body = re.sub(r"""<a\b[^>]*href=["'][^"']+\.(?:pdf|djvu)["'][^>]*>(.*?)</a>""", mark,
+                  body, flags=re.S | re.I)
+    files = [links(base, a)[0] for a, _ in found]
+    flat = text(body)
+    fond = opys = desc = ""
+    desc_from = -1
+    out: list[CaseEntry] = []
+    for m in _DASO_TOKEN.finditer(flat):
+        if m.group("f"):
+            fond, opys, desc, desc_from = daso_fond(m.group("f")), "", "", -1
+        elif m.group("o"):
+            opys, desc, desc_from = norm_num(m.group("o")), "", m.end()
+        else:
+            if desc_from >= 0:
+                desc = re.sub(r"⟦\d+⟧", "", flat[desc_from:m.start()]).strip(" .,-–")
+                desc_from = -1
+            url, label = files[int(m.group("l"))]
+            if not (fond and opys):
+                continue
+            c = _DASO_CASE.fullmatch(label.strip())
+            if not c:
+                continue
+            part = c.group("p") or c.group("c")
+            title = (c.group("rest") or desc).strip() + (f", ч.{part}" if part else "")
+            out.append(CaseEntry(fond=fond, opys=opys, sprava=norm_num(c.group("n")),
+                                 title=title, years=years_of(c.group("rest") or desc),
+                                 page=base, files=[CaseFile(url=url, kind=_kind(url))]))
+    return merge_parts(out)
+
+
+def crawl_daso(get: GetPage, site_url: str, stats: CrawlStats,
+               tick: Tick | None = None) -> Iterator[CaseEntry]:
+    root = site_url.rstrip("/")
+    rb, rt = get(root + "/")
+    stats.pages += 1
+    # 🔴 Сирі `href`, а не `links()`: у меню частина `<a>` не закрита, і через
+    # `links()` обхід бачив 24 розділи з 49 — половину справ сайту.
+    hrefs = re.findall(r"""href=["']([^"'#]+\.php)["']""", rt, re.I)
+    pages = list(dict.fromkeys(u for u in (urljoin(rb, h) for h in hrefs) if _DASO_PAGE.search(u)))
+    seen: set[str] = set()
+    for i, p in enumerate(pages, 1):
+        pb, pt = get(p)
+        stats.pages += 1
+        got = parse_daso_page(pb, pt)
+        if not got:
+            stats.empty_pages.append(p)
+        # Та сама справа тими самими файлами на двох сторінках розділів (ф.992) —
+        # одна справа, а не дві копії.
+        for e in got:
+            urls = {f.url for f in e.files}
+            if urls & seen:
+                continue
+            seen |= urls
+            yield e
+        if tick:
+            tick(i, len(pages), p.rsplit("/", 1)[-1])
+
+
 CRAWLERS: dict[str, Callable[..., Iterator[CaseEntry]]] = {
     "daoo": crawl_daoo,
     "dadno": crawl_dadno,
     "daho": crawl_daho,
     "damo": crawl_damo,
     "daheo": crawl_daheo,
+    "daluo": crawl_daluo,
+    "daro": crawl_daro,
+    "daso": crawl_daso,
 }

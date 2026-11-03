@@ -69,7 +69,7 @@ class SiteCollector:
         src = self._src(target.repo)
         if src is None:
             return (f"для архіву {target.repo} сторінок «оцифровані справи» в паку не "
-                    f"описано — розбір є для ДАОО, ДАДнО, ДАХО, ДАМО, ДАХеО")
+                    f"описано — розбір є для ДАОО, ДАДнО, ДАХО, ДАМО, ДАХеО, ДАЛуО, ДАРО, ДАСО")
         if self.workspace is None and self._source is None:
             return "для каталогу сайту потрібен робочий простір"
         if src.catalog_source()[0] == "none":
