@@ -497,6 +497,58 @@ def test_old_kraken_is_upgraded_in_place_not_beside(tmp_path, monkeypatch):
         assert spec in pip[0], f"{spec} не потрапив у резолвер"
 
 
+def test_torchvision_ceiling_is_the_newest_verified_version(man):
+    """Стеля torchvision у маніфесті = найновіша звірена патчем сегментації й
+    = еталон для хмари. Розійдуться — свіже середовище знову візьме незвірену
+    версію, якої може не бути на CUDA-індексі (відгук №12)."""
+    from nyshporka.htr.patches import seg_resize as SR
+
+    ceiling = man.install_specs()["torchvision"]
+    newest = max(SR.TESTED_TORCHVISION, key=lambda v: tuple(int(x) for x in v.split(".")))
+    assert ceiling == f"torchvision<={newest}", ceiling
+    ref = next(s for s in man.torch_reference if s.startswith("torchvision=="))
+    assert ref == f"torchvision=={newest}", ref
+
+
+@pytest.mark.parametrize(("spec", "have", "ok"), [
+    ("torchvision<=0.29.1", "0.29.2", False),
+    ("torchvision<=0.29.1", "0.29.1+cu126", True),
+    ("torchvision<=0.29.1", "0.25.0+cpu", True),
+    ("rapidfuzz>=3.10", "3.9.7", False),
+    ("rapidfuzz>=3.10", "3.10", True),
+    ("timm>=1.0,<2", "2.0.1", False),
+    ("timm>=1.0", "", None),
+    ("strhub @ git+https://x/y.git@abc", "1.0", None),
+])
+def test_spec_allows_reads_bounds(spec, have, ok):
+    assert M.spec_allows(spec, have) is ok
+
+
+def test_installed_torchvision_above_the_ceiling_is_updated_in_place(tmp_path, monkeypatch):
+    """0.29.2, поставлений на 0.39–0.40.0, стелі не задовольняє — `htr install`
+    оновлює його на місці, а не лишає незвірену версію назавжди."""
+    py = env.venv_python(tmp_path)
+    py.parent.mkdir(parents=True, exist_ok=True)
+    py.write_text("", encoding="utf-8")
+    pins = {s.split("==")[0]: s.split("==")[1] for s in M.active().packages if "==" in s}
+
+    def fake_probe(_py, code, timeout=120):
+        if "version('torchvision')" in code:
+            return "0.29.2"
+        for dist, ver in pins.items():
+            if f"version({dist!r})" in code:
+                return ver
+        if code.startswith("import importlib.metadata"):
+            return "99.0"
+        if "cuda.is_available" in code:
+            return "False"
+        return ""
+
+    monkeypatch.setattr(env, "_probe", fake_probe)
+    rep = env.inspect(tmp_path)
+    assert rep.stale == ("torchvision",), rep.stale
+
+
 def test_the_cloud_box_gets_the_reference_torch(man):
     """Хмарний бокс ставить рівно ту збірку torch, що резолвить kraken на свіжій
     машині, — інакше хмара й дім рахували б різними torch. Індекс під карту бокс

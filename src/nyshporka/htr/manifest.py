@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -60,6 +61,36 @@ def dist_name(spec: str) -> str:
     for mark in _SPEC_BREAK:
         out = out.split(mark)[0]
     return out.strip()
+
+
+_BOUND = re.compile(r"(<=|>=|==|!=|<|>)\s*(\d+(?:\.\d+)*)")
+
+
+def _release(v: str) -> tuple[int, ...]:
+    m = re.match(r"\s*(\d+(?:\.\d+)*)", v.split("+", 1)[0])
+    return tuple(int(x) for x in m.group(1).split(".")) if m else ()
+
+
+def spec_allows(spec: str, version: str) -> bool | None:
+    """Чи лежить версія в межах специфікації: `torchvision<=0.29.1` і `0.29.2` → False.
+
+    Локальна мітка (`+cu126`, `+cpu`) не рахується — як у PEP 440. `None` — меж
+    немає або їх не розібрати (`~=`, git, нерозбірна версія): тоді судити не
+    беремось, і пакет не вважається застарілим.
+    """
+    have = _release(version)
+    bounds = _BOUND.findall(str(spec)[len(dist_name(spec)):])
+    if not have or not bounds:
+        return None
+    for op, raw in bounds:
+        want = tuple(int(x) for x in raw.split("."))
+        n = max(len(have), len(want))
+        a, b = have + (0,) * (n - len(have)), want + (0,) * (n - len(want))
+        ok = {"<=": a <= b, ">=": a >= b, "==": a == b, "!=": a != b,
+              "<": a < b, ">": a > b}[op]
+        if not ok:
+            return False
+    return True
 
 
 @dataclass(frozen=True)

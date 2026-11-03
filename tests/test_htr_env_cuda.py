@@ -88,8 +88,23 @@ def test_cuda_wheel_keeps_the_version_kraken_resolved(monkeypatch, man):
     fake.installed = {"torch": "2.10.0+cpu", "torchvision": "0.25.0+cpu"}
     env._ensure_cuda(Path("venv"), man)
     cmd = fake.cmds[0]
-    assert "torch==2.10.0" in cmd and "torchvision==0.25.0" in cmd, cmd
+    assert "torch==2.10.0" in cmd, cmd
     assert "torch" not in cmd, "лишилось непіноване ім'я"
+    # torchvision — у межах стелі маніфесту: під torch 2.10 резолвер сам візьме 0.25
+    assert man.install_specs()["torchvision"] in cmd, cmd
+
+
+def test_cuda_wheel_does_not_demand_a_torchvision_the_index_lacks(monkeypatch, man):
+    """🔴 Відгук №12 (03.11.2026): крок ② поставив з PyPI torchvision 0.29.2, а на
+    cu126 і cu130 є лише 0.29.1 — пін на 0.29.2 давав «no version of
+    torchvision==0.29.2», і лишалась CPU-збірка. Пінується лише torch."""
+    fake = Fake(monkeypatch, sees=["False", "True"], card=RTX_3050)
+    fake.installed = {"torch": "2.14.0", "torchvision": "0.29.2"}
+    env._ensure_cuda(Path("venv"), man)
+    cmd = fake.cmds[0]
+    assert "torch==2.14.0" in cmd, cmd
+    assert not any(c.startswith("torchvision==") for c in cmd), cmd
+    assert "torchvision<=0.29.1" in cmd, cmd
 
 
 def test_wheel_that_installed_but_did_not_help_is_not_success(monkeypatch, man, capsys):

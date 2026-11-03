@@ -195,12 +195,15 @@ def _inspect(venv: Path, man: M.Manifest | None = None) -> EnvReport:
         return EnvReport(ok=False, problems=(f"немає інтерпретатора: {py}",))
 
     missing: list[str] = []
+    #: Версії пакетів маніфесту — одна проба на пакет на весь огляд.
+    versions: dict[str, str] = {}
     for spec in man.packages:
         # 🔴 Ріже `manifest.dist_name`, а не власний вираз. Доти тут стояла
         # копія, і саме розбіжність між нею і тим, як ім'я шукав `setup`,
         # давала тиху ваду. Копія до того ж не знала ні `~=`, ні екстр.
         dist = M.dist_name(spec)
-        if not _version_of(py, dist):
+        versions[dist] = _version_of(py, dist)
+        if not versions[dist]:
             missing.append(dist)
     for v in man.vcs_packages:
         # 🔴 Модуль із `probe`, а не голе ім'я: порожній `strhub` (з архіву
@@ -221,10 +224,17 @@ def _inspect(venv: Path, man: M.Manifest | None = None) -> EnvReport:
     problems: list[str] = []
     stale: list[str] = []
     for spec in man.packages:
+        dist = M.dist_name(spec)
         if "==" not in spec:
+            # Межі (`torchvision<=0.29.1`): версія поза ними оновлюється на місці.
+            # Без цього стеля діяла б лише на свіже середовище, а вже поставлений
+            # незвірений torchvision 0.29.2 лишався б назавжди (відгук №12).
+            have = versions.get(dist, "")
+            if have and M.spec_allows(spec, have) is False:
+                stale.append(dist)
             continue
-        dist, want = M.dist_name(spec), spec.split("==", 1)[1].strip()
-        have = kraken if dist == "kraken" else _version_of(py, dist)
+        want = spec.split("==", 1)[1].strip()
+        have = kraken if dist == "kraken" else versions.get(dist, "")
         if have and have != want:
             stale.append(dist)
     want_k = next((s.split("==")[1] for s in man.packages
@@ -707,11 +717,22 @@ def _pinned_torch(py: Path, man: M.Manifest) -> list[str]:
     `uv pip check` — «incompatible». Патчі сегментації звірені на тому, що
     резолвить kraken, тож колесо під карту має бути тією самою версією.
     Локальна мітка (`+cpu`) відкидається: `==2.10.0` бере й `2.10.0+cu126`.
+
+    🔴 Пінується лише torch. torchvision кожного випуску вимагає рівно свій torch,
+    тож при піні torch резолвер сам бере torchvision, зібраний під нього на ЦЬОМУ
+    індексі, у межах стелі маніфесту (`torchvision<=…`). Пін torchvision на версію
+    з PyPI ламав крок: 03.11.2026 крок ② поставив 0.29.2, а на cu126 і cu130 є лише
+    0.29.1 — «there is no version of torchvision==0.29.2», лишалась CPU-збірка
+    (відгук №12 порталу).
     """
+    specs = man.install_specs()
     out: list[str] = []
     for dist in man.torch_default:
-        have = _version_of(py, dist).split("+", 1)[0]
-        out.append(f"{dist}=={have}" if have else dist)
+        if dist == "torch":
+            have = _version_of(py, dist).split("+", 1)[0]
+            out.append(f"{dist}=={have}" if have else dist)
+        else:
+            out.append(specs.get(dist, dist))
     return out
 
 
