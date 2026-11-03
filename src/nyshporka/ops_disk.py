@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from pydantic import BaseModel, Field
 
 from nyshporka.core.envelope import Envelope, fail, ok
@@ -100,6 +102,23 @@ class DiskCompactArgs(BaseModel):
                                                    "скільки файлів і скільки звільнить")
     limit: int = Field(default=0, ge=0, description="стиснути не більше стількох прогонів "
                                                     "за раз (0 — усі)")
+    workers: int = Field(default=0, ge=0, description="скільки процесів стискає теки "
+                                                      "паралельно (0 — за числом ядер)")
+
+
+def _compact_progress() -> Callable[[int, int, str], None]:
+    """Рядок у stderr раз на 30 с: захід на мільйон файлів інакше мовчить годинами."""
+    import sys
+    import time
+
+    last = [time.monotonic()]
+
+    def tick(i: int, total: int, name: str) -> None:
+        t = time.monotonic()
+        if t - last[0] >= 30 or i == total:
+            last[0] = t
+            print(f"[compact] {i}/{total} прогонів · {name}", file=sys.stderr, flush=True)
+    return tick
 
 
 @op("disk.compact", summary="Стиснути геометрію рядків старих прогонів "
@@ -110,7 +129,8 @@ def disk_compact(a: DiskCompactArgs) -> Envelope:
     from nyshporka.disk import compact as C
 
     try:
-        rep = C.compact(case=a.case, apply=a.apply, limit=a.limit)
+        rep = C.compact(case=a.case, apply=a.apply, limit=a.limit,
+                        workers=a.workers, progress=_compact_progress())
     except C.CompactError as exc:
         return fail(str(exc))
     env = ok(rep.as_json())

@@ -250,3 +250,46 @@ def test_compact_refuses_when_cloud_state_is_unknown(space: Path,
     with pytest.raises(C.CompactError):
         C.compact(apply=True)
     assert len(list(space.glob("*.lines.json"))) == 2
+
+
+def test_compact_in_processes_matches_one_by_one(space: Path,
+                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    """`workers` розводить теки по процесах: той самий підсумок, живу теку не чіпає,
+    стор не перечитує, звіт у порядку переліку."""
+    import shutil
+
+    from nyshporka import htr_store as S
+    from nyshporka.disk import compact as C
+    from nyshporka.htr import runs as R
+    from nyshporka.search import store as ST
+
+    for n in ("проба2", "проба3", "жива"):
+        dst = space.parent / n
+        shutil.copytree(space, dst)
+        if n == "жива":
+            meta = dst / "_htr_meta.json"
+            data = json.loads(meta.read_text(encoding="utf-8"))
+            data["case_key"] = "DAHMO/2/2/2"
+            meta.write_text(json.dumps(data), encoding="utf-8")
+        for f in dst.iterdir():
+            os.utime(f, (OLD, OLD))
+        os.utime(dst, (OLD, OLD))
+    S._CACHE.clear()
+    S._RUNS_CACHE = None
+    monkeypatch.setattr(R, "alive", lambda: [R.Live(pid=1, created=0.0, case="",
+                                                    case_key="DAHMO/2/2/2", shard="",
+                                                    since=0.0)])
+    list(ST.ensure_all(["проба", "проба2", "проба3"]))
+    rep = C.compact(apply=True, workers=2).as_json()
+    assert rep["done"] == 6 and not rep["errors"], rep
+    assert [s["run"] for s in rep["skipped"]] == ["жива"]
+    assert len(list((space.parent / "жива").glob("*.lines.json"))) == 2
+    for n in ("проба", "проба2", "проба3"):
+        assert not list((space.parent / n).glob("*.lines.json"))
+        assert len(list((space.parent / n).glob("*.lines.json.gz"))) == 2
+    conn = ST.connect()
+    try:
+        for n in ("проба", "проба2", "проба3"):
+            assert ST.index_run_if_stale(conn, n) is None, f"стор перечитав {n}"
+    finally:
+        conn.close()

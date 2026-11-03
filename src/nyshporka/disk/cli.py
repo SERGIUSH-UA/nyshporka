@@ -113,12 +113,15 @@ def compact_cmd(
                                         "без нього — увесь простір"),
     apply: bool = typer.Option(False, "--apply", help="справді стиснути"),
     limit: int = typer.Option(0, "--limit", help="не більше стількох прогонів за раз"),
+    workers: int = typer.Option(0, "--workers",
+                                help="процесів паралельно (0 — за числом ядер, 1 — по одній теці)"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Стиснути рамки рядків старих прогонів. Без --apply — лише скільки звільнить."""
     from nyshporka import ops as O
 
-    env = O.call("disk.compact", {"case": case, "apply": apply, "limit": limit})
+    env = O.call("disk.compact", {"case": case, "apply": apply, "limit": limit,
+                                   "workers": workers})
     if _answer(env, as_json):
         return
     d = env.data or {}

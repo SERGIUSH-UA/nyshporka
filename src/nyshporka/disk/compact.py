@@ -298,10 +298,21 @@ def _busy() -> tuple[Callable[[str, dict[str, Any]], str], bool]:
     return why, cloud is not None
 
 
+def _auto_workers() -> int:
+    return max(1, min(16, os.cpu_count() or 1))
+
+
 def compact(*, case: list[str] | None = None, apply: bool = False,
-            limit: int = 0, progress: Callable[[int, int, str], None] | None = None
-            ) -> Report:
-    """Стиснути геометрію прогонів простору (або названих справ)."""
+            limit: int = 0, progress: Callable[[int, int, str], None] | None = None,
+            workers: int = 1) -> Report:
+    """Стиснути геометрію прогонів простору (або названих справ).
+
+    `workers` > 1 (0 — за числом ядер) розводить ТЕКИ по процесах: кожна тека
+    цілком в одному процесі, тож пара файлів однієї сторінки ніколи не
+    стискається двома руками. Вузьке місце — дрібні файлові операції NTFS
+    (тимчасовий файл, заміна, видалення, час), а не gzip, тому процеси, не
+    потоки. З `limit` — послідовно: межа рахує лише теки з простими файлами.
+    """
     from nyshporka.core.workspace import workspace
 
     rows = _run_rows(list(case or []))
@@ -314,6 +325,10 @@ def compact(*, case: list[str] | None = None, apply: bool = False,
     rep = Report(apply=apply)
     sample: list[Path] = []
     total = len(rows)
+    n_workers = _auto_workers() if workers <= 0 else workers
+    if apply and n_workers > 1 and not limit:
+        _compact_parallel(rows, root, why, rep, n_workers, progress)
+        return rep
     done_runs = 0
     for i, row in enumerate(rows, 1):
         name = str(row.get("name") or "")
@@ -352,3 +367,58 @@ def compact(*, case: list[str] | None = None, apply: bool = False,
                 if not r.skipped:
                     r.after = int(r.before * rep.ratio)
     return rep
+
+
+def _compact_parallel(rows: list[dict[str, Any]], root: Path,
+                      why: Callable[[str, dict[str, Any]], str], rep: Report,
+                      n_workers: int,
+                      progress: Callable[[int, int, str], None] | None) -> None:
+    """`--apply` по теках у `n_workers` процесах; порядок звіту — як у переліку."""
+    from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
+
+    total = len(rows)
+    slots: list[RunResult | None] = []
+    todo: list[tuple[int, str, Path]] = []
+    for row in rows:
+        name = str(row.get("name") or "")
+        if not name:
+            continue
+        d = root / name
+        if not d.is_dir():
+            continue
+        busy = why(name, row)
+        if busy:
+            r = RunResult(run=name, files=len(_plain_files(d)), skipped=busy)
+            slots.append(r if r.files else None)
+            continue
+        slots.append(None)
+        todo.append((len(slots) - 1, name, d))
+    seen = total - len(todo)
+    # Не більше двох тек на процес у черзі: обрив (Ctrl+C) не лишає тисяч
+    # поставлених завдань, а пам'ять не росте від переліку на 30 тис. тек.
+    cap = n_workers * 2
+    it = iter(todo)
+    live: dict[Future[RunResult], tuple[int, str, Path]] = {}
+    with ProcessPoolExecutor(max_workers=n_workers) as pool:
+        def feed() -> None:
+            while len(live) < cap:
+                nxt = next(it, None)
+                if nxt is None:
+                    return
+                live[pool.submit(compact_run, nxt[2], apply=True)] = nxt
+        feed()
+        while live:
+            got, _ = wait(live, return_when=FIRST_COMPLETED)
+            for fut in got:
+                idx, name, _d = live.pop(fut)
+                try:
+                    r = fut.result()
+                except Exception as exc:  # процес упав — тека лишається як була
+                    r = RunResult(run=name, errors=[f"процес стиснення впав: {exc}"])
+                if r.files or r.skipped or r.errors:
+                    slots[idx] = r
+                seen += 1
+                if progress:
+                    progress(seen, total, name)
+            feed()
+    rep.runs.extend(r for r in slots if r is not None)
