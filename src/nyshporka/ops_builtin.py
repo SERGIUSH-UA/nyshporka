@@ -2393,6 +2393,12 @@ class SearchArgs(BaseModel):
         default="",
         description="обмежити однією справою: ключ «DAHMO/315/1/8433», шифра "
                     "«ДАХмО 315-1-8433», шлях теки або ім'я прогону")
+    year: str = Field(default="",
+                      description="рік «1858» або вікно «1795..1858» з опису справи; справа "
+                                  "без року лишається в пошуку. Порожньо — без обмеження")
+    archive: str = Field(default="",
+                         description="архів кодом чи міткою («ДАХмО», «DAHMO»). Порожньо — "
+                                     "усі архіви")
     thresh: int = Field(default=80, ge=50, le=100)
     # 🔴 Вікно, а не рядок. Рядок-хіт не розрізняє прізвищ зі спільним коренем,
     # а в одній парафії їх буває кілька: заміряно на метриках одного села — 78
@@ -2629,6 +2635,18 @@ def _search_run(a: SearchArgs) -> Envelope:
         # рівно те виродження, від якого прив'язка до років і рятує.
         return fail("канал імен працює в межах справи: вікно якорів береться з "
                     "її років. Дай --case (ключ, шифру або ім'я прогону)")
+    from nyshporka.search import narrow as NR
+
+    try:
+        nar = NR.parse(a.year, a.archive)
+    except ValueError as exc:
+        return fail(str(exc))
+    if nar is not None and (a.anchors or a.record or a.with_terms or a.selfcheck):
+        # Ці канали живуть у межах ОДНІЄЇ справи (вікно років, ознаки запису,
+        # аркуші ока), а фільтр дає перелік справ. `text.find` розкладає його
+        # на справи й ганяє кожен канал по кожній.
+        return fail("канали імен, запису й самоперевірка разом із year/archive — у "
+                    "text.find: він розкладає відбір на справи й шукає кожну окремо")
     if a.axis == "place" and a.where == "decode":
         return fail("вісь місця живе у виписаному й розібраному, а не в тексті "
                     "прогонів: постав where=pages або where=records. По декоду "
@@ -2643,7 +2661,7 @@ def _search_run(a: SearchArgs) -> Envelope:
                                    profile=a.profile, anchors=a.anchors,
                                    family=a.family,
                                    record=a.record or bool(a.with_terms),
-                                   with_terms=a.with_terms)
+                                   with_terms=a.with_terms, narrow=nar)
         except ValueError as exc:
             # Область пошуку не впізнано. Відмова тут нормативна (перелік
             # прийнятних форм), і вона краща за мовчазний пошук по всьому
@@ -2701,7 +2719,10 @@ def _search_run(a: SearchArgs) -> Envelope:
                                "anchor": res.get("anchor") or {"on": False},
                                # 🏠 Третій канал — так само окремо.
                                "record": res.get("record") or {"on": False},
-                               "family": res.get("family")}})
+                               "family": res.get("family"),
+                               "narrow": res.get("narrow") or {}}})
+        for code, text in NR.notes(res.get("narrow") or {}):
+            env.warn(code, text)
         if scope_kind == "all" or not (res.get("hits") or []):
             # Звідки взято область: без цього «прочесано N прогонів» не каже,
             # що лишилось поза пошуком (`search.reach`).
@@ -2794,17 +2815,25 @@ def _search_run(a: SearchArgs) -> Envelope:
     # зветься `places`, у записах `place`. Прокид «як є» тут дав би фільтр,
     # який мовчки не спрацював, — а мовчазний фільтр гірший за відсутній.
     by_place = a.axis == "place"
+    keep = None
+    unknown: set[str] = set()
+    if nar is not None:
+        def keep(key: str) -> bool:
+            got = nar.keep_key(key)
+            if got is None:
+                unknown.add(key)
+            return got is not False
     if a.where == "pages":
         res = query.grep_surnames(a.q, thresh=a.thresh, case_key=case_key,
                                   places=by_place, limit=a.limit,
                                   given=a.given, folk=a.folk, rank_hits=a.rank,
-                                  profile=a.profile)
+                                  profile=a.profile, keep=keep)
     else:
         res = query.grep_records(a.q, thresh=a.thresh, case_key=case_key,
                                  role=a.role or None, rtype=a.rtype or None,
                                  place=by_place, limit=a.limit,
                                  given=a.given, folk=a.folk, rank_hits=a.rank,
-                                 profile=a.profile)
+                                 profile=a.profile, keep=keep)
     # 🔴 Знаменник тут такий самий обов'язковий, як у пошуку по декоду, — і
     # довго його не було саме тут, у гілці, найближчій до людини. «Не
     # знайшлось у виписаному» означає лише «серед того, що вже занесли оком»:
@@ -2825,7 +2854,15 @@ def _search_run(a: SearchArgs) -> Envelope:
                            "rank_rules": res.get("rank_rules") or 0,
                            "rank_confusers": res.get("rank_confusers") or 0,
                            "ranked": res.get("ranked") or {},
-                           "axis": a.axis, "role": a.role, "rtype": a.rtype}})
+                           "axis": a.axis, "role": a.role, "rtype": a.rtype,
+                           "narrow": ({**nar.as_json(), "cases_kept": res.get("cases") or 0,
+                                       "year_unknown": len(unknown),
+                                       "year_unknown_cases": sorted(unknown)[:20]}
+                                      if nar is not None else {})}})
+    if nar is not None:
+        for code, text in NR.notes(env.data["coverage"]["narrow"]):
+            if code != "narrowed":
+                env.warn(code, text)
     if res.get("error"):
         env.warn("bad_query", str(res["error"]))
     _warn_search(env, res)
@@ -2841,6 +2878,8 @@ def _search_run(a: SearchArgs) -> Envelope:
             narrowed += f", роль «{a.role}»"
         if a.rtype:
             narrowed += f", тип запису «{a.rtype}»"
+        if nar is not None:
+            narrowed += f", фільтр «{nar.label}»"
         env.warn("zero_with_denominator",
                  f"не знайшлось у {where}{narrowed}: переглянуто "
                  f"{res.get('cases') or 0} справ")

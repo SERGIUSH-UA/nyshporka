@@ -2179,13 +2179,17 @@ def query_stems(q: str, *, given: bool = True, folk: bool = False, profile: bool
     return {"stems": stems, "origin": origin, "asked": asked, "whose": whose, "fam": fam}
 
 
-def search(q: str, name: str | None = None, thresh: int = 78,
+def search(q: str, name: str | Sequence[str] | None = None, thresh: int = 78,
            limit: int = 200, context: int = 0, *,
            given: bool = True, folk: bool = False,
            rank: bool = True, profile: bool = True,
            anchors: bool = False, family: str = "",
-           record: bool = False, with_terms: Sequence[str] = ()) -> dict[str, Any]:
+           record: bool = False, with_terms: Sequence[str] = (),
+           narrow: Any = None) -> dict[str, Any]:
     """Fuzzy-пошук по текстах прогонів. `name=None` — по всіх справах.
+
+    `narrow` (`search.narrow.Narrow`) — рік і/або архів: область звужується до
+    справ у фільтрі (ValueError, якщо не лишилось жодної).
 
     `context` — скільки рядків сусідства додати до кожного хіта (0 = без них).
     Вікно розсувне (`line_window`) і, якщо у справи є прогін другим рушієм,
@@ -2222,6 +2226,10 @@ def search(q: str, name: str | None = None, thresh: int = 78,
     from nyshporka.search import decode as D
 
     scope = runs_for_scope(name or "")
+    if narrow is not None:
+        from nyshporka.search import narrow as NR
+
+        scope = NR.apply(scope, narrow)
     rows = scope["rows"]
     names = [r["name"] for r in rows]
     # 🔴 Індекс однієї справи збирається на місці — це секунди, і людина
@@ -2410,7 +2418,7 @@ def search(q: str, name: str | None = None, thresh: int = 78,
             # див. `runs_for_scope`.
             "pages": unique_pages(rows), "runs_scoped": len(rows),
             "scope": scope["kind"], "scope_key": scope["key"],
-            "scope_shifra": scope["shifra"],
+            "scope_shifra": scope["shifra"], "narrow": scope.get("narrow") or {},
             # 🔴 Знаменник індексу, а не лише прогонів. Прочесане й наявне —
             # різні числа доти, доки індекс не догнав корпус, і нуль на
             # частковому індексі означає зовсім не те, що нуль на повному.

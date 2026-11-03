@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
 from rapidfuzz import fuzz
 
@@ -250,8 +250,12 @@ def grep_surnames(q: str, thresh: int = 80, case_key: str | None = None,
                   places: bool = False, limit: int = 200, *,
                   given: bool = True, folk: bool = False,
                   rank_hits: bool = True,
-                  profile: bool = True) -> dict[str, Any]:
+                  profile: bool = True,
+                  keep: Callable[[str], bool] | None = None) -> dict[str, Any]:
     """Fuzzy по всіх збережених прізвищах (або місцях) усіх справ.
+
+    `keep` — фільтр за ключем справи (рік і архів, `search.narrow`): справа,
+    якої він не пускає, не шукається й у знаменник не входить.
 
     ⚠ Гніздо імен розкривається і для осі МІСЦЯ теж, і це свідомо: назва села
     поділяє з іменем ту саму нормалізацію, а зайвий стем там просто нічого не
@@ -264,6 +268,8 @@ def grep_surnames(q: str, thresh: int = 80, case_key: str | None = None,
     for path in _iter_files(case_key):
         idx = _index(path)
         if not idx:
+            continue
+        if keep is not None and not keep(str(idx["key"] or "")):
             continue
         scanned += 1
         for scan, raw, norm in idx["places" if places else "surnames"]:
@@ -294,8 +300,10 @@ def grep_records(q: str, thresh: int = 80, case_key: str | None = None,
                  place: bool = False, limit: int = 200, *,
                  given: bool = True, folk: bool = False,
                  rank_hits: bool = True,
-                 profile: bool = True) -> dict[str, Any]:
+                 profile: bool = True,
+                 keep: Callable[[str], bool] | None = None) -> dict[str, Any]:
     """Fuzzy по учасниках записів; `place=True` — шукати по місцю, а не прізвищу.
+    `keep` — фільтр за ключем справи, як у `grep_surnames`.
 
     Пошук по місцю відповідає на питання, якого прізвищевий не бере: «які акти
     згадують це поселення» — байдуже, під яким прізвищем. Саме так шукають
@@ -308,6 +316,8 @@ def grep_records(q: str, thresh: int = 80, case_key: str | None = None,
     for path in _iter_files(case_key):
         idx = _index(path)
         if not idx:
+            continue
+        if keep is not None and not keep(str(idx["key"] or "")):
             continue
         scanned += 1
         for rec, person, raw, norm in idx["rec_places" if place else "persons"]:

@@ -689,6 +689,12 @@ class TextFindArgs(BaseModel):
     case: CaseScope = Field(default="",
                             description="справа, шифра, серія («RGIA 592-25»), перелік "
                                         "справ або прогін; порожньо — усе прочитане")
+    year: str = Field(default="",
+                      description="рік «1858» або вікно «1795..1858» з опису справи; справа "
+                                  "без року лишається в пошуку. Порожньо — без обмеження")
+    archive: str = Field(default="",
+                         description="архів кодом чи міткою («ДАХмО», «DAHMO»). Порожньо — "
+                                     "усі архіви")
     thresh: int = Field(default=78, ge=50, le=100)
     limit: int = Field(default=40, ge=1, le=5000)
     context: int = Field(default=1, ge=0, le=6)
@@ -765,11 +771,13 @@ def text_find(a: TextFindArgs) -> Envelope:
     Рід — будь-який профіль файла: названий `family` або той, написанням якого
     є запит.
     """
+    from nyshporka.search import narrow as NR
     from nyshporka.search import textops as T
 
     try:
+        nar = NR.parse(a.year, a.archive)
         res = T.find(a.q, a.case, thresh=a.thresh, limit=a.limit, context=a.context,
-                     family=a.family, with_terms=a.with_terms)
+                     family=a.family, with_terms=a.with_terms, narrow=nar)
     except ValueError as exc:
         return fail(str(exc))
     if res.get("error"):
@@ -782,6 +790,8 @@ def text_find(a: TextFindArgs) -> Envelope:
                  "тут нічого не доводить — запустіть ще раз, щоб знати напевно",
                  level=ALERT)
     led = res["ledger"]
+    for code, text in NR.notes(led.get("narrow") or {}):
+        env.warn(code, text)
     for ch in led["channels"]:
         if not ch["ran"] and ch.get("why"):
             fix = f"; {ch['fix']}" if ch.get("fix") else ""

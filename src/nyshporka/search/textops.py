@@ -789,8 +789,12 @@ def _query_is_profile(q: str, fam: Any = None) -> bool:
 
 def find(q: str, scope: str | Sequence[str] = "", *, thresh: int = 78, limit: int = 40,
          context: int = 1, family: str = "",
-         with_terms: Sequence[str] = ()) -> dict[str, Any]:
+         with_terms: Sequence[str] = (), narrow: Any = None) -> dict[str, Any]:
     """Пошук роду в області: одна справа, прогін, серія або кілька справ.
+
+    `narrow` (`search.narrow.Narrow`) — рік і/або архів: область стає переліком
+    справ у фільтрі й шукається як серія, кожна справа зі своїм журналом.
+    ValueError — фільтр не лишив жодної справи (текст зі знаменником).
 
     🔴 Серія й перелік розкладаються на справи, а не шукаються одним заходом.
     Якорі (вікно років справи) і самоперевірка (аркуші, виписані оком)
@@ -814,6 +818,27 @@ def find(q: str, scope: str | Sequence[str] = "", *, thresh: int = 78, limit: in
     # коштувала в 8 разів більше за сам пошук (замір 19.10.2026).
     with (S.one_listing(), PQ.one_snapshot(), SC.one_snapshot(), TRACE.batch(),
           ST.one_stamps()):
+        if narrow is not None:
+            from nyshporka.search import narrow as NR
+
+            sc = NR.apply(S.runs_for_scope(scope or ""), narrow)
+            items = len(sc["keys"]) + int(sc["narrow"].get("no_case_kept") or 0)
+            if items <= NR.SERIES_MAX:
+                res = _find_many(q, sc, thresh=thresh, limit=limit, context=context,
+                                 family=family, with_terms=with_terms)
+            else:
+                # 🔴 Великий відбір — одним проходом, як корпус. Справами по одній
+                # 4844 справи ДАХмО 1795–1858 шукались 45 хв (замір 03.11.2026);
+                # канали імен і запису живуть у межах справи, тож тут вони
+                # вимкнені так само, як на всьому корпусі, — і журнал це каже.
+                res = _find_one(q, scope if isinstance(scope, str) else "",
+                                thresh=thresh, limit=limit, context=context,
+                                family=family, with_terms=with_terms, narrow=narrow,
+                                scope_list=None if isinstance(scope, str) else list(scope))
+            if isinstance(res.get("ledger"), dict):
+                res["ledger"]["narrow"] = {**sc["narrow"],
+                                           "one_pass": items > NR.SERIES_MAX}
+            return res
         if scope:
             sc = S.runs_for_scope(scope)
             if sc["kind"] == "cases":
@@ -987,7 +1012,8 @@ def _merge_finds(q: str, sc: dict[str, Any], one: list[tuple[str, dict[str, Any]
 
 def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
               context: int = 1, family: str = "",
-              with_terms: Sequence[str] = ()) -> dict[str, Any]:
+              with_terms: Sequence[str] = (), narrow: Any = None,
+              scope_list: list[str] | None = None) -> dict[str, Any]:
     """Пошук усіма каналами пакета з журналом заходу.
 
     🔴 Журнал — не прикраса. «Шукай ще» доти означало імпровізацію, бо жоден
@@ -999,7 +1025,7 @@ def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
     from nyshporka.search import selfcheck as SC
     from nyshporka.search import trace as TRACE
 
-    in_case = bool(scope)
+    in_case = bool(scope) and narrow is None
     from nyshporka.core import profile as PROF
 
     # 🏠 Чий рід. Названий явно (`--family`) — той; ні — той профіль файла,
@@ -1027,8 +1053,15 @@ def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
     # «перевірено й латинкою» (рецензія 08.09, третій раунд). Прогін без ключа
     # лишається сам: журнал тоді чесно каже про один голос.
     sc: dict[str, Any] = {"rows": S.list_cases(), "kind": "all", "key": ""}
-    search_scope = scope
-    if scope:
+    search_scope: str | list[str] = scope
+    if narrow is not None:
+        # Відбір року й архіву одним проходом (`find`): область — та сама
+        # множина, що в журналі, бо обидва беруть `narrow.apply`.
+        from nyshporka.search import narrow as NR
+
+        search_scope = scope_list if scope_list is not None else scope
+        sc = NR.apply(S.runs_for_scope(search_scope or ""), narrow)
+    elif scope:
         sc = S.runs_for_scope(scope)
         if sc["kind"] == "run" and sc.get("key"):
             with contextlib.suppress(ValueError):
@@ -1037,7 +1070,8 @@ def _find_one(q: str, scope: str = "", *, thresh: int = 78, limit: int = 40,
     # 🔴 `--with` вмикає канал запису й для прізвища, що не є родом профілю:
     # ознаки тоді дає сама людина, а не `kin`. Справа потрібна й тут.
     with_terms = tuple(w for w in with_terms if str(w).strip())
-    res = S.search(q, name=search_scope or None, thresh=thresh, limit=limit,
+    res = S.search(q, name=search_scope or None, narrow=narrow, thresh=thresh,
+                   limit=limit,
                    context=context, given=True, folk=False, rank=True,
                    profile=about_profile, anchors=in_case and about_profile,
                    family=fam.name if (about_profile and fam is not None) else "",

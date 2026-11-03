@@ -1793,6 +1793,10 @@ def search_cmd(
              "«ДАХмО 315-1-8433», шлях теки або ім'я прогону"),
     where: str = typer.Option("decode", "--where",
                               help="decode | pages | records | all"),
+    year: str = typer.Option("", "--year",
+                             help="рік «1858» або вікно «1795..1858» з опису справи; "
+                                  "справа без року лишається"),
+    archive: str = typer.Option("", "--archive", help="архів: «ДАХмО» чи «DAHMO»"),
     context: int = typer.Option(1, "--context",
                                 help="рядків сусідства (0 — лише сам рядок)"),
     thresh: int = typer.Option(80, "--thresh", help="поріг схожості 50-100"),
@@ -1851,7 +1855,8 @@ def search_cmd(
                                 "rank": rank, "profile": use_profile,
                                 "anchors": anchors, "record": record,
                                 "family": family, "with_terms": list(with_terms),
-                                "selfcheck": selfcheck})
+                                "selfcheck": selfcheck, "year": year,
+                                "archive": archive})
     if _answer(env, as_json):
         return
     hits = env.data.get("hits") or []

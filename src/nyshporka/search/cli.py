@@ -458,6 +458,10 @@ def find_cmd(
     case: list[str] = typer.Option([], "--case",
                                    help="справа, шифра або прогін; можна кілька разів або серію («RGIA 592-25»); "
                                         "порожньо — усе"),
+    year: str = typer.Option("", "--year",
+                             help="рік «1858» або вікно «1795..1858» з опису справи; "
+                                  "справа без року лишається"),
+    archive: str = typer.Option("", "--archive", help="архів: «ДАХмО» чи «DAHMO»"),
     thresh: int = typer.Option(78, "--thresh", help="поріг схожості 50-100"),
     limit: int = typer.Option(40, "--limit", help="скільки показати"),
     context: int = typer.Option(1, "--context", help="рядків сусідства"),
@@ -476,7 +480,8 @@ def find_cmd(
 
     env = O.call("text.find", {"q": q, "case": _scope(case), "thresh": thresh, "limit": limit,
                                "context": context, "family": family,
-                               "with_terms": list(with_terms)})
+                               "with_terms": list(with_terms),
+                               "year": year, "archive": archive})
     if _answer(env, as_json):
         return
     d = env.data
