@@ -195,6 +195,13 @@ def cmd_merge(
     kept = d.get("verdicts_kept") or 0
     console.print(f"  розбіжностей: {conf}"
                   + (f" · збережено вердиктів: {kept}" if kept else ""))
+    # Самозаливка (`[registry.push]`): збій приходить попередженням `push_failed`
+    # нижче, а вдала заливка мусить бути видна теж — інакше не скажеш, поїхав фонд
+    # у Супрягу чи ні.
+    pushed = d.get("pushed")
+    if isinstance(pushed, dict) and not pushed.get("error"):
+        console.print(f"  Супряга: залито змін {pushed.get('sent', 0)}, "
+                      f"прибрано {pushed.get('deleted', 0)}")
     notes(env)
 
 
