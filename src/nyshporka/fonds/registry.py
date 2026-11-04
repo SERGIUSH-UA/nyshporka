@@ -371,7 +371,11 @@ def _discover_disk() -> list[dict[str, Any]]:
         return out
     for p in sorted(raw.glob("*/f*_opys_merged.tsv")):
         fond_id = p.parent.name
-        m = re.match(r"^f(\d+)_opys_merged\.tsv$", p.name)
+        # 🔴 Номер фонду буває літерним: радянські «R-6380» (ДАХмО) і «Р-2521»
+        # (ДАІФО, кирилицею). Під `\d+` такі реєстри не бачила ні вкладка
+        # «Фонди», ні заливка в Супрягу, хоча `load_rows` їх читає.
+        m = re.match(r"^f([0-9A-Za-zА-Яа-яІЇЄҐіїєґ][0-9A-Za-zА-Яа-яІЇЄҐіїєґ-]*)"
+                     r"_opys_merged\.tsv$", p.name)
         if not m:
             continue
         fond = m.group(1)

@@ -345,6 +345,16 @@ def test_zbii_zalyvky_ne_valyt_zlyttia(prostir: Path, server: FakeSupriaha,
     assert env.ok and "pushed" not in (env.data or {})
 
 
+def test_radianskyi_fond_z_literoiu_vydno(prostir: Path) -> None:
+    """Реєстр літерного фонду (`R-6380`, кириличне `Р-2521`) видно й читається."""
+    _tsv(prostir, "dahmo_R-6380", "R-6380", [{"opys": "1", "spr_int": "5", "title": "А"}])
+    _tsv(prostir, "daifo_Р-2521", "Р-2521", [{"opys": "2", "spr_int": "7", "title": "Б"}])
+    found = {f["id"]: f for f in R.discover_fonds()}
+    assert found["dahmo_R-6380"]["fond"] == "R-6380"
+    assert found["daifo_Р-2521"]["fond"] == "Р-2521"
+    assert [r["shifra"] for r in R.load_rows("daifo_Р-2521")] == ["Р-2521-2-7"]
+
+
 def test_vidbytok_iak_na_servieri() -> None:
     """Той самий вектор, що в тестах порталу (`app.rehistr.hash_danykh`)."""
     assert remote.hash_data({"title": "Сповідні розписи", "year_from": "1820",
