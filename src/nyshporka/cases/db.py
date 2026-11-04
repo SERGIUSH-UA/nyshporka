@@ -205,6 +205,23 @@ def store_debt(rows: list[Any]) -> dict[str, Any]:
         # одного опису — текст той самий, а пошук їх більше не бачив.
         listed = [n for _, names in per_row for n in names if n in have]
         fresh = D.stamps_of(listed) if listed else {}
+        # Змінилась лише мета (`ST.restamp_meta_only`: текст той самий) — штамп поновлюється
+        # тут же, одним переліком теки на прогін: боргом лишається лише відсутнє й справді
+        # змінений текст, і переіндексувати 10 тис. справ через перезапис мети не доводиться.
+        prostr = [n for n in listed if fresh.get(n, "") != have[n]]
+        restamped = 0
+        if prostr:
+            try:
+                restamped = ST.restamp_meta_only(prostr)
+            except Exception:   # стор зайнятий чи інша біда — борг лишається боргом
+                restamped = 0
+            if restamped:
+                conn = ST.connect(readonly=True)
+                try:
+                    have = {str(run): str(stamp)
+                            for run, stamp in conn.execute("select run, stamp from runs")}
+                finally:
+                    conn.close()
     except Exception as exc:          # борг — підказка; збірку реєстру він не валить
         return {"runs": None, "cases": 0, "examples": [], "error": f"{type(exc).__name__}: {exc}"}
     runs = stale = 0
@@ -219,7 +236,7 @@ def store_debt(rows: list[Any]) -> dict[str, Any]:
                           len(miss) + len(old)))
     cases.sort(key=lambda x: -x[1])
     return {"runs": runs, "stale": stale, "cases": len(cases),
-            "examples": [c for c, _ in cases[:5]]}
+            "examples": [c for c, _ in cases[:5]], "restamped": restamped}
 
 
 def _unreadable_reason(meta: dict[str, Any]) -> str:

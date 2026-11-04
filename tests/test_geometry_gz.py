@@ -329,3 +329,30 @@ def test_compact_in_processes_matches_one_by_one(space: Path,
             assert ST.index_run_if_stale(conn, n) is None, f"стор перечитав {n}"
     finally:
         conn.close()
+
+
+def test_search_sees_a_run_whose_meta_alone_was_rewritten(space: Path) -> None:
+    """04.11.2026: перенесення кадрів переписало `case_dir` у меті — `text grep` прочесав
+    9 прогонів із 328. Пошук сам поновлює штамп, коли текст той самий, і не перечитує."""
+    from nyshporka.search import store as ST
+
+    list(ST.ensure_all(["проба"]))
+    meta = space / "_htr_meta.json"
+    data = json.loads(meta.read_text(encoding="utf-8"))
+    data["case_dir"] = "T:/архів/проба"
+    meta.write_text(json.dumps(data), encoding="utf-8")
+    os.utime(meta, (OLD + 50, OLD + 50))
+    got = ST.grep("перший", ["проба"])
+    assert got["unindexed"] == 0 and got["total"] == 2, got
+
+
+def test_changed_text_is_not_restamped_without_reading(space: Path) -> None:
+    """Справжня зміна тексту штампом не прикривається: прогін лишається на збірку."""
+    import time
+
+    from nyshporka.search import store as ST
+
+    list(ST.ensure_all(["проба"]))
+    time.sleep(1.1)
+    (space / "0002.txt").write_text("перший рядок\nновий рядок\n", encoding="utf-8")
+    assert ST.restamp_meta_only(["проба"]) == 0

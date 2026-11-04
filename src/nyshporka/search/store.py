@@ -826,6 +826,58 @@ def _index(conn: sqlite3.Connection, run: str, *, only_stale: bool, wait: float,
     return n_lines
 
 
+def restamp_meta_only(runs: list[str], *, conn: sqlite3.Connection | None = None,
+                      cancel: Callable[[], bool] | None = None) -> int:
+    """Прогони, у яких змінилась ЛИШЕ мета, — новий штамп без перечитування. Скільки поновлено.
+
+    🔴 04.11.2026: перенесення кадрів переписало `case_dir` у меті прогонів одного опису, і
+    `text grep` по ньому прочесав 9 прогонів із 328 — решта стала «застарілою», хоча текст
+    той самий. Збірка (`_index`) уже з 22.10 знала, як це відрізнити (`_text_unchanged`:
+    кількість `.txt` і жоден файл прогону, крім мети, не новіший за `indexed_at`), а пошук
+    — ні: регекс не доганяв стор зовсім, свіп — лише в межах бюджету. Перевірка — один
+    перелік теки прогону, тож без бюджету; справжня зміна тексту лишається на збірку.
+
+    Запис — коротким замком (`BUSY_TIMEOUT`): стор тримає інша сесія — прогін лишається
+    застарілим, і відповідь каже про нього тривогою, а не чекає.
+    """
+    from nyshporka.search import decode as D
+
+    if not runs or not exists():
+        return 0
+    own = conn is None
+    c = conn or connect()
+    n = 0
+    try:
+        rules_now = rules_hash()
+        rows = {str(r[0]): (str(r[1]), str(r[2] or ""), int(r[3] or 0), str(r[4] or ""))
+                for r in c.execute("select run, stamp, coalesce(indexed_at,''), "
+                                   "coalesce(pages,0), coalesce(rules,'') from runs")}
+        st = stamps_for(runs)
+        for r in runs:
+            if cancel and cancel():
+                break
+            row = rows.get(r)
+            s = st.get(r)
+            if not row or not s or row[0] == s or row[3] != rules_now:
+                continue
+            d = D._run_dir(r)
+            if d is None or not _text_unchanged(d, row[2], row[1]):
+                continue
+            try:
+                if index_run_if_stale(c, r) is None:
+                    n += 1
+            except sqlite3.OperationalError as exc:
+                if not _locked_error(exc):
+                    raise
+                with contextlib.suppress(sqlite3.Error):
+                    c.rollback()
+                break
+    finally:
+        if own:
+            c.close()
+    return n
+
+
 def ensure(run: str, conn: sqlite3.Connection | None = None) -> bool:
     own = conn is None
     c = conn or connect()
@@ -2018,6 +2070,11 @@ def sweep(stems: list[str], runs: list[str], *, thresh: int = 78,
         known = stamps(conn)
         st = stamps_for(runs)
         stale = [r for r in runs if st[r] and known.get(r) != st[r]]
+        # Змінилась лише мета — штамп поновлюється без бюджету (один перелік теки);
+        # бюджет — лише на справжню зміну тексту.
+        if stale and restamp_meta_only(stale, conn=conn, cancel=cancel):
+            known = stamps(conn)
+            stale = [r for r in runs if st[r] and known.get(r) != st[r]]
         if 0 < len(stale) <= max(0, build_budget):
             for i, r in enumerate(stale, 1):
                 if cancel and cancel():
@@ -2927,6 +2984,9 @@ def grep(pattern: str, runs: list[str], *, ignore_case: bool = True,
     # нормі сирий текст сторінки для відсіву не годиться.
     gate = (re.compile(pattern, flags | re.MULTILINE)
             if not fold and _line_gate_safe(pattern) else None)
+    # Прогони з переписаною лише метою — свіжими, перш ніж рахувати область.
+    with contextlib.suppress(sqlite3.Error, OSError):
+        restamp_meta_only(runs)
     conn = connect(readonly=True)
     try:
         ids = _run_ids(conn, runs, fresh_only=True)

@@ -47,11 +47,14 @@ def print_store_debt(res: dict[str, Any]) -> None:
     Друкується після КОЖНОЇ збірки реєстру — а її роблять після кожної дії, тож
     борг стору не може лишатись непоміченим тижнями, як цілий опис у жовтні 2026."""
     debt = res.get("store_debt") or {}
+    if debt.get("restamped"):
+        console.print(f"[muted]стор пошуку: змінилась лише мета {debt['restamped']} прогонів — "
+                      f"штамп поновлено без перечитування тексту[/muted]")
     if not debt.get("runs"):
         return
     ex = ", ".join(debt.get("examples") or [])
     stale = int(debt.get("stale") or 0)
-    how = f", з них прострочених після зміни мети {stale}" if stale else ""
+    how = f", з них зі зміненим текстом {stale}" if stale else ""
     console.print(f"[err]🔴 поза стором пошуку: {debt['runs']} прогонів у {debt['cases']} "
                   f"справах{how} — їхнього тексту пошук не бачить, нуль по них хибний "
                   f"(найбільше: {ex}). Догнати: nysh text index[/err]")
