@@ -268,6 +268,24 @@ def test_zalyvka_lyshe_zminene_i_bez_on_disk(prostir: Path, server: FakeSupriaha
     assert server.fonds[("DAHMO", "230")]["rows"]["1/3"]["deleted"]
 
 
+def test_pachky_vmishchaiutsia_v_tilo_zapytu(prostir: Path, server: FakeSupriaha,
+                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Тіло запиту до API — до 1 МБ: пачка ділиться за розміром, а не лише кількістю."""
+    import json
+
+    monkeypatch.setattr(remote, "PUSH_BYTES", 2000)
+    rows = [{"opys": "1", "spr_int": str(i), "title": "Метрична книга церкви " * 8}
+            for i in range(1, 21)]
+    _tsv(prostir, "dahmo_230", "230", rows)
+
+    got = remote.push("dahmo_230")
+    assert got["sent"] == 20
+    sizes = [len(json.dumps(b["rows"], ensure_ascii=False).encode()) for b in server.posts
+             if b.get("rows")]
+    assert len(sizes) > 1 and max(sizes) <= 2000 + 400, sizes
+    assert len(server.fonds[("DAHMO", "230")]["rows"]) == 20
+
+
 def test_zalyvaie_lyshe_vlasnyk(prostir: Path, server: FakeSupriaha) -> None:
     _tsv(prostir, "dahmo_230", "230", [{"opys": "1", "spr_int": "1", "title": "А"}])
     server.admin = False

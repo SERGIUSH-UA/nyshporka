@@ -35,6 +35,8 @@ from typing import Any
 PAGE = 5000
 #: Стеля рядків за одну заливку (`app.rehistr.MAX_RIADKIV`).
 PUSH_CHUNK = 2000
+#: Стеля тексту пачки: тіло запиту до API Супряги — до 1 МБ (nginx), з запасом.
+PUSH_BYTES = 600_000
 #: Після скількох днів узятий реєстр варто дотягнути. Лише підказка: реєстр
 #: старіє повільно, бо назви й роки справ не змінюються, а стан онлайн — так.
 SVIZHYI_DNIV = 30
@@ -332,6 +334,25 @@ def payload(fond_id: str) -> tuple[list[dict[str, Any]], int]:
     return out, dup
 
 
+def _chunks(rows: list[dict[str, Any]]) -> Iterator[list[dict[str, Any]]]:
+    """Пачки для заливки: не більше `PUSH_CHUNK` рядків і `PUSH_BYTES` тексту.
+
+    🔴 Тіло запиту до API Супряги обмежене 1 МБ (nginx), а 2000 рядків реєстру
+    з довгими назвами — близько 1,2 МБ: пачка за самою кількістю дістала б 413.
+    """
+    chunk: list[dict[str, Any]] = []
+    size = 0
+    for r in rows:
+        n = len(json.dumps(r, ensure_ascii=False).encode("utf-8")) + 1
+        if chunk and (len(chunk) >= PUSH_CHUNK or size + n > PUSH_BYTES):
+            yield chunk
+            chunk, size = [], 0
+        chunk.append(r)
+        size += n
+    if chunk:
+        yield chunk
+
+
 def _digest(rows: list[dict[str, Any]], label: str, schema: str) -> str:
     h = hashlib.sha256(f"{label}\n{schema}\n".encode())
     for r in sorted(rows, key=lambda x: x["key"]):
@@ -369,8 +390,7 @@ def push(fond_id: str, base: str = "") -> dict[str, Any]:
     meta = {"schema": schema}
     last: dict[str, Any] = {}
     sent = 0
-    for i in range(0, len(changed), PUSH_CHUNK):
-        chunk = changed[i:i + PUSH_CHUNK]
+    for chunk in _chunks(changed):
         last = _post(_url(base, "/fonds/rows"), {
             "repo": repo, "fond": fond, "label": label, "meta": meta, "rows": chunk})
         sent += len(chunk)
