@@ -193,15 +193,16 @@ def indeks_storinok(kanon: Path, manifest: Path | None = None
             zapysy = {}
         for v in (zapysy.values() if isinstance(zapysy, dict) else []):
             pokhid = (v or {}).get("origin") or {}
-            m = _SHYFR.search(str(pokhid.get("case") or ""))
-            s = re.search(r"(\d+)\D*$", str(pokhid.get("page") or ""))
-            if not (m and s):
+            ms = _SHYFR.search(str(pokhid.get("case") or ""))
+            mp = re.search(r"(\d+)\D*$", str(pokhid.get("page") or ""))
+            if not (ms and mp):
                 continue
             for kto in (v.get("cited_by") or []):
                 # «<проєкт>:<картка>.md» — лише картки ЦЬОГО канону: чужий проєкт — не наш висновок.
                 kartka = Path(str(kto).split(":", 1)[-1]).stem
                 if kartka in kartky_kanonu:
-                    dodaty((_n(m.group(1)), _n(m.group(2)), _n(m.group(3))), int(s.group(1)), kartka)
+                    dodaty((_n(ms.group(1)), _n(ms.group(2)), _n(ms.group(3))), int(mp.group(1)),
+                           kartka)
     return out
 
 
