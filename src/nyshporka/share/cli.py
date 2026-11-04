@@ -1364,7 +1364,9 @@ def kartky_cmd(
         return
     d = env.data or {}
     if d.get("fayly"):
-        console.print(f"карток {_e(d.get('kartok'))}, справа в каноні — {_e(d.get('v_kanoni'))}; "
+        console.print(f"карток {_e(d.get('kartok'))}, справа в каноні — {_e(d.get('v_kanoni'))}, "
+                      f"рядків зі сторінкою в каноні — {_e(d.get('riadkiv_storinka_v_kanoni'))}, "
+                      f"з аркушем в обліку — {_e(d.get('riadkiv_arkush_v_obliku'))}; "
                       f"порцій {len(d['fayly'])}:", highlight=False)
         for f in d["fayly"]:
             console.print(f"  {_e(f['fayl'])} · K{_e(f['kartky'][0])}–K{_e(f['kartky'][1])}",
@@ -1416,6 +1418,33 @@ def vyklyk_dia_cmd(
     else:
         console.print(f"група {_e(d.get('group_id'))} · {_e(d.get('verdict') or 'позначку знято')}",
                       highlight=False)
+    _notes(env)
+
+
+@app.command("vyklyk-ramky")
+@route("share vyklyk-ramky", skill="share-case",
+       when="кропи кандидатів Дзеркала: сторінка, рядок, рамка рядка й кадр джерела")
+def vyklyk_ramky_cmd(
+    vyklyk: int = typer.Argument(..., help="номер виклику"),
+    hrupa: list[int] = typer.Option([], "--hrupa", help="номер групи (можна кілька)"),
+    z_kartok: str = typer.Option("", "--z-kartok",
+                                 help="файл вивантаження (vyklyk-rezultat … --do): усі групи карток"),
+    do: str = typer.Option(..., "--do", help="куди: JSONL, рядок на групу"),
+    base: str = typer.Option("", "--base", help="інша адреса пулу"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Рамки рядків груп для кропу. Кадрів сервер не віддає: кадр — з джерела зйомки
+    (`source_ref`, `frame`), рамка — у координатах кадру донора (`size`)."""
+    from nyshporka import ops as O
+
+    env = O.call("share.vyklyk_ramky", {"vyklyk": vyklyk, "hrupa": hrupa, "z_kartok": z_kartok,
+                                        "do": do, "base": base})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    console.print(f"рамок {_e(d.get('hrup'))}: з рамкою рядка {_e(d.get('z_ramkoiu'))}, з адресою "
+                  f"кадру {_e(d.get('z_kadrom'))}, з помилкою {_e(d.get('pomylok'))} → "
+                  f"{_e(d.get('fayl'))}", highlight=False)
     _notes(env)
 
 

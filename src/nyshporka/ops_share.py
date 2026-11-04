@@ -1666,15 +1666,18 @@ def share_kartky(a: ShareKartkyArgs) -> Envelope:
     from nyshporka.share import kartky as K
 
     kanon: Path | None = None
+    manifest: Path | None = None
     env_warn = ""
     if not a.bez_kanonu:
         try:
-            kanon = workspace().canonical
+            ws = workspace()
+            kanon = ws.canonical
+            manifest = ws.citations / "MANIFEST_citations.json"
         except WorkspaceError:
             env_warn = "проєкту немає: справи з каноном не звірено (сесія в теці проєкту)"
     try:
         got = K.porcii(Path(a.fayl).expanduser(), kanon=kanon, porciia=a.porciia, vid=a.vid,
-                       do=Path(a.do).expanduser() if a.do else None)
+                       do=Path(a.do).expanduser() if a.do else None, manifest=manifest)
     except (OSError, ValueError) as exc:
         return fail(f"файл вивантаження не прочитано: {exc}")
     env = ok(got)
@@ -1776,6 +1779,47 @@ def share_vyklyk_dia(a: ShareVyklykDiaArgs) -> Envelope:
                 got_ = V.dia(a.vyklyk, tilo, a.base)
                 poznacheno[vyrok] = poznacheno.get(vyrok, 0) + len(got_.get("group_ids") or tilo["group_ids"])
         return ok({"poznacheno": poznacheno})
+    except (RuntimeError, OSError) as exc:
+        return _vidmova_pulu(exc)
+
+
+class ShareVyklykRamkyArgs(BaseModel):
+    vyklyk: int = Field(description="номер виклику")
+    hrupa: list[int] = Field(default_factory=list, description="номер(и) груп з результату виклику")
+    z_kartok: str = Field(default="",
+                          description="файл вивантаження (`vyklyk-rezultat … --do`): усі групи карток")
+    do: str = Field(description="куди: JSONL, рядок на групу")
+    base: str = Field(default="", description="інша адреса пулу")
+
+    @field_validator("hrupa", mode="before")
+    @classmethod
+    def _odna_chy_kilka(cls, v: Any) -> Any:
+        return [v] if isinstance(v, int) else v
+
+
+@op("share.vyklyk_ramky", summary="Рамки рядків груп Дзеркала для кропу: сторінка, рядок, рамка, кадр",
+    args=ShareVyklykRamkyArgs, mutates=False, section=SECTION, private=True,
+    skill="share-case",
+    when="вирізати кропи кандидатів Дзеркала: де саме на кадрі рядок і звідки взяти кадр")
+def share_vyklyk_ramky(a: ShareVyklykRamkyArgs) -> Envelope:
+    """Кадрів сервер не віддає — лише рамку рядка й адресу кадру в джерелі зйомки."""
+    from pathlib import Path
+
+    from nyshporka.share import kartky as K
+    from nyshporka.share import vyklyky as V
+
+    ids = sorted(set(a.hrupa))
+    if a.z_kartok:
+        try:
+            _, kartky = K.prochytaty(Path(a.z_kartok).expanduser())
+        except (OSError, ValueError) as exc:
+            return fail(f"файл вивантаження не прочитано: {exc}")
+        ids = sorted(set(ids) | {int(g) for k in kartky for rd in k.get("lines") or []
+                                 for g in rd.get("group_ids") or []})
+    if not ids:
+        return fail("потрібні групи: --hrupa або --z-kartok")
+    try:
+        return ok(V.ramky_u_fayl(a.vyklyk, ids, Path(a.do).expanduser(), a.base))
     except (RuntimeError, OSError) as exc:
         return _vidmova_pulu(exc)
 

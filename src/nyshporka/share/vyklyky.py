@@ -308,6 +308,38 @@ def rezultat_u_fayl(vid: int, kudy: Path, base: str = "",
             "nedokacheno": bool(usi and dali is not None), "header": shapka}
 
 
+#: Груп в одному запиті рамок (сервер приймає до 50: кожна тягне пакети внеску з R2).
+GRUP_RAMOK = 50
+
+
+def ramky_u_fayl(vid: int, ids: list[int], kudy: Path, base: str = "") -> dict[str, Any]:
+    """Рамки рядків груп для кропу — пачками по `GRUP_RAMOK`, рядок JSONL на групу: сторінка,
+    номер рядка, текст рядка й попереднього, рамка, розмір кадру донора, кадр джерела.
+    Пишеться в тимчасовий файл і переноситься цілим."""
+    from urllib.parse import urlencode
+
+    tmp = kudy.with_name(kudy.name + ".part")
+    kudy.parent.mkdir(parents=True, exist_ok=True)
+    rakh = {"hrup": 0, "z_ramkoiu": 0, "z_kadrom": 0, "pomylok": 0}
+    try:
+        with tmp.open("w", encoding="utf-8", newline="\n") as f:
+            for i in range(0, len(ids), GRUP_RAMOK):
+                pachka = ids[i:i + GRUP_RAMOK]
+                q = urlencode({"group_ids": ",".join(map(str, pachka))})
+                got = _get(f"{C.base_url(base)}/m/vyklyky/{vid}/ramky?{q}")
+                for r in got.get("frames") or []:
+                    f.write(json.dumps(r, ensure_ascii=False) + "\n")
+                    rakh["hrup"] += 1
+                    rakh["z_ramkoiu"] += bool(r.get("box"))
+                    rakh["z_kadrom"] += bool(r.get("frame") or r.get("source_ref"))
+                    rakh["pomylok"] += bool(r.get("error"))
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    tmp.replace(kudy)
+    return {"fayl": str(kudy), **rakh}
+
+
 #: Груп в одному запиті позначки пачкою (сервер приймає до 5000).
 GRUP_U_PACHTSI = 5000
 

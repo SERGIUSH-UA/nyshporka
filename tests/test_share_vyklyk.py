@@ -505,3 +505,69 @@ def test_kartky_osoby_kanonu_usi_a_ne_za_prizvyshchem(tmp_path: Path) -> None:
     got = K.porcii(_vyvantazhennia(tmp_path), kanon=kanon, porciia=5, do=tmp_path / "p")
     assert got["osoby"]["osib"] == 1
     assert "P7" in (tmp_path / "p" / "kanon_osoby.md").read_text(encoding="utf-8")
+
+
+def test_kartky_storinka_v_kanoni_i_arkush_v_obliku(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+                                                     ) -> None:
+    """Сторінку канон уже має — цитатою, кропом чи маніфестом — і рядок це каже; дата в
+    підписі кропа справою не вважається; чужий проєкт у маніфесті — не наш висновок."""
+    from nyshporka.share import kartky as K
+
+    kanon = tmp_path / "canonical"
+    for d in ("persons", "sources"):
+        (kanon / d).mkdir(parents=True)
+    (kanon / "sources" / "S_A.md").write_text(
+        "---\nid: S_A\ntitle: 'А ф.11 оп.2 спр.3: метрика'\n---\n", encoding="utf-8")
+    (kanon / "persons" / "P1.md").write_text(
+        "---\nid: P1\nfacts:\n- type: other\n  citations:\n  - source_id: S_A\n"
+        "    page: скан 0351, ч.І\n    note: 'Доказ: `data/x/arkh_11-2-3_1849_0013_tarasiuk.jpg`'\n"
+        "media:\n- path: data/x/d3_0128_tarasiuk.png\n  caption: 'спр.3 скан 0128 (5.12.1904)'\n"
+        "---\n", encoding="utf-8")
+    manifest = tmp_path / "MANIFEST.json"
+    manifest.write_text(json.dumps({
+        "a": {"origin": {"case": "А 11-2-3", "page": "0067.jpg", "line": 4},
+              "cited_by": ["rid:P1.md", "inshyi:P9.md"]}}), encoding="utf-8")
+    idx = K.indeks_storinok(kanon, manifest)
+    assert {k for k in idx if k[:3] == ("11", "2", "3")} == {
+        ("11", "2", "3", 351), ("11", "2", "3", 13), ("11", "2", "3", 128), ("11", "2", "3", 67)}
+    assert all(v == {"P1"} for v in idx.values()), idx
+    assert not any(k[:3] == ("5", "12", "1904") for k in idx), "дата — не справа"
+
+    monkeypatch.setattr(K, "arkushi_v_obliku", lambda shifra: {8: "partial 10-25: Тарасюк"}
+                        if shifra == "А 11-2-3" else {})
+    f = tmp_path / "m.jsonl"
+    f.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in [
+        {"header": {"surname": "Тарасюк"}},
+        {"book": {"shifra": "А 11-2-3", "years": [1849]}, "lines": [
+            {"line": "Пономар Тарасюк", "group_ids": [1, 2], "times": 2, "page": 128, "row": 36,
+             "readings": ["Понолырь Тарашюк"]},
+            {"line": "Дяк Тарасюк", "group_ids": [3], "times": 1, "page": 8}]}]),
+        encoding="utf-8")
+    got = K.porcii(f, kanon=kanon, manifest=manifest, porciia=5)
+    t = got["tekst"]
+    assert "p128@36:" in t and "⟨Понолырь Тарашюк⟩" in t and "| CANON-PAGE: P1" in t
+    assert "p8: Дяк Тарасюк | SEEN: partial 10-25: Тарасюк" in t
+    assert got["riadkiv_storinka_v_kanoni"] == 1 and got["riadkiv_arkush_v_obliku"] == 1
+
+
+def test_ramky_pachkamy_z_kartok_u_fayl(pul: Pul, monkeypatch: pytest.MonkeyPatch,
+                                        tmp_path: Path) -> None:
+    """Групи всіх карток вивантаження → рамки пачками по 50 у JSONL."""
+    monkeypatch.setattr(vyklyky, "GRUP_RAMOK", 2)
+    zapyty: list[str] = []
+
+    def _get(url: str) -> Any:
+        zapyty.append(url)
+        ids = [int(x) for x in url.split("group_ids=")[1].replace("%2C", ",").split(",")]
+        return {"frames": [{"group_id": g, "page": "0008", "row": 1, "box": [1, 2, 3, 4]
+                            if g != 20 else None, "source_ref": "commons:file:A.pdf"} for g in ids]}
+
+    monkeypatch.setattr(vyklyky, "_get", _get)
+    env = O.call("share.vyklyk_ramky", {"vyklyk": 7, "z_kartok": str(_vyvantazhennia(tmp_path)),
+                                        "hrupa": [99], "do": str(tmp_path / "r.jsonl")})
+    assert env.ok, env.error
+    assert len(zapyty) == 3, "6 груп пачками по 2"
+    assert env.data["hrup"] == 6 and env.data["z_ramkoiu"] == 5
+    riadky = (tmp_path / "r.jsonl").read_text(encoding="utf-8").splitlines()
+    assert sorted(json.loads(r)["group_id"] for r in riadky) == [10, 11, 12, 20, 30, 99]
+    assert not O.call("share.vyklyk_ramky", {"vyklyk": 7, "do": str(tmp_path / "x")}).ok
