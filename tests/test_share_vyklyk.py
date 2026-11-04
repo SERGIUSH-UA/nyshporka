@@ -360,3 +360,148 @@ def test_dia_neznana_operatsii_koroktko(pul: Pul) -> None:
     pul.post["/m/vyklyky/9/dia"] = HttpError("404", status=404)
     env = O.call("share.vyklyk_dia", {"vyklyk": 9, "zakryty": True})
     assert not env.ok and "Traceback" not in (env.error or "")
+
+
+# ── велика видача: картки сторінками у файл, позначки пачкою ─────────────
+
+def _kartka(shifra: str, ids: list[int]) -> dict[str, Any]:
+    return {"book": {"shifra": shifra, "title": "Metryka", "years": [1890, 1890]},
+            "times": 3, "new": False, "own": False, "more_lines": 0,
+            "lines": [{"line": "Psalomshchyk Teodor", "group_ids": ids, "times": 3, "page": 8}]}
+
+
+def test_rezultat_parametry_idut_u_zapyt(pul: Pul) -> None:
+    pul.get["/m/vyklyky/7/rezultat?view=books"] = {"rezultat": {
+        "view": "books", "surname": "T", "books_total": 1, "items": [_kartka("A 1-1-1", [5, 6])],
+        "next": None}}
+    r = _cli("vyklyk-rezultat", "7", "--param", "view=books")
+    assert r.exit_code == 0, r.output
+    assert "A 1-1-1" in r.output and "#5,6" in r.output
+
+
+def test_rezultat_usi_storinky_u_fayl(pul: Pul, tmp_path: Path) -> None:
+    pul.get["/m/vyklyky/7/rezultat?view=books"] = {"vyklyk": {"id": 7}, "rezultat": {
+        "view": "books", "last_pass": 4, "items": [_kartka("A 1-1-1", [1])], "next": 1}}
+    pul.get["/m/vyklyky/7/rezultat?view=books&from=1"] = {"rezultat": {
+        "view": "books", "items": [_kartka("B 2-2-2", [2])], "next": None}}
+    fayl = tmp_path / "mirror.jsonl"
+    env = O.call("share.vyklyk_rezultat", {"vyklyk": 7, "param": ["view=books"], "vse": True,
+                                           "do": str(fayl)})
+    assert env.ok, env.error
+    riadky = [json.loads(x) for x in fayl.read_text(encoding="utf-8").splitlines()]
+    assert riadky[0]["header"]["last_pass"] == 4 and "items" not in riadky[0]["header"]
+    assert [x["book"]["shifra"] for x in riadky[1:]] == ["A 1-1-1", "B 2-2-2"]
+    assert env.data["elementiv"] == 2 and env.data["storinok"] == 2
+    assert not (tmp_path / "mirror.jsonl.part").exists()
+
+
+def test_rezultat_bez_storinok_u_fayl_vidmova(pul: Pul, tmp_path: Path) -> None:
+    pul.get["/m/vyklyky/7/rezultat"] = REZULTAT
+    env = O.call("share.vyklyk_rezultat", {"vyklyk": 7, "vse": True, "do": str(tmp_path / "x.jsonl")})
+    assert not env.ok and not list(tmp_path.iterdir()), "обірване не лишає файла"
+    assert not O.call("share.vyklyk_rezultat", {"vyklyk": 7, "vse": True}).ok, "--vse без --do"
+
+
+def test_dia_kilka_hrup_odnym_zapytom(pul: Pul) -> None:
+    pul.post["/m/vyklyky/7/dia"] = {"group_ids": [41, 42], "verdict": "shum"}
+    r = _cli("vyklyk-dia", "7", "--hrupa", "42", "--hrupa", "41", "--vyrok", "shum")
+    assert r.exit_code == 0, r.output
+    assert pul.zapyty[-1][2] == {"group_ids": [41, 42], "verdict": "shum"}
+
+
+def test_dia_z_fayla_po_poznachkakh(pul: Pul, tmp_path: Path) -> None:
+    pul.post["/m/vyklyky/7/dia"] = {}
+    f = tmp_path / "marks.json"
+    f.write_text(json.dumps([{"group_ids": [1, 2], "verdict": "shum"},
+                             {"group_id": 3, "verdict": "skhovaty"},
+                             {"group_ids": [2], "verdict": "shum"}]), encoding="utf-8")
+    env = O.call("share.vyklyk_dia", {"vyklyk": 7, "z_fayla": str(f)})
+    assert env.ok, env.error
+    assert env.data == {"poznacheno": {"shum": 2, "skhovaty": 1}}
+    tila = [z[2] for z in pul.zapyty]
+    assert {"group_ids": [1, 2], "verdict": "shum"} in tila
+    assert {"group_ids": [3], "verdict": "skhovaty"} in tila
+
+
+@pytest.mark.parametrize("zmist", ['{"a": 1}', '[{"group_ids": [1], "verdict": "ne_mii"}]',
+                                   '[{"group_ids": ["x"], "verdict": "shum"}]', "[]"])
+def test_dia_z_khybnoho_fayla_ne_ide_na_server(pul: Pul, tmp_path: Path, zmist: str) -> None:
+    f = tmp_path / "marks.json"
+    f.write_text(zmist, encoding="utf-8")
+    env = O.call("share.vyklyk_dia", {"vyklyk": 7, "z_fayla": str(f)})
+    assert not env.ok and not pul.zapyty
+
+
+def test_dia_perehlianuto(pul: Pul) -> None:
+    pul.post["/m/vyklyky/7/dia"] = {"reviewed_upto": 5}
+    r = _cli("vyklyk-dia", "7", "--perehlianuto", "5")
+    assert r.exit_code == 0 and "5" in r.output
+    assert pul.zapyty[-1][2] == {"reviewed_upto": 5}
+    assert not O.call("share.vyklyk_dia", {"vyklyk": 7, "perehlianuto": 5, "zakryty": True}).ok
+
+
+def test_dia_obsiah_ide_na_server(pul: Pul) -> None:
+    pul.post["/m/vyklyky/7/dia"] = {"group_ids": [41, 42, 43], "verdict": "shum"}
+    env = O.call("share.vyklyk_dia", {"vyklyk": 7, "hrupa": [41], "vyrok": "shum",
+                                      "obsiah": "riadok"})
+    assert env.ok, env.error
+    assert pul.zapyty[-1][2] == {"group_ids": [41], "verdict": "shum", "scope": "line"}
+    assert env.data == {"poznacheno": {"shum": 3}}, "скільки розгорнув сервер, а не скільки назвали"
+    assert not O.call("share.vyklyk_dia", {"vyklyk": 7, "hrupa": [41], "vyrok": "shum",
+                                           "obsiah": "sторінка"}).ok
+
+
+def _vyvantazhennia(tmp_path: Path) -> Path:
+    f = tmp_path / "mirror.jsonl"
+    riadky = [{"header": {"surname": "Тарасюк", "last_pass": 3}},
+              _kartka("А 11-2-3", [10, 11, 12]), _kartka("Б 4-5-6", [20]),
+              {**_kartka("В 7-8-9", [30]), "own": True}]
+    f.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in riadky), encoding="utf-8")
+    return f
+
+
+def test_kartky_porciiamy_i_kanon(tmp_path: Path) -> None:
+    """Канон пише справу по-різному — обидва записи впізнаються, сусідні номери — ні."""
+    from nyshporka.share import kartky as K
+
+    kanon = tmp_path / "canonical"
+    (kanon / "persons").mkdir(parents=True)
+    (kanon / "persons" / "P1.md").write_text("Метрика ф. 11, оп. 2, спр. 3, арк. 5",
+                                            encoding="utf-8")
+    (kanon / "sources").mkdir()
+    (kanon / "sources" / "S1.md").write_text("Б 4-5-6; ще 4-5-60", encoding="utf-8")
+    got = K.porcii(_vyvantazhennia(tmp_path), kanon=kanon, porciia=2)
+    assert got["kartok"] == 3 and got["v_kanoni"] == 2 and got["dali"] == 2
+    assert "## K0 А 11-2-3" in got["tekst"] and "CANON: P1" in got["tekst"]
+    assert "g10+2 ×3 p8:" in got["tekst"]
+    dali = K.porcii(_vyvantazhennia(tmp_path), kanon=kanon, porciia=2, vid=2)
+    assert "## K2 В 7-8-9" in dali["tekst"] and "| own" in dali["tekst"]
+    assert "CANON" not in dali["tekst"] and dali["dali"] is None
+    fayly = K.porcii(_vyvantazhennia(tmp_path), kanon=None, porciia=2, do=tmp_path / "p")
+    assert [Path(f["fayl"]).name for f in fayly["fayly"]] == ["porciia_1.md", "porciia_2.md"]
+
+
+def test_kartky_ne_z_kartok_vidmova(tmp_path: Path) -> None:
+    f = tmp_path / "x.jsonl"
+    f.write_text(json.dumps({"header": {}}) + "\n" + json.dumps({"group_id": 1}), encoding="utf-8")
+    env = O.call("share.kartky", {"fayl": str(f), "bez_kanonu": True})
+    assert not env.ok and "view=books" in (env.error or "")
+
+
+def test_kartky_osoby_kanonu_usi_a_ne_za_prizvyshchem(tmp_path: Path) -> None:
+    """Прізвище лише у формі імені — особа однаково в переліку для помічника (04.11.2026)."""
+    from nyshporka.share import kartky as K
+
+    kanon = tmp_path / "canonical"
+    (kanon / "persons").mkdir(parents=True)
+    (kanon / "places").mkdir()
+    (kanon / "places" / "PL1.md").write_text("---\nid: PL1\nname: Липове\n---\n", encoding="utf-8")
+    (kanon / "persons" / "P7.md").write_text(
+        "---\nid: P7\nnames:\n- form: Стефан Іванович Тарасюк\n  primary: true\n"
+        "  given: Стефан\nfacts:\n- type: occupation\n  value: '**Пономар** у Липовому'\n"
+        "  place_id: PL1\n  date:\n    value: '1851'\n    precision: year\n---\n", encoding="utf-8")
+    osoby = K.osoby_kanonu(kanon)
+    assert osoby == ["P7 | Стефан Іванович Тарасюк | 1851–1851 | Пономар у Липовому | Липове"]
+    got = K.porcii(_vyvantazhennia(tmp_path), kanon=kanon, porciia=5, do=tmp_path / "p")
+    assert got["osoby"]["osib"] == 1
+    assert "P7" in (tmp_path / "p" / "kanon_osoby.md").read_text(encoding="utf-8")

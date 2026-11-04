@@ -10,10 +10,11 @@
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from nyshporka.core.envelope import Envelope, fail, ok
 from nyshporka.core.ops import op
@@ -1608,17 +1609,78 @@ def share_vyklyk_pochaty(a: ShareVyklykIdArgs) -> Envelope:
         return _vidmova_pulu(exc)
 
 
+class ShareVyklykRezultatArgs(BaseModel):
+    vyklyk: int = Field(description="номер виклику")
+    param: list[str] = Field(default_factory=list,
+                             description="параметри видачі `ключ=значення` (що вони значать, каже сервер)")
+    vse: bool = Field(default=False, description="усі сторінки результату (`next`), лише з `do`")
+    do: str = Field(default="", description="файл JSONL: шапка й по рядку на елемент")
+    base: str = Field(default="", description="інша адреса пулу")
+
+
 @op("share.vyklyk_rezultat", summary="Повний результат свого виклику на сервері Супряги",
-    args=ShareVyklykIdArgs, mutates=False, section=SECTION, private=True,
+    args=ShareVyklykRezultatArgs, mutates=False, section=SECTION, private=True,
     skill="share-case",
-    when="виклик готовий, і людина хоче побачити весь результат, а не лише перші рядки")
-def share_vyklyk_rezultat(a: ShareVyklykIdArgs) -> Envelope:
+    when="весь результат готового виклику; велику видачу — у файл сторінками, щоб розібрати")
+def share_vyklyk_rezultat(a: ShareVyklykRezultatArgs) -> Envelope:
+    """Без `do` — відповідь сервера як є. З `do` — у файл JSONL (з `vse` — усі сторінки):
+    велику видачу агент читає з файла порціями, а не з виводу консолі."""
+    from pathlib import Path
+
     from nyshporka.share import vyklyky as V
 
+    parametry = _parametry(a.param)
+    if parametry is None:
+        return fail("параметр має вигляд ключ=значення")
+    if a.vse and not a.do:
+        return fail("--vse пише у файл: додайте --do <файл.jsonl>")
     try:
-        return ok(V.rezultat(a.vyklyk, a.base))
+        if a.do:
+            got = V.rezultat_u_fayl(a.vyklyk, Path(a.do).expanduser(), a.base, parametry,
+                                    usi=a.vse)
+            env = ok(got)
+            if got["nedokacheno"]:
+                env.warn("nedokacheno", f"зупинено на {got['storinok']} сторінках: сервер "
+                         "дає ще — звузьте видачу параметрами")
+            return env
+        return ok(V.rezultat(a.vyklyk, a.base, parametry))
     except (RuntimeError, OSError) as exc:
         return _vidmova_pulu(exc)
+
+
+class ShareKartkyArgs(BaseModel):
+    fayl: str = Field(description="файл вивантаження (`vyklyk-rezultat --param view=books --vse --do`)")
+    porciia: int = Field(default=300, ge=1, le=5000, description="карток у порції")
+    vid: int = Field(default=0, ge=0, description="з якої картки (без `do`)")
+    do: str = Field(default="", description="тека: усі порції файлами porciia_<n>.md")
+    bez_kanonu: bool = Field(default=False, description="не звіряти номери справ із каноном проєкту")
+
+
+@op("share.kartky", summary="Картки великої видачі текстом, порціями, з позначкою «справа в каноні»",
+    args=ShareKartkyArgs, mutates=False, section=SECTION, private=True,
+    skill="share-case",
+    when="розібрати вивантажену видачу: картки текстом порціями, які справи канон уже знає")
+def share_kartky(a: ShareKartkyArgs) -> Envelope:
+    """Читати порціями, а не JSON: текст утричі коротший. Канон — підказка: що вже відомо."""
+    from nyshporka.core.workspace import WorkspaceError, workspace
+    from nyshporka.share import kartky as K
+
+    kanon: Path | None = None
+    env_warn = ""
+    if not a.bez_kanonu:
+        try:
+            kanon = workspace().canonical
+        except WorkspaceError:
+            env_warn = "проєкту немає: справи з каноном не звірено (сесія в теці проєкту)"
+    try:
+        got = K.porcii(Path(a.fayl).expanduser(), kanon=kanon, porciia=a.porciia, vid=a.vid,
+                       do=Path(a.do).expanduser() if a.do else None)
+    except (OSError, ValueError) as exc:
+        return fail(f"файл вивантаження не прочитано: {exc}")
+    env = ok(got)
+    if env_warn:
+        env.warn("bez_kanonu", env_warn)
+    return env
 
 
 #: Позначка людини → що йде на сервер. `shum` — на скані не це слово (рушій помилився; допомагає
@@ -1627,32 +1689,93 @@ def share_vyklyk_rezultat(a: ShareVyklykIdArgs) -> Envelope:
 VYROKY = {"shum": "shum", "skhovaty": "skhovaty", "znyaty": ""}
 
 
+#: Обсяг позначки: група як є, увесь рядок картки чи вся книга (розгортає сервер).
+OBSIAHY = {"": "", "hrupa": "", "riadok": "line", "line": "line", "knyha": "book", "book": "book"}
+
+
 class ShareVyklykDiaArgs(BaseModel):
     vyklyk: int = Field(description="номер виклику")
-    hrupa: int | None = Field(default=None, description="номер групи з результату виклику")
-    vyrok: str = Field(default="", description="позначка групі: shum, skhovaty або znyaty")
+    hrupa: list[int] = Field(default_factory=list,
+                             description="номер(и) груп з результату виклику — одна позначка всім")
+    vyrok: str = Field(default="", description="позначка групам: shum, skhovaty або znyaty")
+    obsiah: str = Field(default="", description="hrupa (типово), riadok — увесь рядок картки, knyha — уся книга")
+    z_fayla: str = Field(default="", description="файл JSON: [{\"group_ids\": [...], \"verdict\": \"shum\"}]")
+    perehlianuto: int | None = Field(default=None,
+                                     description="переглянуто до проходу (`last_pass` вивантаження)")
     zakryty: bool = Field(default=False, description="закрити виклик: сервер більше його не веде")
     base: str = Field(default="", description="інша адреса пулу")
 
+    @field_validator("hrupa", mode="before")
+    @classmethod
+    def _odna_hrupa(cls, v: Any) -> Any:
+        return [] if v is None else [v] if isinstance(v, int) else v
 
-@op("share.vyklyk_dia", summary="Позначити рядок результату (шум, сховати) або закрити свій виклик",
+
+def _poznachky_z_fayla(shliakh: str) -> dict[tuple[str, str], list[int]] | str:
+    """Файл позначок → {(позначка, обсяг): [групи]}; рядок — що не так із файлом."""
+    from pathlib import Path
+
+    try:
+        dani = json.loads(Path(shliakh).expanduser().read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return f"файл позначок не прочитано: {exc}"
+    if not isinstance(dani, list):
+        return "файл позначок — список [{\"group_ids\": [...], \"verdict\": \"shum\"}]"
+    out: dict[tuple[str, str], list[int]] = {}
+    for i, z in enumerate(dani):
+        if not isinstance(z, dict) or z.get("verdict") not in VYROKY:
+            return f"запис {i}: verdict — shum, skhovaty або znyaty"
+        if str(z.get("scope") or "") not in OBSIAHY:
+            return f"запис {i}: scope — line (рядок) або book (книга)"
+        ids = z.get("group_ids", [z.get("group_id")] if "group_id" in z else [])
+        if not ids or not all(isinstance(x, int) and not isinstance(x, bool) for x in ids):
+            return f"запис {i}: group_ids — номери груп"
+        out.setdefault((z["verdict"], OBSIAHY[str(z.get("scope") or "")]), []).extend(ids)
+    return {k: sorted(set(v)) for k, v in out.items()} or "файл позначок порожній"
+
+
+@op("share.vyklyk_dia", summary="Позначити рядки результату (шум, сховати), закрити розбір або виклик",
     args=ShareVyklykDiaArgs, mutates=True, section=SECTION, private=True,
     skill="share-case",
-    when="людина подивилась скан: «там інше слово» (шум) чи «це не той» (сховати), або відпускає виклик")
+    when="слово людини про рядки результату (шум, сховати), кінець розбору чи закрити виклик")
 def share_vyklyk_dia(a: ShareVyklykDiaArgs) -> Envelope:
-    """Позначку ставить людина, а не агент: агент лише передає її слово."""
+    """Позначку ставить людина, а не агент: агент лише передає її слово. Одна група без обсягу
+    йде `group_id` (так розуміє й старий сервер), решта — `group_ids` пачками з `scope`."""
     from nyshporka.share import vyklyky as V
 
-    if a.zakryty == (a.hrupa is not None):
-        return fail("потрібне щось одне: --hrupa з --vyrok або --zakryty")
-    if a.zakryty:
-        tilo: dict[str, Any] = {"close": True}
-    else:
-        if a.vyrok not in VYROKY:
-            return fail("позначка: shum (на скані інше слово), skhovaty (не той) або znyaty")
-        tilo = {"group_id": a.hrupa, "verdict": VYROKY[a.vyrok]}
+    dii = sum([a.zakryty, a.perehlianuto is not None, bool(a.hrupa), bool(a.z_fayla)])
+    if dii != 1:
+        return fail("потрібне щось одне: --hrupa з --vyrok, --z-fayla, --perehlianuto або --zakryty")
+    if a.obsiah not in OBSIAHY:
+        return fail("обсяг: hrupa, riadok (увесь рядок картки) або knyha (уся книга)")
     try:
-        return ok(V.dia(a.vyklyk, tilo, a.base))
+        if a.zakryty:
+            return ok(V.dia(a.vyklyk, {"close": True}, a.base))
+        if a.perehlianuto is not None:
+            return ok(V.dia(a.vyklyk, {"reviewed_upto": a.perehlianuto}, a.base))
+        if a.hrupa:
+            if a.vyrok not in VYROKY:
+                return fail("позначка: shum (на скані інше слово), skhovaty (не той) або znyaty")
+            plan = {(a.vyrok, OBSIAHY[a.obsiah]): sorted(set(a.hrupa))}
+        else:
+            got = _poznachky_z_fayla(a.z_fayla)
+            if isinstance(got, str):
+                return fail(got)
+            plan = got
+        if len(plan) == 1:
+            ((vyrok, obsiah), ids), = plan.items()
+            if len(ids) == 1 and not obsiah:
+                return ok(V.dia(a.vyklyk, {"group_id": ids[0], "verdict": VYROKY[vyrok]}, a.base))
+        poznacheno: dict[str, int] = {}
+        for (vyrok, obsiah), ids in plan.items():
+            for i in range(0, len(ids), V.GRUP_U_PACHTSI):
+                tilo: dict[str, Any] = {"group_ids": ids[i:i + V.GRUP_U_PACHTSI],
+                                        "verdict": VYROKY[vyrok]}
+                if obsiah:
+                    tilo["scope"] = obsiah
+                got_ = V.dia(a.vyklyk, tilo, a.base)
+                poznacheno[vyrok] = poznacheno.get(vyrok, 0) + len(got_.get("group_ids") or tilo["group_ids"])
+        return ok({"poznacheno": poznacheno})
     except (RuntimeError, OSError) as exc:
         return _vidmova_pulu(exc)
 

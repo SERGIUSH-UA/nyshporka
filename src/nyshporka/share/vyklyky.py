@@ -252,9 +252,64 @@ def skasuvaty(vid: int, base: str = "") -> dict[str, Any]:
     return _post(f"{C.base_url(base)}/m/vyklyky/{vid}/skasuvaty", {})
 
 
-def rezultat(vid: int, base: str = "") -> dict[str, Any]:
-    """Повний результат готового виклику — у тому вигляді, який дає сервер."""
-    return _get(f"{C.base_url(base)}/m/vyklyky/{vid}/rezultat")
+def rezultat(vid: int, base: str = "", parametry: dict[str, str] | None = None) -> dict[str, Any]:
+    """Повний результат готового виклику — у тому вигляді, який дає сервер. `parametry` — як є
+    в рядок запиту (`view=books`, `from=200`): що вони значать, знає сервер."""
+    from urllib.parse import urlencode
+
+    url = f"{C.base_url(base)}/m/vyklyky/{vid}/rezultat"
+    return _get(f"{url}?{urlencode(parametry)}" if parametry else url)
+
+
+#: Сторінок вивантаження — не більше: сервер, що щоразу дає `next`, не крутить клієнт вічно.
+MAKS_STORINOK = 500
+
+
+def rezultat_u_fayl(vid: int, kudy: Path, base: str = "",
+                    parametry: dict[str, str] | None = None, *, usi: bool = True) -> dict[str, Any]:
+    """Результат сторінками у JSONL: перший рядок — `{"header": …}` (результат без `items`),
+    далі по рядку на кожен елемент `items`. Сторінки — доки сервер дає `next` (його значення
+    йде параметром `from`). Сервер без `items` — відмова: такий результат цілим, без `--vse`.
+
+    Пишеться в тимчасовий файл і переноситься лише цілим: обірване вивантаження не лишає
+    половини, яку агент прочитав би як усе."""
+    p = dict(parametry or {})
+    tmp = kudy.with_name(kudy.name + ".part")
+    kudy.parent.mkdir(parents=True, exist_ok=True)
+    shapka: dict[str, Any] = {}
+    elementiv = storinok = 0
+    dali: Any = None
+    try:
+        with tmp.open("w", encoding="utf-8", newline="\n") as f:
+            while True:
+                got = rezultat(vid, base, p)
+                r = got.get("rezultat") or {}
+                if not isinstance(r.get("items"), list):
+                    raise C.PoolError("сервер не віддає цей результат сторінками (немає items)")
+                storinok += 1
+                if not shapka:
+                    # відповідь виклику (перші книги) — уже в items: шапка без неї
+                    vk = {k: v for k, v in (got.get("vyklyk") or {}).items() if k != "vidpovid"}
+                    shapka = {"vyklyk": vk,
+                              **{k: v for k, v in r.items() if k not in ("items", "next")}}
+                    f.write(json.dumps({"header": shapka}, ensure_ascii=False) + "\n")
+                for it in r["items"]:
+                    f.write(json.dumps(it, ensure_ascii=False) + "\n")
+                    elementiv += 1
+                dali = r.get("next")
+                if not usi or dali is None or storinok >= MAKS_STORINOK:
+                    break
+                p["from"] = str(dali)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    tmp.replace(kudy)
+    return {"fayl": str(kudy), "elementiv": elementiv, "storinok": storinok,
+            "nedokacheno": bool(usi and dali is not None), "header": shapka}
+
+
+#: Груп в одному запиті позначки пачкою (сервер приймає до 5000).
+GRUP_U_PACHTSI = 5000
 
 
 def dia(vid: int, tilo: dict[str, Any], base: str = "") -> dict[str, Any]:

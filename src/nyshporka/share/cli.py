@@ -1252,23 +1252,66 @@ BLOKY_REZULTATU = (("repeated", "кілька разів або кількома
                    ("weak", "слабкі"), ("noise", "шум"), ("rejected", "позначені вами"))
 
 
+def _druk_kartok(r: dict[str, Any]) -> None:
+    """Картки (`items` з `book` і `lines`): книга рядком, під нею рядки з номерами груп."""
+    console.print(f"[bold]{_e(r.get('surname'))}[/bold] · {_e(r.get('status'))} · книг "
+                  f"{_e(r.get('books_total'))} · переглянуто до проходу "
+                  f"{_e(r.get('reviewed_upto') or '—')}, останній {_e(r.get('last_pass'))}",
+                  highlight=False)
+    for kr in r.get("items") or []:
+        kn = kr.get("book") or {}
+        roky = "–".join(str(x) for x in dict.fromkeys(kn.get("years") or []) if x)
+        mitky = "".join(f" · {m}" for m, tak in (("нове", kr.get("new")), ("ваша", kr.get("own")))
+                        if tak)
+        console.print(f"\n[bold]{_e(kn.get('shifra'))}[/bold] {_e(roky)} ×{_e(kr.get('times'))}"
+                      f"{mitky} · {_e(kn.get('title'))}", highlight=False)
+        for rd in kr.get("lines") or []:
+            ids = rd.get("group_ids") or []
+            nomery = ",".join(map(str, ids[:5])) + (f",…+{len(ids) - 5}" if len(ids) > 5 else "")
+            console.print(f"  #{_e(nomery)} ×{_e(rd.get('times'))} стор. {_e(rd.get('page'))} · "
+                          f"{_e(rd.get('line'))}", highlight=False)
+        if kr.get("more_lines"):
+            console.print(f"  [dim]ще рядків: {_e(kr['more_lines'])}[/dim]", highlight=False)
+    if r.get("next") is not None:
+        console.print(f"\n[dim]далі: --param from={_e(r['next'])}, або все у файл: "
+                      f"--vse --do <файл.jsonl>[/dim]", highlight=False)
+
+
 @app.command("vyklyk-rezultat")
 @route("share vyklyk-rezultat", skill="share-case",
-       when="виклик готовий, і людина хоче побачити весь результат, а не лише перші рядки")
+       when="весь результат готового виклику; велику видачу — у файл сторінками, щоб розібрати")
 def vyklyk_rezultat_cmd(
     vyklyk: int = typer.Argument(..., help="номер виклику"),
+    param: list[str] = typer.Option([], "--param", help="параметр видачі ключ=значення (view=books, new=1)"),
+    vse: bool = typer.Option(False, "--vse", help="усі сторінки результату, у файл (--do)"),
+    do: str = typer.Option("", "--do", help="файл JSONL: шапка й по рядку на книгу чи групу"),
     base: str = typer.Option("", "--base", help="інша адреса пулу"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
-    """Повний результат готового виклику. Групи друкуються рядками з номером для вердикту."""
+    """Повний результат готового виклику. Групи друкуються рядками з номером для вердикту;
+    велика видача — у файл (`--vse --do`), щоб розбирати порціями."""
     import json
 
     from nyshporka import ops as O
 
-    env = O.call("share.vyklyk_rezultat", {"vyklyk": vyklyk, "base": base})
+    env = O.call("share.vyklyk_rezultat", {"vyklyk": vyklyk, "param": param, "vse": vse,
+                                           "do": do, "base": base})
     if _answer(env, as_json):
         return
+    if do:
+        d = env.data or {}
+        sh = d.get("header") or {}
+        console.print(f"у файлі {_e(d.get('fayl'))}: {_e(d.get('elementiv'))} рядків за "
+                      f"{_e(d.get('storinok'))} сторінок"
+                      + (f" · останній прохід {_e(sh['last_pass'])}" if sh.get("last_pass") else ""),
+                      highlight=False)
+        _notes(env)
+        return
     r = (env.data or {}).get("rezultat") or {}
+    if isinstance(r.get("items"), list) and r.get("view") == "books":
+        _druk_kartok(r)
+        _notes(env)
+        return
     if not any(k in r for k, _ in BLOKY_REZULTATU):
         console.print(_e(json.dumps(r, ensure_ascii=False, indent=1)), highlight=False)
         _notes(env)
@@ -1300,27 +1343,76 @@ def vyklyk_rezultat_cmd(
     _notes(env)
 
 
+@app.command("kartky")
+@route("share kartky", skill="share-case",
+       when="розібрати вивантажену видачу: картки текстом порціями, які справи канон уже знає")
+def kartky_cmd(
+    fayl: str = typer.Argument(..., help="файл вивантаження (vyklyk-rezultat --param view=books --vse --do)"),
+    porciia: int = typer.Option(300, "--porciia", help="карток у порції"),
+    vid: int = typer.Option(0, "--vid", help="з якої картки (без --do)"),
+    do: str = typer.Option("", "--do", help="тека: усі порції файлами porciia_<n>.md"),
+    bez_kanonu: bool = typer.Option(False, "--bez-kanonu", help="не звіряти справи з каноном"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Картки великої видачі текстом: книга, роки, рядки з номером групи; справа, яку канон
+    уже згадує, — з позначкою CANON. Порціями — щоб читати самому чи роздати помічникам."""
+    from nyshporka import ops as O
+
+    env = O.call("share.kartky", {"fayl": fayl, "porciia": porciia, "vid": vid, "do": do,
+                                  "bez_kanonu": bez_kanonu})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    if d.get("fayly"):
+        console.print(f"карток {_e(d.get('kartok'))}, справа в каноні — {_e(d.get('v_kanoni'))}; "
+                      f"порцій {len(d['fayly'])}:", highlight=False)
+        for f in d["fayly"]:
+            console.print(f"  {_e(f['fayl'])} · K{_e(f['kartky'][0])}–K{_e(f['kartky'][1])}",
+                          highlight=False)
+        if d.get("osoby"):
+            console.print(f"особи канону для помічників ({_e(d['osoby']['osib'])}): "
+                          f"{_e(d['osoby']['fayl'])}", highlight=False)
+    else:
+        console.print(_e(d.get("tekst") or ""), highlight=False)
+        if d.get("dali") is not None:
+            console.print(f"\n[dim]далі: --vid {_e(d['dali'])}[/dim]", highlight=False)
+    _notes(env)
+
+
 @app.command("vyklyk-dia")
 @route("share vyklyk-dia", skill="share-case",
-       when="людина подивилась скан: «там інше слово» (шум) чи «це не той» (сховати), або відпускає виклик")
+       when="слово людини про рядки результату (шум, сховати), кінець розбору чи закрити виклик")
 def vyklyk_dia_cmd(
     vyklyk: int = typer.Argument(..., help="номер виклику"),
-    hrupa: int | None = typer.Option(None, "--hrupa", help="номер групи з vyklyk-rezultat"),
+    hrupa: list[int] = typer.Option([], "--hrupa", help="номер групи з vyklyk-rezultat (можна кілька)"),
     vyrok: str = typer.Option("", "--vyrok", help="shum (на скані інше слово) · skhovaty (не той) · znyaty"),
+    obsiah: str = typer.Option("", "--obsiah", help="riadok — увесь рядок картки, knyha — уся книга"),
+    z_fayla: str = typer.Option("", "--z-fayla", help="позначки файлом JSON: [{group_ids, verdict, scope}]"),
+    perehlianuto: int | None = typer.Option(None, "--perehlianuto",
+                                            help="розбір закінчено до проходу (last_pass)"),
     zakryty: bool = typer.Option(False, "--zakryty", help="закрити виклик: сервер більше його не веде"),
     base: str = typer.Option("", "--base", help="інша адреса пулу"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
-    """Позначка групі результату (слово людини, не агента) або закрити свій виклик."""
+    """Позначка групам результату (слово людини, не агента): одній, кільком чи файлом;
+    «переглянуто до проходу»; або закрити свій виклик."""
     from nyshporka import ops as O
 
     env = O.call("share.vyklyk_dia", {"vyklyk": vyklyk, "hrupa": hrupa, "vyrok": vyrok,
+                                      "obsiah": obsiah, "z_fayla": z_fayla,
+                                      "perehlianuto": perehlianuto,
                                       "zakryty": zakryty, "base": base})
     if _answer(env, as_json):
         return
     d = env.data or {}
     if d.get("closed"):
         console.print(f"виклик {_e(vyklyk)} закрито", highlight=False)
+    elif d.get("reviewed_upto") is not None:
+        console.print(f"переглянуто до проходу {_e(d['reviewed_upto'])}: далі --param new=1 "
+                      "дає лише нове", highlight=False)
+    elif d.get("poznacheno"):
+        console.print("позначено: " + ", ".join(f"{_e(k)} {_e(v)}" for k, v in d["poznacheno"].items()),
+                      highlight=False)
     else:
         console.print(f"група {_e(d.get('group_id'))} · {_e(d.get('verdict') or 'позначку знято')}",
                       highlight=False)
