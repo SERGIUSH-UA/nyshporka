@@ -392,7 +392,11 @@ def fond_list(_: NoArgs) -> Envelope:
                     # Чи є супутні файли — щоб екран не обіцяв того, чого немає.
                     "has_coverage": bool(f.get("has_coverage")),
                     "has_conflicts": bool(f.get("has_conflicts")),
-                    "has_alfavitka": bool(f.get("has_alfavitka"))})
+                    "has_alfavitka": bool(f.get("has_alfavitka")),
+                    # 🗂 Звідки реєстр: зібраний тут чи взятий із Супряги, і
+                    # станом на коли — щоб узяте не читалось як своє свіже.
+                    "source": f.get("source") or "disk",
+                    "pushed_at": f.get("pushed_at")})
     env = ok({"fonds": out, "shown": len(out)})
     if not out:
         env.warn("no_registries",
@@ -400,6 +404,8 @@ def fond_list(_: NoArgs) -> Envelope:
         # 🔴 Порада мусить вести туди, де це лікується. Доти вона кликала
         # `catalog.packs` — довідники газетира, які до опису фонду стосунку не
         # мають: відповідь була не на те питання, а виглядала як відповідь.
+        env.suggest("registry.remote",
+                    "які реєстри опису вже є в Супрязі — узяти готовий")
         env.suggest("registry.collectors",
                     "чим збирати опис фонду на цій машині")
     return env
@@ -532,7 +538,16 @@ def fond_rows(a: FondRowsArgs) -> Envelope:
               "surnames": R.surname_list(f["id"]),
               # Покриття по описах: скільки номерів в описі взагалі є і
               # скількох ми не бачимо. `None` = не рахувалось.
-              "coverage": R.load_coverage(f["id"])})
+              "coverage": R.load_coverage(f["id"]),
+              "source": f.get("source") or "disk",
+              "pushed_at": f.get("pushed_at")})
+    if f.get("source") == "supriaha":
+        # Узятий реєстр свіжий станом на заливку в Супрязі: скан, який архів
+        # виклав після неї, тут ще «не оцифрований».
+        env.warn("from_supriaha",
+                 f"реєстр узято з Супряги, станом на "
+                 f"{str(f.get('pushed_at') or '')[:10] or '?'}; дотягнути — "
+                 f"nysh registry pull")
     if summary.get("disk_mismatch"):
         env.warn("disk_mismatch",
                  f"колонка «на диску» в реєстрі розходиться з бібліотекою у "
@@ -774,7 +789,25 @@ def registry_merge(a: MergeArgs) -> Envelope:
     # прогалину.
     for name, n in res.sources:
         env.coverage.append(CoverageItem(source=name, rows=n, scope=target.fond_id))
+    if not a.dry_run:
+        # 🗂 Самозаливка в Супрягу, якщо її ввімкнено в `[registry.push]`
+        # маркера Майстерні (рішення дослідника 04.11.2026): свіжість реєстру
+        # в людей — від цього кроку, окремого обходу немає.
+        from nyshporka.fonds import remote
+
+        pushed = remote.auto_push(fond_id)
+        if pushed is not None:
+            env.data["pushed"] = pushed
+            _push_note(env, pushed)
     return env
+
+
+def _push_note(env: Envelope, pushed: Any) -> None:
+    """Збій самозаливки — попередження, а не відмова: злиття вже відбулося."""
+    if isinstance(pushed, dict) and pushed.get("error"):
+        env.warn("push_failed",
+                 f"реєстр зведено, але в Супрягу не залито: {pushed['error']}")
+        env.suggest("registry.push", "залити ще раз")
 
 
 @op("registry.collect", summary="Зібрати перелік справ фонду в registry/*.tsv",
@@ -861,6 +894,7 @@ def registry_collect(a: CollectArgs) -> Envelope:
         return env
     data = merged.data or {}
     env.data["merged"] = data
+    _push_note(env, data.get("pushed"))
     env.warn("merged_into_registry",
              f"зібране зведено в реєстр опису: "
              f"{data.get('rows') or 0} справ у фонді {a.repo} {a.fond}")
@@ -991,6 +1025,7 @@ def registry_build(a: BuildArgs) -> Envelope:
     md = merged.data or {}
     data["merged"] = md
     env = ok(data)
+    _push_note(env, md.get("pushed"))
     # 🔴 Пропущені джерела називаються завжди, навіть коли решта дала багато:
     # реєстр із двох джерел і реєстр із трьох — різні знаменники для майбутнього
     # «такої справи в архіві не існує».
@@ -1005,6 +1040,108 @@ def registry_build(a: BuildArgs) -> Envelope:
              + (f", пропущено {len(skipped)}" if skipped else "")
              + f" — у реєстрі {md.get('rows') or 0} справ фонду {a.repo} {a.fond}")
     env.suggest("fond.list", "подивитись опис фонду")
+    return env
+
+
+class RegistryPullArgs(BaseModel):
+    repo: str = Field("", description="код архіву: DAHMO, CDIAK…; порожньо разом із "
+                                      "фондом — дотягнути всі вже взяті")
+    fond: str = Field("", description="номер фонду")
+    full: bool = Field(False, description="узяти фонд цілком, а не лише змінене")
+
+
+@op("registry.remote", summary="Які реєстри опису фондів є в Супрязі і станом на коли",
+    mutates=False, section="material", skill="keep-fond", tier="situational",
+    when="чи є в Супрязі готовий реєстр опису фонду, щоб не збирати самому")
+def registry_remote(_: NoArgs) -> Envelope:
+    """Перелік реєстрів Супряги й позначка, які з них уже взято сюди."""
+    from nyshporka.fonds import remote
+    from nyshporka.share.catalog import PoolError
+
+    try:
+        got = remote.remote_list()
+    except PoolError as exc:
+        return fail(str(exc))
+    have = {(str(t["repo"]), str(t["fond"])): t for t in remote.taken()}
+    for f in got:
+        t = have.get((str(f.get("repo")), str(f.get("fond"))))
+        f["taken"] = t is not None
+        f["taken_rev"] = t["rev"] if t else None
+    env = ok({"fonds": got, "shown": len(got)})
+    if not got:
+        env.warn("no_remote", "у Супрязі ще немає жодного реєстру опису")
+    env.suggest("registry.pull", "узяти реєстр фонду")
+    return env
+
+
+@op("registry.pull",
+    summary="Узяти реєстр опису фонду із Супряги; далі — дотягувати лише змінене",
+    args=RegistryPullArgs, mutates=True, section="material", skill="keep-fond",
+    tier="situational",
+    when="реєстру опису фонду немає — узяти готовий із Супряги, а не збирати самому")
+def registry_pull(a: RegistryPullArgs) -> Envelope:
+    """Узяти фонд або дотягнути всі взяті.
+
+    🔴 Свій реєстр на диску сильніший за взятий: узятий лягає в стор поруч і
+    читається лише там, де свого немає.
+    """
+    from nyshporka.fonds import registry as R
+    from nyshporka.fonds import remote
+    from nyshporka.share.catalog import PoolError
+
+    repo, fond = a.repo.strip(), a.fond.strip()
+    if bool(repo) != bool(fond):
+        return fail("назвіть і архів, і фонд (--repo DAHMO --fond 315) або жодного — "
+                    "тоді дотягнуться всі вже взяті")
+    if not fond:
+        many = remote.pull_taken()
+        R.invalidate()
+        env = ok({"fonds": many, "shown": len(many)})
+        if not many:
+            env.warn("nothing_taken", "жодного реєстру з Супряги ще не взято")
+            env.suggest("registry.remote", "подивитись, що є в Супрязі")
+        for g in many:
+            if g.get("error"):
+                env.warn("pull_failed", f"{g['repo']} ф.{g['fond']}: {g['error']}")
+        return env
+    try:
+        got = remote.pull(repo, fond, full=a.full)
+    except (remote.RegistryRemoteError, PoolError) as exc:
+        return fail(str(exc))
+    R.invalidate(got["fond_id"])
+    env = ok(got)
+    if R.fond_path(got["fond_id"]).exists():
+        env.warn("own_registry_wins",
+                 "на диску є свій реєстр цього фонду — читається він; узяте з "
+                 "Супряги лежить про запас")
+    env.suggest("fond.rows", "подивитись справи фонду")
+    return env
+
+
+class RegistryPushArgs(BaseModel):
+    fond_id: str = Field("", description="тека фонду: dahmo_315; порожньо — усі свої")
+    force: bool = Field(False, description="заливати й незмінені від минулої заливки")
+
+
+@op("registry.push", summary="Залити свої реєстри опису в Супрягу (лише власник Супряги)",
+    args=RegistryPushArgs, mutates=True, long=True, section="material",
+    skill="keep-fond", tier="rare",
+    when="залити реєстр опису фонду в Супрягу, щоб люди не збирали його самі")
+def registry_push(a: RegistryPushArgs) -> Envelope:
+    """Лише змінене від того, що вже лежить у Супрязі; виключені фонди — `[registry.push]`."""
+    from nyshporka.fonds import remote
+    from nyshporka.share.catalog import PoolError
+
+    if a.fond_id.strip():
+        try:
+            return ok(remote.push(a.fond_id.strip()))
+        except (remote.RegistryRemoteError, PoolError) as exc:
+            return fail(str(exc))
+    many = remote.push_all(force=a.force)
+    env = ok({"fonds": many, "shown": len(many)})
+    for g in many:
+        if g.get("error"):
+            env.warn("push_failed", f"{g['id']}: {g['error']}")
     return env
 
 

@@ -198,6 +198,69 @@ def cmd_merge(
     notes(env)
 
 
+@app.command("remote")
+def cmd_remote() -> None:
+    """Які реєстри опису фондів є в Супрязі і станом на коли."""
+    env = O.call("registry.remote", {})
+    answer(env)
+    rows = (env.data or {}).get("fonds") or []
+    for f in rows:
+        when = str(f.get("pushed_at") or "")[:10]
+        mark = "[ok]✓ узято[/ok]" if f.get("taken") else ""
+        console.print(f"  [bold]{f.get('repo')} ф.{f.get('fond')}[/bold]  "
+                      f"{f.get('label') or ''} · {f.get('rows')} справ · станом на {when}"
+                      f"  {mark}")
+    if rows:
+        console.print("[muted]узяти: nysh registry pull --repo <архів> --fond <фонд>[/muted]")
+    notes(env)
+
+
+@app.command("pull")
+def cmd_pull(
+    fond: str = typer.Option("", "--fond", help="номер фонду; без нього — дотягнути всі взяті"),
+    repo: str = typer.Option("", "--repo", help="код архіву: DAHMO, CDIAK…"),
+    full: bool = typer.Option(False, "--full", help="узяти фонд цілком, а не лише змінене"),
+) -> None:
+    """Узяти реєстр опису фонду із Супряги; повторний запуск дотягує лише змінене.
+
+    Без `--repo`/`--fond` — дотягнути всі вже взяті фонди. Свій реєстр на диску
+    (зібраний `nysh registry build`) сильніший за взятий.
+    """
+    env = O.call("registry.pull", {"repo": repo, "fond": fond, "full": full})
+    answer(env)
+    d = env.data or {}
+    many = d.get("fonds")
+    for x in (many if isinstance(many, list) else [d]):
+        if x.get("error"):
+            continue
+        when = str(x.get("pushed_at") or "")[:10]
+        what = (f"узято {x.get('got')} справ" if x.get("first")
+                else f"змінилось {x.get('got')}, прибрано {x.get('deleted')}")
+        console.print(f"[ok]✓[/ok] {x.get('repo')} ф.{x.get('fond')}: {what} · "
+                      f"у реєстрі {x.get('rows')} · станом на {when}")
+    notes(env)
+
+
+@app.command("push")
+def cmd_push(
+    fond_id: str = typer.Option("", "--fond-id", help="тека фонду: dahmo_315; без неї — усі свої"),
+    force: bool = typer.Option(False, "--force", help="заливати й незмінені від минулої заливки"),
+) -> None:
+    """Залити свої реєстри опису в Супрягу — лише змінене (заливає лише власник)."""
+    env = O.call("registry.push", {"fond_id": fond_id, "force": force})
+    answer(env)
+    d = env.data or {}
+    many = d.get("fonds")
+    for x in (many if isinstance(many, list) else [d]):
+        if x.get("skipped"):
+            console.print(f"  [muted]— {x['id']}: {x['skipped']}[/muted]")
+        elif not x.get("error"):
+            console.print(f"  [ok]✓[/ok] {x['id']}: {x.get('rows')} справ · залито "
+                          f"{x.get('sent')} · прибрано {x.get('deleted')}"
+                          + (f" · повтор ключа {x['dup']}" if x.get("dup") else ""))
+    notes(env)
+
+
 @app.command("show")
 @route("registry show", skill="keep-fond",
        when="що вже зібрано в реєстрі опису фонду")

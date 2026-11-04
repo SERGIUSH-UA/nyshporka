@@ -238,67 +238,6 @@ def test_pack_of_wrong_schema_is_named_not_ignored(catalog):
     assert Q.find_places("М'ястківка").rows
 
 
-def test_on_disk_column_never_ships_in_opys_pack(tmp_path):
-    """🔴 `on_disk` описує чужий диск — у паку його не має бути в принципі.
-
-    Перевірка на двох рівнях: у схемі (щоб колонку не додали) і в справжньому
-    зібраному паку (щоб її не додав збирач в обхід схеми). Поїхавши в пак, вона
-    стала б станом диска дослідника, виданим за факт про архів, — і позначка
-    «реєстр розходиться з бібліотекою» перестала б щось означати в усіх.
-    """
-    import csv as _csv
-    import sqlite3 as _sq
-
-    from nyshporka.catalog.build import build_opys
-    from nyshporka.catalog.schema import OPYS
-
-    assert "on_disk" not in OPYS
-
-    src = tmp_path / "f999_opys_merged.tsv"
-    with src.open("w", encoding="utf-8", newline="") as fh:
-        w = _csv.writer(fh, delimiter="\t")
-        w.writerow(["opys", "spr_int", "spr_letter", "title", "on_disk",
-                    "year_from", "year_to"])
-        w.writerow(["1", "43", "", "Метрична книга Ольгопольского уезда",
-                    "data/raw/секретний/шлях", "1802", "1802"])
-    out = tmp_path / "opys-test-2026.08.sqlite"
-    build_opys(src, out, fond="999", pack_id="opys-test-2026.08",
-               taken="2026-08-16")
-
-    con = _sq.connect(f"file:{out}?mode=ro", uri=True)
-    cols = [r[1] for r in con.execute("PRAGMA table_info(cases)")]
-    dump = "\n".join(str(r) for r in con.execute("SELECT * FROM cases"))
-    con.close()
-    assert "on_disk" not in cols
-    assert "секретний" not in dump, "шлях із диска дослідника потрапив у пак"
-
-
-def test_uezd_is_materialised_at_build_not_regex_at_query(tmp_path):
-    """Повіт рахується на збірці — це та сама третина часу запиту вкладки.
-
-    Заміряно: `facets()` ганяв regex повіту по кожному з 12 824 заголовків на
-    кожен запит — 137 мс.
-    """
-    import csv as _csv
-    import sqlite3 as _sq
-
-    from nyshporka.catalog.build import build_opys
-
-    src = tmp_path / "f999_opys_merged.tsv"
-    with src.open("w", encoding="utf-8", newline="") as fh:
-        w = _csv.writer(fh, delimiter="\t")
-        w.writerow(["opys", "spr_int", "spr_letter", "title"])
-        w.writerow(["1", "1", "", "Метрична книга Ольгопольского уезда"])
-        w.writerow(["1", "2", "", "Книга без повіту"])
-    out = tmp_path / "opys-u-2026.08.sqlite"
-    build_opys(src, out, fond="999", pack_id="opys-u-2026.08", taken="2026-08-16")
-    con = _sq.connect(f"file:{out}?mode=ro", uri=True)
-    got = dict(con.execute("SELECT spr, uezd FROM cases"))
-    con.close()
-    assert got["1"] == "Ольгопільський"
-    assert got["2"] == ""
-
-
 def test_latin_query_finds_the_place_and_does_not_invent_one(catalog):
     """🆕 Латинка: `Miastkowka` → М'ястківка. Раніше це був нуль.
 
@@ -329,66 +268,6 @@ def test_cyrillic_queries_never_enter_the_latin_branch(catalog, monkeypatch):
     _Q.find_places("М'ястківка")
     _Q.find_places("Такогоселанемає")
     assert called == [], "кириличний запит зайшов у латинську гілку"
-
-
-# ── пак довідників: розбіжності й знаменник ──────────────────────────────────
-def test_a_conflict_in_the_pack_shows_what_the_sources_say(tmp_path) -> None:
-    """🔴 Колонки звуться `value_a`/`value_b`, а читались як `a`/`b` — тобто в
-    пак кожна розбіжність їхала порожньою. Черга ока в довіднику існувала й
-    нічого не показувала: видно, що джерела розходяться, і не видно чим."""
-    import sqlite3
-
-    from nyshporka.catalog.build import build_opys
-
-    reg = tmp_path / "registry"
-    reg.mkdir()
-    (reg / "conflicts.tsv").write_text(
-        "opys\tspr\tfield\tvalue_a\tsrc_a\tvalue_b\tsrc_b\tscore\tverdict\tnote\n"
-        "1\t7\ttitle\tМетрика Вільхівки\tarchium\tМетрика Ольхівки\twikisource\t0.20\t\t\n",
-        encoding="utf-8")
-    merged = tmp_path / "f1_opys_merged.tsv"
-    merged.write_text("opys\tspr_int\tspr_letter\ttitle\n1\t7\t\tМетрика\n",
-                      encoding="utf-8")
-
-    out = tmp_path / "pack.sqlite"
-    build_opys(merged, out, fond="1", pack_id="тест", taken="2026-01-01",
-               registry_dir=reg)
-    con = sqlite3.connect(out)
-    a, b = con.execute("SELECT a, b FROM conflicts").fetchone()
-    con.close()
-    assert a == "Метрика Вільхівки" and b == "Метрика Ольхівки"
-
-
-def test_a_known_bound_stops_the_pack_from_calling_it_unknown(tmp_path) -> None:
-    """🔴 Формат покриття читався не той, тож знаменник ніколи не доїжджав:
-    `denom` завжди порожній, і поруч завжди стояла нота «межа опису невідома» —
-    навіть коли межа відома. Пак брехав в обидва боки одночасно."""
-    import json
-    import sqlite3
-
-    from nyshporka.catalog.build import build_opys
-
-    reg = tmp_path / "registry"
-    reg.mkdir()
-    (reg / "coverage.json").write_text(json.dumps(
-        {"1": {"last_number": 7438, "present": 7263},
-         "_total": {"present": 7263}}, ensure_ascii=False), encoding="utf-8")
-    merged = tmp_path / "f1_opys_merged.tsv"
-    merged.write_text("opys\tspr_int\tspr_letter\ttitle\n1\t7\t\tх\n2\t3\t\tх\n",
-                      encoding="utf-8")
-
-    out = tmp_path / "pack.sqlite"
-    build_opys(merged, out, fond="1", pack_id="тест", taken="2026-01-01",
-               registry_dir=reg)
-    con = sqlite3.connect(out)
-    got = {v: (d, note) for v, d, note in con.execute(
-        "SELECT value, denom, note FROM coverage_scope WHERE dim='opys'")}
-    con.close()
-
-    assert got["1"][0] == 7438, "відома межа не доїхала"
-    assert not got["1"][1], "відому межу названо невідомою"
-    # А там, де межі справді немає, застереження лишається.
-    assert got["2"][0] is None and "нижня" in got["2"][1]
 
 
 # ── той самий зріз не ставиться вдруге ───────────────────────────────────────

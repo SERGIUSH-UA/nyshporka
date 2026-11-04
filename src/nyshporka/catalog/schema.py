@@ -104,55 +104,6 @@ CREATE INDEX ix_cases_fond ON cases(fond, opys, spr_int);
 -- відсутністю користі», а не «визнано непридатним назавжди».
 """
 
-OPYS = _PRAGMA + _COMMON + """
-CREATE TABLE cases (
-    opys TEXT, spr_int INTEGER, spr_letter TEXT, spr TEXT, shifra TEXT,
-    title TEXT, title_norm TEXT, title_src TEXT, title_alt TEXT,
-    commons_title TEXT,
-    year_from INTEGER, year_to INTEGER, years_src TEXT,
-    folios TEXT, folios_src TEXT, dv_no TEXT,
-    uezd TEXT,                       -- матеріалізовано на збірці, не regex у запиті
-    -- commons_size/pages — сума всіх файлів справи (їх буває кілька: томи
-    -- «Частина 1..3» або витяг однієї парафії поруч із повним томом);
-    -- commons_size_max — найбільший файл, за ним міряють обрізаність дзеркала
-    commons_url TEXT, commons_size INTEGER, commons_pages INTEGER,
-    commons_files INTEGER, commons_kind TEXT,
-    commons_size_max INTEGER, commons_parts TEXT,
-    mirror_url TEXT, mirror_size INTEGER, truncated_mirror INTEGER,
-    src_page TEXT, page_quality TEXT, num_src TEXT, surnames TEXT,
-    cover_place TEXT, cover_letters TEXT, cover_note TEXT,
-    fs_dgs TEXT, fs_film TEXT, fs_url TEXT, fs_record_type TEXT,
-    fs_place TEXT, fs_frames INTEGER,
-    sources TEXT,
-    fs_more TEXT,
-    PRIMARY KEY (opys, spr_int, spr_letter)
-);
-CREATE INDEX ix_opys_year ON cases(year_from, year_to);
-CREATE INDEX ix_opys_film ON cases(fs_film);
-CREATE INDEX ix_opys_uezd ON cases(uezd);
-
-CREATE TABLE alfavitka (
-    surname TEXT, surname_norm TEXT, opys TEXT, spr TEXT, note TEXT
-);
-CREATE INDEX ix_alf_norm ON alfavitka(surname_norm);
-
-CREATE TABLE conflicts (
-    opys TEXT, spr TEXT, field TEXT, a TEXT, b TEXT, note TEXT
-);
-
--- 🔴 FTS тут теж немає, і причина інша, ніж у газетира: не «замало користі», а
--- **інша семантика пошуку**.
---
--- Фільтр `q` у реєстрі опису — це пошук підрядка (`fonds.registry.filter_rows`:
--- `if ql not in hay.lower()`). FTS5 з `unicode61` шукає словами й префіксами.
--- Це не швидший спосіб зробити те саме, а інший спосіб зробити інше: фрагмент
--- «ястків» сьогодні знаходить «М'ястківку», а через FTS не знайшов би.
---
--- Тобто заміна виглядала б як оптимізація, а була б тихою зміною того, які
--- справи знаходяться. Ціна відмови мала: 12 824 рядки скануються за ~20 мс, і
--- результат уже кешується за штампом файла.
-"""
-
 CHURCHES = _PRAGMA + _COMMON + """
 -- ⛪ Церкви Речі Посполитої близько 1772 р. за базою Б. Шади (Кольбук 1998 +
 -- Radwan «Socjografia» 1782). Одна церква — один рядок; `ob_id` — ключ самої
@@ -337,7 +288,7 @@ CREATE INDEX ix_mr_case ON refs(fond, opys, spr);
 """
 
 #: Домен → DDL. Ключ домену входить в ім'я пака: `geog-cdiak-2026.08.sqlite`.
-DDL: dict[str, str] = {"geog": GEOG, "opys": OPYS, "churches": CHURCHES,
+DDL: dict[str, str] = {"geog": GEOG, "churches": CHURCHES,
                        "places": PLACES, "rkparishes": RKPARISHES,
                        "courtbooks": COURTBOOKS, "metrics": METRICS}
 

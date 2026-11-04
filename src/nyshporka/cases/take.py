@@ -48,6 +48,11 @@ def _row(key: str) -> tuple[str, str, str, str, str, dict[str, Any], Path]:
             f"замовчуванням не має — назвіть опис: {repo}/{fond}/<опис>/{spr}{letter}")
     row, path = F.registry_row(repo, fond, opys, spr, letter)
     if row is None:
+        if not F.has_registry(F.fond_id_of(repo, fond)):
+            raise TakeError(
+                f"реєстру опису {repo} ф.{fond} на цій машині немає ({path}) — цей опис "
+                f"у нас не зібраний; узяти з Супряги: "
+                f"nysh registry pull --repo {repo} --fond {fond}")
         raise TakeError(
             f"у реєстрі опису немає {repo} {fond}-{opys}-{spr}{letter} "
             f"({path}) — цей опис у нас не зібраний")

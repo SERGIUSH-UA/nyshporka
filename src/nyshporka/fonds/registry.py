@@ -113,6 +113,39 @@ FIELDS = ("opys", "spr_int", "spr_letter", "spr", "shifra", "title", "title_src"
           # стояли в черзі замовлення.
           "site_source", "site_ref", "site_url", "site_kind")
 
+#: 🔴 Поля, які їдуть у Супрягу (`nysh registry push`). Білий список, а не «усе,
+#: крім»: колонка, дописана в реєстр через місяць, не поїде до людей сама.
+#: `on_disk` — стан диска Майстерні на момент злиття, людям він чужий і зламав би
+#: в них позначку «реєстр розходиться з бібліотекою». `spr` і `shifra`
+#: складаються з інших полів при читанні.
+PUBLIC_FIELDS = tuple(k for k in FIELDS if k not in ("on_disk", "spr", "shifra"))
+
+
+def public_data(row: dict[str, Any]) -> dict[str, Any]:
+    """Рядок реєстру → дані для Супряги.
+
+    Порожній рядок не їде (при читанні відсутнє поле стає `""`), а `None` їде
+    як є: він означає «схема цього фонду такого поля не має», і зливати його з
+    порожнім не можна — див. шапку модуля.
+    """
+    out: dict[str, Any] = {}
+    for k in PUBLIC_FIELDS:
+        if k not in row:
+            continue
+        v = row[k]
+        if v is None:
+            out[k] = None
+        elif isinstance(v, str):
+            if v.strip():
+                out[k] = v.strip()
+        else:
+            out[k] = v
+    if row.get("commons_flag") and not row.get("commons_url"):
+        # Стара схема ф.315: «скан десь є», а адреси немає (`_norm_legacy`).
+        out["commons_flag"] = True
+    return out
+
+
 def fs_head(row: dict[str, Any] | dict[str, str]) -> str:
     """Одна група FamilySearch справи — та, що в картці й у плані завантаження.
 
@@ -235,7 +268,17 @@ def _stamp_or_none(p: Path) -> tuple[Any, ...]:
 
 def _facets_stamp(fond_id: str, rows: list[dict[str, Any]]) -> tuple[Any, ...]:
     """Штамп для memo фасетів: файл реєстру + скільки рядків насправді дали."""
-    return (*_stamp_or_none(fond_path(fond_id)), len(rows))
+    return (*_rows_stamp(fond_id), len(rows))
+
+
+def _rows_stamp(fond_id: str) -> tuple[Any, ...]:
+    """Штамп того, звідки читаються рядки фонду: свій TSV або стор Супряги."""
+    p = fond_path(fond_id)
+    if p.exists():
+        return _stamp(p)
+    from nyshporka.fonds import remote
+
+    return ("supriaha", *remote.stamp())
 
 
 def _library_stamp() -> tuple[Any, ...]:
@@ -277,7 +320,51 @@ def registry_dir(fond_id: str) -> Path:
 
 
 def discover_fonds() -> list[dict[str, Any]]:
-    """Усі реєстри описів на диску. Без хардкоду переліку фондів."""
+    """Усі реєстри описів: свої на диску й узяті з Супряги. Без хардкоду переліку.
+
+    `source` — `disk` (зібраний тут) або `supriaha` (узятий `nysh registry
+    pull`). Фонд, що є і там, і там, видно один раз — свій.
+    """
+    out = _discover_disk()
+    have = {f["id"] for f in out}
+    from nyshporka.fonds import remote
+
+    for t in remote.taken():
+        if t["fond_id"] in have:
+            continue
+        repo = str(t["repo"])
+        out.append({
+            "id": t["fond_id"], "repo": repo,
+            "repo_label": REPO_LABEL.get(repo, repo), "fond": str(t["fond"]),
+            "label": str(t.get("label") or f"{REPO_LABEL.get(repo, repo)} ф.{t['fond']}"),
+            "path": str(remote.store_path()), "mtime": 0.0,
+            "has_coverage": False, "has_conflicts": False, "has_alfavitka": False,
+            "source": "supriaha", "pushed_at": t.get("pushed_at"),
+            "refreshed_at": t.get("refreshed_at"),
+        })
+    return out
+
+
+def has_registry(fond_id: str) -> bool:
+    """Чи є реєстр фонду: свій TSV або взятий із Супряги."""
+    if fond_path(fond_id).exists():
+        return True
+    from nyshporka.fonds import remote
+
+    return remote.taken_one(fond_id) is not None
+
+
+def registry_where(fond_id: str) -> Path:
+    """Звідки читається реєстр фонду — для повідомлень «шукали тут»."""
+    p = fond_path(fond_id)
+    if p.exists():
+        return p
+    from nyshporka.fonds import remote
+
+    return remote.store_path() if remote.taken_one(fond_id) else p
+
+
+def _discover_disk() -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     raw = workspace().raw
     if not raw.exists():
@@ -299,6 +386,7 @@ def discover_fonds() -> list[dict[str, Any]]:
             "has_coverage": (registry_dir(fond_id) / "coverage.json").exists(),
             "has_conflicts": (registry_dir(fond_id) / "conflicts.tsv").exists(),
             "has_alfavitka": (registry_dir(fond_id) / "alfavitka.tsv").exists(),
+            "source": "disk",
         })
     return out
 
@@ -347,11 +435,64 @@ def _norm_merged(r: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _norm_remote(d: dict[str, Any]) -> dict[str, Any]:
+    """Рядок зі стору Супряги → та сама форма, що з TSV.
+
+    Порожніх полів Супряга не везе (відсутнє = `""`), а `None` везе як є
+    (`public_data`). `on_disk` — завжди `None`: стану чужого диска тут немає, і
+    позначка розбіжності з бібліотекою не мусить спрацьовувати на ньому.
+    """
+    out: dict[str, Any] = {}
+    for k in _MERGED_FIELDS:
+        v = d.get(k, "")
+        out[k] = v.strip() if isinstance(v, str) else v
+    out["on_disk"] = None
+    out["commons_flag"] = bool(d.get("commons_flag") or out.get("commons_url"))
+    out["fs_film"] = out.get("fs_film") or ""
+    return out
+
+
+def _remote_order(r: dict[str, Any]) -> tuple[Any, ...]:
+    from nyshporka.fonds.merge.text import opys_sort
+
+    n = str(r.get("spr_int") or "")
+    return (opys_sort(str(r.get("opys") or "")), int(n) if n.isdigit() else 1 << 30,
+            n, str(r.get("spr_letter") or ""))
+
+
+def _load_remote(fond_id: str) -> list[dict[str, Any]]:
+    from nyshporka.fonds import remote
+
+    stamp = ("supriaha", *remote.stamp())
+    hit = _CACHE.get(fond_id)
+    if hit and hit[0] == stamp:
+        return hit[1]
+    got = remote.rows_of(fond_id)
+    if got is None:
+        return []
+    info = remote.taken_one(fond_id) or {}
+    schema = str(info.get("schema") or "merged_v2")
+    fond = fond_id.rsplit("_", 1)[-1]
+    rows: list[dict[str, Any]] = []
+    for d in got:
+        n = _norm_remote(d)
+        n["spr"] = f"{n.get('spr_int') or ''}{n.get('spr_letter') or ''}"
+        n["shifra"] = f"{fond}-{n.get('opys') or ''}-{n['spr']}"
+        n["schema"] = schema
+        rows.append(n)
+    rows.sort(key=_remote_order)
+    _CACHE[fond_id] = (stamp, rows)
+    return rows
+
+
 def load_rows(fond_id: str) -> list[dict[str, Any]]:
-    """Нормалізовані рядки реєстру опису; memo за (path, mtime, size)."""
+    """Нормалізовані рядки реєстру опису; memo за (path, mtime, size).
+
+    Свого TSV немає — рядки фонду, узятого з Супряги (`nysh registry pull`).
+    """
     p = fond_path(fond_id)
     if not p.exists():
-        return []
+        return _load_remote(fond_id)
     stamp = _stamp(p)
     hit = _CACHE.get(fond_id)
     if hit and hit[0] == stamp:
@@ -956,7 +1097,7 @@ def opys_keys(repo: str, fond: str, opys: str) -> list[str] | None:
     from nyshporka.core import casekey
 
     fond_id = fond_id_of(repo, fond)
-    if not fond_path(fond_id).exists():
+    if not has_registry(fond_id):
         return None
     want = casekey._norm_opys(opys)
     out: list[str] = []
@@ -973,8 +1114,8 @@ def registry_row(repo: str, fond: str, opys: str, spr: str,
                  letter: str = "") -> tuple[dict[str, Any] | None, Path]:
     """Нормалізований рядок однієї справи + шлях реєстру (для повідомлень)."""
     fond_id = fond_id_of(repo, fond)
-    path = fond_path(fond_id)
-    if not path.exists():
+    path = registry_where(fond_id)
+    if not has_registry(fond_id):
         return None, path
     # 🔴 Порівняння в каноні письма (`casekey`): `355a` = `355а`, `1d` = `1д`.
     want = disk_key(opys, spr, letter)

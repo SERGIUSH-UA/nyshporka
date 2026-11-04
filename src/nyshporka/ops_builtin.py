@@ -1077,8 +1077,9 @@ def _address_answer(a: CatalogSearchArgs, addr: Any) -> Envelope | None:
         # мовчазний нуль тут читався б як «такої справи не існує».
         unavailable.append({
             "source": f"registry:{addr.repo or '?'}-{addr.fond}",
-            "why": f"реєстру опису ф.{addr.fond} на цій машині немає — зібрати: "
-                   f"nysh op registry.collect"})
+            "why": f"реєстру опису ф.{addr.fond} на цій машині немає — узяти з "
+                   f"Супряги: nysh registry pull --repo {addr.repo or '<архів>'} "
+                   f"--fond {addr.fond}; або зібрати: nysh registry build"})
     for f in fonds:
         searched.append(f"registry:{f['id']}")
         try:

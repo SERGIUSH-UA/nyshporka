@@ -11,7 +11,6 @@ from rich.table import Table
 
 from nyshporka import brand
 from nyshporka.cases import db
-from nyshporka.catalog import store as _store
 from nyshporka.fonds import registry as _fonds
 
 app = typer.Typer(help="Реєстр справ: що є, що декодовано, що прошукано, що бачило око.")
@@ -438,6 +437,38 @@ def _parse_key(key: str) -> tuple[str, str, str, str, str]:
     return got
 
 
+def _registry_missing_hint(repo: str, fond: str) -> None:
+    """Куди йти, коли реєстру фонду немає ні свого, ні взятого.
+
+    ⚠ Порада в порожнє гірша за відсутність поради: людина виконує її, бачить
+    «немає такого файлу» й вирішує, що зламався застосунок. Тому обидва шляхи
+    названо, і саме в цьому порядку: взяти готовий реєстр із Супряги дешевше,
+    ніж зібрати фонд самому. 🔴 Довідники каталогу (`nysh catalog install`)
+    реєстрів опису не містять — колись порада вела туди, і нічого не давала.
+    """
+    console.print(f"  взяти з Супряги: [bold]nysh registry pull --repo {repo} --fond {fond}"
+                  "[/bold]  [muted](що там є — nysh registry remote)[/muted]")
+    console.print(f"  або зібрати самому: [bold]nysh registry build --repo {repo} "
+                  f"--fond {fond}[/bold]  [muted](джерела — nysh registry sources)[/muted]")
+
+
+def _remote_age_note(fond_id: str) -> None:
+    """Реєстр узято з Супряги — сказати, станом на коли, і як дотягнути."""
+    from nyshporka.fonds import remote
+
+    if _fonds.fond_path(fond_id).exists():
+        return
+    t = remote.taken_one(fond_id)
+    if t is None:
+        return
+    when = str(t.get("pushed_at") or "")[:10] or "?"
+    age = remote.age_days(t)
+    stale = age is not None and age >= remote.SVIZHYI_DNIV
+    console.print(f"[muted]реєстр із Супряги станом на {when}"
+                  + (f"; дотягнуто {age} дн. тому — [bold]nysh registry pull[/bold]"
+                     if stale else "") + "[/muted]")
+
+
 def _opys_registry_row(repo: str, fond: str, opys: str, spr: str,
                        letter: str) -> tuple[dict[str, Any] | None, Path]:
     """Рядок реєстру опису плюс шлях реєстру — шлях потрібен у повідомленні.
@@ -462,16 +493,8 @@ def cmd_opys(key: str = typer.Argument(..., help="DAHMO/230/43 або DAHMO/230/
     if row is None:
         console.print(f"[warn]у реєстрі опису немає {repo} {fond}-{opys}-{spr}{letter}"
                       f"[/warn]  ({path})")
-        # ⚠ Порада в порожнє гірша за відсутність поради: людина виконує її,
-        # бачить «немає такого файлу» й вирішує, що зламався застосунок. Тому
-        # обидва шляхи названо, і саме в цьому порядку: взяти готовий пак
-        # дешевше, ніж зібрати фонд самому.
-        console.print("  реєстр опису цього фонду не встановлено: "
-                      f"[bold]nysh catalog install --from <zip>[/bold]  "
-                      f"[muted]({_store.RELEASES_URL})[/muted]")
-        console.print(f"  або зібрати самому: [bold]nysh registry collect …[/bold] "
-                      f"→ [bold]nysh registry merge --repo {repo} --fond {fond}"
-                      f"[/bold]")
+        if not _fonds.has_registry(_fonds.fond_id_of(repo, fond)):
+            _registry_missing_hint(repo, fond)
         raise typer.Exit(1)
     if as_json:
         typer.echo(_json.dumps(row, ensure_ascii=False, indent=1))
@@ -623,13 +646,11 @@ def cmd_fond(
     а сюди виведений лише читальний доступ.
     """
     fond_id = _fonds.fond_id_of(repo, fond)
-    path = _fonds.fond_path(fond_id)
-    if not path.exists():
-        console.print(f"[warn]реєстру опису немає: {path}[/warn]")
-        console.print("  встановити довідники: "
-                      f"[bold]nysh catalog install --from <zip>[/bold]  "
-                      f"[muted]({_store.RELEASES_URL})[/muted]")
+    if not _fonds.has_registry(fond_id):
+        console.print(f"[warn]реєстру опису немає: {_fonds.fond_path(fond_id)}[/warn]")
+        _registry_missing_hint(repo, fond)
         raise typer.Exit(1)
+    _remote_age_note(fond_id)
     rows = _fonds.load_rows(fond_id)
     live = _fonds.live_on_disk(repo.upper(), fond)
     frames_live = _fonds.live_frames(repo.upper(), fond)
