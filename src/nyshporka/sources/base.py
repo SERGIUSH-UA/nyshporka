@@ -204,6 +204,7 @@ NOT_FOUND = "not_found"
 DENIED = "denied"
 RATE_LIMITED = "rate_limited"
 HOST_DOWN = "host_down"
+REDIRECT_LOOP = "redirect_loop"
 LOCAL = "local"
 OTHER = "other"
 
@@ -212,6 +213,9 @@ CAUSE_TEXT = {
     DENIED: "джерело відмовило в доступі (401/403): без входу чи з цієї мережі не віддає",
     RATE_LIMITED: "джерело відсікає за темпом (429): зачекати й повторити",
     HOST_DOWN: "хост не відповідає (обрив, тайм-аут, 5xx): лежить або відсік за адресою",
+    REDIRECT_LOOP: "джерело переадресовує запит по колу (301 сам на себе): зламане "
+                   "налаштування сервера, не відсічка й не мережа — повтор не допоможе, "
+                   "доки його не виправлять",
     LOCAL: "не записалось на диск",
     OTHER: "інша відмова джерела",
 }
@@ -219,6 +223,8 @@ CAUSE_TEXT = {
 
 def cause_of(exc: BaseException) -> str:
     """Причина збою завантаження за тим, що відповіло джерело."""
+    if getattr(exc, "redirect_loop", False):
+        return REDIRECT_LOOP
     status = getattr(exc, "status", None)
     if isinstance(exc, OSError) and status is None and not hasattr(exc, "body"):
         return LOCAL

@@ -271,6 +271,31 @@ def test_vidmova_404_stiraie_part(tmp_path: Path, naps: list[float]) -> None:
     assert e.value.status == 404 and not part.exists() and not dest.exists()
 
 
+def _petlia_client() -> Any:
+    import httpx
+
+    return httpx.Client(follow_redirects=True, transport=httpx.MockTransport(
+        lambda req: httpx.Response(301, headers={"Location": str(req.url)})))
+
+
+def test_petlia_pereadresatsii_tse_HttpError_bez_povtoriv(naps: list[float]) -> None:
+    """🔴 `TooManyRedirects` — не `TransportError` і пролітав повз `_send` сирим."""
+    with pytest.raises(H.HttpError) as e:
+        H.Fetcher(delay=0.0).get("https://x/0001.jpg", client=_petlia_client())
+    assert isinstance(e.value, H.RedirectLoop) and naps == []
+    assert "по колу" in H.explain(e.value) and "https://x/0001.jpg" in H.explain(e.value)
+
+    from nyshporka.sources.base import REDIRECT_LOOP, cause_of
+    assert cause_of(e.value) == REDIRECT_LOOP
+
+
+def test_petlia_v_download_bez_povtoriv(tmp_path: Path, naps: list[float]) -> None:
+    with pytest.raises(H.RedirectLoop):
+        H.Fetcher(delay=0.0).download("https://x/f.pdf", tmp_path / "f.pdf",
+                                      client=_petlia_client())
+    assert naps == [] and not (tmp_path / "f.pdf").exists()
+
+
 def test_get_na_429_chekaie_retry_after(naps: list[float]) -> None:
     f = H.Fetcher(base="https://приклад", delay=0.0)
 

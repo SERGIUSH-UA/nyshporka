@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from nyshporka.sources.base import (
+    REDIRECT_LOOP,
     FetchResult,
     Hit,
     Manifest,
@@ -626,7 +627,14 @@ class FilmMirrorSource:
                         misses = 0
                     except (HttpError, OSError) as exc:
                         res.errors.append(f"{name}: {exc}")
-                        res.blame(exc)
+                        if res.blame(exc) == REDIRECT_LOOP:
+                            # Петля — налаштування сховища, а не кадру: решта
+                            # кадрів упреться в неї так само.
+                            res.errors.append(
+                                "сховище кадрів дзеркала переадресовує по колу — "
+                                "зламане налаштування сервера дзеркала, решту кадрів "
+                                "не питаю. Ті самі плівки є на самому FamilySearch.")
+                            break
                         misses += 1
                         if misses >= 10:
                             res.errors.append(

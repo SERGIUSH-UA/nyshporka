@@ -194,6 +194,23 @@ class HttpError(RuntimeError):
         self.retry_after = retry_after
 
 
+class RedirectLoop(HttpError):
+    """Сервер переадресовує запит без кінця — найчастіше 301 на ту саму адресу.
+
+    🔴 httpx кидає тут `TooManyRedirects`, а він не `TransportError`: виняток
+    пролітав повз `_send` сирим і валив `nysh get fsfilm` трасуванням на
+    першому ж кадрі (04.11.2026: `geno-dbase.ru` з 03.11 відповідає на кожну
+    адресу, включно з головною, 301 на неї ж). Повторювати такий запит
+    безглуздо — це налаштування сервера, а не збій мережі й не темп.
+    """
+
+    redirect_loop = True
+
+    def __init__(self, url: str) -> None:
+        super().__init__(f"{url}: переадресація по колу")
+        self.url = url
+
+
 def explain(exc: HttpError) -> str:
     """Відмова чужого сайту — словами людини, з адресою в кінці.
 
@@ -201,6 +218,10 @@ def explain(exc: HttpError) -> str:
     трасування на пів екрана: що сталося і що з цим робити, не казало ніщо
     (прохід новачка 23.10.2026).
     """
+    if isinstance(exc, RedirectLoop):
+        return ("сайт переадресовує запит сам на себе по колу — зламане налаштування "
+                "самого сайту, а не відсічка й не ваша мережа; повтор не допоможе, "
+                f"доки сайт цього не виправить. Адреса: {exc.url}")
     where = str(exc).rsplit(": HTTP", 1)[0]
     code = exc.status or 0
     if code in (401, 403):
@@ -505,6 +526,9 @@ class Fetcher:
             except TooLarge:
                 part.unlink(missing_ok=True)
                 raise
+            except httpx.TooManyRedirects as exc:
+                # До тіла не дійшло, тож `.part` лишається для наступного запуску.
+                raise RedirectLoop(url) from exc
             except httpx.HTTPError as exc:
                 # Обрив з'єднання посеред потоку — узяте лишається в `.part`.
                 last = f"{type(exc).__name__}: {exc}"
@@ -578,6 +602,9 @@ class Fetcher:
                 self.limiter.acquire(url)
             try:
                 r = call()
+            except httpx.TooManyRedirects as exc:
+                # Не повторюється: див. `RedirectLoop`.
+                raise RedirectLoop(url) from exc
             except httpx.TransportError as exc:
                 last = f"{type(exc).__name__}: {exc}"
             else:

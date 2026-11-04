@@ -265,8 +265,11 @@ def fetch_run(item: dict[str, Any], ctx: Ctx) -> Outcome:
             return blocked("denied", text,
                            "джерело не віддає без входу чи з цієї мережі — візьміть "
                            "кадри інакше й додайте теку")
-        if B.HOST_DOWN in causes or B.RATE_LIMITED in causes:
-            return retry("host_down" if B.HOST_DOWN in causes else "rate_limited", text)
+        # Петля переадресацій — теж стан хоста, що минає, коли сервер полагодять.
+        if B.HOST_DOWN in causes or B.REDIRECT_LOOP in causes:
+            return retry("host_down", text)
+        if B.RATE_LIMITED in causes:
+            return retry("rate_limited", text)
         if B.NOT_FOUND in causes and set(causes) == {B.NOT_FOUND}:
             return failed("not_found", text, "адреса в реєстрі опису застаріла")
         if str(meta.get("fetch_state") or "") == "partial":

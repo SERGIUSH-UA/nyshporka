@@ -388,8 +388,10 @@ def _z_vidpoviddiu(src: FilmMirrorSource, handler: Any) -> None:
 
     from nyshporka.sources.http import Fetcher
 
+    # `follow_redirects` — як у справжнього клієнта `Fetcher.client()`.
     src.http = Fetcher(delay=0.0, attempts=1,
-                       client=httpx.Client(transport=httpx.MockTransport(handler)))
+                       client=httpx.Client(follow_redirects=True,
+                                           transport=httpx.MockTransport(handler)))
 
 
 @pytest.mark.parametrize(("status", "cause"), [
@@ -418,6 +420,39 @@ def test_obryv_ziednannia_tse_khost_a_ne_kadr(src: FilmMirrorSource, tmp_path: P
     res = src.fetch(REF, tmp_path / "out", frames=(1, 2))
 
     assert res.causes == {"host_down": 2}
+
+
+def _petlia(req: Any) -> Any:
+    """301 на ту саму адресу — так `geno-dbase.ru` відповідає з 03.11.2026."""
+    import httpx
+
+    return httpx.Response(301, headers={"Location": str(req.url)})
+
+
+def test_petlia_pereadresatsii_spyniaie_kachannia_odrazu(src: FilmMirrorSource,
+                                                          tmp_path: Path) -> None:
+    """🔴 Петля — налаштування сховища: не трасування і не десять марних кадрів."""
+    seen: list[str] = []
+
+    def _handler(req: Any) -> Any:
+        seen.append(str(req.url))
+        return _petlia(req)
+
+    _z_vidpoviddiu(src, _handler)
+    res = src.fetch(REF, tmp_path / "out", frames=(1, 5))
+
+    assert res.frames == 0 and res.causes == {"redirect_loop": 1}
+    assert len({u for u in seen}) == 1          # другого кадру не питали
+    assert "по колу" in res.why() and "FamilySearch" in res.errors[-1]
+
+
+def test_petlia_na_derevi_tse_vidmova_slovamy(src: FilmMirrorSource) -> None:
+    (src.cache_dir / "moldova.json.gz").unlink()
+    src._trees.clear()
+    _z_vidpoviddiu(src, _petlia)
+
+    with pytest.raises(SourceError, match="по колу"):
+        src.tree("moldova")
 
 
 def test_vzyati_kadry_bez_prychyn(src: FilmMirrorSource, tmp_path: Path) -> None:
