@@ -64,6 +64,7 @@ class _Span:
     remote: dict[str, Any] | None = None   # маніфест бакета плівки
     runs: list[str] = field(default_factory=list)
     whole: bool = False                    # частина — уся тека, а не шматок плівки
+    all_names: list[str] = field(default_factory=list)   # усі кадри теки плівки
 
 
 def parse_piece(spec: str) -> Piece:
@@ -162,7 +163,7 @@ def _spans(pieces: list[Piece]) -> list[_Span]:
             raise JoinError(f"частина {piece.src.name}: «{piece.first}» стоїть після «{piece.last}»")
         spans.append(_Span(piece, piece.label or _label(piece.src), frames_dir,
                            names[a:b + 1], remote, _piece_runs(piece.src, frames_dir),
-                           whole=a == 0 and b == len(names) - 1))
+                           whole=a == 0 and b == len(names) - 1, all_names=list(names)))
     if len({s.remote is None for s in spans}) > 1:
         raise JoinError("частини змішано: одна плівка з кадрами на диску, інша — в бакеті "
                         "(`_r2_frames.json`). Зберіть однаково: докачайте кадри бакетної плівки")
@@ -272,31 +273,95 @@ def _retire(spans: list[_Span], runs: dict[str, str], key: str) -> list[str]:
     (29.10.2026: 12 частин справ ДАОО ф.37). Так само, як `cases split` знімає
     розкладену теку: `joined_into` у паспорті ховає її з бібліотеки
     (`library.split_into`), `superseded` у меті — її прогони з підрахунку.
-    Шматок плівки (не вся тека) нічого не знімає: решта плівки — інші справи.
+    Шматок плівки знімає теку, лише коли склейки разом забрали всі її кадри
+    (`joined_parts` у паспорті плівки, `retire_if_covered`).
     """
-    from nyshporka import htr_store as S
     from nyshporka.cases import split as SPL
-    from nyshporka.cloud.verify import META_NAME
 
     done: list[str] = []
     by = sorted(runs.values())
     for s in spans:
         src = s.piece.src
-        if not s.whole or (src / SPL.JOURNAL).exists():
-            continue
+        if (src / SPL.JOURNAL).exists():
+            continue        # розкладена тека: її вже зняла `cases split`
         side = src / "_source.json"
         meta = _read_json(side)
-        if meta.get("joined_into") != key or meta.get("joined_runs") != s.runs:
-            _write_json(side, {**meta, "joined_into": key, "joined_runs": s.runs})
-        for run in s.runs:
-            f = S.htr_root() / run / META_NAME
-            m = _read_json(f)
-            if m and not m.get("superseded"):
-                m["superseded"] = {"by": by, "at": SPL._now(),
-                                   "why": f"теку зведено в справу {key}"}
-                _write_json(f, m)
-        done.append(str(src))
+        if s.whole:
+            if meta.get("joined_into") != key or meta.get("joined_runs") != s.runs:
+                _write_json(side, {**meta, "joined_into": key, "joined_runs": s.runs})
+            _supersede(s.runs, by, f"теку зведено в справу {key}")
+            done.append(str(src))
+            continue
+        # 🔴 Шматок плівки. Плівка, що ВСЯ розійшлась по кількох склейках (кінець
+        # однієї справи й початок наступної), лишалась у бібліотеці «справою» під
+        # своїм ключем поруч зі склеєними — і її теж віддали б у пул (04.11.2026:
+        # шість плівок ANRM ф.211/134, відмітку ставили руками). Тож кожна склейка
+        # записує свій шматок у паспорт плівки, а коли шматки покрили всі кадри,
+        # плівка знімається, як розкладена `cases split`. Решту кадрів (хвіст
+        # чужої справи) оголошує `cases split <плівка> --part "-=…"`.
+        pieces = [p for p in meta.get(JOINED_PARTS) or [] if p.get("key") != key]
+        pieces.append({"key": key, "first": s.names[0], "last": s.names[-1],
+                       "runs": by})
+        pieces.sort(key=lambda p: str(p.get("first")))
+        meta[JOINED_PARTS] = pieces
+        _write_json(side, meta)
+        if retire_if_covered(src, s.all_names, s.runs):
+            done.append(str(src))
     return done
+
+
+#: поле паспорта плівки: шматки, які забрали склейки (`cases join`)
+JOINED_PARTS = "joined_parts"
+
+
+def _supersede(film_runs: list[str], by: list[str], why: str) -> None:
+    from nyshporka import htr_store as S
+    from nyshporka.cases import split as SPL
+    from nyshporka.cloud.verify import META_NAME
+
+    for run in film_runs:
+        f = S.htr_root() / run / META_NAME
+        m = _read_json(f)
+        if m and not m.get("superseded"):
+            m["superseded"] = {"by": by, "at": SPL._now(), "why": why}
+            _write_json(f, m)
+
+
+def claimed(meta: dict[str, Any], names: list[str]) -> set[str]:
+    """Кадри плівки, які забрали склейки, — за `joined_parts` паспорта."""
+    out: set[str] = set()
+    pos = {n: i for i, n in enumerate(names)}
+    for p in meta.get(JOINED_PARTS) or []:
+        a, b = pos.get(str(p.get("first"))), pos.get(str(p.get("last")))
+        if a is not None and b is not None:
+            out.update(names[a:b + 1])
+    return out
+
+
+def retire_if_covered(src: Path, names: list[str], film_runs: list[str],
+                      outside: set[str] | None = None) -> bool:
+    """Зняти плівку, коли кожен її кадр забрала склейка або названо «поза справами».
+
+    Позначки ті самі, що ставить `cases split`: `split_into` у паспорті ховає
+    теку з бібліотеки, `superseded` у меті — її прогони з підрахунку."""
+    from nyshporka.cases import split as SPL
+
+    side = src / "_source.json"
+    meta = _read_json(side)
+    taken = claimed(meta, names)
+    if not taken or set(names) - taken - (outside or set()):
+        return False
+    parts = meta.get(JOINED_PARTS) or []
+    keys = list(dict.fromkeys(str(p["key"]) for p in parts))
+    if meta.get("split_into") != keys or meta.get("joined_runs") != film_runs:
+        meta["split_into"] = keys
+        meta["split_at"] = SPL._now()
+        # прогони плівки вже заміщено — повтор склейки бере їх звідси (`_piece_runs`)
+        meta["joined_runs"] = list(film_runs)
+        _write_json(side, meta)
+    by = sorted({str(r) for p in parts for r in p.get("runs") or []})
+    _supersede(film_runs, by, "теку зведено в справи " + ", ".join(keys))
+    return True
 
 
 def _key_of(shifra: str) -> str:

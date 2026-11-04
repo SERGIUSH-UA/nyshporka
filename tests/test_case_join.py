@@ -295,3 +295,111 @@ def test_zibrana_z_bakieta_khmara_ne_perechytuie(space: Path, two: tuple[Path, P
 
     assert G.joined_remote(dest) is True
     assert G.joined_remote(head) is False
+
+
+# ── плівка, що вся розійшлась по склейках ───────────────────────────────────
+# ANRM 211-20 (04.11.2026): плівка 005613345 — кінець справи 16 (к.1–1011) і
+# початок справи 17 (к.1012–1035). Жодна склейка не бере її цілою, і доти вона
+# лишалась у бібліотеці «справою 211-20-16» поруч зі склеєною — пішла б у пул.
+
+
+def _side(d: Path) -> dict:
+    return _json.loads((d / "_source.json").read_text(encoding="utf-8"))
+
+
+def _meta(space: Path, run: str) -> dict:
+    return _json.loads((space / "reports/htr" / run / "_htr_meta.json").read_text(encoding="utf-8"))
+
+
+def test_plivka_dvokh_skleiok_znimaietsia_pislia_druhoi(space: Path) -> None:
+    from nyshporka import library as L
+    from nyshporka.cases import db
+
+    a = _r2_film(space, "005613344", 4, shifra="ANRM 211-20-15", run="film-005613344")
+    b = _r2_film(space, "005613345", 6, shifra="ANRM 211-20-16", run="film-005613345")
+    c = _r2_film(space, "005613346", 3, shifra="ANRM 211-20-17", run="film-005613346")
+    db.rebuild(rescan=True)
+    raw = space / "data" / "raw" / "cdiak_127"
+
+    first = J.join(raw / "op20-spr-16", [J.Piece(a, "0001.jpg", "0004.jpg"),
+                                         J.Piece(b, "0001.jpg", "0003.jpg")],
+                   shifra="ANRM 211-20-16", rebuild=False)
+    assert first["retired"] == [str(a)], "шматок b — ще не вся плівка"
+    side = _side(b)
+    assert "split_into" not in side and [p["key"] for p in side["joined_parts"]] == [
+        "ANRM/211/20/16"]
+
+    second = J.join(raw / "op20-spr-17", [J.Piece(b, "0004.jpg", "0006.jpg"),
+                                          J.Piece(c, "0001.jpg", "0003.jpg")],
+                    shifra="ANRM 211-20-17", rebuild=False)
+
+    assert sorted(second["retired"]) == sorted([str(b), str(c)])
+    side = _side(b)
+    assert side["split_into"] == ["ANRM/211/20/16", "ANRM/211/20/17"]
+    assert sorted(side["joined_runs"]) == ["film-005613345", "film-005613345-diak_v10"]
+    assert L.split_into(str(b.relative_to(L.case_base())).replace("\\", "/")) == [
+        "ANRM/211/20/16", "ANRM/211/20/17"]
+    assert _meta(space, "film-005613345")["superseded"]["by"] == sorted(
+        [*first["runs"].values(), *second["runs"].values()])
+
+    # повтор склейки бере прогони заміщеної плівки з паспорта й доробляє те саме
+    again = J.join(raw / "op20-spr-17", [J.Piece(b, "0004.jpg", "0006.jpg"),
+                                         J.Piece(c, "0001.jpg", "0003.jpg")],
+                   shifra="ANRM 211-20-17", rebuild=False)
+    assert again["runs"] == second["runs"] and again["made"] == 0
+
+
+def test_chuzhyi_khvist_plivky_nazyvaietsia_poza_spravamy(space: Path) -> None:
+    """ANRM 134-2-56: к.0871 плівки 005773174 — останній кадр справи 55, решта —
+    голова справи 56. Справ у карті немає, тож `split` відмовляв («менше двох
+    справ»), а плівка лишалась «справою 134-2-56»."""
+    from nyshporka.cases import db
+    from nyshporka.cases import split as SPL
+
+    a = _r2_film(space, "005773174", 4, shifra="ANRM 134-2-56", run="film-005773174")
+    b = _r2_film(space, "005773175", 3, shifra="ANRM 134-2-57", run="film-005773175")
+    db.rebuild(rescan=True)
+    J.join(space / "data" / "raw" / "cdiak_127" / "op2-spr-56",
+           [J.Piece(a, "0002.jpg", "0004.jpg"), J.Piece(b, "0001.jpg", "0003.jpg")],
+           shifra="ANRM 134-2-56", rebuild=False)
+    assert "split_into" not in _side(a)
+
+    assert SPL.rest_only(a, [("56", "0001.jpg", "0001.jpg")]) is None, "у карті справа"
+    with pytest.raises(SPL.SplitError, match="не забрала жодна склейка"):
+        SPL.rest_only(a, [("-", "0004.jpg", "0004.jpg")])   # к.0001 лишився нічиїм
+    proba = SPL.rest_only(a, [("-", "0001.jpg", "0001.jpg")], dry_run=True)
+    assert proba is not None and proba["dry_run"] and "split_into" not in _side(a)
+
+    got = SPL.rest_only(a, [("-", "0001.jpg", "0001.jpg")])
+
+    assert got is not None and got["split_into"] == ["ANRM/134/2/56"]
+    assert (got["claimed"], got["outside"]) == (3, 1)
+    assert _side(a)["split_into"] == ["ANRM/134/2/56"]
+    assert _meta(space, "film-005773174")["superseded"]["by"] == [
+        "op2-spr-56", "op2-spr-56-diak_v10"]
+
+
+def test_kray_plivky_pidkazuie_mozhlyvyi_shmatok(space: Path) -> None:
+    """Частина справи після `split` проходить ворота 75 % (знаменник — свої
+    кадри): ANRM 211-20-22 — 280 кадрів кінця плівки з 614."""
+    from nyshporka.cases import db
+    from nyshporka.cases import split as SPL
+    from nyshporka.share import kray
+
+    f = _r2_film(space, "005613354", 6, shifra="ANRM 211-20-21", run="film-005613354")
+    g = _r2_film(space, "005613355", 4, shifra="ANRM 211-20-23", run="film-005613355")
+    db.rebuild(rescan=True)
+    got = SPL.split(f, [("-", "0001.jpg", "0002.jpg"), ("21", "0003.jpg", "0004.jpg"),
+                        ("22", "0005.jpg", "0006.jpg")], rebuild=False)
+    dirs = {p["spr"]: space / p["dir"] for p in got["parts"] if p.get("dir")}
+
+    assert kray.check(dirs["21"]) == []
+    tail = kray.check(dirs["22"])
+    assert [w["code"] for w in tail] == ["kray_plivky"] and "останнього кадру" in tail[0]["text"]
+
+    # склейка, що починається з першого кадру плівки, — голова могла бути раніше
+    dest = space / "data" / "raw" / "anrm_211" / "op20-spr-23"
+    J.join(dest, [J.Piece(g, "0001.jpg", "0004.jpg")], shifra="ANRM 211-20-23", rebuild=False)
+    both = kray.check(dest)
+    assert [("першого" in w["text"], "останнього" in w["text"]) for w in both] == [
+        (True, False), (False, True)]

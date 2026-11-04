@@ -216,6 +216,57 @@ def _shifra_of(what: str, base: Any) -> Any:
     return replace(base, spr=what.lstrip("0") or "0")
 
 
+def rest_only(case_dir: str | Path, specs: list[tuple[str, str, str]], *,
+              dry_run: bool = False) -> dict[str, Any] | None:
+    """Карта з самих «-» на плівці, чиї кадри забрали склейки, — зняти плівку.
+
+    Плівка буває вся роздана склейкам (`cases join`), крім кадрів, що не
+    належать жодній справі замовлення (хвіст справи, прочитаної деінде). Справ
+    у карті тоді немає — і доти `split` відмовляв («менше двох справ»), а
+    плівка лишалась у бібліотеці «справою» поруч зі склеєними (04.11.2026,
+    ANRM 134-2-56: к.0871 — останній кадр справи 55). Тут ці кадри названо
+    «поза справами», а решту мусять покривати шматки склейок (`joined_parts`).
+    Не та карта (є справи або склейок немає) — `None`, і далі звичайний план."""
+    from nyshporka.cases import join as J
+    from nyshporka.cases.chain import sidecar_of
+    from nyshporka.cases.register import case_path
+    from nyshporka.core.workspace import workspace
+    from nyshporka.share import align
+
+    if not specs or any(what != "-" for what, _a, _b in specs):
+        return None
+    d = case_path(case_dir)
+    _, meta = sidecar_of(d)
+    if not meta.get(J.JOINED_PARTS):
+        return None
+    frames_dir = align._frames_dir(d)
+    local = [p.name for p in align.frames_sorted(frames_dir)] if frames_dir else []
+    remote = _remote_manifest(d, local)
+    names = sorted(str(f["name"]) for f in remote["frames"]) if remote is not None else local
+    pos = {n: i for i, n in enumerate(names)}
+    outside: set[str] = set()
+    for _w, first, last in specs:
+        for name in (first, last):
+            if name not in pos:
+                raise SplitError(f"частина «-»: файла «{name}» у теці немає")
+        outside.update(names[pos[first]:pos[last] + 1])
+    taken = J.claimed(meta, names)
+    free = [n for n in names if n not in taken and n not in outside]
+    if free:
+        raise SplitError(
+            f"{len(free)} кадрів плівки не забрала жодна склейка і не названо «поза "
+            f"справами»: від «{free[0]}» до «{free[-1]}»")
+    keys = list(dict.fromkeys(str(p["key"]) for p in meta[J.JOINED_PARTS]))
+    out = {"case_dir": _rel(d, workspace().hub), "frames": len(names), "rest_only": True,
+           "split_into": keys, "outside": len(outside), "claimed": len(taken),
+           "dry_run": dry_run}
+    if not dry_run:
+        runs = J._piece_runs(d, d if remote is not None else (frames_dir or d))
+        J.retire_if_covered(d, names, runs, outside)
+        _forget_caches()
+    return out
+
+
 def plan(case_dir: str | Path, specs: list[tuple[str, str, str]]) -> Plan:
     """Що станеться, якщо розкласти теку за цією картою. Нічого не пише."""
     from nyshporka import htr_store as S
@@ -750,6 +801,44 @@ def _drop_from_store(runs: list[str]) -> None:
 
 
 # ── зняти ────────────────────────────────────────────────────────────────────
+def undo_plan(case_dir: str | Path) -> dict[str, Any]:
+    """Що зняла б `undo`, — нічого не чіпаючи (`--undo --dry-run`).
+
+    🔴 04.11.2026 `nysh cases split <тека> --undo --dry-run` справді знімав
+    розбивку: гілка `undo` стояла в операції раніше за `dry_run`. Тут — ті самі
+    перевірки, що в `undo`, без жодного запису."""
+    from nyshporka import htr_store as S
+    from nyshporka.cases.register import case_path
+    from nyshporka.cloud.verify import META_NAME
+    from nyshporka.core.workspace import workspace
+
+    d = case_path(case_dir)
+    root = workspace().hub
+    journal = _read_journal(d / JOURNAL)
+    if not journal:
+        raise SplitError(f"розбивки в теці немає (файла {JOURNAL} не знайдено): {d}")
+    parts: list[dict[str, Any]] = []
+    kept: list[str] = []
+    for part in journal.get("parts") or []:
+        if not part.get("dir"):
+            continue
+        gone: list[str] = []
+        for old, new in (part.get("runs") or {}).items():
+            run_dir = S.htr_root() / str(new)
+            if not run_dir.is_dir():
+                continue
+            if _read_json(run_dir / META_NAME).get("split_from", {}).get("run") != old \
+                    or not _run_is_copy(run_dir, S.htr_root() / str(old)):
+                kept.append(f"прогін {new}: змінено після розбивки — лишився б")
+                continue
+            gone.append(str(new))
+        parts.append({"dir": str(part["dir"]), "shifra": part.get("shifra") or "",
+                      "runs_removed": gone, "dir_exists": (root / str(part["dir"])).is_dir()})
+    return {"case_dir": _rel(d, root), "dry_run": True, "parts": parts,
+            "runs_removed": [r for p in parts for r in p["runs_removed"]],
+            "runs_restored": [str(r) for r in journal.get("runs") or []], "kept": kept}
+
+
 def undo(case_dir: str | Path) -> dict[str, Any]:
     """Зняти розбивку: прибрати лише те, що вона створила, і повернути позначки."""
     from nyshporka import htr_store as S

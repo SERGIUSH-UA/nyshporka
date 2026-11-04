@@ -2435,10 +2435,26 @@ def cases_split_cmd(
         return
     d = env.data or {}
     if undo:
-        console.print(f"розбивку знято: {_e(str(d.get('case_dir')))} · прибрано "
-                      f"прогонів: {len(d.get('runs_removed') or [])}")
+        if d.get("dry_run"):
+            console.print(f"проба, нічого не змінено: зняття розбивки {_e(str(d.get('case_dir')))} "
+                          f"прибрало б прогонів: {len(d.get('runs_removed') or [])}, "
+                          f"тек справ: {len(d.get('parts') or [])}")
+            for row in d.get("parts") or []:
+                console.print(f"  [muted]{_e(str(row.get('dir')))}: "
+                              f"{_e(', '.join(row.get('runs_removed') or []) or 'прогонів немає')}[/muted]")
+        else:
+            console.print(f"розбивку знято: {_e(str(d.get('case_dir')))} · прибрано "
+                          f"прогонів: {len(d.get('runs_removed') or [])}")
         for row in d.get("kept") or []:
             console.print(f"  [warn]{_e(row)}[/warn]")
+        notes(env)
+        return
+    if d.get("rest_only"):
+        console.print(f"[bold]{_e(str(d.get('case_dir')))}[/bold] — {d.get('frames')} кадрів: "
+                      f"склейки забрали {d.get('claimed')}, поза справами {d.get('outside')}"
+                      + (" · проба, нічого не змінено" if d.get("dry_run")
+                         else " · плівку знято з бібліотеки"))
+        console.print(f"  [muted]справи: {_e(', '.join(d.get('split_into') or []))}[/muted]")
         notes(env)
         return
     console.print(f"[bold]{_e(str(d.get('case_dir')))}[/bold] — {d.get('frames')} кадрів"

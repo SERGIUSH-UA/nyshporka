@@ -1106,6 +1106,16 @@ def chastyna_spravy(key: str, shifra: str, kadriv: int) -> str:
     return ""
 
 
+def _kray(case: dict[str, Any]) -> list[dict[str, str]]:
+    """Підказка «справа торкається краю плівки» (`share.kray`) — збій її не валить пакет."""
+    from nyshporka.share import align, kray
+
+    try:
+        return kray.check(align.case_dir_for(str(case.get("key_local") or "")))
+    except Exception:       # підказка, не умова пакування
+        return []
+
+
 def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
          hash_frames: bool = False, partial_why: str = "",
          dry_run: bool = False, **meta: Any) -> dict[str, Any]:
@@ -1142,7 +1152,7 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
         "geometry_on_disk": bool(geom_dirs),
         # Чи названо той опис: пул — завжди (офлайн), покажчик — лише в пробі,
         # бо це запит у мережу. Лише підказки, заливку вони не зупиняють.
-        "opys_check": opys_check.check(m.case, network=dry_run),
+        "opys_check": opys_check.check(m.case, network=dry_run) + _kray(m.case),
         "karta": dict((m.case.get("details") or {}).get("karta") or {}),
     }
     # 🔴 Пакет без числа кадрів справи не збирається мовчки. Ворота його

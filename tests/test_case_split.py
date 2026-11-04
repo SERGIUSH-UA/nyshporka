@@ -315,6 +315,31 @@ def test_undo_povertaie_yak_bulo(space: Path, zbirka: Path) -> None:
     assert sorted(cf.pages) == ["0002.jpg", "0004.jpg", "0006.jpg", "0008.jpg"]
 
 
+def test_proba_zniattia_nichoho_ne_znimaie(space: Path, zbirka: Path) -> None:
+    """🔴 04.11.2026 `nysh cases split <тека> --undo --dry-run` справді знімав
+    розбивку: гілка `undo` в операції стояла раніше за `dry_run`."""
+    from nyshporka import ops as O
+
+    SPL.split(zbirka, MAP)
+
+    env = O.call("cases.split", {"case_dir": str(zbirka), "undo": True, "dry_run": True})
+
+    assert env.ok, env.error
+    assert env.data["dry_run"] is True
+    assert sorted(env.data["runs_removed"]) == [
+        "op25-spr-926", "op25-spr-926-diak_v4", "op25-spr-927", "op25-spr-927-diak_v4",
+        "op25-spr-928", "op25-spr-928-diak_v4"]
+    assert (zbirka / SPL.JOURNAL).exists(), "проба зняла розбивку"
+    for spr in ("926", "927", "928"):
+        assert (space / f"data/raw/rgia_592/op25-spr-{spr}").is_dir()
+        assert (space / f"reports/htr/op25-spr-{spr}").is_dir()
+    side = json.loads((zbirka / "_source.json").read_text(encoding="utf-8"))
+    assert side["split_into"] == ["RGIA/592/25/926", "RGIA/592/25/927", "RGIA/592/25/928"]
+
+    got = O.call("cases.split", {"case_dir": str(zbirka), "undo": True})
+    assert got.ok and not (zbirka / SPL.JOURNAL).exists()
+
+
 def test_undo_ne_chipaie_zminenoho_pislia_rozbyvky(space: Path, zbirka: Path) -> None:
     SPL.split(zbirka, MAP)
     pravka = space / "reports/htr/op25-spr-927/0004.txt"

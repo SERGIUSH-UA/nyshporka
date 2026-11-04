@@ -3599,9 +3599,13 @@ def cases_split(a: CasesSplitArgs) -> Envelope:
 
     try:
         if a.undo:
-            return ok(SPL.undo(a.case_dir))
+            # `--dry-run` важить і тут: проба зняття не знімає (04.11.2026 знімала)
+            return ok(SPL.undo_plan(a.case_dir) if a.dry_run else SPL.undo(a.case_dir))
         specs = ([SPL.parse_part(p) for p in a.parts] if a.parts
                  else SPL.load_map(a.map_file) if a.map_file else [])
+        rest = SPL.rest_only(a.case_dir, specs, dry_run=a.dry_run)
+        if rest is not None:
+            return ok(rest)
         if a.dry_run:
             pl = SPL.plan(a.case_dir, specs)
             env = ok({**pl.as_json(workspace().hub), "dry_run": True})
