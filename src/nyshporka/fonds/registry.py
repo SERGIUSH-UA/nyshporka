@@ -364,6 +364,22 @@ def registry_where(fond_id: str) -> Path:
     return remote.store_path() if remote.taken_one(fond_id) else p
 
 
+def _repo_label(repo: str) -> str:
+    """Людська назва архіву: словник вище, а для решти — пак архівів.
+
+    Словник знає сім архівів; без паку реєстр ЦДІАЛ чи ДАЧкО підписувався
+    латинським кодом («CDIAL ф.201») — і так їхав у Супрягу.
+    """
+    if repo in REPO_LABEL:
+        return REPO_LABEL[repo]
+    try:
+        from nyshporka.archives import active
+
+        return str(active().repo_label(repo) or repo)
+    except Exception:  # пака архівів немає — лишається код
+        return repo
+
+
 def _discover_disk() -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     raw = workspace().raw
@@ -382,10 +398,11 @@ def _discover_disk() -> list[dict[str, Any]]:
         slug_repo = fond_id.rsplit("_", 1)[0]
         repo = _SLUG_REPO.get(slug_repo, slug_repo.upper())
         st = p.stat()
+        lbl = _repo_label(repo)
         out.append({
             "id": fond_id, "repo": repo,
-            "repo_label": REPO_LABEL.get(repo, repo), "fond": fond,
-            "label": f"{REPO_LABEL.get(repo, repo)} ф.{fond}",
+            "repo_label": lbl, "fond": fond,
+            "label": f"{lbl} ф.{fond}",
             "path": str(p), "mtime": st.st_mtime,
             "has_coverage": (registry_dir(fond_id) / "coverage.json").exists(),
             "has_conflicts": (registry_dir(fond_id) / "conflicts.tsv").exists(),
