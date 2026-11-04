@@ -77,6 +77,34 @@ def test_idempotent(run, tmp_path: Path) -> None:
     assert res2.verdicts_kept == 1, "вердикт людини мусить пережити перезбірку"
 
 
+def test_opys_letter_case_from_two_sources_is_one_case(tmp_path: Path) -> None:
+    """🔴 Качка пише опис «1Д», Вікіджерела — «1д»: це та сама справа.
+
+    Ключ брав опис як є, і в ДАХмО ф.227 879 справ лежали в реєстрі двічі
+    (04.11.2026). Номер опису при цьому не чіпається: провідний нуль і «Л2»
+    лишаються, як надруковано.
+    """
+    d = tmp_path / "registry"
+    d.mkdir()
+    (d / "duck.tsv").write_text(
+        "opys\tspr_int\tspr_letter\ttitle\tyear_from\tyear_to\tfolios\tduck_id\tduck_url\t"
+        "duck_online\tduck_copies\tduck_copy_url\n"
+        "1Д\t129\t\tАлфавіт євреїв\t1837\t1837\t\td1\thttps://duck.example/1\t\t\t\n"
+        "Л2\t5\t\tСправа опису Л2\t1840\t1840\t\td2\thttps://duck.example/2\t\t\t\n",
+        encoding="utf-8")
+    (d / "wikisource.tsv").write_text(
+        "opys\tspr_raw\tspr_int\tspr_letter\ttitle\tyear_from\tyear_to\tfolios\t"
+        "commons_file\tfs_film\tsrc\tspr_to\n"
+        "1д\t129\t129\t\tАлфавіт євреїв, що отримали паспорти\t1837\t1837\t12\t\t\twiki\t\n",
+        encoding="utf-8")
+    out = tmp_path / "f227_opys_merged.tsv"
+    merge_fond(Target(repo="DAHMO", fond="227"), dest=d, out=out, library=None)
+    with out.open(encoding="utf-8", newline="") as fh:
+        got = [(r["opys"], r["spr_int"]) for r in csv.DictReader(fh, delimiter="\t")]
+    assert got.count(("1д", "129")) == 1 and ("1Д", "129") not in got, got
+    assert ("Л2", "5") in got, "номер опису без цифри попереду лишається, як є"
+
+
 # ── зшивачі: те, що розходиться мовчки ──────────────────────────────────────
 
 def test_columns_known_to_reader() -> None:
