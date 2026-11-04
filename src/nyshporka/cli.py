@@ -2297,6 +2297,9 @@ def cases_build(
                       f"[/warn]")
     console.print(f"✅ реєстр: [bold]{res['cases']}[/bold] справ · "
                   f"нерозв'язаних прогонів: {res.get('orphans', 0)} · {res['path']}")
+    from nyshporka.cases.cli import print_store_debt
+
+    print_store_debt(res)
 
 
 @cases_app.command("rekey")

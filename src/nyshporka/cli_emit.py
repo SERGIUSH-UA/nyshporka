@@ -97,8 +97,15 @@ def notes(env: Any, indent: str = "") -> None:
         console.print(f"{indent}[warn]⚠ зріз застарів[/warn] [muted]({_plain(why)})[/muted]")
         if env.stale.fix:
             console.print(f"{indent}  [muted]полагодити: {_plain(env.stale.fix)}[/muted]")
-    for w in env.warnings:
-        console.print(f"{indent}[warn]⚠[/warn] [muted]{_plain(w.text)}[/muted]")
+    # 🔴 Тривога (`alert`) — не та сама сіра примітка: 04.11.2026 «319 прогонів поза
+    # стором» стояло в одному сірому рядку з «не знайшлось», і нуль по 9 із 328
+    # прогонів читався як нуль по серії. Тривоги — першими й червоним.
+    warnings = sorted(env.warnings, key=lambda w: getattr(w, "level", "") != "alert")
+    for w in warnings:
+        if getattr(w, "level", "") == "alert":
+            console.print(f"{indent}[err]🔴 {_plain(w.text)}[/err]")
+        else:
+            console.print(f"{indent}[warn]⚠[/warn] [muted]{_plain(w.text)}[/muted]")
     if env.coverage:
         seen = "; ".join(c.human() for c in env.coverage)
         console.print(f"{indent}[muted]🔎 шукали в: {_plain(seen)}[/muted]")

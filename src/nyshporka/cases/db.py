@@ -109,6 +109,7 @@ def build_index(db_path: Path | None = None,
     # означало б видати неповний зріз за відповідь.
     unreadable: list[dict[str, str]] = []
     rows, orphans = collect_rows(index, unreadable=unreadable)
+    debt = store_debt(rows)
     # 🔴 Аудит 29.09.2026: tmp мав одне ім'я на всіх (`case_index.sqlite.tmp`),
     # а заміна йшла без повтору. Дві паралельні `cases build` (дві сесії, демон
     # після пульсу) видаляли чи підміняли проміжну базу одна одній, а на
@@ -153,6 +154,8 @@ def build_index(db_path: Path | None = None,
             # Скільки тек прогонів бачила збірка: перевірка свіжості порівнює
             # з цим числом, а не з кількістю прив'язаних прогонів (див. там).
             ("htr_dirs", str(sources_at_start["htr_dirs"])),
+            # Борг стору пошуку на момент збірки (`store_debt`).
+            ("store_debt", json.dumps(debt, ensure_ascii=False)),
         ])
         con.commit()
     except BaseException:
@@ -162,7 +165,61 @@ def build_index(db_path: Path | None = None,
     con.close()
     replace_retrying(tmp, path)
     return {"cases": len(rows), "orphans": len(orphans) - decided,
-            "decided": decided, "path": str(path), "unreadable": unreadable}
+            "decided": decided, "path": str(path), "unreadable": unreadable,
+            "store_debt": debt}
+
+
+def store_debt(rows: list[Any]) -> dict[str, Any]:
+    """Прочитані прогони справ, яких немає в сторі пошуку: їхнього тексту пошук не бачить.
+
+    🔴 04.11.2026: 319 із 328 прогонів одного опису (хмарні партії жовтня) не були
+    внесені в стор, і жодна зведена перевірка цього не казала; 28.10.2026 так само
+    лежали 909 справ іншого фонду. Реєстр перебудовується після кожної дії — тож борг
+    стору рахується тут і друкується в підсумку збірки. Лише множинна різниця імен
+    (без `stat` тек), тому дешево й на 12 тис. справ. Стору немає — боргу не
+    рахуємо (`None`): тоді пошук і так відмовляє з порадою зібрати стор.
+    """
+    per_row: list[tuple[Any, list[str]]] = []
+    for r in rows:
+        names = getattr(r, "htr_runs", None) or []
+        if isinstance(names, str):
+            try:
+                names = json.loads(names)
+            except ValueError:
+                names = [names]
+        per_row.append((r, [str(n) for n in names if n]))
+    try:
+        from nyshporka.search import decode as D
+        from nyshporka.search import store as ST
+
+        if not ST.exists():
+            return {"runs": None, "cases": 0, "examples": []}
+        conn = ST.connect(readonly=True)
+        try:
+            have = {str(run): str(stamp) for run, stamp in conn.execute("select run, stamp from runs")}
+        finally:
+            conn.close()
+        # 🔴 Не лише відсутні, а й ПРОСТРОЧЕНІ: пошук бере прогін лише зі свіжим штампом
+        # (`store._run_ids(fresh_only=True)`), а штамп міняє будь-який перезапис мети.
+        # 03.11.2026 перенесення кадрів у архів переписало `case_dir` у меті прогонів
+        # одного опису — текст той самий, а пошук їх більше не бачив.
+        listed = [n for _, names in per_row for n in names if n in have]
+        fresh = D.stamps_of(listed) if listed else {}
+    except Exception as exc:          # борг — підказка; збірку реєстру він не валить
+        return {"runs": None, "cases": 0, "examples": [], "error": f"{type(exc).__name__}: {exc}"}
+    runs = stale = 0
+    cases: list[tuple[str, int]] = []
+    for r, names in per_row:
+        miss = [n for n in names if n not in have]
+        old = [n for n in names if n in have and fresh.get(n, "") != have[n]]
+        if miss or old:
+            runs += len(miss) + len(old)
+            stale += len(old)
+            cases.append((getattr(r, "shifra", "") or getattr(r, "key", "") or names[0],
+                          len(miss) + len(old)))
+    cases.sort(key=lambda x: -x[1])
+    return {"runs": runs, "stale": stale, "cases": len(cases),
+            "examples": [c for c, _ in cases[:5]]}
 
 
 def _unreadable_reason(meta: dict[str, Any]) -> str:

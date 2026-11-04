@@ -2756,11 +2756,17 @@ def _search_run(a: SearchArgs) -> Envelope:
                      f"із {res.get('runs_total') or '?'} — перелік неповний, і нуль "
                      f"із нього нічого не доводить", ALERT)
         if blind:
-            env.warn("partial_index",
-                     f"{blind} прогонів поза пошуком: їхній текст ще не "
-                     f"проіндексовано. Прочесано {scanned}.")
-            env.suggest("text.index" if res.get("backend") == "store" else "search.index",
-                        "зібрати індекс решти прогонів")
+            from nyshporka.ops_text import partial_store_alert
+
+            # Код лишається `partial_index` — на нього спираються агенти й тести.
+            if res.get("backend") == "store":
+                partial_store_alert(env, blind, scanned + blind, a.case,
+                                    zero=not (res.get("hits") or []), code="partial_index")
+            else:
+                env.warn("partial_index",
+                         f"{blind} прогонів поза пошуком: їхній текст ще не "
+                         f"проіндексовано. Прочесано {scanned}.", ALERT)
+                env.suggest("search.index", "зібрати індекс решти прогонів", level=ALERT)
         if scope_kind == "case" and not int(res.get("runs_scoped") or 0):
             # Справу впізнано, але прочитаного в ній немає. Це зовсім інша
             # відповідь, ніж «шукали й не знайшли», і зливати їх в одну —

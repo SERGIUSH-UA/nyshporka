@@ -41,6 +41,22 @@ def _warn_stale() -> None:
                   f"({'; '.join(st['reasons'][:3])}) — [bold]nysh cases build[/bold]")
 
 
+def print_store_debt(res: dict[str, Any]) -> None:
+    """🔴 Прочитане, якого пошук не бачить (`db.store_debt`): нуль по цих справах хибний.
+
+    Друкується після КОЖНОЇ збірки реєстру — а її роблять після кожної дії, тож
+    борг стору не може лишатись непоміченим тижнями, як цілий опис у жовтні 2026."""
+    debt = res.get("store_debt") or {}
+    if not debt.get("runs"):
+        return
+    ex = ", ".join(debt.get("examples") or [])
+    stale = int(debt.get("stale") or 0)
+    how = f", з них прострочених після зміни мети {stale}" if stale else ""
+    console.print(f"[err]🔴 поза стором пошуку: {debt['runs']} прогонів у {debt['cases']} "
+                  f"справах{how} — їхнього тексту пошук не бачить, нуль по них хибний "
+                  f"(найбільше: {ex}). Догнати: nysh text index[/err]")
+
+
 def _place(row: dict[str, Any]) -> str:
     """Місце для списку: розібране, а якщо розбору не вийшло — сире, з міткою `?`.
 
@@ -88,6 +104,7 @@ def cmd_build(
     word = plural(int(res["cases"] or 0), "справа", "справи", "справ")
     console.print(f"{mark} реєстр: [bold]{res['cases']}[/bold] {word} · "
                   f"нерозв'язаних прогонів: {res['orphans']}{tail} · {res['path']}")
+    print_store_debt(res)
     if bad:
         # 🔴 Аудит 29.09.2026: битий файл шару раніше зникав мовчки, і реєстр
         # казав «пошуку не було» там, де він був. Кажемо вголос і поіменно.

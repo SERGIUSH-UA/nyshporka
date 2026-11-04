@@ -29,6 +29,33 @@ SECTION = "research"
 CaseScope = str | list[str]
 
 
+def partial_store_alert(env: Envelope, blind: int, total: int, case: Any, *,
+                        zero: bool, code: str = "partial_store") -> None:
+    """Прогони області поза стором пошуку — тривога й «зріз застарів», а не примітка.
+
+    🔴 04.11.2026: `text grep` по серії одного опису прочесав 9 прогонів із 328 і
+    сказав «не знайшлось»; «319 прогонів поза стором» стояло сірою приміткою поряд,
+    і нуль по 3 % серії читався як нуль по серії. Те саме 28.10.2026 — 909 справ
+    іншого фонду поза стором. Тому тут: рівень `alert`, позначка застарілості з точною
+    командою догону і слово про те, що нуль недійсний.
+    """
+    if not blind:
+        return
+    if isinstance(case, str):
+        cases = [case.strip()] if case.strip() else []
+    else:
+        cases = [str(c).strip() for c in (case or []) if str(c).strip()]
+    fix = ("nysh text index " + " ".join(f'--case "{c}"' for c in cases)) if cases \
+        else "nysh text index  (усе прочитане — довго)"
+    of = f" із {total}" if total else ""
+    what = "цей нуль нічого не доводить" if zero else "видача неповна"
+    env.warn(code, f"{blind}{of} прогонів області поза стором пошуку — їхнього тексту "
+                   f"пошук не бачив, {what}. Догнати: {fix}", level=ALERT)
+    env.stale_because([f"{blind}{of} прогонів поза стором пошуку"], fix=fix)
+    env.suggest("text.index", "догнати стор по області запиту", level=ALERT,
+                args={"case": cases} if cases else None)
+
+
 class TextStateArgs(BaseModel):
     verify: bool = Field(default=False,
                          description="звірити блоби кандидатів із чинним кодом — приймач "
@@ -439,11 +466,8 @@ def text_grep(a: TextGrepArgs) -> Envelope:
     if layered is not None:
         _warn_cuts(env, layered)
         _peek_elsewhere(env, a.pattern, layers, a.ignore_case)
-    if res["unindexed"]:
-        env.warn("partial_store",
-                 f"{res['unindexed']} прогонів поза стором: їхній текст ще не "
-                 f"проіндексовано. Прочесано {res['runs']}.")
-        env.suggest("text.index", "догнати стор")
+    partial_store_alert(env, int(res["unindexed"] or 0), int(res.get("runs_asked") or 0),
+                        a.case, zero=not res["hits"])
     if not res["prefiltered"]:
         env.warn("full_scan", "у регексі немає літерала з трьох літер — прочесано "
                               "кожен рядок області, а не звужений корпус")
@@ -814,9 +838,8 @@ def text_find(a: TextFindArgs) -> Envelope:
                      f"в описі {head} за реєстром справ {ser['listed']}, не прочитано тут "
                      f"{len(miss)} — у пошук і знаменник не входять: "
                      + ", ".join(miss[:10]) + (" …" if len(miss) > 10 else ""))
-    if led.get("unindexed"):
-        env.warn("partial_store", f"{led['unindexed']} прогонів поза стором")
-        env.suggest("text.index", "догнати стор")
+    partial_store_alert(env, int(led.get("unindexed") or 0), int(led.get("runs") or 0), a.case,
+                        zero=not (res.get("hits") or []))
     if led.get("rules_stale"):
         env.warn("rules_stale", RULES_STALE_MSG)
     if led.get("short_stems"):
@@ -909,9 +932,8 @@ def text_near(a: TextNearArgs) -> Envelope:
     if res["stopped"]:
         env.warn("search_stopped", "пошук спинено: прочесано не все, нуль нічого не доводить",
                  level=ALERT)
-    if res["unindexed"]:
-        env.warn("partial_store", f"{res['unindexed']} прогонів поза стором")
-        env.suggest("text.index", "догнати стор")
+    partial_store_alert(env, int(res["unindexed"] or 0), 0, a.case,
+                        zero=not (res.get("hits") or []))
     if res["rules_stale"]:
         env.warn("rules_stale", RULES_STALE_MSG)
     if res["fast_error"]:
