@@ -14,10 +14,12 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import sys
+from collections.abc import Callable
 from functools import lru_cache
-from typing import TextIO
+from typing import Any, TextIO
 
 from rich.console import Console
 from rich.theme import Theme
@@ -118,6 +120,44 @@ def _never_choke(stream: TextIO) -> None:
         reconfigure(errors="replace")
 
 
+class _BrandConsole(Console):
+    """`Console`, що віддає JSON машині звичайним текстом, а не через рендерер.
+
+    🔴 `Console.print_json` розфарбовує JSON і на Windows пише його сегмент за
+    сегментом через Win32-консоль (`legacy_windows_render` → `write_text`), навіть
+    коли вивід перенаправлено у файл. Ціна росте з розміром відповіді й з тим,
+    скільки процесів ділять одну консоль: 04.11.2026 `nysh text find --json` по
+    60 справах ДАХмО шукав хвилини, а друкував готові 6–20 МБ відповіді ще
+    десятки хвилин (py-spy: `print_json` → `_win32_console.write_text`); той самий
+    JSON через `json.dumps` лягає за 0,1 с. Кольори машинному виводу не потрібні,
+    тож усі `console.print_json(...)` пакета йдуть сюди.
+    """
+
+    def print_json(
+        self,
+        json_str: str | None = None,
+        *,
+        data: Any = None,
+        indent: int | str | None = 2,
+        highlight: bool = True,
+        skip_keys: bool = False,
+        ensure_ascii: bool = False,
+        check_circular: bool = True,
+        allow_nan: bool = True,
+        default: Callable[[Any], Any] | None = None,
+        sort_keys: bool = False,
+    ) -> None:
+        del highlight  # підсвітка — саме те, від чого тут тікаємо
+        obj = json.loads(json_str) if json_str is not None else data
+        text = json.dumps(
+            obj, indent=indent, skipkeys=skip_keys, ensure_ascii=ensure_ascii,
+            check_circular=check_circular, allow_nan=allow_nan, default=default,
+            sort_keys=sort_keys)
+        out = self.file
+        out.write(text + "\n")
+        out.flush()
+
+
 @lru_cache(maxsize=2)
 def _make(stderr: bool) -> Console:
     # ⚠ Ширина при перенаправленні. Rich за замовчуванням бере 80 колонок для
@@ -127,7 +167,7 @@ def _make(stderr: bool) -> Console:
     stream = sys.stderr if stderr else sys.stdout
     _never_choke(stream)
     width = None if stream.isatty() else 150
-    return Console(theme=theme(), stderr=stderr, width=width)
+    return _BrandConsole(theme=theme(), stderr=stderr, width=width)
 
 
 def console() -> Console:

@@ -331,6 +331,37 @@ def test_console_survives_an_ansi_pipe() -> None:
     assert "? готово" in r.stdout.decode("cp1251")
 
 
+def test_print_json_goes_out_as_plain_text() -> None:
+    """🔴 `console().print_json` віддає машині голий JSON, повз рендерер rich.
+
+    04.11.2026 `nysh text find --json` по 60 справах ДАХмО друкував готову
+    відповідь (6–20 МБ) десятки хвилин: rich розфарбовував її й на Windows писав
+    сегмент за сегментом через Win32-консоль. Навіть із примусовим кольором
+    (`FORCE_COLOR`) у виводі не має бути ні ESC, ні переносів rich, а обидві
+    форми виклику (`data=` і рядок) мусять давати той самий розбірний JSON.
+    """
+    import importlib
+    import io
+    import json
+
+    # `brand.console` — і модуль, і реекспортована функція; беремо саме модуль
+    BC = importlib.import_module("nyshporka.brand.console")
+
+    assert isinstance(BC.console(), BC._BrandConsole)
+    buf = io.StringIO()
+    c = BC._BrandConsole(file=buf, force_terminal=True, color_system="truecolor", width=40)
+    data = {"q": "Коваленко", "hits": [{"line": "х" * 400}] * 3}
+    c.print_json(data=data)
+    c.print_json('{"ok": true, "n": [1, 2]}')
+    out = buf.getvalue()
+    assert "\x1b" not in out
+    dec = json.JSONDecoder()
+    first, end = dec.raw_decode(out)
+    second, _ = dec.raw_decode(out[end:].lstrip())
+    assert first == data
+    assert second == {"ok": True, "n": [1, 2]}
+
+
 def test_generator_speaks_to_a_legacy_console(monkeypatch: pytest.MonkeyPatch) -> None:
     """⚠ Приймач айдентики не має падати через власну позначку.
 
