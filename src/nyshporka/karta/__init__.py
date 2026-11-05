@@ -52,7 +52,7 @@ log = logging.getLogger("nyshporka.karta")
 
 #: Номер правил прив'язки. Сервер додає його до відбитка книги (`app.heo.vidbytok`):
 #: зміна правил тут перераховує весь пул без окремого кроку на сервері.
-PRAVYLA = 11
+PRAVYLA = 12
 
 POD = ["вінниц", "хмельниц", "одес"]
 VOL = ["волин", "рівнен", "житомир", "тернопіл", "хмельниц"]
@@ -175,7 +175,17 @@ USTANOVA_RE = re.compile(
     r"(?:(?:міськ|римо-католицьк|парафіяльн|гродськ|земськ|повітов|магістратськ)\w*\s+)*"
     r"(?:костел|сільрад|примар|громад|виконком|волост|гродськ\w* суд|духовн\w* суд|"
     r"земськ\w* суд|магістрат|ратуш|кагал|синагог|общин)")
-PRYKM_OSNOVA_RE = re.compile(r"([\w'’ʼ]+?)(янськ|анськ|ськ|цьк|зьк)(?:ого|ої|ий|а|ій|і|ому)$")
+#: «-сько» — ліва половина складеного прикметника: «Гайсинсько-Ольгопільського».
+PRYKM_OSNOVA_RE = re.compile(r"([\w'’ʼ]+?)(янськ|анськ|ськ|цьк|зьк)(?:ого|ої|ий|а|ій|і|ому|о)$")
+#: Слово перед дефісом, за яким регулярка установи підхопила лише хвіст:
+#: «Новоград-|Волинського», «Буда-|Орловецька», «Чернецько-|слободського».
+SKLADENA_RE = re.compile(r"([\w'’ʼ]+)-$")
+#: Установа міста чи містечка: її місце може зватися «Полонне», «Голованівськ»,
+#: «Дубно» — форми, яких серед сільрад і волостей не буває.
+USTANOVA_MISTA_RE = re.compile(r"костел|суд|магістрат|ратуш|кагал|синагог|примар")
+#: Суд, магістрат, ратуша — лише в місті, і місто не «-ка»: «Володимирський
+#: гродський суд» — Володимир, а не село Володимирка Вінниччини.
+LYSHE_MISTO_RE = re.compile(r"суд|магістрат|ратуш")
 #: FamilySearch: «Церковні записи · Pylyava, Litin (каталог FamilySearch)».
 TYTUL_FS = re.compile(r"·\s*([A-Za-z'’ -]+?),\s*([A-Za-z'’ -]+?)\s*(?:,|\(|$)")
 TYTUL_POVIT = re.compile(r"([А-ЯІЇЄҐ][а-яіїєґ'’ʼ-]+?)"
@@ -613,11 +623,37 @@ def z_prykmetnyka(title: str) -> list[tuple[str, list[str]]]:
 
     Повертає (прикметник, можливі назви): прикметник однозначно назву не
     відновлює (Деражня, Славута, Острожець, Іллінці), тож пробуються кілька.
+
+    Прикметник у складеній назві («Новоград-Волинського костелу») — частина
+    назви, а не окреме місце: 05.11.2026 «Волинського» само по собі дало
+    село Волинка Чернігівщини 28 книгам Новоград-Волинського (Звягеля).
     """
     out: list[tuple[str, list[str]]] = []
     for m in USTANOVA_RE.finditer(title):
-        for x in re.split(r"\s*(?:,|-|\bй\b|\bі\b|\bта\b)\s*", m.group(1)):
-            o = PRYKM_OSNOVA_RE.match(x.strip())
+        ustanova = m.group(0)[m.end(1) - m.start(0):]
+        mistechko = bool(USTANOVA_MISTA_RE.search(ustanova))
+        lyshe_misto = bool(LYSHE_MISTO_RE.search(ustanova))
+        chastyny = [x.strip() for x in re.split(r"\s*(?:,|-|\bй\b|\bі\b|\bта\b)\s*", m.group(1))]
+        liva = SKLADENA_RE.search(title[:m.start(1)])
+        if liva:
+            slovo = liva.group(1)
+            persha = chastyny.pop(0)
+            if not persha[:1].isupper():
+                # «Чернецько-слободського»: одна назва з малої, з прикметника
+                # її не відновити — краще без точки, ніж Слобідка навмання.
+                pass
+            elif PRYKM_OSNOVA_RE.match(slovo):
+                # «Гайсинсько-Ольгопільського» — два місця.
+                chastyny[:0] = [slovo, persha]
+            else:
+                # «Новоград-Волинського», «Буда-Орловецька» — одна назва.
+                o = PRYKM_OSNOVA_RE.match(persha)
+                if o:
+                    osnova = slovo + "-" + o.group(1) + o.group(2)
+                    out.append((slovo + "-" + persha,
+                                [osnova + "ий", osnova + "а", osnova + "е", osnova + "і"]))
+        for x in chastyny:
+            o = PRYKM_OSNOVA_RE.match(x)
             if not o or len(o.group(1)) < 3:
                 continue
             os_, suf = o.group(1), o.group(2)
@@ -632,7 +668,20 @@ def z_prykmetnyka(title: str) -> list[tuple[str, list[str]]]:
                          os_ + "ка"]
                 if os_.endswith("й"):
                     formy.append(os_[:-1] + "я")
-            out.append((x.strip(), formy))
+                if mistechko:
+                    # «Полонського» — Полонне, «Голованівського» — Голованівськ,
+                    # «Дубенський» — Дубно (випадне «е»). Без цих форм єдиним
+                    # кандидатом лишалось чуже село: Полонка Волині, Голованівка
+                    # Криму, Дубенка Тернопільщини.
+                    if os_.endswith("н"):
+                        formy.append(os_ + "не")
+                    formy.append(os_ + suf)
+                    vypadne = re.fullmatch(r"(.+[^аеєиіїоуюя'’ʼ])е([^аеєиіїоуюяй'’ʼ])", os_)
+                    if vypadne:
+                        formy += [vypadne[1] + vypadne[2] + "о", vypadne[1] + vypadne[2] + "е"]
+            if lyshe_misto:
+                formy = [f for f in formy if not f.endswith("ка")]
+            out.append((x, formy))
     return out
 
 
@@ -646,11 +695,23 @@ def _z_prykmetnyka(dov: Dovidnyk, formy: list[str], kt: _Kontekst) -> dict[str, 
     if not c:
         return None
     # Консисторія чи деканат могли сягати за губернію архіву (римо-католицька
-    # консисторія в ДАЖО — і Тетіїв, і Кодима): одне поселення на весь пак — воно.
+    # консисторія в ДАЖО — і Тетіїв, і Кодима): одне поселення на весь пак — воно,
+    # але поза областю справи — лише місто. Село-одинак звідти — однойменне з
+    # іншого кінця країни, а не парафія (05.11.2026: Волинка Чернігівщини для
+    # Новоград-Волинського, Голованівка в Криму, Дубенка для Дубна). Повіт
+    # одинака не відсіює: повіт у назві буває хибним (Вчорайше «Новоград-
+    # Волинського повіту»), а центр повіту — не тим Городищем.
     if len({d["qid"] for d in c.values()}) == 1:
-        return next(iter(c.values()))
-    if not kt.obl:
+        d1 = next(iter(c.values()))
+        if d1["kind"] in MISTA or any(o in d1["obl"] for o in kt.obl):
+            return d1
         return None
+    if not kt.obl:
+        # Справа ЦДІАК без губернії: установа стоїть у місті, тож із кількох
+        # однойменних — єдине місто («Дубенський гродський суд» — Дубно, а не
+        # однойменні села Рівненщини й Молдови).
+        mista_ = [d for d in c.values() if d["kind"] in MISTA]
+        return mista_[0] if len(mista_) == 1 or _odne(mista_) else None
     d, rez = _vybraty(c, kt)
     if d is None and rez == "dvoznachno":
         # Костел, примарія, суд стоять у місті: Славутський костел — місто
