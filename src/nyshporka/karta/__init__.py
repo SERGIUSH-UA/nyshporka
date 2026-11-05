@@ -52,7 +52,7 @@ log = logging.getLogger("nyshporka.karta")
 
 #: Номер правил прив'язки. Сервер додає його до відбитка книги (`app.heo.vidbytok`):
 #: зміна правил тут перераховує весь пул без окремого кроку на сервері.
-PRAVYLA = 12
+PRAVYLA = 13
 
 POD = ["вінниц", "хмельниц", "одес"]
 VOL = ["волин", "рівнен", "житомир", "тернопіл", "хмельниц"]
@@ -200,6 +200,28 @@ PRYKM = re.compile(r"(ського|цького|зького|ского|скаг
 
 #: Як далеко від повітового міста ще «в повіті». Повіти XIX ст. — до 100 км.
 POVIT_KM = 100
+#: Степові повіти Бессарабії, Таврії, Херсонщини й Катеринославщини ширші:
+#: Аккерманський сягав Болграда (Кубей, Пандаклія — за 130 км від Білгорода),
+#: Дніпровський — від Олешок до Кам'янки (Менчикури — за 170 км), Мелітопольський —
+#: моря (05.11.2026: ~280 книг відкидались «поза повітом» за 100–200 км). Межа —
+#: за областю центру повіту, і лише запасна: коли ближче за `POVIT_KM` нічого.
+POVIT_KM_STEP = 200
+STEP = ("одес", "миколаїв", "херсон", "запоріз", "дніпропетров", "донец", "луган", "крим",
+        "молдова", "кіровоград")
+#: Повіти, центр яких зветься не як повіт: повна основа з назви книги (як у
+#: `_kontekst`) → назва центру в паку. Без цього «Дніпровський повіт» брав
+#: за центр Дніпрорудне (центр — Олешки), «Олександрівський» — Олександрівку
+#: (центр — Олександрівськ, нині Запоріжжя).
+POVIT_TSENTR = {
+    "днипров": "Олешки",
+    "олександрив": "Запоріжжя",
+    "заслав": "Ізяслав",
+    "проскурив": "Хмельницький",
+    "елисаветград": "Кропивницький",
+    "новомосков": "Самар",
+    "ровен": "Рівне",
+    "ривнен": "Рівне",
+}
 #: Сусіди однієї книги: однойменних розводить відстань до вже поставлених.
 SUSID_KM = 40
 #: Види поселень, де стоїть повітова установа, костел, примарія.
@@ -671,23 +693,24 @@ def z_prykmetnyka(title: str) -> list[tuple[str, list[str]]]:
             elif suf == "янськ":
                 formy = [os_ + "я", os_ + "яни", os_ + "янка", os_ + "ян"]
             elif suf == "анськ":
-                formy = [os_ + "а", os_ + "ани", os_ + "анка"]
+                # «Саксаганська сільрада» — Саксагань
+                formy = [os_ + "а", os_ + "ани", os_ + "анка", os_ + "ань"]
             else:
                 formy = [os_, os_ + "а", os_ + "я", os_ + "е", os_ + "и", os_ + "о", os_ + "ь",
                          os_ + "ка"]
                 if os_.endswith("й"):
                     formy.append(os_[:-1] + "я")
+                # Випадне «е»: «Дубенський» — Дубно, «Верховенська волость» — Верховня.
+                vypadne = re.fullmatch(r"(.+[^аеєиіїоуюя'’ʼ])е([^аеєиіїоуюяй'’ʼ])", os_)
+                if vypadne:
+                    formy += [vypadne[1] + vypadne[2] + k for k in ("о", "е", "я")]
                 if mistechko:
-                    # «Полонського» — Полонне, «Голованівського» — Голованівськ,
-                    # «Дубенський» — Дубно (випадне «е»). Без цих форм єдиним
-                    # кандидатом лишалось чуже село: Полонка Волині, Голованівка
-                    # Криму, Дубенка Тернопільщини.
+                    # «Полонського» — Полонне, «Голованівського» — Голованівськ.
+                    # Без цих форм єдиним кандидатом лишалось чуже село: Полонка
+                    # Волині, Голованівка Криму.
                     if os_.endswith("н"):
                         formy.append(os_ + "не")
                     formy.append(os_ + suf)
-                    vypadne = re.fullmatch(r"(.+[^аеєиіїоуюя'’ʼ])е([^аеєиіїоуюяй'’ʼ])", os_)
-                    if vypadne:
-                        formy += [vypadne[1] + vypadne[2] + "о", vypadne[1] + vypadne[2] + "е"]
             if lyshe_misto:
                 formy = [f for f in formy if not f.endswith("ка")]
             out.append((x, formy))
@@ -796,7 +819,9 @@ def _kontekst(dov: Dovidnyk, repo: str, title: str, place: str, places: list[str
                     k == p or k.startswith(p + "-") or k.startswith(p + " ")
                     for k in m["kl"] for p in osnovy)]
 
-    tsentry = (povit_ts and tochno(povit_ts)) or tochno(povit_povni)
+    tabl = {_norm(POVIT_TSENTR[p]).translate(STARE) for p in povit_povni if p in POVIT_TSENTR}
+    tsentry = ([m for m in dov.mista if m["kl"] & tabl and v_zoni(m)] if tabl else []) \
+        or (povit_ts and tochno(povit_ts)) or tochno(povit_povni)
     # Точна назва лише поза краєм справи — однойменні села, а не центр: для
     # «Білопільського району» Сумщини — Білопіль Кіровоградщини й Хмельниччини,
     # а місто — Білопілля; 33 книги ДАСО Р-7720 лишались без жодної точки
@@ -816,11 +841,21 @@ def _kontekst(dov: Dovidnyk, repo: str, title: str, place: str, places: list[str
     return _Kontekst(obl=obl or obl_povitu, povit=povit, tsentry=tsentry)
 
 
+def _povit_km(t: dict[str, Any]) -> int:
+    """Межа повіту від цього центру: степові повіти ширші (`POVIT_KM_STEP`)."""
+    return POVIT_KM_STEP if any(o in t.get("obl", "") for o in STEP) else POVIT_KM
+
+
+def _v_poviti(d: dict[str, Any], tsentry: list[dict[str, Any]], *, step: bool = False) -> bool:
+    """У межах повіту: `POVIT_KM`, а зі `step` — ширша межа степових повітів."""
+    return any(_km(d, t) <= (_povit_km(t) if step else POVIT_KM) for t in tsentry)
+
+
 def _pul(dov: Dovidnyk, kt: _Kontekst) -> list[dict[str, Any]]:
-    """Поселення в межах повіту — простір для слабких способів."""
+    """Поселення в межах повіту — простір для слабких способів (без степової межі:
+    у ширшому колі «на одну літеру» знаходить більше чужого)."""
     if kt._pul is None:
-        kt._pul = ([d for d in dov.vsi if min(_km(d, t) for t in kt.tsentry) <= POVIT_KM]
-                   if kt.tsentry else [])
+        kt._pul = [d for d in dov.vsi if _v_poviti(d, kt.tsentry)] if kt.tsentry else []
     return kt._pul
 
 
@@ -838,7 +873,11 @@ def _vybraty(c: dict[str, dict[str, Any]], kt: _Kontekst) -> tuple[dict[str, Any
     if kt.tsentry:
         # Межа повіту — відстань, а не назва району: Ямпільський район є й на
         # Сумщині, і за назвою туди йшли села Ямпільського повіту Поділля.
-        v = [d for d in rows if min(_km(d, t) for t in kt.tsentry) <= POVIT_KM]
+        # Степова межа — лише коли в 100 км нічого: інакше друге однойменне за
+        # 150 км робило двозначною точку, яка стояла правильно (Костянтинівка
+        # Бердянського, Грушка Балтського повіту — звірка 05.11.2026).
+        v = ([d for d in rows if _v_poviti(d, kt.tsentry)]
+             or [d for d in rows if _v_poviti(d, kt.tsentry, step=True)])
         if not v:
             return None, "poza_povitom"
         rows = v
@@ -879,6 +918,15 @@ def _odne(rows: list[dict[str, Any]]) -> bool:
     """
     return (len(rows) > 1 and len({d["name_uk"] for d in rows}) == 1
             and max(_km(rows[0], d) for d in rows) <= DUBL_KM)
+
+
+def _perelik_mists(s: str) -> list[str]:
+    """«Березне; Казимирка» → два місця. Лише простий перелік: крапка з комою в
+    дужках чи довгому описі («с. Озерна (… до 1793 — …; нині …)») — частина опису."""
+    if ";" not in s or "(" in s:
+        return [s] if s.strip() else []
+    chastyny = [p.strip() for p in s.split(";") if p.strip()]
+    return chastyny if all(len(p.split()) <= 4 for p in chastyny) else [s]
 
 
 def _povit_korin(povit: str) -> str:
@@ -1162,8 +1210,7 @@ def z_latynky(dov: Dovidnyk, kt: _Kontekst, title: str, place: str,
         kp = (skeleton(povit), obl)
         if kp not in dov.lat_pul:
             tsentry = _tsentry_lat(dov, povit, kt.obl)
-            dov.lat_pul[kp] = ([d for d in dov.vsi if min(_km(d, t) for t in tsentry) <= POVIT_KM]
-                               if tsentry else [])
+            dov.lat_pul[kp] = [d for d in dov.vsi if _v_poviti(d, tsentry)] if tsentry else []
         got = _lat_z_pamiati(dov, selo, kp, chomu, dzherelo)
         if got:
             out.append((got[0], got[1], dzherelo))
@@ -1217,6 +1264,14 @@ def pryviazaty(dov: Dovidnyk, *, repo: str, title: str, place: str,
                                seriia=seriia)
         return [_tochka(lyudyna, "tytul", "lyudyna", "людина"),
                 *[t for t in zvychaini if t.rol == "tekst" and t.qid != lyudyna["qid"]]]
+    # «Березне; Казимирка» — два головні місця одним рядком (ДАРО 171, 19 книг
+    # 05.11.2026 цілим рядком не знаходились): кожне — місце з назви.
+    holovni = _perelik_mists(place)
+    if len(holovni) > 1:
+        place = holovni[0]
+    else:
+        holovni = []
+    places = [p for s in places for p in _perelik_mists(s)]
     kt = _kontekst(dov, repo, title, place, places)
     kt.seriia = list(seriia or [])
     tyt = z_nazvy(title)
@@ -1225,6 +1280,9 @@ def pryviazaty(dov: Dovidnyk, *, repo: str, title: str, place: str,
     var_mistsia = _varianty(place) if place else []
     if var_mistsia:
         tyt.append(var_mistsia[0])
+    for p in holovni[1:]:
+        if v := _varianty(p):
+            tyt.append(v[0])
     zapysy: list[dict[str, Any]] = [
         {"s": s, "rol": "tytul", "var": var_mistsia if var_mistsia and s == var_mistsia[0] else [s]}
         for s in dict.fromkeys(tyt)]
@@ -1232,7 +1290,7 @@ def pryviazaty(dov: Dovidnyk, *, repo: str, title: str, place: str,
                for s, formy in z_prykmetnyka(title) if s not in tyt]
     for s in places:
         var = _varianty(s)
-        if var and s != place:
+        if var and s != place and s not in holovni:
             # «Вінниця, Подільська губ.» без головного місця — перелік парафій, який
             # видавець склав сам (збірні книги деканату), а не слово з тексту рушія.
             # Як згадка такі книги не видно на мапі без галочки (21.10.2026: ~70
