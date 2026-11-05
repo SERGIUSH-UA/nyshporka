@@ -95,6 +95,16 @@ POSELENNIA = [
     ("Q54", "Полонка", "Полонка", "село", "Луцький район", "Волинська область", 50.80, 25.40),
     ("Q55", "Полонне", "Полонное", "місто", "Шепетівський район", "Хмельницька область",
      50.12, 27.52),
+    # «Будки Лебединського пов.» — газетир каже «Білопільського р-ну», а це Великі
+    # Будки Вільшанської громади (05.11.2026)
+    ("Q60", "Будки", "Будки", "село", "Білопільський район", "Сумська область", 51.23, 34.33),
+    ("Q61", "Великі Будки", "Большие Будки", "село", "Недригайлівський район",
+     "Сумська область", 50.87, 34.04),
+    # «Білопільський район»: точна назва — село Кіровоградщини, центр — Білопілля
+    ("Q62", "Білопіль", "Белополь", "село", "Кропивницький район",
+     "Кіровоградська область", 48.44, 32.93),
+    ("Q63", "Білопілля", "Белополье", "місто", "Сумський район", "Сумська область",
+     51.15, 34.30),
 ]
 
 
@@ -136,7 +146,9 @@ def dov(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> heo.Dovidnyk:
             ("k5", "Янів, с.", "Янов, с.", "Вінницького пов. Подільської губ.",
              "Вінницького р-ну і обл.", "янів", "янов"),
             ("k4", "Кам'яне, с.", "Каменное, с.", "Балтського пов. Подільської губ.",
-             "Савранського р-ну Одеської обл.", "камяне", "каменное")):
+             "Савранського р-ну Одеської обл.", "камяне", "каменное"),
+            ("k6", "Будки, с.", "Будки, с.", "Лебединського пов. Харківської губ.",
+             "Білопільського р-ну Сумської обл.", "будки", "будки")):
         con.execute(
             "INSERT INTO places (card, village_uk, village_ru, uezd_gub, modern_place, norm_uk, "
             "norm_ru) VALUES (?,?,?,?,?,?,?)", karta)
@@ -438,6 +450,40 @@ def test_ruchna_stara_nazva_lyahaie_na_selo_paku(
                                    "stan": "злите", "dzherelo": "x"}]) == [
         "запис 1 (abc): qid — Q-ідентифікатор Wikidata",
         "запис 1 (abc): з qid координати беруться з паку — lat/lng зайві"]
+
+
+def test_tsentr_povitu_ne_odnoimenne_selo_poza_kraiem(dov: heo.Dovidnyk) -> None:
+    # 05.11.2026: «Білопільський район» брав за центр Білопіль Кіровоградщини, і
+    # 33 книги ДАСО Р-7720 лишались без точки як «поза повітом».
+    place = "Білопільський район, Сумська обл."
+    kt = heo._kontekst(dov, "DASO", "Книга реєстрації актів про народження с. Будки", place,
+                       [place])
+    assert [m["qid"] for m in kt.tsentry] == ["Q63"]
+    t = heo.pryviazaty(dov, repo="DASO", place=place, places=[place],
+                       title="Книга реєстрації актів про народження с. Будки")
+    assert _qid(t) == ["Q60"]
+
+
+def test_ruchnyi_zapys_sylnishyi_za_hazetyr(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dov: heo.Dovidnyk) -> None:
+    # Картка газетира хибна в полі «нині»: 11 книг ДАСО 743-1 лягли в Будки
+    # Білопільщини за 45 км від сусідів по книзі (05.11.2026).
+    title = "Метрична книга, Лебединський повіт, 1877-1883 р. (Будки)"
+    t = heo.pryviazaty(dov, repo="DASO", place="", places=[], title=title)
+    assert _qid(t) == ["Q60"] and t[0].sposib == "hazetyr"
+    yaml_ = tmp_path / "ruchni.yaml"
+    yaml_.write_text(
+        "sela:\n"
+        "- {id: budky-test, nazva: Великі Будки, inshi_nazvy: [Будки], qid: Q61,\n"
+        "   stan: перейменоване, povit: Лебединський, dzherelo: тест}\n", encoding="utf-8")
+    d = heo.dovidnyk(ruchni=_ruchni(yaml_), pamiat=False)
+    assert d is not None
+    t = heo.pryviazaty(d, repo="DASO", place="", places=[], title=title)
+    assert _qid(t) == ["Q61"] and t[0].sposib == "ruchnyi"
+    # інший повіт — запис не його: Будки Сумського повіту газетир не має, пак — так
+    t = heo.pryviazaty(d, repo="DASO", place="", places=[],
+                       title="Метрична книга, Сумський повіт, 1880 р. (Будки)")
+    assert "Q61" not in _qid(t)
 
 
 def test_ruchne_selo_poza_ukrainoiu_prokhodyt_filtr_huberniieiu(

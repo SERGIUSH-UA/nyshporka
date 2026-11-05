@@ -299,6 +299,9 @@ class Dovidnyk:
     #: пам'яті кожна книга заново перебирала 33 тис. поселень.
     lat_pul: dict[tuple[str, tuple[str, ...]], list[dict[str, Any]]] = field(default_factory=dict)
     lat_vybir: dict[tuple[str, str, tuple[str, ...]], Any] = field(default_factory=dict)
+    #: Ручні записи з повітом: назва → [(корінь повіту, поселення)] (`_z_ruchnoho`).
+    ruchni_povit: dict[str, list[tuple[str, dict[str, Any]]]] = field(
+        default_factory=lambda: defaultdict(list))
 
     def dodaty(self, d: dict[str, Any]) -> None:
         d["obl"] = ((d["top"] or "") + " " + ("молдова" if d["country"] == "MD" else "")).lower()
@@ -485,6 +488,11 @@ def dovidnyk(ruchni: list[dict[str, Any]] | None = None, *,
         else:
             log.warning("ручний запис %s: %s немає в паку", s["id"], s["qid"])
             continue
+        if s.get("povit"):
+            korin = _povit_korin(str(s["povit"]))
+            for nazva in [str(s["nazva"]), *(str(x) for x in s.get("inshi_nazvy") or [])]:
+                if n := _chystyty(nazva).translate(STARE):
+                    dov.ruchni_povit[n].append((korin, d))
         # Губернія запису — теж «область» для фільтра: Лопазна нині в Брянській
         # області, якої пак не знає, а Молокіш — у Молдові, хоч книга подільська.
         hub = _norm(str(s.get("huberniia") or "")).translate(STARE)
@@ -506,7 +514,8 @@ class Tochka:
     lng: float
     rol: str          # tytul | tekst
     sposib: str       # odnoznachno | oblast | povit | vidstan | seriia | varianty | hazetyr |
-    #                   nechitko | kvalifikator | prykmetnyk | latynka | latynka_slabko
+    #                   ruchnyi | nechitko | kvalifikator | prykmetnyk | latynka |
+    #                   latynka_slabko | lyudyna
     dzherelo: str     # як місце стоїть у книзі
 
     @property
@@ -788,6 +797,12 @@ def _kontekst(dov: Dovidnyk, repo: str, title: str, place: str, places: list[str
                     for k in m["kl"] for p in osnovy)]
 
     tsentry = (povit_ts and tochno(povit_ts)) or tochno(povit_povni)
+    # Точна назва лише поза краєм справи — однойменні села, а не центр: для
+    # «Білопільського району» Сумщини — Білопіль Кіровоградщини й Хмельниччини,
+    # а місто — Білопілля; 33 книги ДАСО Р-7720 лишались без жодної точки
+    # як «поза повітом» (05.11.2026). Тоді — як без точної назви, серед міст.
+    if zvuzhennia and tsentry and not any(v_zoni(m) for m in tsentry):
+        tsentry = []
     if not tsentry and povit:
         tsentry = [m for m in dov.mista if any(k.startswith(p) for k in m["kl"] for p in povit)]
         # Повітове місто — лише в губернії, де такий повіт був: Ямпільський
@@ -864,6 +879,26 @@ def _odne(rows: list[dict[str, Any]]) -> bool:
     """
     return (len(rows) > 1 and len({d["name_uk"] for d in rows}) == 1
             and max(_km(rows[0], d) for d in rows) <= DUBL_KM)
+
+
+def _povit_korin(povit: str) -> str:
+    """«Лебединський» → «лебеди»: той самий корінь, що `_kontekst` бере з назви книги."""
+    m = re.fullmatch(r"([А-ЯІЇЄҐа-яіїєґ'’ʼ-]+?)(?:ський|цький|зький|ский|цкий|зкий)?",
+                     povit.strip())
+    return _norm(m.group(1) if m else povit).translate(STARE)[:6]
+
+
+def _z_ruchnoho(dov: Dovidnyk, nazva: str, kt: _Kontekst) -> dict[str, Any] | None:
+    """Ручний запис для повіту справи — сильніший за газетир.
+
+    Запис у `heo_ruchni.yaml` модератор робить свідомо, з джерелом, а картка
+    газетира буває хибною в полі «нині» (05.11.2026: «Будки Лебединського пов.»
+    у газетирі ЦДІАК — «нині Білопільського р-ну», а це Великі Будки
+    Вільшанської громади; 11 книг ДАСО 743-1 лягли за 45 км від сусідів).
+    """
+    n = _chystyty(nazva).translate(STARE)
+    v = {d["qid"]: d for p, d in dov.ruchni_povit.get(n, []) if p in kt.povit}
+    return next(iter(v.values())) if len(v) == 1 else None
 
 
 def _z_hazetyra(dov: Dovidnyk, nazva: str, kt: _Kontekst) -> dict[str, Any] | None:
@@ -1223,6 +1258,11 @@ def pryviazaty(dov: Dovidnyk, *, repo: str, title: str, place: str,
             # (аудит 19.10: «Бобрик Лебединського повіту» — Лебединий Бобрик).
             if kt.povit:
                 for v in z["var"]:
+                    dr = _z_ruchnoho(dov, v, kt)
+                    if dr:
+                        d, rez = dr, "ruchnyi"
+                        break
+                for v in z["var"] if d is None else []:
                     dh = _z_hazetyra(dov, v, kt)
                     if dh:
                         d, rez = dh, "hazetyr"
