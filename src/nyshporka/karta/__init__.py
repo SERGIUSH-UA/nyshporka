@@ -52,7 +52,7 @@ log = logging.getLogger("nyshporka.karta")
 
 #: Номер правил прив'язки. Сервер додає його до відбитка книги (`app.heo.vidbytok`):
 #: зміна правил тут перераховує весь пул без окремого кроку на сервері.
-PRAVYLA = 13
+PRAVYLA = 14
 
 POD = ["вінниц", "хмельниц", "одес"]
 VOL = ["волин", "рівнен", "житомир", "тернопіл", "хмельниц"]
@@ -406,11 +406,12 @@ def pereviryty_ruchni(sela: list[dict[str, Any]]) -> list[str]:
         else:
             try:
                 lat, lng = float(s["lat"]), float(s["lng"])
-                # Україна й Молдова з запасом (і північ Чернігівської губернії, нині
-                # Брянщина); поза цим — переплутані lat/lng
-                if not (44.0 <= lat <= 53.5 and 22.0 <= lng <= 40.5):
-                    vady.append(f"{imia}: координати поза Україною й Молдовою — "
-                                "lat/lng переплутані?")
+                # Україна й Молдова з сусідніми губерніями: північ Чернігівської (нині
+                # Брянщина), Царство Польське (Кельці, архів APK); поза цим —
+                # переплутані lat/lng
+                if not (44.0 <= lat <= 55.0 and 14.0 <= lng <= 40.5):
+                    vady.append(f"{imia}: координати поза Україною, Молдовою й сусідніми "
+                                "губерніями — lat/lng переплутані?")
             except (KeyError, TypeError, ValueError):
                 vady.append(f"{imia}: немає координат lat/lng числами")
             if s.get("tochnist") not in _TOCHNIST:
@@ -425,13 +426,17 @@ def pereviryty_ruchni(sela: list[dict[str, Any]]) -> list[str]:
             vady.append(f"{imia}: zlyte_z — Q-ідентифікатор Wikidata")
         if not isinstance(s.get("inshi_nazvy") or [], list):
             vady.append(f"{imia}: inshi_nazvy — перелік у квадратних дужках")
+        if s.get("krai") is not None and not str(s["krai"]).strip():
+            vady.append(f"{imia}: krai — назва країни («Польща») або без поля")
     return vady
 
 
 def _ruchnyi_zapys(s: dict[str, Any]) -> dict[str, Any]:
     """Запис довідника → рядок того самого виду, що й поселення паку."""
     lat, lng = float(s["lat"]), float(s["lng"])
-    oblast = oblast_tochky(lat, lng, "")
+    # Поза контурами областей — країна запису («Польща»): без неї точка в переліку
+    # сіл під картою стояла без краю, а край людини (`app.krai`) — порожній.
+    oblast = oblast_tochky(lat, lng, str(s.get("krai") or "").strip())
     inshi = [str(x) for x in (s.get("inshi_nazvy") or []) if str(x).strip()]
     # Повіт — у адмінодиниці: за ним `_vybraty` розводить однойменні.
     admin = " | ".join(x for x in (f"{s['povit']} повіт" if s.get("povit") else "",
@@ -826,8 +831,12 @@ def _kontekst(dov: Dovidnyk, repo: str, title: str, place: str, places: list[str
     # «Білопільського району» Сумщини — Білопіль Кіровоградщини й Хмельниччини,
     # а місто — Білопілля; 33 книги ДАСО Р-7720 лишались без жодної точки
     # як «поза повітом» (05.11.2026). Тоді — як без точної назви, серед міст.
-    if zvuzhennia and tsentry and not any(v_zoni(m) for m in tsentry):
-        tsentry = []
+    # Є центр у краї — однойменні поза ним теж відпадають: сучасний «Василівський
+    # район» у місцях книги ДАЗПО додавав до Мелітополя Василеви Чернівеччини,
+    # Житомирщини й Київщини та Василів Хутір Харківщини, і поруч із ним 18 книг
+    # дістали Попівку Харківщини (06.11.2026).
+    if zvuzhennia and tsentry:
+        tsentry = [m for m in tsentry if v_zoni(m)]
     if not tsentry and povit:
         tsentry = [m for m in dov.mista if any(k.startswith(p) for k in m["kl"] for p in povit)]
         # Повітове місто — лише в губернії, де такий повіт був: Ямпільський

@@ -115,6 +115,16 @@ POSELENNIA = [
     ("Q67", "Аккерман", "Аккерман", "місто", "Білгород-Дністровський район",
      "Одеська область", 46.19, 30.35),
     ("Q68", "Кубей", "Кубей", "село", "Болградський район", "Одеська область", 45.79, 28.75),
+    # «Василівський район» у місцях книги ДАЗПО: Василів Хутір Харківщини — не центр,
+    # коли є Мелітополь (06.11.2026)
+    ("Q70", "Мелітополь", "Мелитополь", "місто", "Мелітопольський район",
+     "Запорізька область", 46.85, 35.37),
+    ("Q71", "Василів Хутір", "Васильев Хутор", "село", "Харківський район",
+     "Харківська область", 49.83, 36.61),
+    ("Q72", "Попівка", "Поповка", "село", "Харківський район", "Харківська область",
+     49.86, 36.70),
+    ("Q73", "Попівка", "Поповка", "село", "Конотопський район", "Сумська область",
+     51.20, 33.10),
 ]
 
 
@@ -491,6 +501,18 @@ def test_tsentr_povitu_ne_odnoimenne_selo_poza_kraiem(dov: heo.Dovidnyk) -> None
     assert _qid(t) == ["Q60"]
 
 
+def test_tsentr_povitu_odnoimenni_poza_kraiem_vidpadaiut(dov: heo.Dovidnyk) -> None:
+    # 06.11.2026: сучасний «Василівський район» у місцях книги ДАЗПО додавав до
+    # Мелітополя однойменні Василеви по країні, і 18 книг дістали Попівку
+    # Харківщини біля Василевого Хутора.
+    title = "Метричні книги церков Мелітопольського повіту: Оріхів, Поповка"
+    places = ["с. Дніпровка, Василівський район, Запорізька область", "Поповка"]
+    kt = heo._kontekst(dov, "DAZPO", title, "", places)
+    assert [m["qid"] for m in kt.tsentry] == ["Q70"]
+    assert "Q72" not in _qid(heo.pryviazaty(dov, repo="DAZPO", place="", places=places,
+                                            title=title))
+
+
 def test_tsentr_povitu_z_ridnoiu_nazvoiu_i_stepova_mezha(dov: heo.Dovidnyk) -> None:
     # 05.11.2026: «Дніпровський повіт» брав за центр Дніпрорудне (центр — Олешки),
     # 30 книг ДАХеО лягали «поза повітом».
@@ -541,6 +563,25 @@ def test_ruchne_selo_poza_ukrainoiu_prokhodyt_filtr_huberniieiu(
     t = heo.pryviazaty(d, repo="DACHO", place="", places=[],
                        title="Сповідна книга Архангело-Михайлівської церкви села Лопазна")
     assert [x.qid for x in t] == ["r:lopazna-test"]
+
+
+def test_ruchne_misto_za_kordonom_maie_krai(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dov: heo.Dovidnyk) -> None:
+    # Кельці (архів APK, 62 книги дворянської депутації Радомської губернії) —
+    # поза контурами областей: край — з поля `krai`, а не порожній.
+    yaml_ = tmp_path / "ruchni.yaml"
+    yaml_.write_text(
+        "sela:\n"
+        "- {id: kieltsi-test, nazva: Кельці, inshi_nazvy: [Kielce, Кельцы], lat: 50.87,\n"
+        "   lng: 20.63, tochnist: точно, stan: існує, krai: Польща, dzherelo: тест}\n",
+        encoding="utf-8")
+    assert heo.pereviryty_ruchni(_ruchni(yaml_)) == []
+    d = heo.dovidnyk(ruchni=_ruchni(yaml_), pamiat=False)
+    assert d is not None
+    t = heo.pryviazaty(d, repo="APK", place="Кельці, Радомська губернія", places=[],
+                       title="Akta Deputacji Szlacheckiej Guberni Radomskiej")
+    assert [(x.qid, x.rol, x.oblast) for x in t] == [("r:kieltsi-test", "tytul", "Польща")]
+    assert heo.pereviryty_ruchni([{**_ruchni(yaml_)[0], "krai": " "}])
 
 
 def test_dubl_wikidata_ne_robyt_selo_dvoznachnym() -> None:
