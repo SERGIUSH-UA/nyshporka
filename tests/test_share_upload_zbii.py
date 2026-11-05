@@ -814,3 +814,110 @@ def test_vidmova_staroho_pulu_bez_kodiv(monkeypatch: pytest.MonkeyPatch) -> None
         upload._request("POST", "https://nyshporka.online/v1/contributions", auth="k")
 
     assert ei.value.details == [] and ei.value.policy == ""
+
+
+def _complete_po_cherzi(*vidpovidi: Any) -> tuple[Any, list[int]]:
+    """`complete`, що відповідає по черзі: виняток — кидає, решта — успіх."""
+    cherha = list(vidpovidi)
+    lich: list[int] = []
+
+    def _complete() -> None:
+        lich.append(1)
+        v = cherha.pop(0) if cherha else None
+        if isinstance(v, Exception):
+            raise v
+
+    return _complete, lich
+
+
+@pytest.fixture
+def _restart_bez_pauz(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(upload, "POVTOR_COMPLETE_PAUZA", 0.0)
+    monkeypatch.setattr(upload, "POVTOR_429_MAKS", 0.0)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+
+
+@pytest.mark.usefixtures("_restart_bez_pauz")
+def test_restart_portalu_complete_povtoriuietsia(monkeypatch: pytest.MonkeyPatch,
+                                                 tmp_path: Path) -> None:
+    """🔴 502 під деплоєм порталу — не збій заливки: дочекатись і завершити ще раз.
+
+    02.11.2026 внесок 20072 завис під рестартом: клієнт робив одну спробу, а
+    05.11.2026 деплой доводилось втискати в паузи між порціями заливки.
+    """
+    complete, lich = _complete_po_cherzi(upload.UploadError("HTTP 502", status=502))
+    paket, zvity = _pidhotuvaty(monkeypatch, tmp_path, complete=complete)
+    monkeypatch.setattr(upload, "_put", lambda url, blob: None)
+    stany = iter([None, {"ready": False, "status": "nove"}])
+    monkeypatch.setattr(upload, "_stan_vnesku", lambda home, tok, vnesok: next(stany))
+
+    got = upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
+
+    assert len(lich) == 2, "портал піднявся, внесок не прийнято — complete ще раз"
+    assert got["outcome"] == upload.VIDDANO and got["after_restart"] is True
+    assert zvity == []
+
+
+@pytest.mark.usefixtures("_restart_bez_pauz")
+def test_restart_pryiniatyi_vnesok_ne_zavershuietsia_vdruhe(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    complete, lich = _complete_po_cherzi(upload.UploadError("HTTP 503", status=503))
+    paket, zvity = _pidhotuvaty(monkeypatch, tmp_path, complete=complete)
+    monkeypatch.setattr(upload, "_put", lambda url, blob: None)
+    monkeypatch.setattr(upload, "_stan_vnesku",
+                        lambda home, tok, vnesok: {"ready": True, "status": "nove"})
+
+    got = upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
+
+    assert len(lich) == 1 and got["after_restart"] is True and zvity == []
+
+
+@pytest.mark.usefixtures("_restart_bez_pauz")
+def test_restart_429_perechikuie_paralelnyi_complete(monkeypatch: pytest.MonkeyPatch,
+                                                     tmp_path: Path) -> None:
+    """Пул пускає один complete на 30 с — 429 з Retry-After чекаємо, а не здаємось."""
+    complete, lich = _complete_po_cherzi(
+        upload.UploadError("HTTP 502", status=502),
+        upload.UploadError("HTTP 429", status=429, retry_after=20.0))
+    paket, zvity = _pidhotuvaty(monkeypatch, tmp_path, complete=complete)
+    monkeypatch.setattr(upload, "_put", lambda url, blob: None)
+    monkeypatch.setattr(upload, "_stan_vnesku",
+                        lambda home, tok, vnesok: {"ready": False, "status": "nove"})
+
+    got = upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
+
+    assert len(lich) == 3 and got["after_restart"] is True and zvity == []
+
+
+@pytest.mark.usefixtures("_restart_bez_pauz")
+def test_restart_vidmova_vorit_lyshaietsia_vidmovoiu(monkeypatch: pytest.MonkeyPatch,
+                                                     tmp_path: Path) -> None:
+    complete, lich = _complete_po_cherzi(
+        upload.UploadError("HTTP 502", status=502),
+        upload.UploadError("HTTP 400: ворота не пустили", status=400))
+    paket, _ = _pidhotuvaty(monkeypatch, tmp_path, complete=complete)
+    monkeypatch.setattr(upload, "_put", lambda url, blob: None)
+    monkeypatch.setattr(upload, "_stan_vnesku",
+                        lambda home, tok, vnesok: {"ready": False, "status": "nove"})
+
+    with pytest.raises(upload.UploadError) as ei:
+        upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
+
+    assert ei.value.status == 400 and "ворота" in str(ei.value)
+    assert "Повторіть" not in str(ei.value) and len(lich) == 2
+
+
+@pytest.mark.usefixtures("_restart_bez_pauz")
+def test_obryv_bez_restartu_complete_ne_povtoriuie(monkeypatch: pytest.MonkeyPatch,
+                                                   tmp_path: Path) -> None:
+    """Тайм-аут — пул міг ще перевіряти пакет: лише звірка стану, без другого complete."""
+    complete, lich = _complete_po_cherzi(upload.UploadError("ReadTimeout"))
+    paket, _ = _pidhotuvaty(monkeypatch, tmp_path, complete=complete)
+    monkeypatch.setattr(upload, "_put", lambda url, blob: None)
+    monkeypatch.setattr(upload, "STAN_SPROB", 2)
+    monkeypatch.setattr(upload, "_stan_vnesku",
+                        lambda home, tok, vnesok: {"ready": False, "status": "nove"})
+
+    with pytest.raises(upload.UploadError):
+        upload.publish(paket, base="https://nyshporka.online/v1", auth="k")
+    assert len(lich) == 1

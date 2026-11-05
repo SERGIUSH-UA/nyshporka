@@ -79,6 +79,13 @@ def _show_card(card: dict[str, Any], indent: str = "  ") -> None:
         oblast = f" ({selo['oblast']})" if selo.get("oblast") else ""
         console.print(f"{indent}на карті: {_e(selo.get('nazva') or selo['qid'])}{_e(oblast)} "
                       "— назвали ви")
+    if card.get("konfesiia"):
+        from nyshporka.share import card as K
+
+        kod = str(card["konfesiia"])
+        pidpys = ("невідомо — каталог не вгадуватиме" if kod == K.NEVIDOMO
+                  else K.KONFESII.get(kod, kod))
+        console.print(f"{indent}конфесія: {_e(pidpys)}")
 
 
 # Прапорці картки однакові в `pack`, `suggest` і `card` — одна довідка.
@@ -94,12 +101,16 @@ _SCANS_HELP = ("хто тримає кадри, з яких читано: «пі
                "сайт дослідника); «» — стерти")
 _SELO_HELP = ("село справи на карті Супряги, коли машина не розбирає його сама: "
               "«Назва[, район]» сучасною назвою; «» — стерти")
+_KONFESIIA_HELP = ("конфесія книги в каталозі Супряги, коли ви знаєте певніше за каталог: "
+                   "pravoslavna, rymo_katolytska, hreko_katolytska, yudeiska, liuteranska, "
+                   "staroobriadnytska, tsyvilna (цивільні акти)…; «-» — невідомо; «» — стерти")
 
 
 def _card_args(title: str | None, years: str | None, place: list[str] | None,
                genre: str | None, frames: int | None = None,
                frames_unknown: str | None = None,
-               scans: str | None = None, selo: str | None = None) -> dict[str, Any]:
+               scans: str | None = None, selo: str | None = None,
+               konfesiia: str | None = None) -> dict[str, Any]:
     out: dict[str, Any] = {}
     if title is not None:
         out["title"] = title
@@ -117,6 +128,8 @@ def _card_args(title: str | None, years: str | None, place: list[str] | None,
         out["scans"] = scans
     if selo is not None:
         out["selo"] = selo
+    if konfesiia is not None:
+        out["konfesiia"] = konfesiia
     return out
 
 
@@ -406,6 +419,8 @@ def card_cmd(
                                               help=_FRAMES_UNKNOWN_HELP),
     scans: str | None = typer.Option(None, "--scans", help=_SCANS_HELP),
     selo: str | None = typer.Option(None, "--selo", help=_SELO_HELP),
+    konfesiia: str | None = typer.Option(None, "--konfesiia", "--denomination",
+                                         help=_KONFESIIA_HELP),
     clear: bool = typer.Option(False, "--clear", help="прибрати картку цілком"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
@@ -419,7 +434,7 @@ def card_cmd(
 
     env = O.call("share.card", {"case": case, "clear": clear,
                                 **_card_args(title, years, place, genre, frames,
-                                             frames_unknown, scans, selo)})
+                                             frames_unknown, scans, selo, konfesiia)})
     if _answer(env, as_json):
         return
     d = env.data or {}

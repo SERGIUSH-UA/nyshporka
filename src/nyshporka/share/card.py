@@ -37,7 +37,22 @@ CARDS_NAME = "cards.json"
 #: тримає кадри цієї зйомки (першим у `links`, з `role: scans`); решта лягає в
 #: `case` маніфесту.
 FIELDS = ("title", "years", "places", "doc_type", "frames", "frames_unknown", "scans",
-          "selo")
+          "selo", "konfesiia")
+
+#: Конфесія книги — коди каталогу Супряги (`app/konfesiia.KODY` порталу, рішення
+#: дослідника 05.11.2026); у маніфест іде як `case.denomination`. Каталог рахує її
+#: сам — з назви, опису справи й фонду, — а автор каже, коли знає певніше.
+#: `tsyvilna` — цивільні акти (РАЦС, примарії), а не церковні книги.
+KONFESII: dict[str, str] = {
+    "pravoslavna": "православна", "staroobriadnytska": "старообрядницька",
+    "hreko_katolytska": "греко-католицька", "rymo_katolytska": "римо-католицька",
+    "virmenska": "вірменська", "liuteranska": "лютеранська",
+    "reformatska": "реформатська", "menonitska": "менонітська",
+    "yudeiska": "юдейська", "karaimska": "караїмська",
+    "musulmanska": "мусульманська", "tsyvilna": "цивільні акти",
+}
+#: Автор каже «невідомо»: каталог тоді не вгадує й лишає поле порожнім.
+NEVIDOMO = "-"
 
 #: Позначка посилання «де кадри» серед `links` маніфесту — за нею пул показує
 #: його окремо від реєстрових «справа є ще там».
@@ -172,10 +187,12 @@ def normalize(*, title: str | None = None, years: str | None = None,
               frames: int | None = None,
               frames_unknown: str | None = None,
               scans: str | None = None,
-              selo: dict[str, Any] | str | None = None) -> dict[str, Any]:
+              selo: dict[str, Any] | str | None = None,
+              konfesiia: str | None = None) -> dict[str, Any]:
     """Перевірити поля картки. `None` — поле не задавали; `""`/`[]` — стерти.
 
     `selo` — уже знайдене поселення (`karta.znaity_selo`): `{"qid", "nazva"}`.
+    `konfesiia` — код із `KONFESII` або його підпис («римо-католицька»); `-` — невідомо.
     """
     out: dict[str, Any] = {}
     if title is not None:
@@ -227,6 +244,14 @@ def normalize(*, title: str | None = None, years: str | None = None,
             out["selo"] = ""
         else:
             raise CardError("село картки — поселення довідника з qid (`--selo «Назва, район»`)")
+    if konfesiia is not None:
+        kod = " ".join(str(konfesiia).split()).lower()
+        kod = {v: k for k, v in KONFESII.items()}.get(kod, kod)
+        if kod and kod != NEVIDOMO and kod not in KONFESII:
+            raise CardError(f"конфесія «{konfesiia}» невідома; є: "
+                            + ", ".join(f"{k} ({v})" for k, v in KONFESII.items())
+                            + f"; «{NEVIDOMO}» — невідомо")
+        out["konfesiia"] = kod
     return out
 
 
@@ -296,4 +321,7 @@ def apply(case: dict[str, Any], card: dict[str, Any]) -> dict[str, Any]:
     if isinstance(selo, dict) and selo.get("qid"):
         out["karta"] = {"qid": str(selo["qid"]), "nazva": str(selo.get("nazva") or ""),
                         "dzherelo": "людина"}
+    # Конфесія, названа автором, сильніша за висновок каталогу (`-` — «невідомо»).
+    if card.get("konfesiia"):
+        out["denomination"] = str(card["konfesiia"])
     return out

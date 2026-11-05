@@ -124,7 +124,8 @@ def _card(a: Any) -> dict[str, Any]:
         doc_type=getattr(a, "genre", None),
         frames=getattr(a, "frames", None),
         frames_unknown=getattr(a, "frames_unknown", None),
-        scans=getattr(a, "scans", None), selo=selo)
+        scans=getattr(a, "scans", None), selo=selo,
+        konfesiia=getattr(a, "konfesiia", None))
 
 
 def _contact(value: str, default: str) -> str:
@@ -158,6 +159,12 @@ class _CardFields(BaseModel):
         default=None,
         description="село справи на карті Супряги, коли машина не розбирає його сама: "
                     "«Назва[, район]» сучасною назвою; «» — стерти")
+    konfesiia: str | None = Field(
+        default=None,
+        description="конфесія книги в каталозі Супряги, коли автор знає певніше за "
+                    "каталог: pravoslavna, rymo_katolytska, hreko_katolytska, yudeiska, "
+                    "liuteranska, staroobriadnytska, tsyvilna (цивільні акти)…; "
+                    "«-» — невідомо; «» — стерти")
 
 
 class SharePackArgs(_CardFields):

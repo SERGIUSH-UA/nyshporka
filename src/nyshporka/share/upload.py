@@ -230,6 +230,65 @@ def _dochekatysia(home: str, tok: str, vnesok: Any, kazhy: Any = None) -> dict[s
     return stan
 
 
+#: 502/503 на `complete` — портал перезапускається (деплой, 10–30 с): nginx не
+#: достукався до застосунку, або той упав разом із запитом.
+RESTART_STATUSY = (502, 503)
+#: Скільки дати порталу піднятись і з якою паузою питати про внесок.
+POVTOR_COMPLETE_S = 150.0
+POVTOR_COMPLETE_PAUZA = 10.0
+#: Довше за паузу пулу між двома `complete` одного внеску (30 с) чекати на 429 марно.
+POVTOR_429_MAKS = 35.0
+
+
+def _complete_pislia_restartu(home: str, tok: str, vnesok: Any,
+                              kazhy: Any = None) -> dict[str, Any] | None:
+    """502/503 на `complete`: дочекатися порталу й завершити ще раз.
+
+    Цей повтор безпечний, на відміну від того, що зламав 11437 (див. `_complete`).
+    502/503 означає, що застосунок запиту не обробляв або впав разом із ним,
+    тож другого заходу поруч немає. А якщо й є, пул пускає один `complete` на
+    внесок за 30 с, а решті відповідає 429 з `Retry-After`; його тут і чекаємо.
+    Щоразу спершу питаємо стан: прийнятий внесок удруге не завершуємо.
+
+    05.11.2026 деплой порталу доводилось втискати в паузи між порціями
+    таймерної заливки: на `complete` клієнт робив одну спробу, і внесок під
+    рестартом зависав (02.11.2026 — №20072).
+
+    Повертає відповідь `complete` або стан прийнятого внеску. `None` — портал не
+    піднявся за `POVTOR_COMPLETE_S` чи відповів інакше; далі звірка `_dochekatysia`.
+    """
+    import time
+
+    kinets = time.monotonic() + POVTOR_COMPLETE_S
+    pauza = POVTOR_COMPLETE_PAUZA
+    skazano = False
+    while time.monotonic() < kinets:
+        time.sleep(pauza)
+        pauza = POVTOR_COMPLETE_PAUZA
+        stan = _stan_vnesku(home, tok, vnesok)
+        if stan is None:
+            continue                    # портал ще не піднявся
+        if stan.get("ready"):
+            return stan
+        if stan.get("status") == "vidkhyleno":
+            return None
+        if not skazano and kazhy is not None:
+            kazhy("портал перезапускався — завершую заливку ще раз…")
+            skazano = True
+        try:
+            return _complete(home, vnesok, tok)
+        except UploadError as exc:
+            if exc.status == 429:
+                pauza = min(max(float(exc.retry_after or 0.0), 1.0) + 1.0, POVTOR_429_MAKS)
+                continue
+            if exc.status in RESTART_STATUSY:
+                continue
+            if exc.status is not None and exc.status < 500 and exc.status != 409:
+                raise                   # вердикт пулу (ворота, стеля) — як і без рестарту
+            return None
+    return None
+
+
 def _adresa_reiestratsii(home: str, replaces: int | None, why: str,
                          replace_own: bool = False) -> str:
     """Адреса реєстрації; заміна власного внеску — параметрами запиту.
@@ -498,6 +557,11 @@ def _publish(path: Path, *, base: str, auth: str,
         # повтор тут не допоможе — тому й підказки повторити немає.
         if exc.status is not None and exc.status < 500 and not sumnivnyi:
             raise
+        if etap == "complete" and exc.status in RESTART_STATUSY:
+            pislia = _complete_pislia_restartu(home, tok, vnesok, kazhy)
+            if pislia is not None:
+                return _public({**got, **pislia, "after_restart": True,
+                                **({"via_server": True} if cherez_server else {})})
         if etap == "complete":
             # 🔴 Обрив на `complete` не каже, чи пул устиг прийняти внесок:
             # відповідь могла загубитись уже після прийняття. Звіт про збій і

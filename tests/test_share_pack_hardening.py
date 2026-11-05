@@ -235,6 +235,42 @@ def test_kartka_operatsiieiu(space: Path) -> None:
     assert env.data["card"] == {}
 
 
+@pytest.mark.parametrize("raw, want", [
+    ("rymo_katolytska", "rymo_katolytska"), ("Римо-католицька", "rymo_katolytska"),
+    (" цивільні  акти ", "tsyvilna"), ("-", "-"), ("", ""),
+])
+def test_konfesiia_kartky_kodom_chy_pidpysom(raw: str, want: str) -> None:
+    from nyshporka.share import card as K
+
+    assert K.normalize(konfesiia=raw) == {"konfesiia": want}
+
+
+def test_konfesiia_kartky_nevidoma() -> None:
+    from nyshporka.share import card as K
+
+    with pytest.raises(K.CardError, match=r"невідома.*yudeiska"):
+        K.normalize(konfesiia="католицька")
+
+
+def test_konfesiia_kartky_ide_v_manifest(space: Path, monkeypatch: Any) -> None:
+    """Автор каже конфесію — у маніфесті `case.denomination`, його читає каталог Супряги."""
+    from nyshporka import ops as O
+    from nyshporka.share import publish as PUB
+
+    env = O.call("share.card", {"case": "DAHMO/315/8433", "konfesiia": "pravoslavna"})
+    assert env.ok, env.error
+    assert env.data["card"]["konfesiia"] == "pravoslavna"
+    run = make_run(_root(space), "spr-8433")
+    monkeypatch.setattr(PUB, "resolve_runs", lambda scope, **kw: (
+        [run], {"key": "DAHMO/315/8433", "shifra": "ДАХмО 315-1-8433"}))
+    got = PUB.pack("DAHMO/315/8433", geometry=False, extra=BEZ_KADRIV)
+    assert got["manifest"]["case"]["denomination"] == "pravoslavna"
+    env = O.call("share.card", {"case": "DAHMO/315/8433", "konfesiia": ""})
+    assert "konfesiia" not in env.data["card"]
+    got = PUB.pack("DAHMO/315/8433", geometry=False, extra=BEZ_KADRIV)
+    assert "denomination" not in got["manifest"]["case"], "стерте не їде"
+
+
 def test_kartka_nazyvaie_khto_trymaie_kadry(space: Path, monkeypatch: Any) -> None:
     """Текст, читаний із приватної колекції, мусить казати, куди йти по кадри.
 
