@@ -667,6 +667,9 @@ def suspects_of(name: str, ws: Workspace | None = None) -> list[dict[str, Any]]:
                 dens[i] = d
         ratios = G.density_ratios(dens)
         support = literal_support(reg, spec, pg)
+        from nyshporka.train import twin as TW
+
+        twins = TW.line_twins(reg, spec, pg)
         for i, text in enumerate(merged):
             if not text.strip() or conf.get(str(i)) == "low":
                 continue
@@ -676,6 +679,10 @@ def suspects_of(name: str, ws: Workspace | None = None) -> list[dict[str, Any]]:
             if ratios.get(i, 0) >= G.DENSITY_SUSPECT:
                 why = G.dense_why(ratios[i])
             elif G.supported(text, vs, support.get(i)):
+                continue
+            elif i in twins and TW.grounds(text, twins[i]):
+                # Той самий запис іншим письмом — незалежне спостереження:
+                # число чи ім'я, яке голоси розсипали, а двійник дав.
                 continue
             elif G.suspect(sig, text):
                 why = "голоси розходяться"

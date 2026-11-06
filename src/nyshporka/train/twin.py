@@ -50,6 +50,10 @@ NAME_MIN = 0.60
 #: Частка рядків свого письма, що знайшли пару, нижче якої двійник сторінки не
 #: вважається надійним і ворота на ній не діють.
 PAGE_PAIRED_MIN = 0.30
+#: Мітка, схожа на певну пару двійника не менше за цей поріг, спирається на неї
+#: (на tw-207b: «ынъ Ризакъ» / «syn Ryzan» 0.67, «Ефросиния» / «frosyuya» 0.78;
+#: різні формули між собою — до 0.5).
+GROUND_MIN = 0.60
 
 _CYR = {"а": "a", "б": "b", "в": "w", "г": "h", "ґ": "h", "д": "d", "е": "e", "є": "e",
         "ѣ": "e", "э": "e", "ё": "e", "ж": "z", "з": "z", "и": "i", "і": "i", "ї": "i",
@@ -323,6 +327,28 @@ def pair_lines(own_idx: list[int], twin_idx: list[int], own_boxes: list[Any],
     return [(om[a], tm[b], s) for a, b, s in got], len(om)
 
 
+_DIGITS = re.compile(r"\d+")
+
+
+def grounds(text: str, twin_line: str) -> bool:
+    """Мітка спирається на пару з двійника: те саме число або той самий запис.
+
+    Число — збігом цифр (вік 42 в обох половинах); текст — схожістю спільних
+    ключів не нижче `GROUND_MIN` і жодною власною назвою без опори.
+    """
+    if not text.strip() or not twin_line.strip():
+        return False
+    d1, d2 = _DIGITS.findall(text), _DIGITS.findall(twin_line)
+    k1 = key(text)
+    if d1 and not k1.replace(" ", "").strip():
+        return d1 == d2
+    if len(k1.replace(" ", "")) < 3:
+        return False
+    if sim(k1, key(twin_line)) < GROUND_MIN:
+        return False
+    return not unsupported(text, twin_line)
+
+
 # ── ворота ───────────────────────────────────────────────────────────────────
 #: Коротший огризок ворота не судять: трилітерний край прізвища на межі
 #: смужки («Гав-») у двійнику ніде не стоїть цілим, і опора його випадкова.
@@ -555,6 +581,9 @@ def build(name: str, *, twin_run: str = "", twin_set: str = "", twin_draft: str 
         t_lines = tw if pp.twin_page == pg else twin_text(pp.twin_page)
         t_boxes = boxes if pp.twin_page == pg else \
             ((C.page_geometry(run, pp.twin_page, w) or {}).get("boxes") or [])
+        # Графи віку окремо не в'язати: прив'язка через рядок запису на ревізії
+        # 1795 дала 1 збіг проти 7 розбіжностей із мітками (tw-207b, 06.11.2026) —
+        # польська половина розставляє вік інакше. Вік арбітр бере з ДВІЙНИК-СТОР.
         for a, b, s in pp.pairs:
             if b >= len(t_lines) or not t_lines[b].strip():
                 continue
@@ -608,7 +637,21 @@ def page_gate_text(reg: Any, spec: Any, page: str) -> str:
     return str((reg.hint_data(spec, src).get(page) or {}).get("text") or "")
 
 
-__all__ = ["LAYOUTS", "NAME_MIN", "PAIR_FLOOR", "PAIR_SURE", "PagePair", "TwinError",
-           "TwinReport", "align", "build", "form_hits", "gutter", "halves", "is_form", "key",
-           "main_lines", "name_words", "page_gate_text", "pair_lines", "script_of", "sim",
-           "support", "unsupported"]
+def line_twins(reg: Any, spec: Any, page: str) -> dict[int, str]:
+    """{рядок: певна пара двійника} — без пар із сумнівом."""
+    src = next((h for h in spec.hint_sources if h.id == TWIN_ID), None)
+    if src is None:
+        return {}
+    out: dict[int, str] = {}
+    for k, v in reg.hint_data(spec, src).items():
+        pg, _, idx = k.rpartition(":")
+        if pg == page and idx.isdigit() and not v.get("doubt"):
+            out[int(idx)] = str(v.get("text") or "")
+    return out
+
+
+__all__ = ["GROUND_MIN", "LAYOUTS", "NAME_MIN", "PAIR_FLOOR", "PAIR_SURE", "PagePair",
+           "TwinError", "TwinReport", "align", "build", "form_hits", "grounds", "gutter",
+           "halves", "is_form", "key", "line_twins", "main_lines", "name_words",
+           "page_gate_text", "pair_lines", "script_of", "sim", "support",
+           "unsupported"]

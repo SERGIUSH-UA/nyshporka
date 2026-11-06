@@ -33,7 +33,7 @@ def _boxes() -> list[list[int]]:
     for x0 in (50, 550):
         for i in range(5):
             out.append([x0, 100 + i * 60, x0 + 250, 150 + i * 60])
-        out.append([x0 + 350, 100, x0 + 380, 150])
+        out.append([x0 + 350, 160, x0 + 380, 210])   # вік — на висоті рядка 1
     return out
 
 
@@ -201,3 +201,19 @@ def test_mixed_run_set_names_its_script(space: W.Workspace) -> None:
         TW.build("tp", twin_run="r2-lat", ws=space)
     TW.build("tp", twin_run="r2-lat", script="cyrillic", ws=space)
     assert reg.load("tp").script == "cyrillic"
+
+
+def test_line_twins_only_sure_pairs(space: W.Workspace) -> None:
+    TW.build("tw", twin_run="r1-lat", ws=space)
+    reg = S.registry(space)
+    spec = reg.load("tw")
+    assert TW.line_twins(reg, spec, "0001")[1] == "Tedor Fedorow Poliszczuk"
+    assert 5 not in TW.line_twins(reg, spec, "0001")   # графа віку пари не має
+
+
+def test_label_grounded_by_twin_pair() -> None:
+    assert TW.grounds("42", "42")
+    assert not TW.grounds("42", "24")
+    assert TW.grounds("ынъ Ризакъ —", "syn Ryzak")
+    assert not TW.grounds("Иванъ Березовскій", "Iwan Tatarczuk")
+    assert not TW.grounds("дочь", "")
