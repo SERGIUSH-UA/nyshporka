@@ -1993,6 +1993,7 @@ def test_civil_acts_get_cells_in_the_cloud_and_say_how_to_drop_them(
     assert "form_cells=1" in _plan_of(fake_gpurunner)["params"]
     warn = [n for n in res.notes if "автоматично" in n]
     assert warn and "--no-form-cells" in warn[0] and '"form": false' in warn[0], res.notes
+    assert not any("справ черги" in n for n in res.notes), "одна справа — не мікс"
 
 
 def test_no_form_cells_wins_over_the_case_description(
@@ -2033,6 +2034,8 @@ def test_a_mixed_queue_reads_cells_only_in_the_acts(
     res = _go([akty, metryka], dry_run=True)
     assert _case_cells(fake_gpurunner) == {"sprava": "1", "metryka": "0"}
     assert not any("усі" in n and "справ черги" in n for n in res.notes), res.notes
+    # мікс видно одним рядком ще в сухому прогоні — до заливки й оренди
+    assert "📋 клітинки — у 1 з 2 справ черги (sprava); решта читається без них" in res.notes
 
 
 def test_an_old_supervisor_gets_one_knob_and_a_warning(

@@ -1366,6 +1366,16 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
                 w = f"{leg.name}: {cells_auto_warning(why)}"
                 res.notes.append(w)
                 say("warning", f"⚠ {w}")
+        with_cells = [leg.name for leg, on, _why in chosen if on]
+        if with_cells and len(with_cells) < len(chosen):
+            # Мікс видно одним рядком: попередження вище називають лише справи з
+            # клітинками, і що решта йде без них, агент мусив би вивести сам.
+            shown = ", ".join(with_cells[:5]) + (f" і ще {len(with_cells) - 5}"
+                                                 if len(with_cells) > 5 else "")
+            w = (f"📋 клітинки — у {len(with_cells)} з {len(chosen)} справ черги "
+                 f"({shown}); решта читається без них")
+            res.notes.append(w)
+            say("plan", w)
 
         given = {p.split("=", 1)[0].strip() for p in params}
         for knob, setting in (("datacenter_only", "true" if datacenter_only else ""),
