@@ -161,11 +161,17 @@ _LAT_FORMS_RAW = frozenset(w.lower() for w in LAT_FORMS)
 
 
 def is_form(word: str) -> bool:
-    """Слово — формула казки (жена, сынъ, Zona, Córka), а не ім'я."""
+    """Слово — формула казки (жена, сынъ, Zona, Córka), а не ім'я.
+
+    Рядок — смужка, тож формула буває обрізаною: друкована шапка графи
+    «Муже- Жен-» — це «Мужеска / Женска», а не прізвище «Муже».
+    """
     k = key(word)
     if not k:
         return True
-    return k in _FORM_KEYS or any(sim(k, f) >= 0.8 for f in _FORM_KEYS if len(f) >= 4)
+    if k in _FORM_KEYS or any(sim(k, f) >= 0.8 for f in _FORM_KEYS if len(f) >= 4):
+        return True
+    return len(k) >= 3 and any(f.startswith(k) and len(f) > len(k) for f in _FORM_KEYS)
 
 
 # ── письмо ділянки ───────────────────────────────────────────────────────────
@@ -318,11 +324,16 @@ def pair_lines(own_idx: list[int], twin_idx: list[int], own_boxes: list[Any],
 
 
 # ── ворота ───────────────────────────────────────────────────────────────────
+#: Коротший огризок ворота не судять: трилітерний край прізвища на межі
+#: смужки («Гав-») у двійнику ніде не стоїть цілим, і опора його випадкова.
+NAME_MIN_LEN = 4
+
+
 def name_words(text: str) -> list[str]:
-    """Власні назви мітки: слово з великої літери, не формула, ≥3 літер."""
+    """Власні назви мітки: слово з великої літери, не формула, ≥`NAME_MIN_LEN` літер."""
     out = []
     for w in _WORD.findall(text):
-        if len(w) < 3 or not w[0].isupper() or is_form(w):
+        if len(w) < NAME_MIN_LEN or not w[0].isupper() or is_form(w):
             continue
         out.append(w)
     return out

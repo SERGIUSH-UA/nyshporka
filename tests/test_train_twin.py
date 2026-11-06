@@ -130,6 +130,9 @@ def test_invented_surname_has_no_support() -> None:
 
 def test_formula_words_are_not_names() -> None:
     assert TW.name_words("Жена Его Сынъ Дочь") == []
+    # обрізана друкована шапка графи й огризок на межі смужки — не імена
+    assert TW.name_words("Муже- Жен-") == []
+    assert TW.name_words("жена Его Ефимия Гав") == ["Ефимия"]
 
 
 # ── набір ────────────────────────────────────────────────────────────────────
