@@ -1745,3 +1745,20 @@ body.welcome-on main { max-width: none; }
   .rn-row { grid-template-columns: auto minmax(0, 1fr); }
   .rn-prog, .rn-acts { grid-column: 2; justify-content: flex-start; }
 }
+
+/* ── 🗃 Набори (`screens/sets.js`): злиття смужкою, запасний підпис, нещодавні ── */
+.sets-recent { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin: .5rem 0; }
+.sets-sortbar { margin: .25rem 0 .5rem; }
+.sets-fallback { font-style: italic; }
+.sets-bar { display: flex; width: 7rem; height: .45rem; border-radius: .25rem; overflow: hidden;
+  background: var(--line-2); margin-bottom: .2rem; }
+.sets-bar i { display: block; height: 100%; }
+.sets-bar .h { background: var(--ok); }
+.sets-bar .m { background: var(--warn); }
+.sets-bar .l { background: var(--err); }
+.sets-conf { display: flex; flex-wrap: wrap; gap: .1rem .6rem; font-size: .85rem; white-space: nowrap; }
+.sets-conf .ch b { color: var(--ok); }
+.sets-conf .cm b { color: var(--warn-fg, var(--warn)); }
+.sets-conf .cl b { color: var(--err); }
+.sets-sortbar label { display: inline-flex; align-items: center; gap: .5rem; }
+#view .sets-sortbar select { width: auto; flex: 0 0 auto; }

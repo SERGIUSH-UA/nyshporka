@@ -9,9 +9,10 @@
  * Довгі дії (нарізка, голоси, завдання) ідуть роботами в черзі демона, і їхній
  * поступ малюється тут, поруч із формою, а не лише на екрані «Роботи».
  */
-import { modelName } from '../core/bits.js';
+import { modelName, dayOf, pill } from '../core/bits.js';
+import { listView } from '../core/listview.js';
 import { skelRows } from '/ui/dom.js';
-import { t } from '../core/strings.js';
+import { t, tn, LANG } from '../core/strings.js';
 import { callOp, staleThenFresh } from '../core/net.js';
 import { esc, el, setView, boxError, busyForm, renderWarnings,
   curGen, alive, emptyMini, fld } from '../core/view.js';
@@ -25,12 +26,18 @@ import { loadRuns, attachRunPicker } from '../core/runpick.js';
 /** Набори, як їх віддав останній `train.sets` — для селектів у формах. */
 let SETS = [];
 let _runCb = null;
+let _env = null;
 
 SCREENS.sets = async () => {
   const gen = curGen();
   setView(`
     <p class="muted">${t('sets.why')}</p>
+    <div id="sets-recent" class="sets-recent"></div>
+    <div class="sets-sortbar"><label>${t('sets.sort')}
+      <select data-act="sets.sort" id="sets-sort">${SORTS.map((k) =>
+    `<option value="${k}"${k === sortMode() ? ' selected' : ''}>${t(`sets.sort.${k}`)}</option>`).join('')}</select></label></div>
     <div id="sets-list"><table><tbody>${skelRows(5, 4)}</tbody></table></div>
+    <div id="sets-warn"></div>
     <div class="dash-two">
       <div class="dash-box">
         <h3>${t('sets.cut.title')}</h3>
@@ -101,10 +108,106 @@ async function setsList() {
   await staleThenFresh('train.sets', { all: true }, (env) => paintSets(env));
 }
 
+// ── перелік наборів: спільний `listView`, а не власна таблиця ──────────────
+const SORTS = ['recent', 'name', 'crops'];
+
+/** Вибір сортування й «щойно відкритий» живуть у сесії вкладки: після переходу в
+ *  «Розмітку» й назад екран збирається заново, а людина — та сама. */
+function store(key, val) {
+  try {
+    if (val === undefined) return sessionStorage.getItem(key) || '';
+    sessionStorage.setItem(key, val);
+  } catch { /* приватне вікно: працюємо без пам'яті */ }
+  return '';
+}
+function sortMode() {
+  const v = store('sets.sort');
+  return SORTS.includes(v) ? v : 'recent';
+}
+function setSortMode(v) { store('sets.sort', SORTS.includes(v) ? v : 'recent'); }
+function rememberLast(name) { store('sets.last', String(name || '')); }
+const lastOpened = () => store('sets.last');
+
+/** Коли чіпали: щойно відкритий із цього екрана вважається найсвіжішим. */
+const touchedOf = (s) => (s.name === lastOpened() ? Infinity : Number(s.touched || 0));
+
+/** Стан набору словами: що з ним далі. Лише з числових полів, без вгадування. */
+const stNoMerge = (s) => !s.merge;
+const stAwait = (s) => !!s.merge && !s.n_marked;
+const stHand = (s) => s.n_marked > 0;
+
+/** Голоси без повторів: «Логофет v9, Логофет v8, Логофет v9» → «Логофет v9, Логофет v8». */
+export function voiceNames(s) {
+  return [...new Set((s.voices || []).map(modelName).filter(Boolean))];
+}
+
+/** Сімейство набору — його жанр із set.json (`domain`): це поле є в кожного набору
+ *  й задано людиною. Префікс імені (`x17-`, `ro-`) — угода про назви, не дані. */
+const genreOf = (s) => String(s.domain || '').trim();
+
+const byRecent = (a, b) => touchedOf(b) - touchedOf(a) || a.name.localeCompare(b.name, 'uk');
+const SORT_CMP = {
+  recent: byRecent,
+  name: (a, b) => a.name.localeCompare(b.name, 'uk', { numeric: true }),
+  crops: (a, b) => (b.n_crops || 0) - (a.n_crops || 0) || byRecent(a, b),
+};
+const sum = (rows, f) => rows.reduce((n, r) => n + (f(r) || 0), 0);
+
+/** Порядок груп під обраним сортуванням: рядки в групі вже відсортовані. */
+function groupOrder(mode) {
+  if (mode === 'name') return (a, b) => String(a.label).localeCompare(String(b.label), 'uk');
+  if (mode === 'crops') return (a, b) => sum(b.rows, (r) => r.n_crops) - sum(a.rows, (r) => r.n_crops);
+  return (a, b) => touchedOf(b.rows[0]) - touchedOf(a.rows[0]);
+}
+
+function marksCell(s) {
+  if (!s.n_marked) {
+    const why = stAwait(s) ? pill('warn', t('sets.st.await')) : pill('neutral', t('sets.st.nomerge'));
+    return `<span class="muted">${esc(t('sets.marks.none'))}</span><br>${why}`;
+  }
+  const ok = (s.by_status || {}).ok || 0;
+  return `<b>${esc(t('sets.marks.ok').replace('{ok}', ok).replace('{n}', s.n_marked))}</b>`;
+}
+
+function mergeCell(s) {
+  if (!s.merge) return '<span class="muted">—</span>';
+  const m = s.merge;
+  const tot = s.n_merged || 1;
+  const pc = (k) => ((m[k] || 0) * 100 / tot).toFixed(1);
+  const part = (k, cls) => `<span class="${cls}">${esc(t(`sets.conf.${k}`))} <b>${m[k] || 0}</b></span>`;
+  return `<span class="sets-bar" aria-hidden="true"><i class="h" style="width:${pc('high')}%"></i><i class="m" style="width:${pc('med')}%"></i><i class="l" style="width:${pc('low')}%"></i></span>
+    <div class="sets-conf">${part('high', 'ch')} ${part('med', 'cm')} ${part('low', 'cl')}</div>
+    <small class="muted">${esc(t('sets.merge.total').replace('{n}', s.n_merged))}</small>`;
+}
+
+function nameCell(s) {
+  // Без назви — запасний підпис із set.json: справа й жанр, а не порожній рядок.
+  const sub = s.title || [s.case, s.domain].filter(Boolean).join(' · ');
+  const tags = [s.hidden ? pill('neutral', t('sets.hidden')) : '',
+    s.name === lastOpened() ? pill('info', t('sets.last')) : ''].filter(Boolean).join(' ');
+  return `<b>${esc(s.name)}</b> ${tags}${sub ? `<div class="muted${s.title ? '' : ' sets-fallback'}">${esc(sub)}</div>` : ''}`;
+}
+
+function cropsCell(s) {
+  if (!s.crops_present) return `<span class="warn-inline">${t('sets.nocrops')}</span>`;
+  return `<b>${s.n_crops}</b> <span class="muted">/ ${s.n_pages} ${t('common.pages')}</span>`;
+}
+
+function paintRecent(rows) {
+  const box = el('sets-recent');
+  if (!box) return;
+  const top = rows.filter((s) => touchedOf(s) > 0).sort(byRecent).slice(0, 3);
+  box.innerHTML = top.length
+    ? `<span class="muted">${esc(t('sets.sort.recent'))}:</span> ${top.map((s) => `<button type="button" class="ghost ctl-sm"
+        data-act="sets.open" data-arg="${esc(s.name)}" title="${esc(dayOf(s.touched, LANG))}">${esc(s.name)}</button>`).join(' ')}`
+    : '';
+}
+
 function paintSets(env) {
   const box = el('sets-list');
   if (!box) return undefined;
   if (!env.ok) return boxError('sets-list', env);
+  _env = env;
   SETS = env.data.sets || [];
   const opts = SETS.map((s) => `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join('');
   for (const id of ['sets-v-name', 'sets-g-name', 'sets-a-name']) {
@@ -114,33 +217,54 @@ function paintSets(env) {
     sel.innerHTML = opts;
     if (was && SETS.some((x) => x.name === was)) sel.value = was;
   }
+  const warn = el('sets-warn');
+  if (warn) warn.innerHTML = renderWarnings(env);
   if (!SETS.length) {
-    box.innerHTML = emptyMini('kolba', t('sets.none')) + renderWarnings(env);
+    box.innerHTML = emptyMini('kolba', t('sets.none'));
     return undefined;
   }
-  const rows = SETS.map((s) => {
-    const st = s.by_status || {};
-    const merge = s.merge
-      ? `${s.n_merged} <span class="muted">(h${s.merge.high}/m${s.merge.med}/l${s.merge.low})</span>`
-      : '—';
-    const crops = s.crops_present
-      ? `${s.n_crops} <span class="muted">/ ${s.n_pages} ${t('common.pages')}</span>`
-      : `<span class="warn-inline">${t('sets.nocrops')}</span>`;
-    return `<tr>
-      <td><b>${esc(s.name)}</b>${s.title ? `<div class="muted">${esc(s.title)}</div>` : ''}</td>
-      <td>${s.role === 'holdout' ? ic('target', 'ic-sm') + ' ' + t('sets.role.holdout') : t('sets.role.train')}</td>
-      <td class="num">${crops}</td>
-      <td class="num">${s.n_marked} <span class="muted">(ok ${st.ok || 0})</span></td>
-      <td class="num">${merge}</td>
-      <td>${esc((s.voices || []).map(modelName).join(', ') || '—')}</td>
-      <td><button data-act="sets.open" data-arg="${esc(s.name)}">${t('sets.open')}</button></td>
-    </tr>`;
-  }).join('');
-  box.innerHTML = `<div class="tbl-wide"><table>
-    <thead><tr><th>${t('sets.col.name')}</th><th>${t('sets.col.role')}</th>
-      <th>${t('sets.col.crops')}</th><th>${t('sets.col.marks')}</th>
-      <th>${t('sets.col.merge')}</th><th>${t('sets.col.voices')}</th><th></th></tr></thead>
-    <tbody>${rows}</tbody></table></div>` + renderWarnings(env);
+  const mode = sortMode();
+  const rows = [...SETS].sort(SORT_CMP[mode]);
+  paintRecent(rows);
+  listView(box, {
+    id: 'sets',
+    rows,
+    key: (s) => s.name,
+    text: (s) => [s.name, s.title, s.case, s.domain, s.source_run, ...(s.voices || []), ...voiceNames(s)].join(' '),
+    placeholder: t('sets.search.ph'),
+    pageSize: 30,
+    chips: [
+      { id: 'train', label: t('sets.role.train'), test: (s) => s.role !== 'holdout' },
+      { id: 'holdout', label: t('sets.role.holdout'), test: (s) => s.role === 'holdout' },
+      { id: 'nomerge', label: t('sets.f.nomerge'), test: stNoMerge },
+      { id: 'await', label: t('sets.f.await'), test: stAwait, tone: 'warn' },
+      { id: 'hand', label: t('sets.f.hand'), test: stHand, tone: 'ok' },
+      ...['cyrillic', 'latin', 'mixed'].map((k) => ({ id: `sc-${k}`, label: t(`sets.script.${k}`),
+        test: (s) => s.script === k })),
+      { id: 'hidden', label: t('sets.f.hidden'), test: (s) => !!s.hidden },
+    ],
+    group: (s) => {
+      const g = genreOf(s);
+      return { id: `g:${g}`, label: g || t('sets.nogenre') };
+    },
+    groupSort: groupOrder(mode),
+    groupSummary: (g) => esc(t('sets.gsum')
+      .replace('{sets}', tn('lv.n.sets', g.length))
+      .replace('{crops}', tn('lv.n.crops', sum(g, (r) => r.n_crops)))
+      .replace('{ok}', sum(g, (r) => (r.by_status || {}).ok))
+      .replace('{merged}', sum(g, (r) => r.n_merged))),
+    head: `<th>${t('sets.h.name')}</th><th>${t('sets.col.role')}</th><th>${t('sets.h.crops')}</th>
+      <th>${t('sets.h.marks')}</th><th>${t('sets.h.merge')}</th><th>${t('sets.h.voices')}</th>
+      <th>${t('sets.h.when')}</th><th></th>`,
+    cells: (s) => `<td>${nameCell(s)}</td>
+      <td class="lv-nw">${s.role === 'holdout' ? ic('target', 'ic-sm') + ' ' + t('sets.role.holdout') : t('sets.role.train')}</td>
+      <td class="num">${cropsCell(s)}</td>
+      <td>${marksCell(s)}</td>
+      <td>${mergeCell(s)}</td>
+      <td>${esc(voiceNames(s).join(', ') || '—')}</td>
+      <td class="lv-nw">${esc(s.touched ? dayOf(s.touched, LANG) : '—')}</td>
+      <td class="lv-nw"><button data-act="sets.open" data-arg="${esc(s.name)}">${t('sets.open')}</button></td>`,
+  });
   return undefined;
 }
 
@@ -239,7 +363,15 @@ Object.assign(ACTIONS, {
     return undefined;
   },
 
-  'sets.open': (_ev, elm) => goto('label', { set: elm.dataset.arg }),
+  'sets.open': (_ev, elm) => {
+    rememberLast(elm.dataset.arg);
+    return goto('label', { set: elm.dataset.arg });
+  },
+
+  'sets.sort': (_ev, elm) => {
+    setSortMode(elm.value);
+    if (_env) paintSets(_env);
+  },
 });
 
 /** Тримаємо `ST` в імпортах: посів екрана читає `goto`, а не цей модуль. */

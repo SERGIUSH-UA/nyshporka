@@ -561,7 +561,22 @@ class Registry:
             "merge": merge if conf else None,
             "n_merged": sum(merge.values()) if conf else 0,
             "glossary_n": len(spec.glossary),
+            "touched": self.touched(name),
         }
+
+    def touched(self, name: str) -> float:
+        """Коли набір востаннє чіпали: найпізніша зміна `set.json`, міток або
+        злиття (секунди epoch; 0 — файлів нема). Екран «Набори» ставить вище
+        те, з чим працювали щойно. Теку набору не міряємо: у ній `_pageview`
+        і `_sheets` оновлюються самі, і «щойно чіпали» стало б завжди."""
+        d = self.set_dir(name)
+        best = 0.0
+        for p in (d / SET_FILE, d / MARKS_FILE, d / DRAFTS_DIR / MERGE_ID / META_FILE):
+            try:
+                best = max(best, p.stat().st_mtime)
+            except OSError:
+                continue
+        return round(best, 1)
 
 
 def registry(ws: Workspace | None = None) -> Registry:

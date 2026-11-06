@@ -106,6 +106,23 @@ def test_stats_are_denominators_not_self_report(reg: S.Registry) -> None:
     assert st["voices"] == ["pysar"]
 
 
+def test_stats_touched_follows_the_latest_of_set_marks_merge(reg: S.Registry) -> None:
+    """Екран «Набори» сортує за `touched`: це найпізніша зміна set.json, міток чи злиття."""
+    import os
+
+    d = reg.set_dir("demo")
+    os.utime(d / S.SET_FILE, (1_000_000, 1_000_000))
+    assert reg.stats("demo")["touched"] == 1_000_000.0
+    reg.append_mark("demo", "0001", 0, "перший", "ok")
+    assert reg.stats("demo")["touched"] > 1_000_000.0
+    md = reg.merge_dir(reg.load("demo"))
+    md.mkdir(parents=True)
+    (md / S.META_FILE).write_text("{}", encoding="utf-8")
+    os.utime(md / S.META_FILE, (3_000_000_000, 3_000_000_000))
+    assert reg.stats("demo")["touched"] == 3_000_000_000.0
+    assert reg.touched("немає-такого") == 0.0
+
+
 def test_names_hide_hidden_sets_unless_asked(reg: S.Registry) -> None:
     reg.save(S.SetSpec(name="secret", hidden=True))
     assert reg.names() == ["demo"]
