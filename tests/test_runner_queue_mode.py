@@ -129,3 +129,22 @@ def test_a_closed_case_is_skipped_by_a_revived_shard(tmp_path: Path,
     q.write_text(json.dumps(gone) + chr(10) + lines, encoding="utf-8")
     assert R.run_queue(_args(q)) == 0
     assert calls == [live]
+
+
+def test_the_queue_line_decides_cells_for_its_case(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Мішана черга: акти — з клітинками, метрика — без, у ОДНОМУ процесі.
+    Рядок без поля лишає прапорець процесу."""
+    seen: list[bool] = []
+    monkeypatch.setattr(R, "_main_case",
+                        lambda a, cache=None: seen.append(bool(a.form_cells)) or 0)
+    q = _queue(tmp_path, [
+        {"case_dir": str(tmp_path / "akty"), "out_dir": "/o/1", "form_cells": True},
+        {"case_dir": str(tmp_path / "metryka"), "out_dir": "/o/2", "form_cells": False},
+        {"case_dir": str(tmp_path / "bez_polia"), "out_dir": "/o/3"},
+        {"end": True},
+    ])
+    args = _args(q)
+    args.form_cells = True                    # прапорець процесу (заходовий)
+    assert R.run_queue(args) == 0
+    assert seen == [True, False, True]

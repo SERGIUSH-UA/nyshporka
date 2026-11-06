@@ -97,6 +97,8 @@ if args[:2] == ["htr", "plan"]:
         **({"staged": False} if "--no-upload" in args else {}),
         # як наглядач ≥ 0.8: план друку несе позначку можливості
         **({"print_engine": 1} if "engine=paddle_vl" in params else {}),
+        # як наглядач, що везе рішення справи про клітинки (`form_cells` у її params)
+        **({} if cfg.get("old_cells") else {"form_cells_case": 1}),
     }, ensure_ascii=False), encoding="utf-8")
     sys.exit(0)
 
@@ -2000,6 +2002,55 @@ def test_no_form_cells_wins_over_the_case_description(
     res = _go(case, dry_run=True, form_cells=False)
     assert not any(p.startswith("form_cells=") for p in _plan_of(fake_gpurunner)["params"])
     assert not any("автоматично" in n for n in res.notes), res.notes
+
+
+def _two_cases(space: Path, monkeypatch) -> tuple[Path, Path]:
+    """Акти й метрика в одній черзі (друга справа — копія першої під іншим іменем)."""
+    import shutil
+
+    akty, _ = _wire(space, monkeypatch)
+    metryka = space / "metryka"
+    shutil.copytree(akty, metryka)
+    _acts_passport(akty)
+    (metryka / "_source.json").write_text(json.dumps(
+        {"title": "Метрична книга церкви", "year_from": 1864}, ensure_ascii=False),
+        encoding="utf-8")
+    return akty, metryka
+
+
+def _case_cells(fake: Any) -> dict[str, str]:
+    call = fake.called("htr", "plan")[0]
+    plan = json.loads(Path(call[call.index("--out") + 1]).read_text("utf-8"))
+    return {Path(c["case_dir"]).name: str((c.get("params") or {}).get("form_cells", ""))
+            for c in plan["cases"]}
+
+
+def test_a_mixed_queue_reads_cells_only_in_the_acts(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """Акти й метрики разом в одному заході: клітинки — лише справі актів (рішення
+    справи в її `params`), і про «мішану чергу» не попереджено — її розвели."""
+    akty, metryka = _two_cases(space, monkeypatch)
+    res = _go([akty, metryka], dry_run=True)
+    assert _case_cells(fake_gpurunner) == {"sprava": "1", "metryka": "0"}
+    assert not any("усі" in n and "справ черги" in n for n in res.notes), res.notes
+
+
+def test_an_old_supervisor_gets_one_knob_and_a_warning(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    fake_gpurunner.set(estimate=ESTIMATE, old_cells=True)
+    akty, metryka = _two_cases(space, monkeypatch)
+    res = _go([akty, metryka], dry_run=True)
+    assert _case_cells(fake_gpurunner) == {"sprava": "", "metryka": ""}
+    assert "form_cells=1" in _plan_of(fake_gpurunner)["params"]
+    assert any("справ черги" in n and "пакет оренди" in n for n in res.notes), res.notes
+
+
+def test_no_form_cells_turns_the_whole_queue_off(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    akty, metryka = _two_cases(space, monkeypatch)
+    _go([akty, metryka], dry_run=True, form_cells=False)
+    assert _case_cells(fake_gpurunner) == {"sprava": "0", "metryka": "0"}
+    assert not any(p.startswith("form_cells=") for p in _plan_of(fake_gpurunner)["params"])
 
 
 def test_drop_frames_takes_only_our_own_copy(space: Path) -> None:

@@ -4210,6 +4210,10 @@ def run_queue(args: argparse.Namespace) -> int:
             a.case_key = str(entry["case_key"])
         if entry.get("seg_cache_dir"):
             a.seg_cache_dir = str(entry["seg_cache_dir"])
+        if "form_cells" in entry:
+            # 📋 Бланк поклітинно — рішення справи, не процесу: у мішаній черзі акти
+            # цивільного стану читаються з клітинками, метрики — без.
+            a.form_cells = bool(entry["form_cells"])
         _EMIT_EXTRA.clear()
         _EMIT_EXTRA["qi"] = int(entry.get("index") or pos)
         rc = _main_case(a, cache)

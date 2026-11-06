@@ -838,7 +838,11 @@ def prepare(convoy: Convoy, res: GoResult, say: Callable[..., None], *,
     _check_engine(plan_path)
 
     # 3. правки, яких наглядач знати не може
-    _patch_plan(plan_path, convoy)
+    def cells_note(w: str) -> None:
+        res.notes.append(w)
+        say("warning", f"⚠ {w}")
+
+    _patch_plan(plan_path, convoy, cells_note)
 
     # 4. передполіт: живі посилання й доступне сховище — ДО оренди. План для
     # кошторису його не проходить за побудовою: посилання ведуть у порожнечу.
@@ -1152,8 +1156,9 @@ def _workdir() -> Path:
     return workspace().derived / "cloud" / "supervised"
 
 
-def _patch_plan(plan_path: Path, convoy: Convoy) -> None:
-    """Дві правки, яких складач плану зробити не може.
+def _patch_plan(plan_path: Path, convoy: Convoy,
+                note: Callable[[str], None] | None = None) -> None:
+    """Правки, яких складач плану зробити не може.
 
     🔴 `case_dir` — ОРИГІНАЛЬНА тека кадрів КОЖНОЇ справи: у мету прогону має
     лягти вона, бо кроп зі стиснутої копії вдвічі дрібніший, а дивиться на
@@ -1161,10 +1166,14 @@ def _patch_plan(plan_path: Path, convoy: Convoy) -> None:
     означало б, що кропи ріжуться з чужої книги.
     `post_fetch` — облік цього простору абсолютними шляхами: відчеплений
     процес не має ні нашого PATH, ні нашої робочої теки.
+    📋 `form_cells` у `params` КОЖНОЇ справи — голос клітинок для неї (`Leg.cells`),
+    коли наглядач це вміє (позначка `form_cells_case`). Інакше лишається один
+    перемикач на захід, і `note` каже, що мішана черга читатиме клітинки всюди.
     """
     data = json.loads(plan_path.read_text(encoding="utf-8"))
     cases = data.get("cases") or []
     by_name = {leg.name: leg for leg in convoy.legs}
+    per_case = bool(data.get("form_cells_case"))
     for i, case in enumerate(cases):
         leg = by_name.get(str(case.get("name") or ""))
         if leg is None and i < len(convoy.legs):
@@ -1178,6 +1187,20 @@ def _patch_plan(plan_path: Path, convoy: Convoy) -> None:
             # Тимчасова тека (стейджинг агента) помре — у мету йде тека справи.
             case["case_dir"] = lasting_case_dir(
                 leg.source, leg.plan.case_key, [f.name for f in frames_in(leg.source)])
+            cells = getattr(leg, "cells", None)
+            if per_case and cells is not None:
+                own = case.get("params")
+                own = dict(own) if isinstance(own, dict) else {}
+                own["form_cells"] = "1" if cells else "0"
+                case["params"] = own
+    decided = [c for c in (getattr(leg, "cells", None) for leg in convoy.legs)
+               if c is not None]
+    if note is not None and not per_case and any(decided) and not all(decided):
+        # Старий наглядач рішення справи не довезе: заходовий перемикач увімкне
+        # клітинки й тим справам черги, де їх ніхто не просив.
+        note(f"наглядач не везе рішення про клітинки по справах — їх дістануть усі "
+             f"{len(convoy.legs)} справ черги, хоча просили {sum(decided)}. Оновіть "
+             f"пакет оренди (`nysh update`), розділіть чергу або зніміть `--no-form-cells`")
     from nyshporka.cloud import printed as PR
 
     printing = PR.is_print(convoy.legs[0].plan.script)

@@ -1353,21 +1353,17 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
         # 📋 бланк поклітинно: слово людини (`--form-cells` / `--no-form-cells`),
         # інакше `form` у паспорті або опис справи (акти цивільного стану — сам,
         # `htr.run.civil_acts_why`) хоч однієї справи черги. Ручка — на весь захід.
-        cells_on = form_cells
-        if cells_on is None:
-            auto = [(leg, why) for leg in convoy.legs
-                    for on, why in [_form_choice(Path(leg.source), None)] if on]
-            cells_on = bool(auto)
-            for leg, why in auto:
-                if why.startswith(AUTO_PREFIX):
-                    w = f"{leg.name}: {cells_auto_warning(why)}"
-                    res.notes.append(w)
-                    say("warning", f"⚠ {w}")
-            if auto and len(auto) < len(convoy.legs):
-                # ручка одна на захід: клітинки дістануть і справи без бланків
-                w = (f"клітинки ввімкнено для всієї черги через {len(auto)} з "
-                     f"{len(convoy.legs)} справ — решта теж їх дістане; розділіть "
-                     f"чергу або зніміть `--no-form-cells`")
+        # Рішення — ПО СПРАВІ (`Leg.cells`): наглядач, що вміє, везе його на бокс
+        # кожній справі окремо (`supervised._patch_plan`), і мішана черга — акти
+        # разом із метриками — читає клітинки лише в актах. Заходовий перемикач
+        # нижче — «хоч одна справа»: на ньому стоїть старий наглядач.
+        chosen = [(leg, *(_form_choice(Path(leg.source), None) if form_cells is None
+                          else (form_cells, "слово людини"))) for leg in convoy.legs]
+        convoy = replace(convoy, legs=tuple(replace(leg, cells=on) for leg, on, _ in chosen))
+        cells_on = any(on for _leg, on, _why in chosen)
+        for leg, on, why in chosen:
+            if on and why.startswith(AUTO_PREFIX):
+                w = f"{leg.name}: {cells_auto_warning(why)}"
                 res.notes.append(w)
                 say("warning", f"⚠ {w}")
 
