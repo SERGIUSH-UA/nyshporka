@@ -147,6 +147,7 @@ NAME_GROUPS: tuple[tuple[str, ...], ...] = (
     ("onufrii", "onofrei", "onufri", "onofrii", "onufrei", "onisko", "onufer"),
     ("silwestr", "silwester", "selewestr", "siliwestr"),
     ("terentii", "terenti", "teren", "terenko", "terentei"),
+    ("leontii", "leon", "lewon", "lewko", "leontei"),
     ("feodosii", "fedosii", "teodozi", "teodozii", "hwedos", "fedos", "fedosei"),
     ("maksim", "maksim", "maksimko"),
     ("nikolai", "mikola", "mikolai", "nikola", "mikolaiko"),
@@ -191,7 +192,36 @@ def sim(a: str, b: str) -> float:
     return float(fuzz.ratio(a, b)) / 100.0
 
 
+#: Канцелярська лексика ревізії: уряди й титули шляхти, віровизнання, місце,
+#: шапка бланка. Шляхетська казка пише її з великої літери, і ворота брали
+#: «Губерніи», «Казночей», «Римскаго» за прізвища без опори (ДАКО 280-2-*,
+#: 280-203-1а, друга хвиля 06.11.2026).
+OFFICE_FORMS = (
+    "губерніи", "губернія", "губерніе", "повѣта", "повѣтъ", "намѣстничества", "намѣстничество",
+    "находящегося", "находящійся", "находящихся", "здешнаго", "здѣшняго", "здешней", "здешній",
+    "господской", "господскій", "господскаго", "двоюродной", "двоюродный", "двоюродная",
+    "римскаго", "греческаго", "грекоунитскаго", "уніатскаго", "католическаго", "православнаго",
+    "исповѣданія", "исповиданія", "закона", "вѣры", "живущія", "живущихъ", "живущій",
+    "владѣльческихъ", "владѣлческихъ", "владѣлческой", "владѣльческой", "казначей", "казночей",
+    "секретарь", "конюшій", "хорунжій", "подстолій", "стольникъ", "ловчій", "войскій", "судья",
+    "подкоморій", "кавалеръ", "шляхетство", "шляхетскаго", "посессія", "посессіи", "аренда",
+    "арендаторъ", "именно", "имянно", "обитателяхъ", "недвижимой", "состоящихъ", "чиншовой",
+    "чиншовыхъ", "чиншевой", "ревизская", "ревизской", "сказка", "скаска", "скаску", "вѣдомость",
+    "указа", "величества", "императорскаго", "маіорша", "маіоръ", "капитанъ", "поручикъ",
+    "gubernii", "powiatu", "znajdującego", "znaydującego", "tutejszego", "tuteyszego",
+    "rzymskiego", "greckiego", "unickiego", "katolickiego", "wyznania", "mieszkający",
+    "dziedzicznego", "skarbnik", "sekretarz", "koniuszy", "chorąży", "podstoli", "stolnik",
+    "łowczy", "wojski", "sędzia", "podkomorzy", "kawaler", "possessya", "posessya", "arendarz",
+    "mianowicie", "dzierżawa", "szlachecki", "majorowa", "kapitan", "porucznik",
+)
+#: Дієприкметник — не ім'я: «Находящегося», «Живущихъ», «Состоящій».
+_PARTICIPLE = re.compile(r"щ(ій|ая|ее|ія|іе|ихъ|ихь|их|аго|его|ему|агося|егося|ійся|ихся|имъ|ую|ей)$")
+
 _CYR_FORM_KEYS = frozenset(key(w) for w in CYR_FORMS)
+#: 🔴 Лише ТОЧНИЙ збіг ключа: нечітке порівняння з «католическаго» чи
+#: «шляхетскаго» ковтало б прізвища на -ческаго/-скаго, і вигадане голосами
+#: «Долическаго» проходило б як формула.
+_OFFICE_KEYS = frozenset(key(w) for w in OFFICE_FORMS)
 _LAT_FORM_KEYS = frozenset(key(w) for w in LAT_FORMS)
 _FORM_KEYS = _CYR_FORM_KEYS | _LAT_FORM_KEYS
 _CYR_FORMS_RAW = frozenset(CYR_FORMS)
@@ -206,6 +236,10 @@ def is_form(word: str) -> bool:
     """
     k = key(word)
     if not k:
+        return True
+    if len(word) >= 7 and _PARTICIPLE.search(word.lower().rstrip("ъь")):
+        return True
+    if k in _OFFICE_KEYS:
         return True
     if k in _FORM_KEYS or any(sim(k, f) >= 0.8 for f in _FORM_KEYS if len(f) >= 4):
         return True

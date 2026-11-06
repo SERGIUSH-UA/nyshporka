@@ -125,6 +125,11 @@ def test_church_name_supported_by_folk_form() -> None:
     assert TW.unsupported("жена его Мария Григоріева", "Zona iego Marya Hrehorowa") == []
     assert TW.unsupported("Терентій Ивановъ", "Terenty Iwanow") == []
     assert TW.name_words("Товарищъ Его") == []
+    assert TW.name_words("Губерніи Находящегося Здешнаго Казночей Римскаго") == []
+    # прізвище з «щ» усередині лишається ім'ям
+    assert TW.name_words("Иванъ Полищукъ") == ["Иванъ", "Полищукъ"]
+    # канцелярська лексика — лише точним збігом: прізвище на -ческаго лишається ім'ям
+    assert TW.name_words("Долическаго") == ["Долическаго"]
 
 
 def test_invented_surname_has_no_support() -> None:
