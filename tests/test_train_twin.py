@@ -139,6 +139,7 @@ def test_formula_words_are_not_names() -> None:
     assert TW.name_words("Ojciec iego Szlachcic") == []
     assert TW.name_words("Упражняется хлѣбопашествомъ") == []
     assert TW.name_words("въ Селеніи") == []
+    assert TW.name_words("1795 Года Іюня 4 Дня") == []
 
 
 # ── набір ────────────────────────────────────────────────────────────────────

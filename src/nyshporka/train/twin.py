@@ -86,7 +86,11 @@ CYR_FORMS = ("жена", "жона", "его", "ево", "ихъ", "нихъ", "
              # місце й маєток (tw-280-2-57: «Селеній» з великої)
              "селеніе", "селеніи", "селеній", "селенія", "деревня", "деревни", "мѣстечко",
              "мѣстечка", "хуторъ", "фольваркъ", "имѣніе", "имѣніи", "владѣлецъ", "владѣльца",
-             "помѣщикъ", "земледѣліемъ", "чиншъ", "собственнымъ")
+             "помѣщикъ", "земледѣліемъ", "чиншъ", "собственнымъ",
+             # дата (tw-118-14-109: «1795 Года» з великої)
+             "года", "году", "годъ", "мѣсяца", "дня", "числа", "лѣта",
+             "генваря", "января", "февраля", "марта", "апрѣля", "апреля", "мая", "іюня", "июня",
+             "іюля", "июля", "августа", "сентября", "октября", "ноября", "декабря")
 LAT_FORMS = ("zona", "żona", "iego", "jego", "ich", "nich", "niego", "syn", "synowie",
              "corka", "córka", "corki", "córki", "dzieci", "wdowa", "wdowiec", "chałupa",
              "chalupa", "dom", "kawaler", "lata", "rolnik", "męskiey", "meskiey", "niewieściey",
@@ -100,7 +104,10 @@ LAT_FORMS = ("zona", "żona", "iego", "jego", "ich", "nich", "niego", "syn", "sy
              "umarł", "umarl",
              "rolnictwem", "trudni", "rzemiosłem", "handlem", "zbiegły", "zbiegl", "rekrut",
              "oddany",
-             "wieś", "wsi", "miasteczko", "chutor", "folwark", "majętność", "dziedzic", "czynsz")
+             "wieś", "wsi", "miasteczko", "chutor", "folwark", "majętność", "dziedzic", "czynsz",
+             "rok", "roku", "miesiąca", "miesiaca", "dnia",
+             "stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca", "lipca", "sierpnia",
+             "września", "wrzesnia", "października", "pazdziernika", "listopada", "grudnia")
 
 #: Народна й церковна форма того самого імені — ключі `key()`. Двійник пише
 #: «Hnat» там, де кириличний рядок пише «Игнатъ»; без цього ворота понижували б
