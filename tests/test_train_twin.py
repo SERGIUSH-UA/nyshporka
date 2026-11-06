@@ -135,6 +135,7 @@ def test_formula_words_are_not_names() -> None:
     assert TW.name_words("жена Его Ефимия Гав") == ["Ефимия"]
     assert TW.name_words("Отецъ Его Иванъ") == ["Иванъ"]
     assert TW.name_words("Ojciec iego Szlachcic") == []
+    assert TW.name_words("Упражняется хлѣбопашествомъ") == []
 
 
 # ── набір ────────────────────────────────────────────────────────────────────
@@ -219,3 +220,21 @@ def test_label_grounded_by_twin_pair() -> None:
     assert TW.grounds("ынъ Ризакъ —", "syn Ryzak")
     assert not TW.grounds("Иванъ Березовскій", "Iwan Tatarczuk")
     assert not TW.grounds("дочь", "")
+
+
+def test_pages_layout_neighbour_by_frame_number(space: W.Workspace) -> None:
+    # Частковий прогін: прочитано 0005 (кирилиця) і 0009 (польська) — не сусіди.
+    _run(space.htr_reports, "r3", {"0005": CYR, "0009": CYR_ON_LAT}, geo=True)
+    _run(space.htr_reports, "r3-lat", {"0005": LAT_ON_CYR, "0009": LAT}, geo=False)
+    reg = S.registry(space)
+    spec = S.SetSpec(name="tq", source_run="r3", drafts=[S.Draft(id="pysar", run="r3")])
+    reg.save(spec)
+    meta = {"version": 3, "source_run": "r3",
+            "pages": {"0005": {"n_lines": 6, "size": [SIZE, SIZE], "orient": 0,
+                               "boxes": _boxes()[:6], "polys": [None] * 6, "crop_source": "poly"}}}
+    for i in range(6):
+        _crop(reg.crops_of(spec) / "0005" / f"line_{i:03d}.png")
+    (reg.crops_of(spec) / S.CUT_META_FILE).write_text(json.dumps(meta), encoding="utf-8")
+    rep = TW.build("tq", twin_run="r3-lat", ws=space)
+    assert rep.missing == ["0005"]
+    assert any("0004, 0006" in w for w in rep.warnings)

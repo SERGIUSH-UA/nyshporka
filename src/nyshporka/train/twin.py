@@ -78,7 +78,11 @@ CYR_FORMS = ("жена", "жона", "его", "ево", "ихъ", "нихъ", "
              "сноха", "свекровь", "теща", "тесть", "дѣдъ", "бабка", "племянникъ", "племянница",
              "сирота", "сироты", "приемышъ", "наймитъ", "работница", "дворовый", "дворовые",
              "шляхтичъ", "шляхта", "мѣщанинъ", "мѣщане", "подданный", "подданные", "посессоръ",
-             "экономъ", "хата", "хаты", "женатъ", "вдовъ", "дѣвка", "умре", "умеръ")
+             "экономъ", "хата", "хаты", "женатъ", "вдовъ", "дѣвка", "умре", "умеръ",
+             # заняття й відлучки (tw-280-174-613: «Упражняется хлѣбопашествомъ» з великої)
+             "упражняется", "упражняются", "упражняющійся", "хлѣбопашествомъ", "хлѣбопашество",
+             "промышляетъ", "ремесломъ", "торгомъ", "работою", "живетъ", "живутъ", "находится",
+             "отлучкѣ", "бѣглый", "бѣжалъ", "рекрутъ", "отданъ")
 LAT_FORMS = ("zona", "żona", "iego", "jego", "ich", "nich", "niego", "syn", "synowie",
              "corka", "córka", "corki", "córki", "dzieci", "wdowa", "wdowiec", "chałupa",
              "chalupa", "dom", "kawaler", "lata", "rolnik", "męskiey", "meskiey", "niewieściey",
@@ -89,7 +93,9 @@ LAT_FORMS = ("zona", "żona", "iego", "jego", "ich", "nich", "niego", "syn", "sy
              "teściowa", "teść", "dziad", "babka", "bratanek", "synowiec", "siostrzeniec", "sierota",
              "przybrany", "najmita", "parobczak", "dziewka", "szlachcic", "szlachta", "mieszczanin",
              "mieszczanie", "poddany", "possessor", "posesor", "ekonom", "chata", "żonaty", "zonaty",
-             "umarł", "umarl")
+             "umarł", "umarl",
+             "rolnictwem", "trudni", "rzemiosłem", "handlem", "zbiegły", "zbiegl", "rekrut",
+             "oddany")
 
 #: Народна й церковна форма того самого імені — ключі `key()`. Двійник пише
 #: «Hnat» там, де кириличний рядок пише «Игнатъ»; без цього ворота понижували б
@@ -475,6 +481,12 @@ def _region_text(idx: list[int], boxes: list[Any], texts: list[str]) -> str:
     return " / ".join(texts[i].strip() for i in order)
 
 
+def _frame_no(page: str) -> int | None:
+    """Номер кадру зі стему сторінки («0124», «226-79-2695_0469») або None."""
+    m = re.search(r"(\d+)$", page)
+    return int(m.group(1)) if m else None
+
+
 def build(name: str, *, twin_run: str = "", twin_set: str = "", twin_draft: str = "",
           own_draft: str = "", layout: str = "auto", script: str = "",
           dry_run: bool = False, ws: Any = None) -> TwinReport:
@@ -567,10 +579,22 @@ def build(name: str, *, twin_run: str = "", twin_set: str = "", twin_draft: str 
         if pp is None and layout in ("auto", "pages"):
             i = pos.get(pg)
             best: PagePair | None = None
-            for q in (run_pages[i - 1] if i else None,
-                      run_pages[i + 1] if i is not None and i + 1 < len(run_pages) else None):
-                if not q:
-                    continue
+            n0 = _frame_no(pg)
+            around = [run_pages[i - 1] if i else "",
+                      run_pages[i + 1] if i is not None and i + 1 < len(run_pages) else ""]
+            # 🔴 Сусід — за НОМЕРОМ кадру, а не за переліком прочитаного: частковий
+            # прогін (лише вибрані аркуші) ставить поруч кадри за десятки аркушів.
+            near: list[str] = [q for q in around if q and (
+                n0 is None or _frame_no(q) is None or abs((_frame_no(q) or 0) - n0) == 1)]
+            if n0 is not None:
+                have_no = {_frame_no(q) for q in near}
+                lost = [n for n in (n0 - 1, n0 + 1) if n >= 1 and n not in have_no]
+                if lost:
+                    rep.warnings.append(
+                        f"{pg}: двійника шукали лише з одного боку — кадру "
+                        f"{', '.join(str(n).zfill(len(pg)) for n in lost)} у прогоні немає; "
+                        f"польський аркуш буває й попереду, й позаду — дочитати його")
+            for q in near:
                 g2 = C.page_geometry(run, q, w)
                 if g2 is None:
                     continue
