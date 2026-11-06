@@ -130,6 +130,7 @@ def test_church_name_supported_by_folk_form() -> None:
     assert TW.name_words("Иванъ Полищукъ") == ["Иванъ", "Полищукъ"]
     # канцелярська лексика — лише точним збігом: прізвище на -ческаго лишається ім'ям
     assert TW.name_words("Долическаго") == ["Долическаго"]
+    assert TW.name_words("Губерн Упол Коренные Крестіяне") == []
 
 
 def test_invented_surname_has_no_support() -> None:

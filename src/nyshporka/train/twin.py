@@ -208,11 +208,16 @@ OFFICE_FORMS = (
     "арендаторъ", "именно", "имянно", "обитателяхъ", "недвижимой", "состоящихъ", "чиншовой",
     "чиншовыхъ", "чиншевой", "ревизская", "ревизской", "сказка", "скаска", "скаску", "вѣдомость",
     "указа", "величества", "императорскаго", "маіорша", "маіоръ", "капитанъ", "поручикъ",
+    "коренные", "коренніе", "коренный", "крестьяне", "крестіяне", "крестьянинъ", "осѣдлые",
+    "оседлие", "осѣдлыхъ", "неосѣдлые", "служатъ", "служитъ", "другого", "здругого", "кучеръ",
+    "публикованнаго", "публикованный", "уполномоченный", "уполномочія", "кременецкаго",
+    "изяславскаго", "заславскаго", "имѣнно", "аимѣнно", "мужа", "мѣщанъ",
     "gubernii", "powiatu", "znajdującego", "znaydującego", "tutejszego", "tuteyszego",
     "rzymskiego", "greckiego", "unickiego", "katolickiego", "wyznania", "mieszkający",
     "dziedzicznego", "skarbnik", "sekretarz", "koniuszy", "chorąży", "podstoli", "stolnik",
     "łowczy", "wojski", "sędzia", "podkomorzy", "kawaler", "possessya", "posessya", "arendarz",
     "mianowicie", "dzierżawa", "szlachecki", "majorowa", "kapitan", "porucznik",
+    "osiadli", "nieosiadli", "chłopi", "umocowany", "publikowanego", "woźnica",
 )
 #: Дієприкметник — не ім'я: «Находящегося», «Живущихъ», «Состоящій».
 _PARTICIPLE = re.compile(r"щ(ій|ая|ее|ія|іе|ихъ|ихь|их|аго|его|ему|агося|егося|ійся|ихся|имъ|ую|ей)$")
@@ -240,6 +245,9 @@ def is_form(word: str) -> bool:
     if len(word) >= 7 and _PARTICIPLE.search(word.lower().rstrip("ъь")):
         return True
     if k in _OFFICE_KEYS:
+        return True
+    # Обрізане на краю смужки канцелярське слово: «Губерн-», «Упол-».
+    if len(k) >= 4 and any(f.startswith(k) and len(f) > len(k) for f in _OFFICE_KEYS):
         return True
     if k in _FORM_KEYS or any(sim(k, f) >= 0.8 for f in _FORM_KEYS if len(f) >= 4):
         return True
