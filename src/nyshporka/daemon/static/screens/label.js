@@ -34,7 +34,7 @@ const PHONE_H = 110;
 
 /** Стан екрана: живе між входами, бо набір і режим людина обирає раз. */
 const LB = {
-  set: '', pack: '', packs: [], mode: 'spread', page: '', blank: false, minChars: 15, fresh: true,
+  set: '', pack: '', packs: [], mode: 'spread', page: '', blank: false, minChars: 10, fresh: true,
   scen: '', mergedOnly: false, limit: 400, pages: [], q: null, session: 0,
   queue: [], i: -1, srcs: [], ids: [],
   cache: new Map(), zoom: 0, panel: false, panelZoom: 1,
