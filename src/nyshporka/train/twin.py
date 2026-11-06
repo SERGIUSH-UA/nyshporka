@@ -398,6 +398,20 @@ def _variants(k: str) -> set[str]:
     return out
 
 
+#: Закінчення по батькові й родового відмінка в ключах `key()` обох письм:
+#: «Григоріева» / «Hrehorowa», «Ивановъ» / «Iwanow», «Iwana».
+_PATRONYM = ("ewicz", "owicz", "iewna", "owna", "ewna", "iewa", "owa", "ewa", "iew",
+             "ow", "ew", "ina", "in", "ich", "a")
+
+
+def stem(k: str) -> str:
+    """Ключ без закінчення по батькові — коли лишається хоч 3 літери."""
+    for suf in _PATRONYM:
+        if k.endswith(suf) and len(k) - len(suf) >= 3:
+            return k[: -len(suf)]
+    return k
+
+
 def support(word: str, twin_text: str) -> float:
     """Найкраща опора слова в тексті двійника, 0..1.
 
@@ -409,8 +423,11 @@ def support(word: str, twin_text: str) -> float:
     if not k:
         return 1.0
     words = [w for w in key(twin_text).split() if len(w) >= 3]
+    # По батькові: ім'я батька в групі народних форм шукається за основою
+    # («Григоріева» → «grigori…» ↔ «Hrehorowa» → «hrehor…»; tw-118-14-343).
+    words += [stem(w) for w in words]
     best = 0.0
-    for v in _variants(k):
+    for v in _variants(k) | _variants(stem(k)) | {stem(k)}:
         for w in words:
             best = max(best, sim(v, w))
     flat = key(twin_text).replace(" ", "")

@@ -122,6 +122,7 @@ def test_church_name_supported_by_folk_form() -> None:
     assert TW.unsupported("Дѣти у нихъ сынъ Игнатъ", "Dzieci u nich Syn Hnat") == []
     assert TW.unsupported("дочь Параскевія", "Córka Paraska") == []
     assert TW.unsupported("Онофрей Ивановъ", "Onufry Iwanow") == []
+    assert TW.unsupported("жена его Мария Григоріева", "Zona iego Marya Hrehorowa") == []
 
 
 def test_invented_surname_has_no_support() -> None:
