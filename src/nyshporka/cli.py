@@ -4721,6 +4721,11 @@ def mcp_gone() -> None:
 
 
 def main() -> None:
+    # HTTPS вірить і сертифікатам системи (антивірус із перевіркою HTTPS) —
+    # лише тут, у точці входу: процес наш, а не чужий імпорт (`core.tls`).
+    from nyshporka.core.tls import use_system_trust
+
+    use_system_trust()
     app()
 
 

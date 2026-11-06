@@ -103,8 +103,11 @@ def _init(ws: Any, sloty: Any = None) -> None:
     """
     global _SLOTY
     from nyshporka import htr_store
+    from nyshporka.core.tls import use_system_trust
     from nyshporka.core.workspace import use
 
+    # Воркер `spawn` не проходить через `cli.main`, а заливає саме він.
+    use_system_trust()
     use(ws)
     _SLOTY = sloty
     # Воркер прогонів не пише, а справи пачки вирішено до її початку.
