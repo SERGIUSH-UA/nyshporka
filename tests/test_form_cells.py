@@ -20,13 +20,28 @@ ROW_YS = [400 + i * 200 for i in range(9)]            # 9 горизонтале
 COL_XS = [150, 700, 1300, 1800, 2250]                 # 5 вертикалей → 4 колонки + поля
 
 
-def fake_form(*, skew: bool = False) -> Image.Image:
+#: Рядки таблиці, у клітинках яких «написано» (зиґзаґ темним), — решта порожні.
+WRITTEN_ROWS = (0, 1, 2, 3)
+
+
+def _scribble(d: ImageDraw.ImageDraw, x0: int, y0: int, x1: int, y1: int) -> None:
+    """«Рукопис» у клітинці: зиґзаґ без довгих прямих — лінією бланка він не стане."""
+    mid, amp = (y0 + y1) // 2, (y1 - y0) // 4
+    pts = [(x, mid + (amp if k % 2 else -amp)) for k, x in enumerate(range(x0 + 30, x1 - 30, 18))]
+    if len(pts) > 1:
+        d.line(pts, fill=30, width=7)
+
+
+def fake_form(*, skew: bool = False, written: tuple[int, ...] = WRITTEN_ROWS) -> Image.Image:
     im = Image.new("L", (W, H), 235)
     d = ImageDraw.Draw(im)
     for y in ROW_YS:
         d.line([(COL_XS[0], y), (COL_XS[-1], y)], fill=40, width=4)
     for x in COL_XS:
         d.line([(x, ROW_YS[0]), (x, ROW_YS[-1])], fill=40, width=4)
+    for r in written:
+        for x0, x1 in pairwise(COL_XS):
+            _scribble(d, x0, ROW_YS[r], x1, ROW_YS[r + 1])
     return im.convert("RGB")
 
 
@@ -138,6 +153,45 @@ def test_empty_and_book_pages_give_no_cells() -> None:
     assert not book.found and book.crops == []
 
 
+def _open_runs_window(ink, length: int, axis: int):
+    """Еталон: відкриття ковзним вікном (так, як `_open_runs` рахувалось до 06.11.2026)."""
+    import numpy as np
+
+    a = np.moveaxis(ink.astype(np.int32), axis, 1)
+    n = a.shape[1]
+    if length <= 1:
+        return ink.copy()
+    if n < length:
+        return np.zeros_like(ink)
+    s = np.concatenate([np.zeros((a.shape[0], 1), np.int32), a.cumsum(1)], axis=1)
+    starts = (s[:, length:] - s[:, :-length]) == length
+    e = np.concatenate([np.zeros((a.shape[0], 1), np.int32),
+                        starts.astype(np.int32).cumsum(1)], axis=1)
+    x = np.arange(n)
+    hi = np.minimum(x, n - length) + 1
+    lo = np.maximum(x - length + 1, 0)
+    return np.moveaxis(((e[:, hi] - e[:, lo]) > 0) & (a > 0), 1, axis)
+
+
+@pytest.mark.parametrize("density", [0.2, 0.6, 0.95])
+def test_open_runs_matches_the_sliding_window(density: float) -> None:
+    """Відкриття через межі відрізків дає ту саму маску, що й ковзне вікно."""
+    import numpy as np
+
+    from nyshporka.htr import form_cells as FC
+
+    rng = np.random.default_rng(17)
+    ink = rng.random((61, 97)) < density
+    ink[:, 0] = ink[:, -1] = True                       # відрізки, що впираються в край
+    ink[0, :] = True
+    for axis in (0, 1):
+        for length in (1, 2, 3, 7, 60, 97, 98):
+            got = FC._open_runs(ink, length, axis)
+            want = _open_runs_window(ink, length, axis)
+            assert got.dtype == bool and got.shape == ink.shape
+            assert np.array_equal(got, want), (axis, length)
+
+
 def test_tiny_image_does_not_crash() -> None:
     from nyshporka.htr import form_cells as FC
 
@@ -196,7 +250,9 @@ def _run_cells(case_dir: Path, base: Path) -> tuple[dict, Path]:
         meta_args=dict(case_dir=case_dir, case_key="ТЕСТ 1-1-1",
                        model="pysar_cyr_v17.pt", engine="parseq", script="cyrillic",
                        device="cpu", base_run=base.name))
-    assert seen == [48]                                    # книжкову сторінку не читали
+    # книжкову сторінку не читали; на бланку — лише записані клітинки (рядки 0–3 і,
+    # може, ряд 4: запас кропа вгору захоплює низ запису над ним), порожні — ні
+    assert len(seen) == 1 and 16 <= seen[0] <= 20, seen
     return meta, out
 
 
@@ -207,7 +263,15 @@ def test_cells_run_layout_and_meta(space: Path) -> None:
     # сторінка з сіткою — файли є; книжкова — жодного файла, а не порожній
     assert (out / "0001.txt").is_file() and HL.has_geometry(out, "0001")
     assert not (out / "0002.txt").exists() and not HL.has_geometry(out, "0002")
-    assert len((out / "0001.txt").read_text(encoding="utf-8").splitlines()) == 48
+    body = (out / "0001.txt").read_text(encoding="utf-8").splitlines()
+    assert len(body) == 48                       # рядок на клітинку, і порожню теж
+    for r in range(8):
+        row = body[r * 6:(r + 1) * 6]            # поле · 4 графи · поле
+        assert row[0] == "" and row[5] == "", (r, row)
+        if r in WRITTEN_ROWS:
+            assert all(row[1:5]), (r, row)
+        elif r > max(WRITTEN_ROWS) + 1:
+            assert not any(row), (r, row)
     geo = HL.load_geometry(out, "0001") or {}
     assert geo["size"] == [W, H] and len(geo["boxes"]) == 48
     disk = json.loads((out / "_htr_meta.json").read_text(encoding="utf-8"))
@@ -238,13 +302,16 @@ def test_cells_voice_is_searchable_and_crop_hits_the_cell(space: Path) -> None:
     names = {r["name"] for r in T.scope_runs("проба")["rows"]}
     assert names == {"проба", "проба-cells"}
 
-    hits = ST.grep("клітинка 007", ["проба-cells"])
+    body = (out / "0001.txt").read_text(encoding="utf-8").splitlines()
+    want = body[7]                                        # рядок 1, графа 1 — записана
+    assert want
+    hits = ST.grep(want, ["проба-cells"])
     assert hits, "голос -cells не знайдено текстовим пошуком"
 
     geo = HL.load_geometry(out, "0001") or {}
     crop = T.crop("проба-cells", "1", 8, with_next=False, pad=0, out=space / "c.png")
     assert not crop.get("error"), crop
-    assert crop["text"] == "клітинка 007"
+    assert crop["text"] == want
     assert crop["box"] == geo["boxes"][7]                 # рядок 8 = восьма клітинка
     with Image.open(space / "c.png") as im:
         assert im.size == (crop["box"][2] - crop["box"][0], crop["box"][3] - crop["box"][1])
@@ -264,6 +331,72 @@ def test_the_passport_field_form_turns_cells_on(tmp_path: Path) -> None:
     assert RUN.form_of_case(tmp_path) == "true"
     # слово людини важить більше за паспорт
     assert RUN._form_choice(tmp_path, False)[0] is False
+
+
+@pytest.mark.parametrize(("passport", "on"), [
+    # акти радянських РАЦС: бланк із полями — клітинки самі
+    ({"title": "Книга реєстрації актів цивільного стану про народження", "fond": "R-2521",
+      "shifra": "ДАІФО R-2521-1-122", "doc_type": "акти цивільного стану",
+      "year_from": 1940}, True),
+    ({"title": "Акти запису громадянського стану с. Городківки за 1921-1924 роки",
+      "fond": "R-6129", "shifra": "ДАВО Р-6129-24-5", "year_from": 1921}, True),
+    ({"title": "Книга реєстрації актів про смерть Нікопольського міського ЗАГСу, 1921–1922",
+      "shifra": "ДАДнО R-6508-15-3", "year_from": 1921}, True),
+    ({"title": "Книга записей актов гражданского состояния", "year_from": 1932}, True),
+    # метрики — ні: сітка є, але графа висока
+    ({"title": "Метрична книга Покровської церкви (народження) с. Лоташеве",
+      "shifra": "ДАЧКО 931-1-39", "year_from": 1864}, False),
+    ({"title": "Метрическая книга записи актов гражданского состояния о рождении",
+      "shifra": "ДАХмО 315-1-6739", "year_from": 1919}, False),
+    ({"title": "Ревизская сказка", "fond": "R-1", "year_from": 1920}, False),
+    # опис схожий, але людина сказала «не бланк»
+    ({"title": "Книга реєстрації актів цивільного стану", "fond": "R-2521", "form": False},
+     False),
+    ({}, False),
+])
+def test_civil_acts_turn_cells_on_by_the_case_description(tmp_path: Path, passport: dict,
+                                                          on: bool) -> None:
+    from nyshporka.htr import run as RUN
+
+    (tmp_path / "_source.json").write_text(json.dumps(passport, ensure_ascii=False),
+                                           encoding="utf-8")
+    got, why = RUN._form_choice(tmp_path, None)
+    assert got is on, why
+    assert RUN.cells_wanted(tmp_path) is on
+    if on:
+        assert why.startswith("автоматично:")
+    # слово людини важить більше за опис
+    assert RUN._form_choice(tmp_path, False) == (False, "")
+    assert RUN._form_choice(tmp_path, True)[0] is True
+
+
+def test_the_passport_of_a_pages_subfolder_is_one_level_up(tmp_path: Path) -> None:
+    """Кадри в `pages/` (так кладе `cases take`) — опис рівнем вище, і він рахується."""
+    from nyshporka.htr import run as RUN
+
+    (tmp_path / "_source.json").write_text(json.dumps(
+        {"title": "Акти запису громадянського стану", "shifra": "ДАВО Р-6129-24-5"},
+        ensure_ascii=False), encoding="utf-8")
+    (tmp_path / "pages").mkdir()
+    assert RUN.cells_wanted(tmp_path / "pages")
+
+
+def test_empty_cells_are_not_given_to_the_engine() -> None:
+    """Порожня клітинка рушію не йде: він не мовчить, а вигадує слово."""
+    from nyshporka.htr import cells_read as CR
+    from nyshporka.htr import form_cells as FC
+
+    blank = FC.find_grid(fake_form(written=()))
+    assert blank.found and len(blank.crops) == 48 and blank.written() == []
+    g = FC.find_grid(fake_form())
+    rows = {g.addr[k][1] for k in g.written()}
+    assert set(WRITTEN_ROWS) <= rows <= set(WRITTEN_ROWS) | {max(WRITTEN_ROWS) + 1}
+    assert all(g.addr[k][2] not in (0, 5) for k in g.written())     # поля бланка порожні
+
+    seen: list[int] = []
+    got = CR.read_page(fake_form(written=()), lambda crops: seen.append(len(crops)) or [])
+    assert got is not None and seen == [] and got[0] == [""] * 48   # рушія не кликали
+    assert len(got[1]["ink"]) == 48
 
 
 def test_the_runner_command_carries_the_flag(tmp_path: Path) -> None:

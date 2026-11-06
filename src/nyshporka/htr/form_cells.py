@@ -97,6 +97,18 @@ SPREAD_GAP = 0.25
 MAX_LINE_PX = 12
 #: Тло, яким заповнюються кути після повороту.
 BG = 235
+#: Край лінії бланка, що лишився поза тонкою маскою: на стільки робочих пікселів
+#: маска ліній розширюється, перш ніж міряти чорнило в клітинці.
+GROW_PX = 2
+#: Порожня клітинка. Запис — це штрих, темніший за околицю щонайменше на
+#: INK_DELTA (лінування зошита, тінь і зерно паперу слабші), і таких пікселів поза
+#: лініями бланка в кропі мусить бути хоч INK_MIN. Нижче рушій не читає, а вигадує:
+#: на 2 236 кропах ДАВО Р-6129-24-5 (06.11.2026) кожен із вибірки нижче 0.01 був
+#: порожній, а таких — чверть клітинок; вище 0.01 трапляються друковані номери граф
+#: і уламки сусіднього рядка. Поріг «темніше на 11», яким шукаються лінії, тут не
+#: годиться: сіра тінь давала йому 0.05–0.08, а цифра «27» — 0.045.
+INK_DELTA = 35
+INK_MIN = 0.01
 
 
 #: Адреса кропа: (сторінка розвороту, рядок таблиці, колонка в рядку).
@@ -125,15 +137,27 @@ class Grid:
     parts: list[Part] = field(default_factory=list)
     #: (номер сторінки в `parts`, рамка у вирівняній сторінці) — звідки різати кроп.
     src: list[tuple[int, Box]] = field(default_factory=list)
+    #: Частка чорнила поза лініями бланка в рамці кожного кропа (паралельно `crops`);
+    #: нижче INK_MIN клітинка порожня й рушію не йде.
+    ink: list[float] = field(default_factory=list)
+
+    def written(self) -> list[int]:
+        """Індекси кропів, у яких щось написано (решта — порожні клітинки)."""
+        if len(self.ink) != len(self.crops):
+            return list(range(len(self.crops)))
+        return [i for i, k in enumerate(self.ink) if k >= INK_MIN]
 
     @property
     def found(self) -> bool:
         return bool(self.crops)
 
-    def images(self, img: Image.Image) -> list[Image.Image]:
-        """Кропи для читання — з вирівняних сторінок, у порядку `crops`."""
-        pages = [_level(img.crop((p.x0, 0, p.x1, img.height)), p.angle) for p in self.parts]
-        return [pages[i].crop(b) for i, b in self.src]
+    def images(self, img: Image.Image, only: list[int] | None = None) -> list[Image.Image]:
+        """Кропи для читання — з вирівняних сторінок, у порядку `crops` (або лише `only`)."""
+        idx = range(len(self.src)) if only is None else only
+        need = {self.src[k][0] for k in idx}
+        pages = {i: _level(img.crop((p.x0, 0, p.x1, img.height)), p.angle)
+                 for i, p in enumerate(self.parts) if i in need}
+        return [pages[self.src[k][0]].crop(self.src[k][1]) for k in idx]
 
 
 def _local_mean(a: np.ndarray, size: int) -> np.ndarray:
@@ -149,22 +173,31 @@ def _local_mean(a: np.ndarray, size: int) -> np.ndarray:
 
 
 def _open_runs(ink: np.ndarray, length: int, axis: int) -> np.ndarray:
-    """Піксель чорнила, що лежить у суцільному відрізку завдовжки ≥ `length` вздовж `axis`."""
-    a = np.moveaxis(ink.astype(np.int32), axis, 1)
-    n = a.shape[1]
+    """Піксель чорнила, що лежить у суцільному відрізку завдовжки ≥ `length` вздовж `axis`.
+
+    Через межі відрізків, а не через ковзне вікно: рядки маски з полем по краях
+    стають одним довгим рядом, `diff` дає початок (+1) і кінець (−1) кожного
+    відрізка, а лишаються лише відрізки ≥ `length`. Це те саме відкриття, що й
+    ковзне вікно двома кумулятивними сумами з вибіркою по всьому полотну, але
+    втричі-вчетверо швидше: пошук сітки йшов 4–5 с на розворот, і понад половину
+    з'їдало саме це (замір 06.11.2026, ДАВО Р-6129-24-5).
+    """
     if length <= 1:
         return ink.copy()
-    if n < length:
+    a = np.moveaxis(ink, axis, 1)
+    rows, n = a.shape
+    if n < length or rows == 0:
         return np.zeros_like(ink)
-    s = np.concatenate([np.zeros((a.shape[0], 1), np.int32), a.cumsum(1)], axis=1)
-    starts = (s[:, length:] - s[:, :-length]) == length          # (rows, n-length+1)
-    e = np.concatenate([np.zeros((a.shape[0], 1), np.int32),
-                        starts.astype(np.int32).cumsum(1)], axis=1)
-    x = np.arange(n)
-    hi = np.minimum(x, n - length) + 1
-    lo = np.maximum(x - length + 1, 0)
-    covered = (e[:, hi] - e[:, lo]) > 0
-    out = covered & (a > 0)
+    p = np.zeros((rows, n + 2), dtype=np.int8)
+    p[:, 1:-1] = a
+    flat = np.diff(p, axis=1).ravel()                # (rows · (n+1)): ±1 на межах
+    starts = np.flatnonzero(flat == 1)
+    ends = np.flatnonzero(flat == -1)
+    keep = (ends - starts) >= length
+    marks = np.zeros(flat.size, dtype=np.int8)
+    marks[starts[keep]] = 1
+    marks[ends[keep]] = -1
+    out = np.cumsum(marks.reshape(rows, n + 1), axis=1, dtype=np.int8)[:, :n] > 0
     moved: np.ndarray = np.moveaxis(out, 1, axis)
     return moved
 
@@ -214,17 +247,26 @@ def _work(img: Image.Image) -> tuple[np.ndarray, float]:
 
 def raw_cells(img: Image.Image) -> tuple[list[Box], int]:
     """Усі клітинки між лініями в координатах кадру + число знайдених горизонталей."""
+    cells, n, _rest = _cells_and_rest(img)
+    return cells, n
+
+
+def _cells_and_rest(img: Image.Image) -> tuple[list[Box], int, tuple[np.ndarray, float] | None]:
+    """`raw_cells` + чорнило поза лініями бланка (робоча маска й масштаб) —
+    з нього `find_grid` міряє, чи є в клітинці хоч щось написане."""
     w0, h0 = img.size
     if w0 < 8 or h0 < 8:
-        return [], 0
+        return [], 0, None
     small, s = _work(img)
     sh, sw = small.shape
-    ink = _ink(small)
+    mean = _local_mean(small, LOCAL_WINDOW)
+    ink = small < mean - LOCAL_DELTA                     # те саме, що `_ink(small)`
     hm = _hlines(ink)
     ys = _positions(hm, 1, sw * H_FILL)
     if len(ys) < 2:
-        return [], len(ys)
+        return [], len(ys), None
     vm = _thin(_open_runs(ink, max(2, int(sh * V_RUN)), axis=0), 0)
+    rest = ((small < mean - INK_DELTA) & ~_grow(hm | vm), s)
     out: list[Box] = []
     for y0, y1 in pairwise(ys):
         if y1 - y0 < MIN_ROW_PX:
@@ -235,7 +277,34 @@ def raw_cells(img: Image.Image) -> tuple[list[Box], int]:
             if x1 - x0 < MIN_CELL_PX:
                 continue
             out.append((round(x0 / s), round(y0 / s), round(x1 / s), round(y1 / s)))
-    return out, len(ys)
+    return out, len(ys), rest
+
+
+def _grow(mask: np.ndarray, r: int = GROW_PX) -> np.ndarray:
+    """Маска, розширена на `r` робочих пікселів у кожен бік (квадратом):
+    край лінії бланка, що лишився поза тонкою маскою, — теж лінія, а не запис."""
+    # квадрат розкладається на дві смуги: спершу вздовж рядків, потім уздовж колонок
+    row = mask.copy()
+    for d in range(1, r + 1):
+        row[:, d:] |= mask[:, :-d]
+        row[:, :-d] |= mask[:, d:]
+    out = row.copy()
+    for d in range(1, r + 1):
+        out[d:, :] |= row[:-d, :]
+        out[:-d, :] |= row[d:, :]
+    return out
+
+
+def ink_share(rest: tuple[np.ndarray, float] | None, box: Box) -> float:
+    """Частка чорнила поза лініями бланка в рамці (координати вирівняної сторінки)."""
+    if rest is None:
+        return 1.0
+    m, s = rest
+    x0, y0 = max(0, int(box[0] * s)), max(0, int(box[1] * s))
+    x1, y1 = min(m.shape[1], math.ceil(box[2] * s)), min(m.shape[0], math.ceil(box[3] * s))
+    if x1 <= x0 or y1 <= y0:
+        return 0.0
+    return float(m[y0:y1, x0:x1].mean())
 
 
 def crop_boxes(cells: list[Box], size: tuple[int, int]) -> list[Box]:
@@ -369,12 +438,13 @@ def find_grid(img: Image.Image) -> Grid:
     crops: list[Box] = []
     addr: list[Addr] = []
     src: list[tuple[int, Box]] = []
+    ink: list[float] = []
     n_lines = 0
     for x0, x1 in split_spread(img):
         page = img.crop((x0, 0, x1, img.height)) if (x0, x1) != (0, img.width) else img
         angle = page_angle(page)
         level = _level(page, angle)
-        cells, n = raw_cells(level)
+        cells, n, rest = _cells_and_rest(level)
         pi = len(parts)
         parts.append(Part(x0, x1, angle))
         n_lines += n
@@ -396,9 +466,11 @@ def find_grid(img: Image.Image) -> Grid:
             crops.append(_shift(_unlevel(b, angle, level.size), x0))
             addr.append((pi, row_of[r], col))
             src.append((pi, b))
+            ink.append(round(ink_share(rest, b), 4))
     if n_lines < MIN_H_LINES or len(crops) < MIN_CELLS:
         return Grid(cells=cells_all, h_lines=n_lines, parts=parts)
-    return Grid(cells=cells_all, crops=crops, h_lines=n_lines, addr=addr, parts=parts, src=src)
+    return Grid(cells=cells_all, crops=crops, h_lines=n_lines, addr=addr, parts=parts, src=src,
+                ink=ink)
 
 
 def _shift(box: Box, dx: int) -> Box:

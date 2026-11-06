@@ -4698,13 +4698,39 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
             return CR._decode(_r, engine, crops, device, args.batch, this)
         print(f"[htr-run] 📋 бланк поклітинно → {cells_dir.name}", flush=True)
 
+    def cells_prepare(src: Path, orient: int):
+        """Процесорна половина клітинок: кадр → сітка → записані кропи (або `None`)."""
+        with Image.open(src) as raw:
+            im = rotated(raw.convert("RGB"), orient)
+        return CR.prepare_page(im)
+
+    # ⏩ Сітку, чорнило й кропи рахує фоновий потік, поки карта читає сторінку:
+    # послідовно після сторінки це коштувало 4–5 с процесора на розворот, і карта
+    # стояла (ДАВО Р-6129-24-5, 06.11.2026). Після сторінки лишається прочитати
+    # записані клітинки. Кут береться припущенням (`--force-orient` або 0); якщо
+    # сторінку повернуто інакше, підготовка переробляється вже з її кутом.
+    cells_ahead = None
+    cells_pending: dict[str, tuple[int, Any]] = {}
+    if cells_dir is not None:
+        from concurrent.futures import ThreadPoolExecutor
+        cells_ahead = ThreadPoolExecutor(max_workers=1, thread_name_prefix="cells")
+
+    def cells_start(src: Path) -> None:
+        if cells_ahead is None:
+            return
+        guess = max(0, int(args.force_orient))
+        # підготовка сторінки, що впала до клітинок, лишилась би в пам'яті до кінця справи
+        cells_pending.clear()
+        cells_pending[src.stem] = (guess, cells_ahead.submit(cells_prepare, src, guess))
+
     def cells_pass(src: Path, orient: int) -> int:
         """Клітинки сторінки в голос `-cells`. Збій клітинок сторінки не валить:
         він лягає позначкою `.cellsfail` і в мету голосу."""
+        guess, fut = cells_pending.pop(src.stem, (None, None))
         try:
-            with Image.open(src) as raw:
-                im = rotated(raw.convert("RGB"), orient)
-            return CR.write_page(cells_dir, src.stem, CR.read_page(im, cells_decode),
+            prep = fut.result() if fut is not None and guess == orient else \
+                cells_prepare(src, orient)
+            return CR.write_page(cells_dir, src.stem, CR.finish_page(prep, cells_decode),
                                  orient=orient)
         except Exception as exc:
             CR.write_failed(cells_dir, src.stem, f"{type(exc).__name__}: {exc}")
@@ -4927,6 +4953,7 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
         # попередньої, а вони збіглися б за довжиною з її рядками лише випадково —
         # тобто помилка була б рідкою й тихою, найгіршого сорту
         ocr_page_parseq.boxes = []
+        cells_start(src)
         geom_watch.start()
         STAGES.clear()
         try:
@@ -5327,6 +5354,10 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
             "pages": pages_meta, "done": len(pages_meta), "failed": []},
             ensure_ascii=False, indent=1))
         print(f"[htr-run] побічний вихід {d.name}: {len(pages_meta)} стор.", flush=True)
+    if cells_ahead is not None:
+        # підготовка сторінок, що впали чи пішли в карантин, уже нікому не потрібна
+        cells_ahead.shutdown(wait=True, cancel_futures=True)
+        cells_pending.clear()
     if cells_dir is not None:
         cm = CR.finish(cells_dir, names={p.stem: p.name for p in pages_all},
                        started=meta.get("started") or "", case_dir=case_dir,

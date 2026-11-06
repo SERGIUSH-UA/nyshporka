@@ -132,21 +132,49 @@ NOGRID = ".nogrid"
 FAILED = ".cellsfail"
 
 
-def read_page(im: Image.Image, decode: Any) -> tuple[list[str], dict[str, Any]] | None:
-    """Сторінка (уже повернута на `orient`) → тексти кропів і геометрія.
-    `None` — сітки немає."""
+#: Підготовлена сторінка: (число кропів, індекси записаних, їхні зображення, геометрія).
+Prepared = tuple[int, list[int], list[Image.Image], dict[str, Any]]
+
+
+def prepare_page(im: Image.Image) -> Prepared | None:
+    """Процесорна половина: сітка, записані клітинки, їхні кропи. `None` — сітки немає.
+
+    Окремо від читання, щоб раннер рахував її поруч із картою, поки та читає
+    сторінку, а не після неї (`runner.CellsAhead`)."""
     grid = FC.find_grid(im)
     if not grid.found:
         return None
-    texts = [unicodedata.normalize("NFC", (t or "").replace("\n", " ").strip())
-             for t in decode(grid.images(im))]
-    if len(texts) != len(grid.crops):
-        raise RuntimeError(f"рушій віддав {len(texts)} текстів на {len(grid.crops)} клітинок")
+    idx = grid.written()
     geo = {"size": [im.width, im.height],
            "boxes": [list(b) for b in grid.crops],
            "cells": [list(a) for a in grid.addr],
-           "parts": [[p.x0, p.x1, p.angle] for p in grid.parts]}
+           "parts": [[p.x0, p.x1, p.angle] for p in grid.parts],
+           "ink": list(grid.ink)}
+    return len(grid.crops), idx, grid.images(im, idx), geo
+
+
+def finish_page(prep: Prepared | None, decode: Any) -> tuple[list[str], dict[str, Any]] | None:
+    """Картова половина: прочитати записані клітинки; порожні лишаються порожнім рядком.
+
+    🔴 Порожня клітинка рушію не йде: він не вміє мовчати й на чистому папері
+    вигадує слово (на розвороті книги шлюбів — сотня «слів» на 1–3 літери й
+    довші вигадки, які потім знаходить нечіткий пошук)."""
+    if prep is None:
+        return None
+    n, idx, crops, geo = prep
+    got = list(decode(crops)) if crops else []
+    if len(got) != len(crops):
+        raise RuntimeError(f"рушій віддав {len(got)} текстів на {len(crops)} клітинок")
+    texts = [""] * n
+    for k, t in zip(idx, got, strict=True):
+        texts[k] = unicodedata.normalize("NFC", (t or "").replace("\n", " ").strip())
     return texts, geo
+
+
+def read_page(im: Image.Image, decode: Any) -> tuple[list[str], dict[str, Any]] | None:
+    """Сторінка (уже повернута на `orient`) → тексти кропів і геометрія.
+    `None` — сітки немає."""
+    return finish_page(prepare_page(im), decode)
 
 
 def _write(path: Path, text: str) -> None:

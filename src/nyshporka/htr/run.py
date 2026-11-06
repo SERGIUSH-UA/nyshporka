@@ -17,12 +17,12 @@
 from __future__ import annotations
 
 import contextlib
-import json
 import os
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from nyshporka.htr.pick import ScriptGuess
 
@@ -698,24 +698,90 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
                 form_cells=form_on, form_why=form_why)
 
 
-def form_of_case(case_dir: Path) -> str:
-    """Поле `form` паспорта справи: порожньо — не бланк; `true` чи ім'я шаблону."""
+def _passport(case_dir: Path) -> dict[str, Any]:
+    """Опис справи (`_source.json`; для теки `pages/` — рівнем вище) або порожньо."""
     try:
-        src = json.loads((case_dir / "_source.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return ""
-    got = src.get("form") if isinstance(src, dict) else None
+        from nyshporka.cases.register import read_sidecar
+
+        got = read_sidecar(Path(case_dir))
+    except Exception:
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
+def form_of_case(case_dir: Path) -> str:
+    """Поле `form` паспорта справи: порожньо — не бланк; `true` чи ім'я шаблону;
+    `false` — бланка тут немає, навіть якщо опис схожий на акти (`civil_acts_why`)."""
+    got = _passport(case_dir).get("form")
     if got is True:
         return "true"
+    if got is False:
+        return "false"
     return str(got).strip() if isinstance(got, str) else ""
 
 
+#: Акти цивільного стану — запис про подію на окремому бланку з полями (ЗАГС,
+#: РАГС, РАЦС). Слова з назви чи типу справи, як їх пишуть описи фондів.
+_CIVIL_ACTS = re.compile(
+    r"(цивільн|громадянськ|гражданск)\w*\s+стан|\b[зр]агс|\bрацс|\bакт\w*\s+запис|"
+    r"\bзапис\w*\s+акт", re.IGNORECASE)
+#: Радянський фонд: шифра з «Р-»/«R-» (українські архіви так позначають фонди після 1917).
+_SOVIET_FOND = re.compile(r"(^|[\s/.-])[RР]-?\d", re.IGNORECASE)
+
+
+def civil_acts_why(src: dict[str, Any]) -> str:
+    """Чому справа — книга радянських актів цивільного стану (порожньо — ні).
+
+    На таких книгах (бланк акта з полями, заповнений від руки) книжкова
+    сегментація губить більшість рукописних значень, а клітинки їх підбирають:
+    ДАІФО Р-2521 (1940-ві, замір 26.10.2026) — 61 % слів звичайним читанням,
+    67 % клітинками, 85 % обома голосами разом. Тому для них голос клітинок
+    вмикається сам, і людині не треба знати, що такий режим є.
+
+    🔴 Лише за описом справи, не за виглядом сторінки. Метрична книга XIX ст. —
+    теж друкована таблиця, і сітка на ній знаходиться на кожній сторінці (замір
+    06.11.2026, п'ять справ ДАЧО, ЦДІАЛ, ДАВО, ДАІФО: 10–170 клітинок), але графа
+    там висока, на кілька рядків руки, і клітинки читають її гірше за звичайну
+    сегментацію (галицька метрика: 38 % проти 81 %). Жодна ознака самої сітки —
+    висота клітинки, число граф у рядку, довжина прочитаних рядків — актів від
+    метрик не відділяє: на 1 700 сторінках актів і метрик хвости перекривались.
+    """
+    text = " ".join(str(src.get(k) or "") for k in ("title", "doc_type", "title_uk", "title_ru"))
+    if not _CIVIL_ACTS.search(text):
+        return ""
+    where = " ".join(str(src.get(k) or "") for k in ("fond", "shifra", "case_key"))
+    soviet = bool(_SOVIET_FOND.search(where))
+    try:
+        year = int(src.get("year_from") or 0)
+    except (TypeError, ValueError):
+        year = 0
+    if not soviet and year < 1919:
+        return ""
+    # «Метрическая книга записи актов гражданского состояния» 1919–1920 — ще книга
+    # церкви з графами, а не бланк акта
+    if "метрич" in text.lower() and not soviet:
+        return ""
+    label = str(src.get("shifra") or src.get("fond") or year)
+    return f"акти цивільного стану ({label})"
+
+
 def _form_choice(case: Path, asked: bool | None) -> tuple[bool, str]:
-    """(читати клітинки, чому) — слово людини або `form` у паспорті справи."""
+    """(читати клітинки, чому) — слово людини, `form` у паспорті справи або сам
+    опис справи (`civil_acts_why`)."""
     if asked is not None:
         return asked, "слово людини" if asked else ""
     form = form_of_case(case)
-    return (True, f"паспорт справи: form={form}") if form else (False, "")
+    if form == "false":
+        return False, ""
+    if form:
+        return True, f"паспорт справи: form={form}"
+    why = civil_acts_why(_passport(case))
+    return (True, f"автоматично: {why}") if why else (False, "")
+
+
+def cells_wanted(case: Path) -> bool:
+    """Чи читати клітинки цієї справи без слова людини (план і хмарний захід)."""
+    return _form_choice(case, None)[0]
 
 
 def shard_env(workers: int, *, cores: int = 0) -> dict[str, str]:

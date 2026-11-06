@@ -1348,7 +1348,7 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
 
         # Ручки оренди наглядач читає з `-p`; людське `-p …` того самого ключа
         # перемагає (наші йдуть лише туди, де людина нічого не задала).
-        from nyshporka.htr.run import form_of_case
+        from nyshporka.htr.run import cells_wanted
 
         given = {p.split("=", 1)[0].strip() for p in params}
         for knob, setting in (("datacenter_only", "true" if datacenter_only else ""),
@@ -1358,11 +1358,12 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
                               ("accept_slow_delivery",
                                "true" if accept_slow_delivery else ""),
                               ("seg_height", str(int(seg_height)) if seg_height else ""),
-                              # 📋 бланк поклітинно: слово людини або паспорт хоч
-                              # однієї справи черги (`form` у `_source.json`); на
-                              # сторінці без сітки раннер лише лишає позначку
+                              # 📋 бланк поклітинно: слово людини, `form` у паспорті
+                              # або опис справи (акти цивільного стану — сам,
+                              # `htr.run.civil_acts_why`) хоч однієї справи черги;
+                              # на сторінці без сітки раннер лише лишає позначку
                               ("form_cells", "1" if form_cells or any(
-                                  form_of_case(Path(leg.source)) for leg in convoy.legs)
+                                  cells_wanted(Path(leg.source)) for leg in convoy.legs)
                                else "")):
             if setting and knob not in given:
                 params = (*params, f"{knob}={setting}")

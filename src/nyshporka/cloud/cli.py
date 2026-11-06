@@ -1033,7 +1033,8 @@ def cmd_go(
     form_cells: bool = typer.Option(
         False, "--form-cells",
         help="бланк поклітинно: ще голос `<прогін>-cells` (див. `nysh read --form-cells`); "
-             "без прапорця — як каже паспорт справи (поле `form`)"),
+             "без прапорця — як каже паспорт справи (поле `form`), а акти цивільного стану "
+             "(ЗАГС, РАГС, РАЦС) — самі, за описом справи"),
     case_key: str = typer.Option("", "--case-key", help="шифра справи для мети прогону"),
     transport: str = typer.Option(
         "auto", "--transport",
