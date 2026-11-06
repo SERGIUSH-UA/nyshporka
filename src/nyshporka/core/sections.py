@@ -488,6 +488,7 @@ OP_SCREEN: dict[str, str] = {
     "train.queue": "label",
     "train.line": "label",
     "train.page": "label",
+    "train.pages": "label",
     "train.save": "label",
     "train.stats": "label",
     "train.suggest": "label",

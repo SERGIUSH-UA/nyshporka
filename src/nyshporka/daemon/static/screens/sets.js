@@ -263,7 +263,8 @@ function paintSets(env) {
       <td>${mergeCell(s)}</td>
       <td>${esc(voiceNames(s).join(', ') || '—')}</td>
       <td class="lv-nw">${esc(s.touched ? dayOf(s.touched, LANG) : '—')}</td>
-      <td class="lv-nw"><button data-act="sets.open" data-arg="${esc(s.name)}">${t('sets.open')}</button></td>`,
+      <td class="lv-nw sets-acts">${s.merge ? `<button data-act="sets.open" data-arg="${esc(s.name)}" data-scen="merge">${t('sets.open.merge')}</button>` : ''}
+        <button data-act="sets.open" data-arg="${esc(s.name)}" data-scen="new">${t('sets.open.new')}</button></td>`,
   });
   return undefined;
 }
@@ -365,7 +366,7 @@ Object.assign(ACTIONS, {
 
   'sets.open': (_ev, elm) => {
     rememberLast(elm.dataset.arg);
-    return goto('label', { set: elm.dataset.arg });
+    return goto('label', { set: elm.dataset.arg, scen: elm.dataset.scen || 'new' });
   },
 
   'sets.sort': (_ev, elm) => {

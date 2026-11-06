@@ -35,80 +35,223 @@ const PHONE_H = 110;
 /** Стан екрана: живе між входами, бо набір і режим людина обирає раз. */
 const LB = {
   set: '', pack: '', packs: [], mode: 'spread', page: '', blank: false, minChars: 15, fresh: true,
+  scen: '', mergedOnly: false, limit: 400, pages: [], q: null, session: 0,
   queue: [], i: -1, srcs: [], ids: [],
   cache: new Map(), zoom: 0, panel: false, panelZoom: 1,
   t0: 0, sets: [],
 };
 
+/**
+ * Сценарії замість режимів-шифрів. Кожен — готовий набір параметрів черги; точні
+ * значення видно й міняються під «Точні параметри».
+ *  - `merge` — перевірка злиття: лише рядки, які арбітри вже звели (їх міряє
+ *    `nysh train stats`), врозкид з різних сторінок, невелика пачка;
+ *  - `new` — те, чого ще ніхто не зводив, з найкорисніших сторінок;
+ *  - `page` — одна сторінка підряд, у порядку аркуша.
+ */
+const SCEN = {
+  merge: { mode: 'spread', mergedOnly: true, fresh: false, limit: 25 },
+  new: { mode: 'useful', mergedOnly: false, fresh: true, limit: 400 },
+  page: { mode: 'page', mergedOnly: false, fresh: false, limit: 400 },
+};
+
 SCREENS.label = async () => {
   const gen = curGen();
   const seed = ST.label || {};
-  if (seed.set) LB.set = seed.set;
+  if (seed.set) { LB.set = seed.set; LB.pack = ''; }
   ST.label = null;
   setView(`
     <p class="muted">${t('label.why')}</p>
-    <form class="row lb-pick" data-act="label.start">
-      <select name="set" id="lb-set"></select>
-      <select name="mode" id="lb-mode">${MODES.map((m) =>
-    `<option value="${m}"${m === LB.mode ? ' selected' : ''}>${t(`label.mode.${m}`)}</option>`).join('')}</select>
-      <input name="page" id="lb-pagein" placeholder="${t('label.page')}" value="${esc(LB.page)}">
-      <label class="lbl-mini" id="lb-blank"><input type="checkbox" name="blank"${LB.blank ? ' checked' : ''}> ${t('label.blank')}</label>
-      <label class="lbl-mini">${t('label.minchars')} <input type="number" name="minchars" min="0" max="200"
-        inputmode="numeric" style="width:4.5em" value="${LB.minChars}"></label>
-      <label class="lbl-mini" id="lb-fresh"><input type="checkbox" name="fresh"${LB.fresh ? ' checked' : ''}> ${t('label.fresh')}</label>
-      <button type="submit">${t('label.start')}</button>
+    <form class="lb-pick" id="lb-ctl" data-act="label.start">
+      <div class="row">
+        <label class="lbl-mini">${t('label.set')}
+          <select name="set" id="lb-set" data-act="label.pick"></select></label>
+      </div>
+      <div class="lb-scen" id="lb-scen">
+        ${['merge', 'new', 'page'].map((k) => `<button type="button" class="lb-sc" data-act="label.scen" data-arg="${k}"
+          id="lb-sc-${k}"><b>${t(`label.scen.${k}`)}</b><span class="muted">${t(`label.scen.${k}.hint`)}</span></button>`).join('')}
+        <label class="lbl-mini lb-pgpick" id="lb-pgwrap">${t('label.page')}
+          <select name="pg" id="lb-pg" data-act="label.pg"></select></label>
+      </div>
+      <details class="lb-more" id="lb-more">
+        <summary>${t('label.more')}</summary>
+        <div class="row">
+          <label class="lbl-mini">${t('label.mode')}
+            <select name="mode" id="lb-mode">${MODES.map((m) =>
+    `<option value="${m}"${m === LB.mode ? ' selected' : ''}>${t(`label.mode.${m}`)}</option>`).join('')}</select></label>
+          <label class="lbl-mini" id="lb-blank"><input type="checkbox" name="blank"${LB.blank ? ' checked' : ''}> ${t('label.blank')}</label>
+          <label class="lbl-mini" id="lb-fresh"><input type="checkbox" name="fresh"${LB.fresh ? ' checked' : ''}> ${t('label.fresh')}</label>
+          <label class="lbl-mini" id="lb-mo"><input type="checkbox" name="mo"${LB.mergedOnly ? ' checked' : ''}> ${t('label.merged_only')}</label>
+          <label class="lbl-mini">${t('label.minchars')} <input type="number" name="minchars" min="0" max="200"
+            inputmode="numeric" style="width:4.5em" value="${LB.minChars}"></label>
+          <label class="lbl-mini">${t('label.limit')} <input type="number" name="limit" min="1" max="2000"
+            inputmode="numeric" style="width:5.5em" value="${LB.limit}"></label>
+          <button type="submit">${t('label.start')}</button>
+        </div>
+      </details>
     </form>
+    <div id="lb-bar" class="lbq-bar" hidden></div>
     <div id="lb-stats" class="muted"></div>
     <div id="lb-work"></div>`);
-  // 🔴 Пакети розмітки — людські назви черг. Коли вони є, у виборі лише вони:
-  // сотня наборів зі шифрами (голд-сет, probe) людині, що розмічає, не потрібна.
-  const penv = await callOp('train.packs', {});
+  // 🔴 Пакети розмітки — людські назви черг, вони першими у виборі; поруч — усі
+  // набори, свіжі вгорі. Перемикатись можна завжди: і з меню, і з кнопки «Розмітити».
+  const [penv, env] = await Promise.all([callOp('train.packs', {}), callOp('train.sets', { all: false })]);
   if (!alive(gen)) return;
   LB.packs = (penv.ok && penv.data.packs) || [];
-  if (LB.packs.length && !seed.set) {
-    const sel = el('lb-set');
-    if (!LB.pack || !LB.packs.some((p) => p.name === LB.pack)) LB.pack = LB.packs[0].name;
-    sel.innerHTML = LB.packs.map((p) =>
-      `<option value="pack:${esc(p.name)}"${p.name === LB.pack ? ' selected' : ''}>${esc(p.name)}</option>`).join('');
-    for (const id of ['lb-mode', 'lb-pagein', 'lb-blank', 'lb-fresh']) {
-      const node = el(id);
-      if (node) { node.hidden = true; node.style.display = 'none'; }
-    }
-    LB.set = '';
-    return;
-  }
-  LB.pack = '';
-  const env = await callOp('train.sets', { all: false });
-  if (!alive(gen)) return;
   if (!env.ok) { boxError('lb-work', env); return; }
-  LB.sets = env.data.sets || [];
-  const sel = el('lb-set');
-  sel.innerHTML = LB.sets.map((s) =>
-    `<option value="${esc(s.name)}"${s.name === LB.set ? ' selected' : ''}>${esc(s.name)}</option>`).join('');
-  if (!LB.sets.length) {
+  LB.sets = [...(env.data.sets || [])].sort((a, b) => Number(b.touched || 0) - Number(a.touched || 0));
+  if (!LB.sets.length && !LB.packs.length) {
     el('lb-work').innerHTML = emptyMini('kolba', t('sets.none'));
     return;
   }
-  if (!LB.set) LB.set = LB.sets[0].name;
-  // Посів з екрана наборів — одразу в роботу, без зайвого кліку.
-  if (seed.set) await ACTIONS['label.start']({ preventDefault() {}, target: el('view').querySelector('form') });
+  if (LB.pack && !LB.packs.some((p) => p.name === LB.pack)) LB.pack = '';
+  if (LB.set && !LB.sets.some((s) => s.name === LB.set)) LB.set = '';
+  if (!LB.pack && !LB.set) {
+    if (LB.packs.length) LB.pack = LB.packs[0].name; else LB.set = LB.sets[0].name;
+  }
+  fillSetSelect();
+  await refreshPages();
+  if (!alive(gen)) return;
+  // Посів з екрана наборів — одразу в роботу: який сценарій, там і сказано.
+  if (seed.set) await runScenario(SCEN[seed.scen] ? seed.scen : 'new');
 };
+
+/** Вибір набору: пакети першими, далі набори. */
+function fillSetSelect() {
+  const sel = el('lb-set');
+  if (!sel) return;
+  const packs = LB.packs.length ? `<optgroup label="${esc(t('label.group.packs'))}">${LB.packs.map((p) =>
+    `<option value="pack:${esc(p.name)}"${p.name === LB.pack ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</optgroup>` : '';
+  const sets = `<optgroup label="${esc(t('label.group.sets'))}">${LB.sets.map((s) =>
+    `<option value="${esc(s.name)}"${!LB.pack && s.name === LB.set ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</optgroup>`;
+  sel.innerHTML = packs + sets;
+}
+
+/** Набір, обраний у списку зараз (ще не обов'язково запущений). */
+function picked() {
+  const v = String((el('lb-set') || {}).value || '');
+  return v.startsWith('pack:') ? { pack: v.slice(5), set: '' } : { pack: '', set: v };
+}
+
+/** Сторінки набору зі станом — вибір сторінки списком, а не вільним полем. */
+async function refreshPages() {
+  const { pack, set } = picked();
+  LB.pack = pack; LB.set = set;
+  const wrap = el('lb-pgwrap');
+  LB.pages = [];
+  if (!set) {
+    if (wrap) wrap.hidden = true;
+    paintScenButtons();
+    return;
+  }
+  if (wrap) wrap.hidden = false;
+  const env = await callOp('train.pages', { name: set });
+  if (picked().set !== set) return;
+  LB.pages = (env.ok && env.data.pages) || [];
+  const sel = el('lb-pg');
+  if (sel) {
+    // Типово — перша сторінка, де ще лишились нерозмічені рядки.
+    const open = LB.pages.find((p) => p.n_ok < p.n_lines) || LB.pages[0];
+    const want = LB.pages.some((p) => p.page === LB.page) ? LB.page : (open ? open.page : '');
+    sel.innerHTML = LB.pages.map((p) => `<option value="${esc(p.page)}"${p.page === want ? ' selected' : ''}>${esc(pageLabel(p))}</option>`).join('');
+  }
+  paintScenButtons();
+}
+
+/** «0113 · зведено 12 з 12 · ручних 3»: де злиття є, а де ні — видно в списку. */
+function pageLabel(p) {
+  const merged = p.n_merged ? t('label.pg.merged').replace('{m}', p.n_merged).replace('{n}', p.n_lines) : t('label.pg.nomerge');
+  return `${p.page} · ${merged} · ${t('label.pg.hand').replace('{k}', p.n_marked)}`;
+}
+
+/** Сценарій недоступний, коли для нього нема чого брати (злиття, сторінки, пакет). */
+function paintScenButtons() {
+  const { pack, set } = picked();
+  const st = LB.sets.find((s) => s.name === set);
+  const off = {
+    merge: !pack && !(st && st.merge),
+    new: false,
+    page: !set || !LB.pages.length,
+  };
+  for (const k of Object.keys(SCEN)) {
+    const b = el(`lb-sc-${k}`);
+    if (b) { b.disabled = !!off[k]; b.title = off[k] ? t(`label.scen.${k}.off`) : ''; }
+  }
+}
+
+/** Запустити сценарій: параметри лягають і в стан, і в поля «Точних параметрів». */
+async function runScenario(key) {
+  const sc = SCEN[key];
+  if (!sc) return;
+  const { pack, set } = picked();
+  LB.pack = pack; LB.set = set; LB.scen = key;
+  LB.mode = sc.mode; LB.mergedOnly = sc.mergedOnly; LB.fresh = sc.fresh; LB.limit = sc.limit;
+  LB.blank = false;
+  LB.page = key === 'page' ? String((el('lb-pg') || {}).value || '') : '';
+  syncMoreFields();
+  await startQueue();
+}
+
+function syncMoreFields() {
+  const f = el('lb-ctl');
+  if (!f || !f.elements) return;
+  const set = (n, v) => { if (f.elements[n]) f.elements[n].value = v; };
+  const chk = (n, v) => { if (f.elements[n]) f.elements[n].checked = !!v; };
+  set('mode', LB.mode); set('minchars', LB.minChars); set('limit', LB.limit);
+  chk('blank', LB.blank); chk('fresh', LB.fresh); chk('mo', LB.mergedOnly);
+}
+
+async function startQueue() {
+  el('lb-work').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
+  if (await loadQueue()) {
+    const f = el('lb-ctl');
+    if (f) f.hidden = true;        // керування згортається в рядок стану, «змінити» повертає
+    await advance(1);
+  }
+}
+
+/** Липкий рядок стану: що за черга зараз, скільки в ній і з чого вона. */
+function paintBar() {
+  const bar = el('lb-bar');
+  if (!bar) return;
+  if (!LB.q) { bar.hidden = true; return; }
+  const q = LB.q;
+  const modeName = LB.scen ? t(`label.scen.${LB.scen}`) : t(`label.mode.${LB.mode}`);
+  const what = LB.pack ? `${t('label.bar.pack')}: ${LB.pack}` : `${t('label.bar.set')}: ${LB.set}`;
+  const pg = LB.mode === 'page' && LB.page ? LB.page : t('label.bar.pages');
+  // Рахуємо те, що людина справді отримає (черга обрізана стелею), а не все, що є на сервері.
+  const n = LB.queue.length;
+  const merged = LB.queue.filter((it) => it.conf).length;
+  const plain = n - merged;
+  const avail = Number(q.n_queue || 0) > n ? ` · ${t('label.bar.avail').replace('{n}', q.n_queue)}` : '';
+  bar.hidden = false;
+  bar.innerHTML = `<span class="lbq-what"><b>${esc(what)}</b></span>
+    <span>${esc(modeName)}</span>
+    <span class="muted">${esc(t('label.bar.page'))}: ${esc(pg)}</span>
+    <span>${esc(t('label.bar.queue').replace('{n}', n))}
+      <span class="muted">(${esc(t('label.bar.merged').replace('{a}', merged))}, ${esc(t('label.bar.plain').replace('{b}', plain))}${esc(avail)})</span></span>
+    <span class="muted">${esc(t('label.done'))}: ${Number(q.n_done || 0) + LB.session}</span>
+    <button type="button" class="ghost ctl-sm" data-act="label.change">${esc(t('label.bar.change'))}</button>`;
+}
 
 // ── черга ────────────────────────────────────────────────────────────────────
 async function loadQueue() {
+  const base = { mode: LB.mode, min_chars: LB.minChars, fresh: LB.fresh, merged_only: LB.mergedOnly,
+    include_blank: LB.blank, limit: LB.limit };
   const env = LB.pack
-    ? await callOp('train.queue', { pack: LB.pack, mode: 'spread', min_chars: LB.minChars, fresh: true })
-    : await callOp('train.queue', { name: LB.set, mode: LB.mode, page: LB.page,
-      include_blank: LB.blank, min_chars: LB.minChars, fresh: LB.fresh });
+    ? await callOp('train.queue', { ...base, pack: LB.pack })
+    : await callOp('train.queue', { ...base, name: LB.set, page: LB.page });
   if (!env.ok) { boxError('lb-work', env); return false; }
   const d = env.data;
   LB.queue = d.items || [];
   LB.srcs = d.draft_srcs || [];
   LB.ids = d.draft_ids || [];
   LB.i = -1;
+  LB.q = { n_queue: d.n_queue, n_merged: d.n_merged, n_done: d.n_done, n_total: d.n_total };
+  LB.session = 0;
   LB.cache.clear();
-  el('lb-stats').innerHTML = `${t('label.queue')}: <b>${d.n_queue}</b> · `
-    + `${t('label.done')}: <b>${d.n_done}</b> ${t('label.of')} ${d.n_total}`
+  paintBar();
+  el('lb-stats').innerHTML = `${t('label.done')}: <b>${d.n_done}</b> ${t('label.of')} ${d.n_total}`
     + renderWarnings(env);
   return true;
 }
@@ -195,10 +338,18 @@ async function showLine() {
       <span class="mono muted">${String(c.idx).padStart(3, '0')}</span>
       ${c.cur ? '<b>·</b>' : esc(c.text || c.draft || '')}
       ${c.status ? `<span class="muted">(${esc(c.status)})</span>` : ''}</div>`).join('');
+  // Порожнє «Злиття:» — не помилка, а сторінка, яку арбітри ще не зводили; у полі тоді
+  // чернетка першого голосу, і людина має це бачити, а не гадати.
+  const mi = LB.ids.indexOf('merge');
+  const noMerge = mi >= 0 && !d.drafts[mi];
+  const used = noMerge ? d.drafts.findIndex((x) => x) : -1;
+  const usedName = used >= 0 ? (LB.srcs[used] || LB.ids[used] || '') : '';
   const voices = d.drafts.map((v, k) => {
     const others = d.drafts.filter((_, j) => j !== k);
+    const why = noMerge && k === mi
+      ? ` <span class="lb-nomerge">${esc(!saved && usedName ? t('label.nomerge.draft').replace('{v}', usedName) : t('label.nomerge'))}</span>` : '';
     return `<div class="lb-voice"><span class="muted">${esc(LB.srcs[k] || LB.ids[k] || k)}:</span>
-      <span class="lb-vt" data-act="label.use" data-arg="${k}">${wordsHtml(v, others)}</span></div>`;
+      <span class="lb-vt" data-act="label.use" data-arg="${k}">${wordsHtml(v, others)}</span>${why}</div>`;
   }).join('');
   const kind = saved ? saved.kind || 'hand' : 'hand';
   work.innerHTML = `
@@ -360,6 +511,8 @@ function saveCurrent(status) {
   const text = status === 'skip' ? '' : inp.value;
   const draft = inp.dataset.draft || '';
   LB.cache.delete(key(it));
+  LB.session += 1;
+  paintBar();
   callOp('train.save', { name: setOf(it), page: it.page, idx: it.idx, text, status,
     kind, draft, secs: Math.round(secs * 10) / 10 }).then((env) => {
     if (!env.ok) boxError('lb-stats', env);
@@ -367,18 +520,32 @@ function saveCurrent(status) {
 }
 
 Object.assign(ACTIONS, {
+  /** «Точні параметри»: черга зі значень полів, без сценарію. */
   'label.start': async (ev) => {
     ev.preventDefault();
-    const fd = new FormData(ev.target);
-    const pick = String(fd.get('set') || '');
-    if (pick.startsWith('pack:')) { LB.pack = pick.slice(5); LB.set = ''; } else if (pick) { LB.set = pick; LB.pack = ''; }
+    const fd = new FormData(el('lb-ctl'));
+    const { pack, set } = picked();
+    LB.pack = pack; LB.set = set; LB.scen = '';
     LB.mode = fd.get('mode') || 'spread';
-    LB.page = fd.get('page') || '';
+    LB.page = LB.mode === 'page' ? String(fd.get('pg') || '') : '';
     LB.blank = !!fd.get('blank');
     LB.minChars = Math.max(0, parseInt(fd.get('minchars'), 10) || 0);
     LB.fresh = !!fd.get('fresh');
-    el('lb-work').innerHTML = `<p class="muted">${t('common.loading')}</p>`;
-    if (await loadQueue()) await advance(1);
+    LB.mergedOnly = !!fd.get('mo');
+    LB.limit = Math.max(1, Math.min(2000, parseInt(fd.get('limit'), 10) || 400));
+    await startQueue();
+  },
+  'label.scen': async (_ev, elm) => { await runScenario(elm.dataset.arg); },
+  'label.pick': async () => { await refreshPages(); },
+  'label.pg': () => { /* вибір сторінки лише запам'ятовується: черга стартує кнопкою сценарію */ },
+  /** «змінити»: показати керування й піднятись до нього. */
+  'label.change': () => {
+    const f = el('lb-ctl');
+    if (!f) return;
+    f.hidden = false;
+    f.scrollIntoView({ block: 'start' });
+    const sel = el('lb-set');
+    if (sel) sel.focus({ preventScroll: true });
   },
   'label.save': async () => { saveCurrent('ok'); await advance(1); },
   'label.unsure': async () => { saveCurrent('unsure'); await advance(1); },

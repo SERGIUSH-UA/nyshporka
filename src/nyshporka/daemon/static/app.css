@@ -1762,3 +1762,21 @@ body.welcome-on main { max-width: none; }
 .sets-conf .cl b { color: var(--err); }
 .sets-sortbar label { display: inline-flex; align-items: center; gap: .5rem; }
 #view .sets-sortbar select { width: auto; flex: 0 0 auto; }
+
+/* ── ✍️ Розмітка (`screens/label.js`): сценарії, липкий рядок стану ── */
+.lb-scen { display: flex; flex-wrap: wrap; gap: .5rem; align-items: stretch; margin: .5rem 0; }
+#view .lb-sc { display: grid; gap: .15rem; justify-items: start; text-align: left; padding: .6rem .9rem;
+  min-width: 11rem; max-width: 18rem; flex: 1 1 11rem; }
+#view .lb-sc b { font-size: 1rem; color: var(--fg); }
+#view .lb-sc span { font-size: .8rem; white-space: normal; }
+.lb-pgpick { align-self: center; flex: 1 1 18rem; }
+.lb-pgpick select { min-width: 0; }
+.lb-more { margin: .25rem 0 .5rem; }
+.lb-more summary { cursor: pointer; color: var(--fg-3); font-size: .9rem; }
+.lbq-bar { position: sticky; top: 0; z-index: 6; display: flex; box-sizing: border-box; width: 100%; justify-self: stretch; flex-wrap: wrap; align-items: center;
+  gap: .25rem 1rem; padding: .45rem .75rem; margin: .25rem 0 .5rem; font-size: .9rem;
+  background: var(--s-2); border: 1px solid var(--rim, var(--line-2)); border-radius: var(--r-m); }
+.lbq-bar[hidden] { display: none; }
+.lbq-bar .ctl-sm { margin-left: auto; }
+.lb-nomerge { color: var(--warn-fg, var(--warn)); font-size: .85rem; }
+.sets-acts button + button { margin-left: .35rem; }

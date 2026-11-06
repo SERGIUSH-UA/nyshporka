@@ -200,7 +200,7 @@ def draft_label(draft_id: str) -> str:
 
 def pack_queue(pack: str, *, mode: str = "spread", limit: int = 400, include_blank: bool = False,
                min_chars: int = MIN_CHARS, fresh: bool = False,
-               ws: Workspace | None = None) -> dict[str, Any]:
+               merged_only: bool = False, ws: Workspace | None = None) -> dict[str, Any]:
     """Одна черга на весь пакет розмітки: рядки всіх його наборів по колу блоками.
 
     Людина обирає пакет («XX ст. — важкі руки»), а не набір: блоки по `SPREAD_BLOCK`
@@ -212,10 +212,11 @@ def pack_queue(pack: str, *, mode: str = "spread", limit: int = 400, include_bla
     if not names:
         raise S.SetError(f"пакета розмітки «{pack}» немає")
     per: list[list[dict[str, Any]]] = []
-    n_total = n_done = n_pages = 0
+    n_total = n_done = n_pages = n_merged = 0
     for n in names:
         try:
-            q = Store(n, ws=ws).queue(mode, "", 2000, include_blank, min_chars=min_chars, fresh=fresh)
+            q = Store(n, ws=ws).queue(mode, "", 2000, include_blank, min_chars=min_chars, fresh=fresh,
+                                         merged_only=merged_only)
         except S.SetError:
             continue
         for it in q["items"]:
@@ -226,6 +227,7 @@ def pack_queue(pack: str, *, mode: str = "spread", limit: int = 400, include_bla
         n_total += q["n_total"]
         n_done += q["n_done"]
         n_pages += q["n_pages"]
+        n_merged += q["n_merged"]
     n_queue = sum(len(p) for p in per)
     items: list[dict[str, Any]] = []
     off = 0
@@ -240,7 +242,7 @@ def pack_queue(pack: str, *, mode: str = "spread", limit: int = 400, include_bla
         off += SPREAD_BLOCK
     return {"items": items[:limit], "mode": mode, "pack": pack, "sets": names,
             "draft_srcs": [], "draft_ids": [], "n_pages": n_pages, "n_total": n_total,
-            "n_queue": n_queue, "n_done": n_done}
+            "n_queue": n_queue, "n_merged": n_merged, "n_done": n_done}
 
 class Store:
     """Один набір: кропи, голоси, мітки — усе, що потрібно вкладці."""
@@ -269,6 +271,23 @@ class Store:
                         out[d.name] = sorted(idxs)
             self._pages = out
         return self._pages
+
+    def page_states(self) -> list[dict[str, Any]]:
+        """Сторінки набору зі станом: скільки рядків, скільки ручних міток (усього й ok)
+        і скільки рядків зведено арбітрами. Із цього екран «Розмітка» дає вибір сторінки."""
+        marks = self.reg.marks(self.name)
+        by_page: dict[str, list[dict[str, Any]]] = {}
+        for (pg, _i), rec in marks.items():
+            by_page.setdefault(pg, []).append(rec)
+        conf = self.reg.merge_conf(self.spec)
+        out = []
+        for pg, idxs in self.pages().items():
+            recs = by_page.get(pg, [])
+            c = conf.get(pg) or {}
+            out.append({"page": pg, "n_lines": len(idxs), "n_marked": len(recs),
+                        "n_ok": sum(1 for r in recs if r.get("status") == "ok"),
+                        "n_merged": sum(1 for i in idxs if c.get(str(i)))})
+        return out
 
     # -- голоси --
     def draft_ids(self) -> list[str]:
@@ -327,7 +346,7 @@ class Store:
     # -- черга --
     def queue(self, mode: str = "spread", page: str = "", limit: int = 400,
               include_blank: bool = False, min_chars: int = MIN_CHARS,
-              fresh: bool = False) -> dict[str, Any]:
+              fresh: bool = False, merged_only: bool = False) -> dict[str, Any]:
         """Черга рядків на розмітку.
 
         `min_chars` — коротші за це рядки (за чернеткою, яку бачить людина: першим
@@ -340,7 +359,9 @@ class Store:
             raise S.SetError(f"у наборі «{self.name}» немає кропів — спершу `nysh train cut`")
         done = self.reg.marks(self.name)
         no_drafts = not self.spec.drafts or not self.has_drafts()
-        merged = self.reg.merge_conf(self.spec) if fresh else {}
+        # Злиття читаємо завжди: рядок несе `conf`, і екран каже, скільки в черзі зведених.
+        # `merged_only` — навпаки до `fresh`: лише рядки, які арбітри вже звели (вимір CER злиття).
+        merged = self.reg.merge_conf(self.spec)
         floor = max(MIN_CHARS, int(min_chars or 0))
 
         def items_of(pg: str) -> list[dict[str, Any]]:
@@ -350,7 +371,9 @@ class Store:
             for i in pages[pg]:
                 if (pg, i) in done:
                     continue
-                if conf.get(str(i)) in ("high", "med"):
+                if fresh and conf.get(str(i)) in ("high", "med"):
+                    continue
+                if merged_only and not conf.get(str(i)):
                     continue
                 d = drafts.get(i, [""] * len(self.spec.drafts))
                 best = next((x for x in d if x), "")
@@ -363,7 +386,7 @@ class Store:
                     if ink is not None and ink < G.INK_MIN:
                         continue
                 out.append({"page": pg, "idx": i, "draft": best, "drafts": d,
-                            "score": usefulness(d)})
+                            "score": usefulness(d), "conf": conf.get(str(i)) or ""})
             return out
 
         items: list[dict[str, Any]]
@@ -426,7 +449,8 @@ class Store:
                 "draft_srcs": self.draft_labels(), "draft_ids": self.draft_ids(),
                 "n_pages": len(pages),
                 "n_total": sum(len(v) for v in pages.values()),
-                "n_queue": len(items), "n_done": len(done)}
+                "n_queue": len(items), "n_merged": sum(1 for x in items if x.get("conf")),
+                "n_done": len(done)}
 
     # -- один рядок --
     def context(self, page: str, idx: int, span: int = 2) -> list[dict[str, Any]]:

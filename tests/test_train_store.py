@@ -258,6 +258,51 @@ def test_queue_fresh_skips_lines_the_arbiters_merged(space: W.Workspace) -> None
     assert ("0002", 0) in keys, "сторінки без злиття — уся черга"
 
 
+def _with_merge(space: W.Workspace) -> None:
+    reg = S.registry(space)
+    spec = reg.load("demo")
+    mdir = reg.set_dir("demo") / S.DRAFTS_DIR / S.MERGE_ID
+    mdir.mkdir(parents=True, exist_ok=True)
+    (mdir / "0001.txt").write_text("\n".join(VOICE_A["0001"]) + "\n", encoding="utf-8")
+    (mdir / S.META_FILE).write_text(json.dumps(
+        {"pages": {"0001": {"conf": {"0": "high", "1": "med", "5": "low"}}}}), encoding="utf-8")
+    spec.drafts = [S.Draft(id=S.MERGE_ID, dir=f"{S.DRAFTS_DIR}/{S.MERGE_ID}"), *spec.drafts]
+    reg.save(spec)
+
+
+def test_queue_merged_only_gives_just_the_merged_lines(space: W.Workspace) -> None:
+    """Перевірка злиття: лише зведені рядки (будь-якої довіри); `conf` їде в рядку, лічба — у відповіді."""
+    _with_merge(space)
+    st = ST.Store("demo", ws=space)
+    q = st.queue("spread", merged_only=True, include_blank=True)
+    keys = {(it["page"], it["idx"]) for it in q["items"]}
+    assert keys == {("0001", 0), ("0001", 1), ("0001", 5)}
+    assert {it["conf"] for it in q["items"]} == {"high", "med", "low"}
+    assert q["n_merged"] == q["n_queue"] == 3
+    plain = st.queue("sequential", fresh=True)
+    assert plain["n_merged"] == 1, "fresh лишає лише low: зведених у черзі один"
+    assert all(it["conf"] in ("", "low") for it in plain["items"])
+    nm = st.queue("sequential")
+    assert nm["n_merged"] == 3 and nm["n_queue"] > 3, "без фільтрів у черзі і зведені, і ні"
+
+
+def test_page_states_tell_where_the_merge_is(space: W.Workspace) -> None:
+    from nyshporka import ops as O
+
+    _with_merge(space)
+    st = ST.Store("demo", ws=space)
+    st.save("0001", 0, "перший", "ok")
+    st.save("0001", 1, "", "skip")
+    got = {p["page"]: p for p in st.page_states()}
+    assert got["0001"] == {"page": "0001", "n_lines": 8, "n_marked": 2, "n_ok": 1, "n_merged": 3}
+    assert got["0002"]["n_merged"] == 0 and got["0002"]["n_marked"] == 0
+    env = O.call("train.pages", {"name": "demo"})
+    assert env.ok and [p["page"] for p in env.data["pages"]] == ["0001", "0002"]
+    assert not O.call("train.pages", {"name": "nope"}).ok
+    env = O.call("train.queue", {"name": "demo", "merged_only": True, "include_blank": True})
+    assert env.ok and env.data["n_queue"] == 1, "уже розмічені (0, 1) з черги йдуть"
+
+
 def test_pack_is_one_queue_over_its_sets(space: W.Workspace) -> None:
     """Пакет розмітки — одна черга з кількох наборів: блоки по колу, рядок знає свій набір."""
     reg = S.registry(space)

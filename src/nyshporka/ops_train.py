@@ -639,6 +639,7 @@ class QueueArgs(BaseModel):
     include_blank: bool = Field(default=False, description="показувати порожні смужки")
     min_chars: int = Field(default=2, description="коротші рядки (за чернеткою) не показувати")
     fresh: bool = Field(default=False, description="пропускати рядки, які вже звели арбітри (злиття high/med)")
+    merged_only: bool = Field(default=False, description="лише рядки, які вже звели арбітри (перевірка злиття); не разом з fresh")
 
 
 @op("train.queue", summary="Черга рядків на розмітку — за розбіжністю голосів",
@@ -656,7 +657,8 @@ def train_queue(a: QueueArgs) -> Envelope:
         from nyshporka.train import store as ST
         try:
             got = ST.pack_queue(a.pack, mode=a.mode, limit=max(1, min(2000, a.limit)),
-                                include_blank=a.include_blank, min_chars=a.min_chars, fresh=a.fresh)
+                                include_blank=a.include_blank, min_chars=a.min_chars, fresh=a.fresh,
+                                merged_only=a.merged_only)
         except S.SetError as exc:
             return fail(str(exc))
         env = ok(got)
@@ -666,7 +668,7 @@ def train_queue(a: QueueArgs) -> Envelope:
     try:
         st = _store(a.name)
         got = st.queue(a.mode, a.page, max(1, min(2000, a.limit)), a.include_blank,
-                       min_chars=a.min_chars, fresh=a.fresh)
+                       min_chars=a.min_chars, fresh=a.fresh, merged_only=a.merged_only)
     except S.SetError as exc:
         return fail(str(exc))
     env = ok(got)
@@ -678,6 +680,23 @@ def train_queue(a: QueueArgs) -> Envelope:
                                 "або порожні (увімкніть «показувати порожні»)")
     return env
 
+
+
+class PagesArgs(BaseModel):
+    name: str = Field(description="набір")
+
+
+@op("train.pages", summary="Сторінки набору зі станом: рядків, ручних міток, зведено арбітрами",
+    args=PagesArgs, section=SECTION,
+    tier="rare", skill="label-lines")
+def train_pages(a: PagesArgs) -> Envelope:
+    """Вибір сторінки на екрані «Розмітка»: людина бачить, де злиття є, а де ні."""
+    from nyshporka.train import sets as S
+
+    try:
+        return ok({"name": a.name, "pages": _store(a.name).page_states()})
+    except S.SetError as exc:
+        return fail(str(exc))
 
 
 class PacksArgs(BaseModel):
