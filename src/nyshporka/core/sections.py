@@ -480,6 +480,7 @@ OP_SCREEN: dict[str, str] = {
     "train.voices": "sets",
     "train.glossary": "sets",
     "train.hint": "sets",
+    "train.twin": "sets",
     "train.export": "sets",
     "train.import": "sets",
     "train.gates": "sets",

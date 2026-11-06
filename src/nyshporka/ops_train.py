@@ -355,6 +355,61 @@ def train_hint(a: HintArgs) -> Envelope:
     return env
 
 
+# ── двійник: той самий запис іншим письмом ───────────────────────────────────
+class TwinArgs(BaseModel):
+    name: str = Field(description="набір")
+    twin_run: str = Field(default="", description="прогін іншого письма з тими самими рамками "
+                                                  "(гілка голосу того самого прогону)")
+    twin_set: str = Field(default="", description="набір, з голосу якого брати текст двійника; "
+                                                  "порожньо — цей самий")
+    twin_draft: str = Field(default="", description="голос двійника (іншого письма) у наборі")
+    own_draft: str = Field(default="", description="голос свого письма; порожньо — перший")
+    layout: str = Field(default="auto", description="auto | spread | pages")
+    script: str = Field(default="", description="письмо свого набору, коли прогін мішаний: "
+                                                "cyrillic | latin")
+    dry_run: bool = Field(default=False, description="лише заміряти пари, нічого не писати")
+
+
+@op("train.twin", summary="Двійник сторінок: той самий запис іншим письмом — підказка арбітрам",
+    args=TwinArgs, mutates=True, section=SECTION,
+    skill="label-lines",
+    when="двомовна книга (кирилиця + польська паралельно): друга половина — підказка")
+def train_twin(a: TwinArgs) -> Envelope:
+    """Знайти для кожної сторінки набору її двійника іншим письмом.
+
+    Розворот двомовного бланка (`spread`) — половини одного кадру; книга, де
+    письмо чергується через аркуш (`pages`), — сусідній кадр. Пари рядків
+    лягають джерелом підказок (`kind=twin`), рядки іншого письма розвороту
+    виходять із завдань, а ворота імпорту понижують власну назву, якої в
+    двійнику немає.
+    """
+    from nyshporka.train import sets as S
+    from nyshporka.train import twin as TW
+
+    try:
+        rep = TW.build(a.name, twin_run=a.twin_run, twin_set=a.twin_set,
+                       twin_draft=a.twin_draft, own_draft=a.own_draft, layout=a.layout,
+                       script=a.script, dry_run=a.dry_run)
+    except (S.SetError, TW.TwinError, ValueError) as exc:
+        return fail(str(exc))
+    d = rep.summary()
+    d["dry_run"] = a.dry_run
+    d["per_page"] = [{"page": p.page, "twin_page": p.twin_page, "layout": p.note,
+                      "main": p.own_main, "paired": round(p.paired, 3)} for p in rep.pages]
+    env = ok(d)
+    for w_ in rep.warnings:
+        env.warn("twin_page", w_)
+    if rep.missing:
+        env.warn("twin_missing", f"без двійника {len(rep.missing)} стор.: "
+                                 f"{', '.join(rep.missing[:10])}"
+                                 f"{' …' if len(rep.missing) > 10 else ''}")
+    low = [p.page for p in rep.pages if p.paired < TW.PAGE_PAIRED_MIN]
+    if low:
+        env.warn("twin_weak", f"пари слабкі (< {TW.PAGE_PAIRED_MIN:.0%}) на {len(low)} стор.: "
+                              f"{', '.join(low[:10])} — ворота там не діють")
+    return env
+
+
 # ── завдання арбітрам ────────────────────────────────────────────────────────
 class ExportArgs(BaseModel):
     name: str = Field(description="набір")

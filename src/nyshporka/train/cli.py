@@ -201,6 +201,40 @@ def hint_cmd(
     _notes(env)
 
 
+@app.command("twin")
+def twin_cmd(
+    name: str = typer.Option(..., "--set", metavar="НАБІР", help="ім'я набору"),
+    twin_run: str = typer.Option("", "--twin-run", help="прогін іншого письма (ті самі рамки)"),
+    twin_set: str = typer.Option("", "--twin-set", help="набір із голосом двійника"),
+    twin_draft: str = typer.Option("", "--twin-draft", help="голос двійника в наборі"),
+    own_draft: str = typer.Option("", "--own-draft", help="голос свого письма"),
+    layout: str = typer.Option("auto", "--layout", help="auto | spread | pages"),
+    script: str = typer.Option("", "--script",
+                               help="письмо свого набору, коли прогін мішаний: cyrillic | latin"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="лише заміряти пари"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Двійник: той самий запис іншим письмом (кирилиця ↔ польська) — підказка арбітрам.
+
+    Розворот двомовного бланка — половини одного кадру; книга з чергуванням
+    через аркуш — сусідній кадр. Друга половина каже арбітрові, ХТО стоїть у
+    рядку, а ворота імпорту понижують ім'я, якого в ній немає.
+    """
+    from nyshporka import ops as O
+
+    env = O.call("train.twin", {"name": name, "twin_run": twin_run, "twin_set": twin_set,
+                                "twin_draft": twin_draft, "own_draft": own_draft,
+                                "layout": layout, "script": script, "dry_run": dry_run})
+    if _answer(env, as_json):
+        return
+    d = env.data
+    console.print(f"{d['set']}: двійник на {d['with_twin']} з {d['pages']} стор. "
+                  f"(розворот {d['spread']}, сусідній аркуш {d['pages_layout']}); "
+                  f"певна пара в {d['paired_sure']} з {d['main_lines']} рядків записів "
+                  f"({d['paired']:.0%})" + (" — сухий прогін" if d["dry_run"] else ""))
+    _notes(env)
+
+
 @app.command("export")
 def export_cmd(
     name: str = typer.Option(..., "--set", metavar="НАБІР", help="ім'я набору"),

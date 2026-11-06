@@ -97,7 +97,7 @@ CROP_RULES = """Ти читаєш КОЖЕН рядок сам, на його к
 #: правила обережний агент викидає з корпусу добрі рядки.
 
 SOURCES_NOTE = """
-★ ДЖЕРЕЛА — людський текст поруч із голосами. Позначка в рядку — ліворуч:
+★ ДЖЕРЕЛА — текст поруч із голосами, не від рушія цього рядка. Позначка в рядку — ліворуч:
 {items}
    🔴 Джерело — не голос рушія і не готова мітка: скільки б разів воно не
    збіглося з голосом, мітку вирішує смужка.
@@ -169,7 +169,8 @@ HINTS_NOTE = """
 """
 
 HINT_KINDS = {"literal": "дослівно", "normalized": "нормалізовано",
-              "translation": "переклад", "interpretation": "тлумачення"}
+              "translation": "переклад", "interpretation": "тлумачення",
+              "twin": "той самий запис іншим письмом"}
 HINT_TRUST = {"published": "друковане наукове видання",
               "confirmed": "підтверджено власником документа",
               "agreed": "кілька людей згодні", "single": "одна відповідь",
@@ -256,10 +257,13 @@ def pending_rows(reg: S.Registry, spec: S.SetSpec) -> dict[str, list[int]]:
     """
     conf = reg.merge_conf(spec)
     voices = spec.voices()
+    own = spec.twin_own()
     out: dict[str, list[int]] = {}
     for pg in sorted(reg.crop_pages(spec)):
         for r in page_rows(reg, spec, pg, voices):
             if str(r["idx"]) in conf.get(pg, {}):
+                continue
+            if pg in own and r["idx"] not in own[pg]:
                 continue
             png = reg.crop_path(spec, pg, r["idx"])
             if png is not None and G.ink_fraction(png) < G.INK_MIN:
@@ -338,6 +342,16 @@ def export_tasks(name: str, *, pages: list[str] | None = None, pages_per_file: i
         all_pages = [p for p in all_pages if p in set(pages)]
     rows = [r for pg in all_pages for r in page_rows(reg, spec, pg, voices)]
     rep = ExportReport(set=name, out=out or reg.set_dir(name) / TASKS_DIR)
+    # 🔴 Розворот двомовного бланка: половина кадру іншим письмом — двійник,
+    # а не рядки набору. Арбітр бачить її підказкою, а зводити її тут — платити
+    # за мітки, яких набір цього письма не прийме.
+    own = spec.twin_own()
+    if own:
+        before = len(rows)
+        rows = [r for r in rows if r["page"] not in own or r["idx"] in own[r["page"]]]
+        if before != len(rows):
+            rep.warnings.append(f"{before - len(rows)} рядків іншого письма (двійник) "
+                                f"не експортовано")
 
     if only is not None:
         rows = [r for r in rows if r["idx"] in set(only.get(r["page"]) or ())]
@@ -450,6 +464,7 @@ class ImportReport:
     rejected: list[str] = field(default_factory=list)
     gates: list[G.PageGate] = field(default_factory=list)
     splits: list[dict[str, Any]] = field(default_factory=list)
+    twin_demoted: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
 
@@ -537,6 +552,7 @@ def import_answers(name: str, *, tasks_dir: Path | None = None, keep_old: bool =
                            crop_of=lambda i, _pg=pg: reg.crop_path(spec, _pg, i),
                            support=literal_support(reg, spec, pg))
         rep.gates.append(gate)
+        rep.twin_demoted += twin_gate(reg, spec, pg, cur, conf_all, set(lines))
         f.write_text("\n".join(cur) + "\n", encoding="utf-8")
         page_meta["conf"] = {str(k): v for k, v in sorted(conf_all.items())}
         if source:
@@ -548,7 +564,8 @@ def import_answers(name: str, *, tasks_dir: Path | None = None, keep_old: bool =
             rep.conf[conf_all.get(i, "low")] = rep.conf.get(conf_all.get(i, "low"), 0) + 1
     meta["gate"] = {"demoted": sum(len(g.demoted) for g in rep.gates),
                     "marks_stripped": sum(len(g.marks_stripped) for g in rep.gates),
-                    "shift_pages": [g.page for g in rep.gates if g.shift_blocks]}
+                    "shift_pages": [g.page for g in rep.gates if g.shift_blocks],
+                    **({"twin_demoted": len(rep.twin_demoted)} if rep.twin_demoted else {})}
     write_json(out / S.META_FILE, meta)
     if spec.merge() is None:
         spec.drafts.append(S.Draft(id=S.MERGE_ID, dir=f"{S.DRAFTS_DIR}/{S.MERGE_ID}"))
@@ -570,6 +587,10 @@ def import_answers(name: str, *, tasks_dir: Path | None = None, keep_old: bool =
         for a, b, off in g.shift_blocks:
             rep.warnings.append(f"{g.page}: рядки {a}–{b} зсунуті на {off:+d} відносно "
                                 f"голосів — блок понижено до low, перевірити аркуш")
+    if rep.twin_demoted:
+        rep.warnings.append(f"власна назва без опори в двійнику → low: "
+                            f"{len(rep.twin_demoted)} рядків (перші: "
+                            f"{'; '.join(rep.twin_demoted[:6])})")
     for sp in rep.splits:
         rep.warnings.append(f"словникове «{sp['term']}» має різні написання в різних "
                             f"файлах: {', '.join(sp['forms'])}")
@@ -577,6 +598,33 @@ def import_answers(name: str, *, tasks_dir: Path | None = None, keep_old: bool =
         rep.warnings.append(f"відкинуто {len(rep.rejected)} ключів не з набору "
                             f"(перші: {', '.join(rep.rejected[:4])})")
     return rep
+
+
+def twin_gate(reg: S.Registry, spec: S.SetSpec, page: str, merged: list[str],
+              conf: dict[int, str], touched: set[int]) -> list[str]:
+    """Власна назва мітки, якої немає в двійнику навіть віддалено, → `low`.
+
+    Діє лише на рядки цього імпорту (`touched`) свого письма й лише там, де
+    пари сторінки надійні (`twin.PAGE_PAIRED_MIN`): двійник із каші не суддя.
+    ПРАВИТЬ `conf` на місці; повертає «сторінка:рядок «назва»» понижених.
+    """
+    from nyshporka.train import twin as TW
+
+    text = TW.page_gate_text(reg, spec, page)
+    if not text:
+        return []
+    own = spec.twin_own().get(page)
+    out = []
+    for i in sorted(touched):
+        if own is not None and i not in own:
+            continue
+        if conf.get(i) == "low" or i >= len(merged) or not merged[i].strip():
+            continue
+        bad = TW.unsupported(merged[i], text)
+        if bad:
+            conf[i] = "low"
+            out.append(f"{page}:{i} «{', '.join(bad[:3])}»")
+    return out
 
 
 def literal_support(reg: S.Registry, spec: S.SetSpec, page: str) -> dict[int, list[str]]:

@@ -207,6 +207,11 @@ class SetSpec:
     #: Не виходить за межі цієї машини: платне замовлення, дані родини клієнта.
     #: `nysh zvid pack` такий набір не пакує — перевірка в коді, а не на совісті.
     private: bool = False
+    #: Двійник сторінок — той самий запис іншим письмом (`train/twin.py`):
+    #: `{"source": {...}, "pages": {сторінка: {"layout", "twin_page", "own"?, "paired"}}}`.
+    #: `own` — рядки СВОГО письма на розвороті: решта кадру — двійник, і в
+    #: завдання арбітрам вона не йде.
+    twin: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -225,6 +230,7 @@ class SetSpec:
             **({"hint_sources": [h.as_dict() for h in self.hint_sources]}
                if self.hint_sources else {}),
             **({"private": True} if self.private else {}),
+            **({"twin": self.twin} if self.twin else {}),
         }
 
     @classmethod
@@ -252,7 +258,16 @@ class SetSpec:
             hint_sources=[HintSource.from_dict(x) for x in (d.get("hint_sources") or [])
                           if isinstance(x, dict) and x.get("id")],
             private=bool(d.get("private", False)),
+            twin=dict(d.get("twin") or {}) if isinstance(d.get("twin"), dict) else {},
         )
+
+    def twin_own(self) -> dict[str, set[int]]:
+        """{сторінка: рядки свого письма} — лише для розворотів; решта сторінок цілі."""
+        out: dict[str, set[int]] = {}
+        for pg, v in ((self.twin or {}).get("pages") or {}).items():
+            if isinstance(v, dict) and isinstance(v.get("own"), list):
+                out[str(pg)] = {int(i) for i in v["own"]}
+        return out
 
     def voices(self) -> list[Draft]:
         """Голоси для експорту арбітрам — БЕЗ злиття. Див. докстрінг модуля."""
