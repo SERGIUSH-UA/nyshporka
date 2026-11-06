@@ -399,6 +399,41 @@ def test_empty_cells_are_not_given_to_the_engine() -> None:
     assert len(got[1]["ink"]) == 48
 
 
+def test_an_automatic_choice_warns_how_to_drop_it(tmp_path: Path) -> None:
+    """Клітинки ввімкнув опис справи — план каже, чому, і як їх зняти; слово
+    людини чи `form` у паспорті попередження не дають."""
+    from nyshporka.htr import run as RUN
+    from nyshporka.htr.run import Plan
+
+    (tmp_path / "_source.json").write_text(json.dumps(
+        {"title": "Книга реєстрації актів цивільного стану", "shifra": "ДАІФО R-2521-1-122"},
+        ensure_ascii=False), encoding="utf-8")
+    on, why = RUN._form_choice(tmp_path, None)
+    base = Plan(case_dir=tmp_path, out_dir=tmp_path / "out", model=tmp_path / "m.pt",
+                script="cyrillic", frames=1, python=tmp_path / "py", runner=tmp_path / "r.py")
+    auto = dataclasses.replace(base, form_cells=on, form_why=why)
+    assert auto.form_auto
+    warn = auto.form_warning
+    assert "ДАІФО R-2521-1-122" in warn and "--no-form-cells" in warn and '"form": false' in warn
+    assert not warn.startswith("автоматично")
+    d = auto.as_dict()
+    assert d["form_auto"] is True and d["form_warning"] == warn
+    for who in ("слово людини", "паспорт справи: form=true"):
+        told = dataclasses.replace(base, form_cells=True, form_why=who)
+        assert not told.form_auto and told.form_warning == ""
+    assert base.form_warning == ""
+
+
+def test_the_read_command_takes_no_form_cells(tmp_path: Path) -> None:
+    """`nysh read --no-form-cells` — справжній прапорець, а не помилка розбору."""
+    from typer.testing import CliRunner
+
+    from nyshporka.cli import app
+
+    got = CliRunner().invoke(app, ["read", "--help"])
+    assert got.exit_code == 0 and "--no-form-cells" in got.output
+
+
 def test_the_runner_command_carries_the_flag(tmp_path: Path) -> None:
     from nyshporka.htr.run import Plan
 

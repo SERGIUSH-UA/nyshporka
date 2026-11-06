@@ -96,6 +96,15 @@ class Plan:
     form_why: str = ""
 
     @property
+    def form_auto(self) -> bool:
+        """Клітинки ввімкнув опис справи, а не людина (`cells_auto_warning`)."""
+        return self.form_cells and self.form_why.startswith(AUTO_PREFIX)
+
+    @property
+    def form_warning(self) -> str:
+        return cells_auto_warning(self.form_why) if self.form_auto else ""
+
+    @property
     def voices(self) -> tuple[Path, ...]:
         return tuple(v for v in (self.voice, *self.extra_voices) if v is not None)
 
@@ -162,7 +171,8 @@ class Plan:
                 "script": self.script, "frames": self.frames,
                 "script_trust": self.script_trust, "script_why": self.script_why,
                 "bokovi": self.bokovi, "form_cells": self.form_cells,
-                "form_why": self.form_why}
+                "form_why": self.form_why, "form_auto": self.form_auto,
+                "form_warning": self.form_warning}
 
     # ── шарди ────────────────────────────────────────────────────────────────
     def shards(self, workers: int = 1, *, device: str = "", dynamic: bool = True,
@@ -765,6 +775,27 @@ def civil_acts_why(src: dict[str, Any]) -> str:
     return f"акти цивільного стану ({label})"
 
 
+#: Початок пояснення, коли клітинки ввімкнуто не людиною, а описом справи.
+AUTO_PREFIX = "автоматично: "
+
+
+def cells_auto_warning(why: str) -> str:
+    """Попередження агентові й людині, що запускають справу: клітинки ввімкнулись
+    самі — чому, що це коштує і як їх зняти.
+
+    🔴 Правило `civil_acts_why` судить за описом справи, а опис буває хибним або
+    загальним («акти цивільного стану» на книзі-реєстрі з графами). Той, хто
+    запускає, бачить кадри, а правило — ні, тож рішення лишається за ним; це
+    попередження лише каже, що воно є і як його змінити."""
+    why = why.removeprefix(AUTO_PREFIX)
+    return (f"голос клітинок увімкнено автоматично — {why}. Він читає кожну записану "
+            f"клітинку бланка окремо, поруч зі звичайним читанням (пошук бере обидва), і "
+            f"коштує ~+30–40 % часу на щільних сторінках. Якщо справа — не бланки актів "
+            f"(книга-реєстр із графами, метрика, алфавітний покажчик), зніміть його: "
+            f"`--no-form-cells` на цей запуск або `\"form\": false` у _source.json справи "
+            f"назавжди")
+
+
 def _form_choice(case: Path, asked: bool | None) -> tuple[bool, str]:
     """(читати клітинки, чому) — слово людини, `form` у паспорті справи або сам
     опис справи (`civil_acts_why`)."""
@@ -776,7 +807,7 @@ def _form_choice(case: Path, asked: bool | None) -> tuple[bool, str]:
     if form:
         return True, f"паспорт справи: form={form}"
     why = civil_acts_why(_passport(case))
-    return (True, f"автоматично: {why}") if why else (False, "")
+    return (True, f"{AUTO_PREFIX}{why}") if why else (False, "")
 
 
 def cells_wanted(case: Path) -> bool:

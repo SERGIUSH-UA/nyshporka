@@ -1975,6 +1975,33 @@ def test_seg_height_reaches_the_box(space: Path, monkeypatch, fake_gpurunner) ->
     assert "seg_height=900" in _plan_of(fake_gpurunner)["params"]
 
 
+def _acts_passport(case: Path) -> None:
+    (case / "_source.json").write_text(json.dumps(
+        {"title": "Книга реєстрації актів цивільного стану про народження",
+         "fond": "R-2521", "year_from": 1940}, ensure_ascii=False), encoding="utf-8")
+
+
+def test_civil_acts_get_cells_in_the_cloud_and_say_how_to_drop_them(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """Справа актів дістає клітинки без прапорця — і агент, що запускає захід,
+    бачить, чому і як їх зняти (опис справи буває хибним)."""
+    case, _ = _wire(space, monkeypatch)
+    _acts_passport(case)
+    res = _go(case, dry_run=True)
+    assert "form_cells=1" in _plan_of(fake_gpurunner)["params"]
+    warn = [n for n in res.notes if "автоматично" in n]
+    assert warn and "--no-form-cells" in warn[0] and '"form": false' in warn[0], res.notes
+
+
+def test_no_form_cells_wins_over_the_case_description(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    case, _ = _wire(space, monkeypatch)
+    _acts_passport(case)
+    res = _go(case, dry_run=True, form_cells=False)
+    assert not any(p.startswith("form_cells=") for p in _plan_of(fake_gpurunner)["params"])
+    assert not any("автоматично" in n for n in res.notes), res.notes
+
+
 def test_drop_frames_takes_only_our_own_copy(space: Path) -> None:
     """Стиснута копія прочитаної справи йде геть (20 ГБ за кілька днів, відгук
     18.10.2026), а чуже — тека без паспорта, шлях убік — лишається."""

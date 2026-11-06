@@ -1030,11 +1030,12 @@ def cmd_go(
         help="ще голос тим самим проходом: `latin` (Скриба) або ім'я ваг"),
     one_voice: bool = typer.Option(False, "--one-voice",
                                    help="без другого рушія (швидше, але сліпіше)"),
-    form_cells: bool = typer.Option(
-        False, "--form-cells",
+    form_cells: bool | None = typer.Option(
+        None, "--form-cells/--no-form-cells",
         help="бланк поклітинно: ще голос `<прогін>-cells` (див. `nysh read --form-cells`); "
              "без прапорця — як каже паспорт справи (поле `form`), а акти цивільного стану "
-             "(ЗАГС, РАГС, РАЦС) — самі, за описом справи"),
+             "(ЗАГС, РАГС, РАЦС) — самі, за описом справи; `--no-form-cells` знімає й "
+             "автоматичне для всієї черги"),
     case_key: str = typer.Option("", "--case-key", help="шифра справи для мети прогону"),
     transport: str = typer.Option(
         "auto", "--transport",

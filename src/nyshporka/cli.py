@@ -1412,13 +1412,14 @@ def read(
         help=("запустити, хоч справу вже прочитано ЦІЄЮ моделлю: раннер дочитає "
               "сторінки без тексту, готові не перечитує. Перечитати все — "
               "окрема тека (--out) або інша модель (--model)")),
-    form_cells: bool = typer.Option(
-        False, "--form-cells",
+    form_cells: bool | None = typer.Option(
+        None, "--form-cells/--no-form-cells",
         help="бланк поклітинно: ще голос `<прогін>-cells` — клітинки за лініями "
              "друкованої таблиці (розворот ділиться, сторінка вирівнюється, висока "
              "графа ріжеться на рядки руки). Уже прочитані сторінки дістають лише "
              "клітинки. Без прапорця — як каже паспорт справи (поле `form`), а акти "
-             "цивільного стану (ЗАГС, РАГС, РАЦС) — самі, за описом справи"),
+             "цивільного стану (ЗАГС, РАГС, РАЦС) — самі, за описом справи; "
+             "`--no-form-cells` знімає й автоматичне"),
     dry: bool = typer.Option(False, "--dry-run", help="лише показати план"),
 ) -> None:
     """Прочитати справу рукописним рушієм.
@@ -1444,7 +1445,7 @@ def read(
         p = make_plan(case_dir, out_dir=out, script=script,
                       second_voice=not one_voice, model=model, seg_cache=seg_cache,
                       also=with_, fix_sideways=not dry,
-                      form_cells=True if form_cells else None)
+                      form_cells=form_cells)
     except ReadError as exc:
         console.print(f"[err]{exc}[/err]")
         raise typer.Exit(code=1) from None
@@ -1456,6 +1457,10 @@ def read(
     if getattr(p, "form_cells", False):
         console.print(f"  📋 бланк поклітинно → {p.out_dir.name}-cells "
                       f"[muted]({p.form_why})[/muted]")
+    if warn := getattr(p, "form_warning", ""):
+        # Правило судить за описом справи, а той, хто запускає, бачить кадри:
+        # рішення за ним, і він мусить знати, що воно є (див. `cells_auto_warning`)
+        console.print(f"  ⚠ {warn}", style="warn", markup=False)
     if bokom := getattr(p, "bokovi", ""):
         console.print(f"  ⚠ {bokom}", style="warn", markup=False)
     # 🔴 Вже прочитане цією моделлю не перечитується мовчки: прогін коштує

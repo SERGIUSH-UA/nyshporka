@@ -533,7 +533,7 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
        boxes: int = 1, datacenter_only: bool = False, pace: str = "",
        min_pph: float = 0.0, machine: int = 0, accept_slow_delivery: bool = False,
        vydannia: str = "", title: str = "", city: str = "",
-       seg_height: int = 0, book: int = 0, form_cells: bool = False,
+       seg_height: int = 0, book: int = 0, form_cells: bool | None = None,
        on_event: EventFn | None = None, tick_sec: float = 60.0) -> GoResult:
     """Прочитати справу (або кілька) на орендованій машині від початку до кінця.
 
@@ -1172,7 +1172,7 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
         pace: str = "", min_pph: float = 0.0, machine: int = 0,
         accept_slow_delivery: bool = False,
         edition: dict[str, Any] | None = None,
-        seg_height: int = 0, form_cells: bool = False,
+        seg_height: int = 0, form_cells: bool | None = None,
         pack_dir: str = "", upload_jobs: int = 0) -> None:
     from nyshporka.cloud import plan as PL
 
@@ -1348,7 +1348,28 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
 
         # Ручки оренди наглядач читає з `-p`; людське `-p …` того самого ключа
         # перемагає (наші йдуть лише туди, де людина нічого не задала).
-        from nyshporka.htr.run import cells_wanted
+        from nyshporka.htr.run import AUTO_PREFIX, _form_choice, cells_auto_warning
+
+        # 📋 бланк поклітинно: слово людини (`--form-cells` / `--no-form-cells`),
+        # інакше `form` у паспорті або опис справи (акти цивільного стану — сам,
+        # `htr.run.civil_acts_why`) хоч однієї справи черги. Ручка — на весь захід.
+        cells_on = form_cells
+        if cells_on is None:
+            auto = [(leg, why) for leg in convoy.legs
+                    for on, why in [_form_choice(Path(leg.source), None)] if on]
+            cells_on = bool(auto)
+            for leg, why in auto:
+                if why.startswith(AUTO_PREFIX):
+                    w = f"{leg.name}: {cells_auto_warning(why)}"
+                    res.notes.append(w)
+                    say("warning", f"⚠ {w}")
+            if auto and len(auto) < len(convoy.legs):
+                # ручка одна на захід: клітинки дістануть і справи без бланків
+                w = (f"клітинки ввімкнено для всієї черги через {len(auto)} з "
+                     f"{len(convoy.legs)} справ — решта теж їх дістане; розділіть "
+                     f"чергу або зніміть `--no-form-cells`")
+                res.notes.append(w)
+                say("warning", f"⚠ {w}")
 
         given = {p.split("=", 1)[0].strip() for p in params}
         for knob, setting in (("datacenter_only", "true" if datacenter_only else ""),
@@ -1358,13 +1379,8 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
                               ("accept_slow_delivery",
                                "true" if accept_slow_delivery else ""),
                               ("seg_height", str(int(seg_height)) if seg_height else ""),
-                              # 📋 бланк поклітинно: слово людини, `form` у паспорті
-                              # або опис справи (акти цивільного стану — сам,
-                              # `htr.run.civil_acts_why`) хоч однієї справи черги;
                               # на сторінці без сітки раннер лише лишає позначку
-                              ("form_cells", "1" if form_cells or any(
-                                  cells_wanted(Path(leg.source)) for leg in convoy.legs)
-                               else "")):
+                              ("form_cells", "1" if cells_on else "")):
             if setting and knob not in given:
                 params = (*params, f"{knob}={setting}")
 

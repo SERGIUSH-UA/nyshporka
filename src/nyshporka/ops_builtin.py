@@ -4694,6 +4694,10 @@ def read_plan(a: ReadArgs) -> Envelope:
         # Кадри PDF лежать боком: план нічого не змінює, а запуск читання
         # розгорне їх і відкладе прочитане з них (`htr.bokovi`).
         env.warn("pdf_sideways", p.bokovi, ALERT)
+    if getattr(p, "form_warning", ""):
+        # Клітинки ввімкнув опис справи; кадри бачить той, хто запускає, тож
+        # рішення за ним (`htr.run.cells_auto_warning`)
+        env.warn("cells_auto", p.form_warning)
     _plan_existing(env, p)
     if not a.script:
         # Здогад про письмо слабкий за побудовою — з імені теки нічого не
