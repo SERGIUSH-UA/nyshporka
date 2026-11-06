@@ -128,6 +128,7 @@ $Msg = @{
         'err.uv' = 'uv не встановився у {0}'
         'err.uvsum' = 'uv {0}: контрольна сума архіву не збіглася — завантаження пошкоджене або підмінене'
         'err.python' = 'не вдалося встановити Python 3.12 (uv повернув {0})'
+        'py.mirror' = '  uv не докачав архів Python — качаю його засобами Windows і ставлю з диска'
         'app.get' = '⬇ Нишпорка ({0})…'
         'err.app' = 'не вдалося встановити {0} (uv повернув {1})'
         'app.ok' = '✓ Нишпорка'
@@ -221,6 +222,7 @@ $Msg = @{
         'err.uv' = 'uv did not install into {0}'
         'err.uvsum' = 'uv {0}: archive checksum mismatch — the download is damaged or tampered with'
         'err.python' = 'could not install Python 3.12 (uv returned {0})'
+        'py.mirror' = '  uv could not download the Python archive — fetching it with Windows and installing from disk'
         'app.get' = '⬇ Nyshporka ({0})…'
         'err.app' = 'could not install {0} (uv returned {1})'
         'app.ok' = '✓ Nyshporka'
@@ -314,6 +316,7 @@ $Msg = @{
         'err.uv' = 'uv nie zainstalował się w {0}'
         'err.uvsum' = 'uv {0}: suma kontrolna archiwum się nie zgadza — pobranie jest uszkodzone lub podmienione'
         'err.python' = 'nie udało się zainstalować Python 3.12 (uv zwrócił {0})'
+        'py.mirror' = '  uv nie pobrał archiwum Pythona — pobieram je narzędziami Windows i instaluję z dysku'
         'app.get' = '⬇ Nyshporka ({0})…'
         'err.app' = 'nie udało się zainstalować {0} (uv zwrócił {1})'
         'app.ok' = '✓ Nyshporka'
@@ -407,6 +410,7 @@ $Msg = @{
         'err.uv' = 'uv nu s-a instalat în {0}'
         'err.uvsum' = 'uv {0}: suma de control a arhivei nu corespunde — descărcarea este deteriorată sau înlocuită'
         'err.python' = 'nu s-a putut instala Python 3.12 (uv a returnat {0})'
+        'py.mirror' = '  uv nu a putut descărca arhiva Python — o descarc prin Windows și o instalez de pe disc'
         'app.get' = '⬇ Nyshporka ({0})…'
         'err.app' = 'nu s-a putut instala {0} (uv a returnat {1})'
         'app.ok' = '✓ Nyshporka'
@@ -500,6 +504,7 @@ $Msg = @{
         'err.uv' = 'uv ne s''est pas installé dans {0}'
         'err.uvsum' = 'uv {0} : la somme de contrôle de l''archive ne correspond pas — téléchargement endommagé ou falsifié'
         'err.python' = 'impossible d''installer Python 3.12 (uv a renvoyé {0})'
+        'py.mirror' = '  uv n''a pas pu télécharger l''archive Python — téléchargement par Windows, installation depuis le disque'
         'app.get' = '⬇ Nyshporka ({0})…'
         'err.app' = 'impossible d''installer {0} (uv a renvoyé {1})'
         'app.ok' = '✓ Nyshporka'
@@ -593,6 +598,7 @@ $Msg = @{
         'err.uv' = 'uv wurde nicht nach {0} installiert'
         'err.uvsum' = 'uv {0}: Prüfsumme des Archivs stimmt nicht — der Download ist beschädigt oder manipuliert'
         'err.python' = 'Python 3.12 konnte nicht installiert werden (uv gab {0} zurück)'
+        'py.mirror' = '  uv konnte das Python-Archiv nicht laden — Download über Windows, Installation von der Festplatte'
         'app.get' = '⬇ Nyshporka ({0})…'
         'err.app' = '{0} konnte nicht installiert werden (uv gab {1} zurück)'
         'app.ok' = '✓ Nyshporka'
@@ -686,6 +692,7 @@ $Msg = @{
         'err.uv' = 'uv не установился в {0}'
         'err.uvsum' = 'uv {0}: контрольная сумма архива не совпала — загрузка повреждена или подменена'
         'err.python' = 'не удалось установить Python 3.12 (uv вернул {0})'
+        'py.mirror' = '  uv не докачал архив Python — качаю его средствами Windows и ставлю с диска'
         'app.get' = '⬇ Нышпорка ({0})…'
         'err.app' = 'не удалось установить {0} (uv вернул {1})'
         'app.ok' = '✓ Нышпорка'
@@ -934,6 +941,47 @@ function Resolve-ExtractedPython([string] $Tail, [string] $Dir, [string] $Versio
     return $exe
 }
 
+# 🔴 Архів Python повз мережевий стек uv (06.11.2026). У людини `uv python
+# install` чотири рази поспіль обривав архів інтерпретатора на тому самому
+# місці (~16,7 із 21 МБ): «error reading a body from connection: message
+# buffer full». Це відмова TLS-бібліотеки uv (rustls), а не обрив зв'язку,
+# тож власні повтори uv її не лікують. Той самий архів качаємо засобами
+# Windows (`Invoke-WebRequest`, інший TLS-стек) у теку `$Mirror` і далі
+# даємо uv як дзеркало `file://`. Адресу й ім'я файла називає сам uv, а хеш
+# архіву він звіряє з власним переліком: підмінений чи недокачаний файл не
+# стане (перевірено на uv 0.13.5). Розкладка теки — як у дзеркала:
+# `<реліз>/<файл>`. Повертає '' (дзеркало готове) або причину відмови.
+function Save-PythonMirror([string] $Uv, [string] $Request, [string] $Mirror) {
+    $url = $null
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $json = (& $Uv python list $Request --only-downloads --output-format json 2>$null) -join ''
+        $list = $json | ConvertFrom-Json
+        foreach ($d in $list) { if ($d.url) { $url = [string]$d.url; break } }
+    } catch { $url = $null }
+    finally { $ErrorActionPreference = $prev }
+    if (-not $url) { return "uv python list ${Request}: адреси архіву немає" }
+    $parts = $url -split '/'
+    $file = $parts[-1]
+    $dir = Join-Path $Mirror $parts[-2]
+    $out = Join-Path $dir ([Uri]::UnescapeDataString($file))
+    $why = @()
+    # Спершу адреса від uv (дзеркало Astral), потім першоджерело на GitHub.
+    $github = "https://github.com/astral-sh/python-build-standalone/releases/download/$($parts[-2])/$file"
+    foreach ($u in (@($url, $github) | Select-Object -Unique)) {
+        try {
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+            Invoke-WebRequest -UseBasicParsing -TimeoutSec 600 -OutFile $out -Uri $u
+            return ''
+        } catch {
+            $why += "$u — $($_.Exception.Message)"
+            Remove-Item -LiteralPath $out -Force -ErrorAction SilentlyContinue
+        }
+    }
+    return ($why -join "`n")
+}
+
 # Останній рядок stdout рідної команди; stderr і будь-яка відмова — у тишу.
 # Для запитань на кшталт «а куди ти кладеш команди»: відповідь або є, або
 # лишається порожньою, і викликач бере запасний варіант.
@@ -1169,11 +1217,35 @@ $PythonArg = $PyReq
 if ($rc -ne 0) {
     $tail = $script:NativeTail -join "`n"
     $exe = Resolve-ExtractedPython $tail $PythonDir '3.12'
-    if ($exe) {
-        Say "  python.exe → $exe" DarkGray
-        $PythonArg = $exe
-    } elseif ($tail -match 'os error 448') { throw $Untrusted448 }
-    else { throw (M 'err.python' $rc) }
+    # Не 448 і не junction — отже, uv не взяв сам архів: ще одна спроба з
+    # архівом, скачаним засобами Windows (`Save-PythonMirror`). Змінна дзеркала
+    # живе лише на цей виклик: інакше `nysh htr install` шукав би в неіснуючій
+    # теці інший Python, якщо попросить.
+    if (-not $exe -and $tail -notmatch 'os error 448') {
+        Say (M 'py.mirror') DarkGray
+        $mirror = Join-Path $Home_ '_python-mirror'
+        $hadMirror = $env:UV_PYTHON_INSTALL_MIRROR
+        try {
+            $why = Save-PythonMirror $uv $PyReq $mirror
+            if ($why) { $script:NativeTail.Add($why) }
+            else {
+                $env:UV_PYTHON_INSTALL_MIRROR = ([Uri]$mirror).AbsoluteUri
+                $rc = Invoke-Logged $uv python install $PyReq
+                $tail = $script:NativeTail -join "`n"
+                if ($rc -ne 0) { $exe = Resolve-ExtractedPython $tail $PythonDir '3.12' }
+            }
+        } finally {
+            $env:UV_PYTHON_INSTALL_MIRROR = $hadMirror
+            Remove-Item -LiteralPath $mirror -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    if ($rc -ne 0) {
+        if ($exe) {
+            Say "  python.exe → $exe" DarkGray
+            $PythonArg = $exe
+        } elseif ($tail -match 'os error 448') { throw $Untrusted448 }
+        else { throw (M 'err.python' $rc) }
+    }
 }
 Say "✓ Python" Green
 
