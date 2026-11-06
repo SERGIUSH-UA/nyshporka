@@ -34,7 +34,7 @@ const PHONE_H = 110;
 
 /** Стан екрана: живе між входами, бо набір і режим людина обирає раз. */
 const LB = {
-  set: '', pack: '', packs: [], mode: 'spread', page: '', blank: false, minChars: 10, fresh: true,
+  set: '', qSet: '', pack: '', packs: [], mode: 'spread', page: '', blank: false, minChars: 10, fresh: true,
   scen: '', mergedOnly: false, limit: 400, pages: [], q: null, session: 0,
   queue: [], i: -1, srcs: [], ids: [],
   cache: new Map(), zoom: 0, panel: false, panelZoom: 1,
@@ -95,11 +95,14 @@ SCREENS.label = async () => {
     <div id="lb-work"></div>`);
   // 🔴 Пакети розмітки — людські назви черг, вони першими у виборі; поруч — усі
   // набори, свіжі вгорі. Перемикатись можна завжди: і з меню, і з кнопки «Розмітити».
-  const [penv, env] = await Promise.all([callOp('train.packs', {}), callOp('train.sets', { all: false })]);
+  // Прихований набір у списку не стоїть, але посів з екрана «Набори» може вести саме
+  // на нього — тоді він лишається у виборі, інакше сценарій пішов би на чужий набір.
+  const [penv, env] = await Promise.all([callOp('train.packs', {}), callOp('train.sets', { all: !!seed.set })]);
   if (!alive(gen)) return;
   LB.packs = (penv.ok && penv.data.packs) || [];
   if (!env.ok) { boxError('lb-work', env); return; }
-  LB.sets = [...(env.data.sets || [])].sort((a, b) => Number(b.touched || 0) - Number(a.touched || 0));
+  LB.sets = (env.data.sets || []).filter((s) => !s.hidden || s.name === seed.set)
+    .sort((a, b) => Number(b.touched || 0) - Number(a.touched || 0));
   if (!LB.sets.length && !LB.packs.length) {
     el('lb-work').innerHTML = emptyMini('kolba', t('sets.none'));
     return;
@@ -135,8 +138,10 @@ function picked() {
 
 /** Сторінки набору зі станом — вибір сторінки списком, а не вільним полем. */
 async function refreshPages() {
-  const { pack, set } = picked();
-  LB.pack = pack; LB.set = set;
+  // 🔴 Лише вибір у списку: `LB.set`/`LB.pack` — набір ЗАПУЩЕНОЇ черги, і їх міняє
+  // тільки старт. Інакше «змінити» → інший набір → Enter писав мітку рядка старої
+  // черги в новий набір.
+  const { set } = picked();
   const wrap = el('lb-pgwrap');
   LB.pages = [];
   if (!set) {
@@ -243,6 +248,7 @@ async function loadQueue() {
     : await callOp('train.queue', { ...base, name: LB.set, page: LB.page });
   if (!env.ok) { boxError('lb-work', env); return false; }
   const d = env.data;
+  LB.qSet = LB.pack ? '' : LB.set;
   LB.queue = d.items || [];
   LB.srcs = d.draft_srcs || [];
   LB.ids = d.draft_ids || [];
@@ -259,7 +265,7 @@ async function loadQueue() {
 function key(it) { return `${it.set || ''}:${it.page}:${it.idx}`; }
 
 /** Набір рядка: у черзі пакета кожен рядок несе свій. */
-function setOf(it) { return (it && it.set) || LB.set; }
+function setOf(it) { return (it && it.set) || LB.qSet; }
 
 /** Рядок із кешу або з сервера; кеш і є префетч. */
 async function fetchLine(it) {
