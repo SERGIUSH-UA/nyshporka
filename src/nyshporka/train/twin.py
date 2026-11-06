@@ -82,7 +82,11 @@ CYR_FORMS = ("жена", "жона", "его", "ево", "ихъ", "нихъ", "
              # заняття й відлучки (tw-280-174-613: «Упражняется хлѣбопашествомъ» з великої)
              "упражняется", "упражняются", "упражняющійся", "хлѣбопашествомъ", "хлѣбопашество",
              "промышляетъ", "ремесломъ", "торгомъ", "работою", "живетъ", "живутъ", "находится",
-             "отлучкѣ", "бѣглый", "бѣжалъ", "рекрутъ", "отданъ")
+             "отлучкѣ", "бѣглый", "бѣжалъ", "рекрутъ", "отданъ",
+             # місце й маєток (tw-280-2-57: «Селеній» з великої)
+             "селеніе", "селеніи", "селеній", "селенія", "деревня", "деревни", "мѣстечко",
+             "мѣстечка", "хуторъ", "фольваркъ", "имѣніе", "имѣніи", "владѣлецъ", "владѣльца",
+             "помѣщикъ", "земледѣліемъ", "чиншъ", "собственнымъ")
 LAT_FORMS = ("zona", "żona", "iego", "jego", "ich", "nich", "niego", "syn", "synowie",
              "corka", "córka", "corki", "córki", "dzieci", "wdowa", "wdowiec", "chałupa",
              "chalupa", "dom", "kawaler", "lata", "rolnik", "męskiey", "meskiey", "niewieściey",
@@ -95,7 +99,8 @@ LAT_FORMS = ("zona", "żona", "iego", "jego", "ich", "nich", "niego", "syn", "sy
              "mieszczanie", "poddany", "possessor", "posesor", "ekonom", "chata", "żonaty", "zonaty",
              "umarł", "umarl",
              "rolnictwem", "trudni", "rzemiosłem", "handlem", "zbiegły", "zbiegl", "rekrut",
-             "oddany")
+             "oddany",
+             "wieś", "wsi", "miasteczko", "chutor", "folwark", "majętność", "dziedzic", "czynsz")
 
 #: Народна й церковна форма того самого імені — ключі `key()`. Двійник пише
 #: «Hnat» там, де кириличний рядок пише «Игнатъ»; без цього ворота понижували б
@@ -132,6 +137,8 @@ NAME_GROUPS: tuple[tuple[str, ...], ...] = (
     ("petr", "petro", "petrus", "petrik"),
     ("kirill", "kirilo", "kiril", "kirik"),
     ("aleksii", "oleksa", "oleksii", "aleksei", "oleks"),
+    ("onufrii", "onofrei", "onufri", "onofrii", "onufrei", "onisko", "onufer"),
+    ("silwestr", "silwester", "selewestr", "siliwestr"),
     ("maksim", "maksim", "maksimko"),
     ("nikolai", "mikola", "mikolai", "nikola", "mikolaiko"),
     ("ewfimii", "ewtim", "iuhim", "ohim", "iuchim"),

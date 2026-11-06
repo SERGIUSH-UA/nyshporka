@@ -121,6 +121,7 @@ def test_halves_split_spread_by_gutter() -> None:
 def test_church_name_supported_by_folk_form() -> None:
     assert TW.unsupported("Дѣти у нихъ сынъ Игнатъ", "Dzieci u nich Syn Hnat") == []
     assert TW.unsupported("дочь Параскевія", "Córka Paraska") == []
+    assert TW.unsupported("Онофрей Ивановъ", "Onufry Iwanow") == []
 
 
 def test_invented_surname_has_no_support() -> None:
@@ -136,6 +137,7 @@ def test_formula_words_are_not_names() -> None:
     assert TW.name_words("Отецъ Его Иванъ") == ["Иванъ"]
     assert TW.name_words("Ojciec iego Szlachcic") == []
     assert TW.name_words("Упражняется хлѣбопашествомъ") == []
+    assert TW.name_words("въ Селеніи") == []
 
 
 # ── набір ────────────────────────────────────────────────────────────────────
