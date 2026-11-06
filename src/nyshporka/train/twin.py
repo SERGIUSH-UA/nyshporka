@@ -88,7 +88,7 @@ CYR_FORMS = ("жена", "жона", "его", "ево", "ихъ", "нихъ", "
              "мѣстечка", "хуторъ", "фольваркъ", "имѣніе", "имѣніи", "владѣлецъ", "владѣльца",
              "помѣщикъ", "земледѣліемъ", "чиншъ", "собственнымъ",
              # дата (tw-118-14-109: «1795 Года» з великої)
-             "года", "году", "годъ", "мѣсяца", "дня", "числа", "лѣта",
+             "товарищъ", "товарищи", "года", "году", "годъ", "мѣсяца", "дня", "числа", "лѣта",
              "генваря", "января", "февраля", "марта", "апрѣля", "апреля", "мая", "іюня", "июня",
              "іюля", "июля", "августа", "сентября", "октября", "ноября", "декабря")
 LAT_FORMS = ("zona", "żona", "iego", "jego", "ich", "nich", "niego", "syn", "synowie",
@@ -105,7 +105,7 @@ LAT_FORMS = ("zona", "żona", "iego", "jego", "ich", "nich", "niego", "syn", "sy
              "rolnictwem", "trudni", "rzemiosłem", "handlem", "zbiegły", "zbiegl", "rekrut",
              "oddany",
              "wieś", "wsi", "miasteczko", "chutor", "folwark", "majętność", "dziedzic", "czynsz",
-             "rok", "roku", "miesiąca", "miesiaca", "dnia",
+             "towarzysz", "towarzysze", "rok", "roku", "miesiąca", "miesiaca", "dnia",
              "stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca", "lipca", "sierpnia",
              "września", "wrzesnia", "października", "pazdziernika", "listopada", "grudnia")
 
@@ -146,6 +146,8 @@ NAME_GROUPS: tuple[tuple[str, ...], ...] = (
     ("aleksii", "oleksa", "oleksii", "aleksei", "oleks"),
     ("onufrii", "onofrei", "onufri", "onofrii", "onufrei", "onisko", "onufer"),
     ("silwestr", "silwester", "selewestr", "siliwestr"),
+    ("terentii", "terenti", "teren", "terenko", "terentei"),
+    ("feodosii", "fedosii", "teodozi", "teodozii", "hwedos", "fedos", "fedosei"),
     ("maksim", "maksim", "maksimko"),
     ("nikolai", "mikola", "mikolai", "nikola", "mikolaiko"),
     ("ewfimii", "ewtim", "iuhim", "ohim", "iuchim"),
