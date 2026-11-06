@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 from itertools import pairwise
 from pathlib import Path
 
@@ -431,7 +432,10 @@ def test_the_read_command_takes_no_form_cells(tmp_path: Path) -> None:
     from nyshporka.cli import app
 
     got = CliRunner().invoke(app, ["read", "--help"])
-    assert got.exit_code == 0 and "--no-form-cells" in got.output
+    # На GitHub Actions Typer фарбує довідку завжди (`GITHUB_ACTIONS` читається при
+    # імпорті), і стилі рвуть назву прапорця — звіряємо текст без ANSI.
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", got.output)
+    assert got.exit_code == 0 and "--no-form-cells" in plain
 
 
 def test_the_runner_command_carries_the_flag(tmp_path: Path) -> None:
