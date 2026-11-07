@@ -396,10 +396,15 @@ def build(name: str, file: Path, *, dry_run: bool = False, ws: Any = None) -> Ro
                 v["doubt"] = f"прив'язка непевна (схожість {s:.2f})"
             line_hints[f"{pg}:{i}"] = v
         for j, pi in pm.ages.items():
-            v = {"text": f"вік {people[pi].age} — {people[pi].full}"}
-            if j not in pm.ages_sure:
-                v["doubt"] = "прив'язка непевна: жоден голос цього числа не читає, смужка може "                              "належати сусідньому рядку"
-            line_hints[f"{pg}:{j}"] = v
+            if j in pm.ages_sure:
+                line_hints[f"{pg}:{j}"] = {"text": f"вік {people[pi].age} — {people[pi].full}"}
+            else:
+                # Без голосу прив'язка віку частіше хибна, ніж ні (хвиля fsi 07.11:
+                # арбітри знаходили чужий вік на 8 з 11 таких смужок), тож числа тут
+                # не показуємо — лише що це графа віку; віки двору є в ІНДЕКС-СТОР.
+                line_hints[f"{pg}:{j}"] = {
+                    "text": "графа віку (особу певно не прив'язано) — число лише з кропа",
+                    "doubt": "віки двору — у переліку кадру"}
         page_hints[pg] = {"text": page_text(people)}
         state_pages[pg] = {"persons": [p.as_dict() for p in people],
                            "names": {str(i): pi for i, (pi, _) in sorted(pm.names.items())},

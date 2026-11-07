@@ -171,8 +171,8 @@ def test_build_writes_hints_and_export_shows_them(space: W.Workspace) -> None:
     src = next(h for h in spec.hint_sources if h.id == RO.ROSTER_LINE_ID)
     hints = reg.hint_data(spec, src)
     assert hints["0001:2"]["text"] == "Симеон Леонтиев Крига (глава) 40"
-    assert hints["0001:3"]["text"] == "вік 40 — Симеон Леонтиев Крига"
-    assert "непевна" in hints["0001:3"]["doubt"]          # голоси «Ло/4о» віку не читають
+    assert hints["0001:3"]["text"].startswith("графа віку")   # голоси «Ло/4о» віку не читають
+    assert "40" not in hints["0001:3"]["text"]
     assert not hints["0001:9"]["doubt"]                   # голос «55» — певна
     txt = T.export_tasks("sp", sheets=False, ws=space).files[0].read_text(encoding="utf-8")
     assert "ІНДЕКС: Симеон Леонтиев Крига (глава) 40" in txt
