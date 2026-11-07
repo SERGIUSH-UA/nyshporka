@@ -513,13 +513,9 @@ def _links_from_registry(shifra: str) -> list[dict[str, str]]:
         return []
 
     out: list[dict[str, str]] = []
-    dgs = str(row.get("fs_dgs") or row.get("fs_film") or "").strip()
-    if dgs:
-        out.append({
-            "label": f"FamilySearch, DGS {dgs}",
-            "url": "https://www.familysearch.org/records/images/"
-                   f"search-results?imageGroupNumbers={dgs}",
-        })
+    fs = _fs_link(str(row.get("fs_dgs") or ""), str(row.get("fs_film") or ""))
+    if fs:
+        out.append(fs)
     commons = str(row.get("commons_title") or "").strip()
     if commons:
         out.append({"label": f"Wikimedia Commons: {commons}",
@@ -530,15 +526,62 @@ def _links_from_registry(shifra: str) -> list[dict[str, str]]:
     return [x for x in out if x["url"]]
 
 
-def _with_registry(own: list[dict[str, str]], shifra: str) -> list[dict[str, str]]:
-    """Свої посилання плюс реєстрові, без повторів.
+#: DGS FamilySearch — 9 цифр із нулями попереду (005773162, 118463212);
+#: номер мікроплівки — до 7 (2360571). Коротше 8 цифр — не DGS.
+_DGS_MIN_DIGITS = 8
+
+
+def _fs_link(dgs: str, film: str = "") -> dict[str, str] | None:
+    """Посилання на FamilySearch: за DGS — на образи, за мікроплівкою — на каталог.
+
+    🔴 Поле `fs_film` реєстру різні збирачі заповнюють різним: вікіджерела
+    кладуть туди DGS, а покажчик катаграфій ANRM — номер мікроплівки
+    (2360571). Пошук образів FamilySearch за номером мікроплівки нічого не
+    знаходить, тож до 07.11.2026 картки ANRM ф.134 вели на порожню видачу під
+    підписом «DGS 2360571». Мікроплівку FamilySearch шукає каталог.
+    """
+    dgs, film = dgs.strip(), film.strip()
+    if not dgs and film.isdigit() and len(film) >= _DGS_MIN_DIGITS:
+        dgs, film = film, ""
+    if dgs:
+        return {"label": f"FamilySearch, DGS {dgs}",
+                "url": "https://www.familysearch.org/records/images/"
+                       f"search-results?imageGroupNumbers={dgs}"}
+    if film.isdigit():
+        return {"label": f"FamilySearch, мікроплівка {film}",
+                "url": "https://www.familysearch.org/search/catalog/results"
+                       f"?count=20&query=%2Bfilm_number%3A{film}"}
+    return None
+
+
+def _links_from_refs(refs: list[dict[str, str]]) -> list[dict[str, str]]:
+    """DGS зйомки, з якої читано, — посиланням для ока.
+
+    Реєстр знає, де справа є взагалі; паспорт — з якої плівки взято саме ці
+    кадри. Номер, коротший за DGS (у давніх паспортах у полі `dgs` бувала
+    мікроплівка дзеркала), посиланням на образи не стає.
+    """
+    out: list[dict[str, str]] = []
+    for r in refs:
+        ref = str(r.get("ref") or "")
+        if r.get("source") != "fs" or not ref.startswith("dgs:"):
+            continue
+        num = ref[4:].strip()
+        if num.isdigit() and len(num) >= _DGS_MIN_DIGITS:
+            out.append(_fs_link(num) or {})
+    return [x for x in out if x]
+
+
+def _with_registry(own: list[dict[str, str]], shifra: str,
+                   refs: list[dict[str, str]] | None = None) -> list[dict[str, str]]:
+    """Свої посилання, плівка зйомки з паспорта, реєстрові — без повторів.
 
     🔴 Назване людиною йде першим і не витісняється: вона знає, звідки
     качала САМЕ ЦЮ зйомку, а реєстр знає лише, де справа є взагалі.
     """
     out = list(own)
     seen = {x.get("url", "").strip().rstrip("/") for x in out}
-    for link in _links_from_registry(shifra):
+    for link in [*_links_from_refs(refs or []), *_links_from_registry(shifra)]:
         if link["url"].rstrip("/") not in seen:
             out.append(link)
             seen.add(link["url"].rstrip("/"))
@@ -970,11 +1013,12 @@ def build_manifest(scope: str, *,
     scans = K.scans_link(kartka)
     taken = {s["url"] for s in scans}
     own = scans + [x for x in (links or []) if x.get("url") not in taken]
+    refs = _merge_refs(_refs_from_sidecar(home), _refs_from_links(own))
     m = Manifest(
         case=case,
-        refs=_merge_refs(_refs_from_sidecar(home), _refs_from_links(own)),
+        refs=refs,
         frames=frames_block, decode=decode, publisher=pub, note=note,
-        links=_with_registry(own, str(case.get("shifra") or "")),
+        links=_with_registry(own, str(case.get("shifra") or ""), refs),
         extra=dict(extra or {}), license=lic,
         tool=bundle._tool_version(), created=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
     details = {"skipped_runs": list(info.get("skipped_runs") or []),

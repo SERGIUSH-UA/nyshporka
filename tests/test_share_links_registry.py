@@ -118,3 +118,39 @@ def test_porozhnia_shyfra_ne_pytaie_reiestr(reiestr: list[tuple[str, ...]]) -> N
     """Без шифри питати нічого — і реєстр не турбуємо."""
     assert publish._links_from_registry("") == []
     assert reiestr == []
+
+
+def test_mikroplivka_ne_vydaietsia_za_dgs() -> None:
+    """Номер мікроплівки в `fs_film` (покажчик катаграфій ANRM) — не DGS.
+
+    🔴 До 07.11.2026 картки ANRM ф.134 вели на пошук образів за 2360571 під
+    підписом «DGS 2360571» — видача порожня: образи FamilySearch шукаються за
+    DGS (005773162), а мікроплівку знає лише каталог.
+    """
+    got = publish._fs_link("", "2360571")
+
+    assert got is not None
+    assert "DGS" not in got["label"] and "2360571" in got["label"]
+    assert "imageGroupNumbers" not in got["url"]
+    assert "film_number%3A2360571" in got["url"]
+
+
+def test_dgs_u_fs_film_lyshaietsia_dgs() -> None:
+    """Вікіджерела кладуть у `fs_film` саме DGS — він і лишається посиланням на образи."""
+    got = publish._fs_link("", "100000123")
+
+    assert got and got["label"] == "FamilySearch, DGS 100000123"
+    assert "imageGroupNumbers=100000123" in got["url"]
+
+
+def test_dgs_zyomky_z_pasporta_staie_posylanniam(reiestr: list[tuple[str, ...]]) -> None:
+    """DGS плівки, з якої взято кадри, — посилання для ока; мікроплівка в `dgs:` — ні."""
+    refs = [{"source": "fs", "ref": "dgs:005773162"},
+            {"source": "fs", "ref": "dgs:2361072"},
+            {"source": "commons", "ref": "File:x.pdf"}]
+
+    got = publish._with_registry([], "ДАХмО 315-1-84а", refs)
+
+    assert got[0]["label"] == "FamilySearch, DGS 005773162"
+    assert not any("2361072" in x["url"] for x in got)
+    assert any("118463212" in x["url"] for x in got), "реєстрове посилання лишається"
