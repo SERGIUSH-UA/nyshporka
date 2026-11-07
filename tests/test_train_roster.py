@@ -283,3 +283,13 @@ def test_name_line_grounded_by_household() -> None:
     assert not RO.grounds("Жена Симеона Марія", "name", p)
     assert RO.grounds("Жена Симеона Марія", "name", p, "Симеон Леонтиев Крига Мария Григориева")
     assert RO.name_words("Служителка Пономариха") == []
+
+
+def test_gutter_prefers_clean_band_in_center() -> None:
+    # Ліва сторінка з проміжком між графами на 0,39 (20 px), корінець на 0,50 — вужчий (12 px),
+    # а праворуч від корінця рамки впритул.
+    width = 1000
+    boxes = [[100, 10, 380, 40], [400, 10, 494, 40], [506, 10, 900, 40],
+             [100, 50, 380, 80], [400, 50, 494, 80], [506, 50, 900, 80]]
+    x, _gap, crossing = SP.gutter(boxes, width)
+    assert 494 < x < 506 and crossing == 0

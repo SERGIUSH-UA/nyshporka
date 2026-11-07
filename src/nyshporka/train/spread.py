@@ -20,6 +20,8 @@ from typing import Any
 SIDES = ("left", "right")
 #: Де шукати корінець: середня частина кадру.
 LO, HI = 0.30, 0.70
+#: Центральне вікно, де корінець шукається першим.
+CENTER = (0.44, 0.58)
 STEP = 4
 
 
@@ -37,16 +39,12 @@ def _span(b: Any) -> tuple[int, int] | None:
     return int(b[0]), int(b[2])
 
 
-def gutter(boxes: list[Any], width: int) -> tuple[int, int, int]:
-    """Корінець розвороту: (x, ширина смуги в px, скільки рамок її перетинає).
-
-    Смуга — суцільний відрізок x у середній частині кадру з найменшим покриттям
-    рамками; з кількох таких береться найширша.
-    """
-    spans = [s for s in (_span(b) for b in boxes) if s]
-    if not spans or width <= 0:
-        raise SpreadError("на сторінці немає рамок рядків")
-    xs = list(range(int(width * LO), int(width * HI), STEP))
+def _widest_low_run(spans: list[tuple[int, int]], width: int, lo: float,
+                    hi: float) -> tuple[int, int, int] | None:
+    """Найширша смуга з найменшим покриттям у [lo, hi] ширини: (x, ширина px, покриття)."""
+    xs = list(range(int(width * lo), int(width * hi), STEP))
+    if not xs:
+        return None
     cov = [sum(1 for a, c in spans if a <= x <= c) for x in xs]
     low = min(cov)
     best: tuple[int, int, int] | None = None   # (довжина, перший, останній)
@@ -62,6 +60,27 @@ def gutter(boxes: list[Any], width: int) -> tuple[int, int, int]:
     assert best is not None
     n, a, z = best
     return (xs[a] + xs[z]) // 2, n * STEP, low
+
+
+def gutter(boxes: list[Any], width: int) -> tuple[int, int, int]:
+    """Корінець розвороту: (x, ширина смуги в px, скільки рамок її перетинає).
+
+    Спершу — центральне вікно кадру (`CENTER`): корінець майже завжди там, і
+    чиста смуга в ньому — він, хоч би й вужча за проміжок між графами деінде
+    (кадр 1798 р., хвиля fsi 07.11.2026: корінець 0,506 на 8–12 px, а проміжок між
+    графою віку й графою показань лівої сторінки на 0,39 — на 20 px). Немає в
+    центрі смуги з покриттям ≤ 1 — найширша смуга з найменшим покриттям у
+    середній частині кадру.
+    """
+    spans = [s for s in (_span(b) for b in boxes) if s]
+    if not spans or width <= 0:
+        raise SpreadError("на сторінці немає рамок рядків")
+    mid = _widest_low_run(spans, width, *CENTER)
+    if mid is not None and mid[2] <= 1:
+        return mid
+    got = _widest_low_run(spans, width, LO, HI)
+    assert got is not None
+    return got
 
 
 def side_lines(boxes: list[Any], width: int, side: str) -> list[int]:
