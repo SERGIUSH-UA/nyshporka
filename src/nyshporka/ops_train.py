@@ -624,6 +624,10 @@ def train_gates(a: GatesArgs) -> Envelope:
 
         d["gt_shifted"] = G.audit_marks(reg.marks(a.name), _vl)
     env = ok(d)
+    if a.lower and lr.unreadable:
+        env.warn("lower_unreadable", f"файли відповідей не розібрано — рядки в них не понижено: "
+                                     f"{', '.join(lr.unreadable[:10])}"
+                                     f"{' …' if len(lr.unreadable) > 10 else ''}")
     if d.get("gt_shifted"):
         env.warn("gt_shift", f"{len(d['gt_shifted'])} ручних міток мають якір на іншому "
                              f"індексі — перевірити, чи не з'їхала нумерація кропів")

@@ -293,3 +293,30 @@ def test_gutter_prefers_clean_band_in_center() -> None:
              [100, 50, 380, 80], [400, 50, 494, 80], [506, 50, 900, 80]]
     x, _gap, crossing = SP.gutter(boxes, width)
     assert 494 < x < 506 and crossing == 0
+
+
+def test_side_change_on_some_pages_is_refused(space: W.Workspace) -> None:
+    SP.mark_side("sp", "left", ws=space)
+    with pytest.raises(SP.SpreadError):
+        SP.mark_side("sp", "right", pages=["0001"], ws=space)
+    rep = SP.mark_side("sp", "right", ws=space)          # усім сторінкам разом — можна
+    spec = S.registry(space).load("sp")
+    assert spec.side["side"] == "right" and set(spec.side["pages"]) == set(rep.pages)
+
+
+def test_age_from_index_is_normalized_to_digits() -> None:
+    assert RO.Person.from_dict({"name": "Іван", "age": 40}).age == "40"
+    assert RO.Person.from_dict({"name": "Іван", "age": "40.0"}).age == "40"
+    assert RO.Person.from_dict({"name": "Іван", "age": "3 мес"}).age == "3"
+    assert RO.Person.from_dict({"name": "Іван", "age": "—"}).age == ""
+
+
+def test_lower_reports_unreadable_answer_file(space: W.Workspace) -> None:
+    RO.build("sp", space.root / "roster.json", ws=space)
+    _answers(space, {"0001:1": ("102", "med")})
+    T.import_answers("sp", ws=space)
+    bad = S.registry(space).set_dir("sp") / T.TASKS_DIR / "zz_part99.answer.json"
+    bad.write_text('{"0001:3": {"m": "x", "c": "high"},}', encoding="utf-8")
+    lr = T.lower_suspects("sp", ws=space)
+    assert "zz_part99.answer.json" in lr.unreadable
+    assert lr.lowered == ["0001:1"]

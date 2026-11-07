@@ -25,6 +25,32 @@
  "schema": 1,
  "packs": [
   {
+   "id": "pysar-cyr-v29",
+   "kind": "model",
+   "label": "Писар v29 — кирилиця",
+   "filename": "pysar_cyr_v29.pt",
+   "sha256": "36388a2cb76f16c1bfcd4969ea8d0f988cbd174b6a1dab98f307b0424e3c4dcb",
+   "size": 97017568,
+   "release": "weights-v5",
+   "script": "cyrillic",
+   "engine": "parseq",
+   "note": "канцелярія, метрики, сповідки, ревізькі казки, судові й поліцейські справи XVIII–XX ст.; дотреновано на нових руках сповідних розписів і ревізії",
+   "license": "CC BY-NC-SA 4.0"
+  },
+  {
+   "id": "diak-cyr-v12",
+   "kind": "model",
+   "label": "Дяк-Літописець v12 — кирилиця, другий голос",
+   "filename": "diak_cyr_v12.safetensors",
+   "sha256": "ac4eaa66afa9a62b2e05437a065e4773f9f0a52541f533a49bc8343a526a95d5",
+   "size": 63781228,
+   "release": "weights-v5",
+   "script": "cyrillic",
+   "engine": "kraken",
+   "note": "PP-OCRv6: читає ті самі кропи, що й Писар, і помиляється інакше — витягує прізвища, яких Писар не бачить",
+   "license": "CC BY-NC-SA 4.0"
+  },
+  {
    "id": "pysar-cyr-v28",
    "kind": "model",
    "label": "Писар v28 — кирилиця",
@@ -34,7 +60,8 @@
    "release": "weights-v3",
    "script": "cyrillic",
    "engine": "parseq",
-   "note": "канцелярія, метрики, сповідки, судові й поліцейські справи XVIII–XX ст.; дотреновано на ~10 тис. рядках важких рук"
+   "note": "канцелярія, метрики, сповідки, судові й поліцейські справи XVIII–XX ст.; дотреновано на ~10 тис. рядках важких рук",
+   "superseded": true
   },
   {
    "id": "diak-cyr-v10",
@@ -46,7 +73,8 @@
    "release": "weights-v3",
    "script": "cyrillic",
    "engine": "kraken",
-   "note": "PP-OCRv6: читає ті самі кропи, що й Писар, і помиляється інакше — витягує прізвища, яких Писар не бачить"
+   "note": "PP-OCRv6: читає ті самі кропи, що й Писар, і помиляється інакше — витягує прізвища, яких Писар не бачить",
+   "superseded": true
   },
   {
    "id": "logofet-ro-v11",

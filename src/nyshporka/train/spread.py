@@ -135,11 +135,20 @@ def mark_side(name: str, side: str, *, pages: list[str] | None = None,
         raise SpreadError(f"набір «{name}» нарізаний не з прогону — рамок немає")
     have = sorted(reg.crop_pages(spec))
     todo = [p for p in have if not pages or p in set(pages)]
-    got_pages: dict[str, list[int]] = dict((spec.side or {}).get("pages") or {})
-    gut: dict[str, int] = dict((spec.side or {}).get("gutter") or {})
+    old = spec.side or {}
+    if pages and old.get("side") and old.get("side") != side:
+        # Інша сторона лише для частини сторінок дала б набір, що зветься «right», а на
+        # решті сторінок тримає рядки лівої: сторона в наборі одна на всі сторінки.
+        raise SpreadError(f"набір «{name}» позначено стороною «{old['side']}» — нову сторону "
+                          f"ставлять усім сторінкам разом (без --pages)")
+    same = old.get("side") == side
+    got_pages: dict[str, list[int]] = dict(old.get("pages") or {}) if same else {}
+    gut: dict[str, int] = dict(old.get("gutter") or {}) if same else {}
     for pg in todo:
         geo = C.page_geometry(spec.source_run, pg, w)
         if geo is None:
+            got_pages.pop(pg, None)
+            gut.pop(pg, None)
             rep.warnings.append(f"{pg}: прогін не зберіг рамок — сторінку лишено цілою")
             continue
         boxes = geo.get("boxes") or []

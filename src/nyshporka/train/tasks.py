@@ -39,7 +39,7 @@ from typing import Any
 from nyshporka.core.workspace import Workspace, workspace
 from nyshporka.train import gate as G
 from nyshporka.train import sets as S
-from nyshporka.utils.atomic import read_json, write_json
+from nyshporka.utils.atomic import CorruptFileError, read_json, write_json
 
 TASKS_DIR = "_tasks"
 SHEETS_DIR = "_sheets"
@@ -698,7 +698,10 @@ def suspects_of(name: str, ws: Workspace | None = None) -> list[dict[str, Any]]:
 
         twins = TW.line_twins(reg, spec, pg)
         listed = RO.line_entries(roster_st, pg) if roster_st else {}
-        geo = C.page_geometry(spec.source_run, pg, w) if spec.source_run else None
+        try:
+            geo = C.page_geometry(spec.source_run, pg, w) if spec.source_run else None
+        except CorruptFileError:
+            geo = None              # битий файл рамок сторінки: без ряду лічильника, не без воріт
         series = G.series_support(merged, (geo or {}).get("boxes") or [],
                                   int((geo or {}).get("size", [0])[0] or 0)) if geo else set()
         for i, text in enumerate(merged):
@@ -736,6 +739,7 @@ class LowerReport:
     set: str
     lowered: list[str] = field(default_factory=list)   # «сторінка:рядок»
     missing: list[str] = field(default_factory=list)   # підозрілі без ключа у відповідях
+    unreadable: list[str] = field(default_factory=list)  # файли відповідей, які не розібрано
     files: int = 0
     imported: ImportReport | None = None
 
@@ -764,12 +768,17 @@ def lower_suspects(name: str, *, dry_run: bool = False,
     if not isinstance(before, dict):
         before = {}
     seen: set[str] = set()
+    to_write: list[tuple[Path, dict[str, Any]]] = []
     for f in sorted(src.glob("*.answer.json")):
         try:
             d = json.loads(f.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
+            # Імпорт розбирає такий файл поблажливо, а переписати його тут не можна,
+            # не зіпсувавши: рядки з нього лишаються як є, і про це видно у звіті.
+            rep.unreadable.append(f.name)
             continue
         if not isinstance(d, dict):
+            rep.unreadable.append(f.name)
             continue
         hit = [k for k in want & set(d) if isinstance(d[k], dict)]
         seen.update(hit)
@@ -778,17 +787,21 @@ def lower_suspects(name: str, *, dry_run: bool = False,
             if d[k].get("c") != "low":
                 # Попередня оцінка арбітра — у бічний файл: правило опори може
                 # змінитись, і без неї пониження не переглянути.
-                before.setdefault(k, d[k].get("c"))
+                if before.get(k) is None:
+                    before[k] = d[k].get("c")
                 d[k]["c"] = "low"
                 rep.lowered.append(k)
                 changed = True
         if changed:
             rep.files += 1
-            if not dry_run:
-                f.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+            to_write.append((f, d))
     rep.missing = sorted(want - seen)
     if rep.lowered and not dry_run:
+        # Спершу попередні оцінки, потім відповіді, і обидва атомарно: обрив посередині
+        # не лишає ні відповіді, з якої пропала оцінка, ні напівзаписаного файлу.
         write_json(side, before)
+        for f, d in to_write:
+            write_json(f, d, indent=1)
         rep.imported = import_answers(name, ws=w)
     return rep
 

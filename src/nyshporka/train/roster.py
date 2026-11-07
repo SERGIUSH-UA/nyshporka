@@ -161,8 +161,13 @@ class Person:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Person:
-        return cls(**{k: str(d.get(k) or "").strip() for k in
-                      ("name", "given", "patronymic", "surname", "relation", "age", "household")})
+        v = {k: str(d.get(k) or "").strip() for k in
+             ("name", "given", "patronymic", "surname", "relation", "age", "household")}
+        # Вік у переліку — число (40), рядок «40», «40.0» з таблиці чи «3 мес»: порівнюють
+        # його з цифрами голосу, тож лишається перша група цифр, як вона стоїть у рядку.
+        m = _DIGITS.search(v["age"])
+        v["age"] = m.group(0) if m else ""
+        return cls(**v)
 
 
 def load(path: Path) -> tuple[dict[str, Any], dict[str, list[Person]]]:
@@ -303,7 +308,7 @@ def match_page(page: str, people: list[Person], boxes: list[Any], width: int,
                 take(pi, i, s)
     # 3. Вік: вузька смужка праворуч на висоті рядка імені. Певна — коли хоч
     # один голос читає саме цей вік; інакше найближча за висотою, з сумнівом.
-    narrow = [j for j, bx in geo.items() if bx and (own is None or j in own)
+    narrow = [j for j, bx in geo.items() if bx and (own is None or j in own) and j not in pm.names
               and (bx[2] - bx[0]) < AGE_MAX_W * width and texts(j)
               and not any(len(_LETTERS.findall(t)) >= 3 and not _DIGITS.search(t)
                           for t in texts(j))]
@@ -512,6 +517,8 @@ def line_entries(st: dict[str, Any], page: str) -> dict[int, tuple[str, Person, 
         for i, pi in (pg.get(kind) or {}).items():
             if not (str(i).isdigit() and isinstance(pi, int) and 0 <= pi < len(people)):
                 continue
+            if kind == "ages" and int(i) in out:
+                continue                      # ім'я на цьому рядку важливіше за вік
             k = "name" if kind == "names" else ("age" if int(i) in sure else "age?")
             p = people[pi]
             out[int(i)] = (k, p, " ".join(hh.get(p.household, []) if p.household else []))
