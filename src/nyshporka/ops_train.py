@@ -410,6 +410,83 @@ def train_twin(a: TwinArgs) -> Envelope:
     return env
 
 
+# ── сторінка розвороту ───────────────────────────────────────────────────────
+class SideArgs(BaseModel):
+    name: str = Field(description="набір")
+    side: str = Field(default="left", description="left | right — яку сторінку розвороту "
+                                                  "зводити; порожньо — знову кадр цілим")
+    pages: str = Field(default="", description="кома-список сторінок; порожньо — усі")
+    dry_run: bool = Field(default=False, description="лише показати межу, нічого не писати")
+
+
+@op("train.side", summary="Сторінка розвороту: набір зводить одну сторінку кадру",
+    args=SideArgs, mutates=True, section=SECTION,
+    skill="label-lines",
+    when="кадр знято розворотом, а мітки потрібні з однієї сторінки — та сама рука, "
+         "удвічі дешевше")
+def train_side(a: SideArgs) -> Envelope:
+    """Записати в набір рядки однієї сторінки розвороту.
+
+    Експорт, черга розмітки й ворота далі працюють лише з ними; аркуш із
+    рамками показує кадр цілим. Межа — найширша смуга кадру без рамок у
+    середній частині (`train/spread.py`).
+    """
+    from nyshporka.train import sets as S
+    from nyshporka.train import spread as SP
+
+    try:
+        rep = SP.mark_side(a.name, a.side, pages=_csv(a.pages) or None, dry_run=a.dry_run)
+    except (S.SetError, SP.SpreadError, ValueError) as exc:
+        return fail(str(exc))
+    env = ok({"set": a.name, "side": a.side, "dry_run": a.dry_run, "pages": rep.pages})
+    for w_ in rep.warnings:
+        env.warn("side_gutter", w_)
+    return env
+
+
+# ── поіменний індекс сторінки ────────────────────────────────────────────────
+class RosterArgs(BaseModel):
+    name: str = Field(description="набір")
+    file: str = Field(description="JSON переліку осіб: {\"source\": {...}, \"pages\": "
+                                  "{сторінка: [{name|given,patronymic,surname, relation, age, "
+                                  "household}]}}")
+    dry_run: bool = Field(default=False, description="лише заміряти прив'язку, нічого не писати")
+
+
+@op("train.roster", summary="Поіменний індекс сторінки — підказка арбітрам і ворота злиття",
+    args=RosterArgs, mutates=True, section=SECTION,
+    skill="label-lines",
+    when="до кадрів є поіменний індекс (FamilySearch, Geneteka): хто в рядку й скільки "
+         "йому років")
+def train_roster(a: RosterArgs) -> Envelope:
+    """Прив'язати осіб індексу до рядків імені й смужок віку кожної сторінки.
+
+    Пари лягають джерелом підказок (`ІНДЕКС` біля рядка, `ІНДЕКС-СТОР` — увесь
+    перелік), а ворота імпорту понижують власну назву, якої в індексі сторінки
+    немає, і вік, що розходиться з індексом без опори в голосах.
+    """
+    from nyshporka.train import roster as RO
+    from nyshporka.train import sets as S
+
+    try:
+        rep = RO.build(a.name, Path(a.file), dry_run=a.dry_run)
+    except (S.SetError, RO.RosterError, ValueError) as exc:
+        return fail(str(exc))
+    d = rep.summary()
+    d["dry_run"] = a.dry_run
+    d["per_page"] = [{"page": p.page, "persons": p.persons, "matched": p.matched,
+                      "ages": len(p.ages), "name_lines": p.name_lines,
+                      "reliable": p.reliable} for p in rep.pages]
+    env = ok(d)
+    for w_ in rep.warnings:
+        env.warn("roster_page", w_)
+    if rep.missing:
+        env.warn("roster_missing", f"сторінок переліку немає в наборі: "
+                                   f"{', '.join(rep.missing[:10])}"
+                                   f"{' …' if len(rep.missing) > 10 else ''}")
+    return env
+
+
 # ── завдання арбітрам ────────────────────────────────────────────────────────
 class ExportArgs(BaseModel):
     name: str = Field(description="набір")
@@ -504,6 +581,10 @@ class GatesArgs(BaseModel):
     name: str = Field(description="набір")
     suspects: bool = Field(default=False, description="показати рядки на очі людині")
     gt: bool = Field(default=False, description="звірити якір ручних міток із голосами")
+    lower: bool = Field(default=False, description="підозрілі без опори → low у відповідях "
+                                                   "арбітрів і повторний імпорт (коли "
+                                                   "людина їх свідомо не дивиться)")
+    dry_run: bool = Field(default=False, description="з --lower: лише порахувати")
 
 
 @op("train.gates", summary="Ворота злиття окремо: підозрілі рядки, якір ручних міток",
@@ -526,7 +607,14 @@ def train_gates(a: GatesArgs) -> Envelope:
     except S.SetError as exc:
         return fail(str(exc))
     d: dict[str, Any] = {"set": a.name}
-    if a.suspects or not a.gt:
+    if a.lower:
+        lr = T.lower_suspects(a.name, dry_run=a.dry_run)
+        d["lowered"] = lr.lowered
+        d["lower_missing"] = lr.missing
+        d["dry_run"] = a.dry_run
+        if lr.imported is not None:
+            d["merge_conf"] = dict(lr.imported.conf)
+    if a.suspects or (not a.gt and not a.lower):
         d["suspects"] = T.suspects_of(a.name)
     if a.gt:
         voices = spec.voices()

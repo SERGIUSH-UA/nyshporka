@@ -379,6 +379,46 @@ def gate_page(page: str, merged: list[str], voices: list[list[str]],
     return g
 
 
+_NUM_LABEL = re.compile(r"^\s*(\d{1,4})\s*[.,]?\s*$")
+#: Крок ряду лічильника між сусідніми числами графи: між ними бувають рядки
+#: іншої статі чи рядок без числа, але не більше трьох.
+SERIES_STEP = 3
+#: Графа — центри рамок по x не далі за цю частку ширини кадру.
+SERIES_COL_W = 0.02
+
+
+def series_support(merged: list[str], boxes: list[Any], width: int) -> set[int]:
+    """Рядки-числа, які лягають у ряд лічильника своєї графи.
+
+    Наскрізні лічильники розпису й метрики (душі, двори, номери актів) ідуть
+    без діри згори вниз. Число в графі опирається на ряд, коли найближчі числа
+    тієї самої графи згори й знизу обрамлюють його: попереднє < це < наступне,
+    кожен крок ≤ `SERIES_STEP`. Це арифметика самого документа — незалежна від
+    голосів перевірка, яка знімає сміття рушія на цифрах («Лог» → 102).
+    """
+    if not boxes or width <= 0:
+        return set()
+    pts: list[tuple[float, float, int, int]] = []    # (x центр, y центр, число, рядок)
+    for i, t in enumerate(merged):
+        m = _NUM_LABEL.match(t or "")
+        if not m or i >= len(boxes) or not boxes[i]:
+            continue
+        b = boxes[i]
+        if isinstance(b[0], (list, tuple)):
+            xs, ys = [p[0] for p in b], [p[1] for p in b]
+            b = [min(xs), min(ys), max(xs), max(ys)]
+        pts.append(((b[0] + b[2]) / 2, (b[1] + b[3]) / 2, int(m.group(1)), i))
+    out: set[int] = set()
+    tol = SERIES_COL_W * width
+    for xc, yc, v, i in pts:
+        col = sorted((y, n) for x, y, n, j in pts if abs(x - xc) <= tol and j != i)
+        up = [n for y, n in col if y < yc]
+        down = [n for y, n in col if y > yc]
+        if up and down and 0 < v - up[-1] <= SERIES_STEP and 0 < down[0] - v <= SERIES_STEP:
+            out.add(i)
+    return out
+
+
 def spelling_splits(glossary: list[str], by_file: dict[str, dict[str, str]],
                     thresh: int = 82) -> list[dict[str, Any]]:
     """Розкол написань: одне словникове слово — різні форми в різних файлах.

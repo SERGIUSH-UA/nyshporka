@@ -212,6 +212,10 @@ class SetSpec:
     #: `own` — рядки СВОГО письма на розвороті: решта кадру — двійник, і в
     #: завдання арбітрам вона не йде.
     twin: dict[str, Any] = field(default_factory=dict)
+    #: Сторінка розвороту, яку набір зводить (`train/spread.py`): кадр знято
+    #: розворотом, а мітки потрібні з однієї сторінки — та сама рука, удвічі
+    #: дешевше. `{"side": "left"|"right", "pages": {сторінка: [рядки]}, "gutter": {…}}`.
+    side: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -231,6 +235,7 @@ class SetSpec:
                if self.hint_sources else {}),
             **({"private": True} if self.private else {}),
             **({"twin": self.twin} if self.twin else {}),
+            **({"side": self.side} if self.side else {}),
         }
 
     @classmethod
@@ -259,6 +264,7 @@ class SetSpec:
                           if isinstance(x, dict) and x.get("id")],
             private=bool(d.get("private", False)),
             twin=dict(d.get("twin") or {}) if isinstance(d.get("twin"), dict) else {},
+            side=dict(d.get("side") or {}) if isinstance(d.get("side"), dict) else {},
         )
 
     def twin_own(self) -> dict[str, set[int]]:
@@ -267,6 +273,17 @@ class SetSpec:
         for pg, v in ((self.twin or {}).get("pages") or {}).items():
             if isinstance(v, dict) and isinstance(v.get("own"), list):
                 out[str(pg)] = {int(i) for i in v["own"]}
+        return out
+
+    def own_lines(self) -> dict[str, set[int]]:
+        """{сторінка: рядки, які набір зводить} — своє письмо двійника ∩ обрана сторінка
+        розвороту. Сторінки, яких тут немає, зводяться цілими."""
+        out = self.twin_own()
+        for pg, idx in ((self.side or {}).get("pages") or {}).items():
+            if not isinstance(idx, list):
+                continue
+            mine = {int(i) for i in idx}
+            out[str(pg)] = out[str(pg)] & mine if str(pg) in out else mine
         return out
 
     def voices(self) -> list[Draft]:

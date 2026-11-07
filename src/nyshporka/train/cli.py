@@ -235,6 +235,53 @@ def twin_cmd(
     _notes(env)
 
 
+@app.command("side")
+def side_cmd(
+    name: str = typer.Option(..., "--set", metavar="НАБІР", help="ім'я набору"),
+    side: str = typer.Option("left", "--side", help="left | right; порожньо — кадр цілим"),
+    pages: str = typer.Option("", "--pages", help="кома-список сторінок; порожньо — усі"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="лише показати межу"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Сторінка розвороту: набір зводить одну сторінку кадру — та сама рука, удвічі дешевше."""
+    from nyshporka import ops as O
+
+    env = O.call("train.side", {"name": name, "side": side, "pages": pages, "dry_run": dry_run})
+    if _answer(env, as_json):
+        return
+    d = env.data
+    for pg, v in sorted(d["pages"].items()):
+        console.print(f"  {pg}: {v['lines']} з {v['of']} рядків · корінець x={v['gutter']} "
+                      f"(смуга {v['gap']} px)")
+    console.print(f"{d['set']}: сторінка «{d['side'] or 'кадр цілим'}»"
+                  + (" — сухий прогін" if d["dry_run"] else ""))
+    _notes(env)
+
+
+@app.command("roster")
+def roster_cmd(
+    name: str = typer.Option(..., "--set", metavar="НАБІР", help="ім'я набору"),
+    file: str = typer.Option(..., "--from", help="JSON переліку осіб по сторінках"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="лише заміряти прив'язку"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Поіменний індекс сторінки (FamilySearch, Geneteka, покажчик): хто й скільки років —
+    підказка арбітрам біля рядка й ворота імпорту."""
+    from nyshporka import ops as O
+
+    env = O.call("train.roster", {"name": name, "file": file, "dry_run": dry_run})
+    if _answer(env, as_json):
+        return
+    d = env.data
+    for p in d["per_page"]:
+        console.print(f"  {p['page']}: осіб {p['persons']}, прив'язано {p['matched']} "
+                      f"(рядків імені {p['name_lines']}), вік {p['ages']}"
+                      + ("" if p["reliable"] else " · ворота не діють"))
+    console.print(f"{d['set']}: прив'язано {d['matched']} з {d['persons']} осіб, вік {d['ages']} "
+                  f"на {d['pages']} стор." + (" — сухий прогін" if d["dry_run"] else ""))
+    _notes(env)
+
+
 @app.command("export")
 def export_cmd(
     name: str = typer.Option(..., "--set", metavar="НАБІР", help="ім'я набору"),
@@ -301,14 +348,26 @@ def gates_cmd(
     name: str = typer.Option(..., "--set", metavar="НАБІР", help="ім'я набору"),
     suspects: bool = typer.Option(False, "--suspects", help="рядки на очі людині"),
     gt: bool = typer.Option(False, "--gt", help="якір ручних міток"),
+    lower: bool = typer.Option(False, "--lower", help="підозрілі без опори → low і повторний "
+                                                      "імпорт (людина їх свідомо не дивиться)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="з --lower: лише порахувати"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Ворота окремо: підозрілі рядки злиття, якір ручних міток."""
     from nyshporka import ops as O
 
-    env = O.call("train.gates", {"name": name, "suspects": suspects, "gt": gt})
+    env = O.call("train.gates", {"name": name, "suspects": suspects, "gt": gt,
+                                 "lower": lower, "dry_run": dry_run})
     if _answer(env, as_json):
         return
+    if lower:
+        lw = env.data.get("lowered") or []
+        console.print(f"у low {'було б ' if dry_run else ''}{len(lw)} рядків"
+                      + (f": {', '.join(lw[:12])}{' …' if len(lw) > 12 else ''}" if lw else ""))
+        if env.data.get("merge_conf"):
+            mc = env.data["merge_conf"]
+            console.print(f"злиття після імпорту: h{mc.get('high', 0)}/m{mc.get('med', 0)}/"
+                          f"l{mc.get('low', 0)}")
     for s in env.data.get("suspects", [])[:60]:
         console.print(f"  ? {s['page']}:{s['idx']}  {s['text']}  [muted]{s['why']}[/muted]")
     for s in env.data.get("gt_shifted", []):

@@ -257,7 +257,7 @@ def pending_rows(reg: S.Registry, spec: S.SetSpec) -> dict[str, list[int]]:
     """
     conf = reg.merge_conf(spec)
     voices = spec.voices()
-    own = spec.twin_own()
+    own = spec.own_lines()
     out: dict[str, list[int]] = {}
     for pg in sorted(reg.crop_pages(spec)):
         for r in page_rows(reg, spec, pg, voices):
@@ -352,6 +352,15 @@ def export_tasks(name: str, *, pages: list[str] | None = None, pages_per_file: i
         if before != len(rows):
             rep.warnings.append(f"{before - len(rows)} рядків іншого письма (двійник) "
                                 f"не експортовано")
+    # Кадр-розворот, а набір зводить одну сторінку (`train side`): друга —
+    # та сама рука за подвійну ціну. На аркуші вона лишається для контексту.
+    sided = {pg: set(v) for pg, v in ((spec.side or {}).get("pages") or {}).items()}
+    if sided:
+        before = len(rows)
+        rows = [r for r in rows if r["page"] not in sided or r["idx"] in sided[r["page"]]]
+        if before != len(rows):
+            rep.warnings.append(f"{before - len(rows)} рядків іншої сторінки розвороту "
+                                f"не експортовано (набір зводить «{spec.side.get('side')}»)")
 
     if only is not None:
         rows = [r for r in rows if r["idx"] in set(only.get(r["page"]) or ())]
@@ -465,6 +474,7 @@ class ImportReport:
     gates: list[G.PageGate] = field(default_factory=list)
     splits: list[dict[str, Any]] = field(default_factory=list)
     twin_demoted: list[str] = field(default_factory=list)
+    roster_demoted: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
 
@@ -529,6 +539,10 @@ def import_answers(name: str, *, tasks_dir: Path | None = None, keep_old: bool =
     meta.setdefault("pages", {})
     meta["set"] = name
     voices = spec.voices()
+    from nyshporka.train import roster as RO
+
+    roster_st = RO.state(reg, spec)
+    own_all = spec.own_lines()
     for pg, lines in by_page.items():
         f = out / f"{pg}.txt"
         # 🔴 Дописуємо В НАЯВНЕ, а не перезаписуємо: другий захід доливає те,
@@ -553,6 +567,9 @@ def import_answers(name: str, *, tasks_dir: Path | None = None, keep_old: bool =
                            support=literal_support(reg, spec, pg))
         rep.gates.append(gate)
         rep.twin_demoted += twin_gate(reg, spec, pg, cur, conf_all, set(lines))
+        if roster_st:
+            rep.roster_demoted += RO.gate_page(roster_st, pg, cur, conf_all, set(lines), vlines,
+                                               own_all.get(pg))
         f.write_text("\n".join(cur) + "\n", encoding="utf-8")
         page_meta["conf"] = {str(k): v for k, v in sorted(conf_all.items())}
         if source:
@@ -565,7 +582,9 @@ def import_answers(name: str, *, tasks_dir: Path | None = None, keep_old: bool =
     meta["gate"] = {"demoted": sum(len(g.demoted) for g in rep.gates),
                     "marks_stripped": sum(len(g.marks_stripped) for g in rep.gates),
                     "shift_pages": [g.page for g in rep.gates if g.shift_blocks],
-                    **({"twin_demoted": len(rep.twin_demoted)} if rep.twin_demoted else {})}
+                    **({"twin_demoted": len(rep.twin_demoted)} if rep.twin_demoted else {}),
+                    **({"roster_demoted": len(rep.roster_demoted)}
+                       if rep.roster_demoted else {})}
     write_json(out / S.META_FILE, meta)
     if spec.merge() is None:
         spec.drafts.append(S.Draft(id=S.MERGE_ID, dir=f"{S.DRAFTS_DIR}/{S.MERGE_ID}"))
@@ -591,6 +610,9 @@ def import_answers(name: str, *, tasks_dir: Path | None = None, keep_old: bool =
         rep.warnings.append(f"власна назва без опори в двійнику → low: "
                             f"{len(rep.twin_demoted)} рядків (перші: "
                             f"{'; '.join(rep.twin_demoted[:6])})")
+    if rep.roster_demoted:
+        rep.warnings.append(f"за індексом осіб → low: {len(rep.roster_demoted)} рядків "
+                            f"(перші: {'; '.join(rep.roster_demoted[:6])})")
     for sp in rep.splits:
         rep.warnings.append(f"словникове «{sp['term']}» має різні написання в різних "
                             f"файлах: {', '.join(sp['forms'])}")
@@ -613,7 +635,7 @@ def twin_gate(reg: S.Registry, spec: S.SetSpec, page: str, merged: list[str],
     text = TW.page_gate_text(reg, spec, page)
     if not text:
         return []
-    own = spec.twin_own().get(page)
+    own = spec.own_lines().get(page)
     out = []
     for i in sorted(touched):
         if own is not None and i not in own:
@@ -652,6 +674,9 @@ def suspects_of(name: str, ws: Workspace | None = None) -> list[dict[str, Any]]:
     if m is None:
         return []
     voices = spec.voices()
+    from nyshporka.train import roster as RO
+
+    roster_st = RO.state(reg, spec)
     out: list[dict[str, Any]] = []
     for pg in sorted(reg.crop_pages(spec)):
         merged = reg.draft_lines(spec, m, pg)
@@ -667,9 +692,15 @@ def suspects_of(name: str, ws: Workspace | None = None) -> list[dict[str, Any]]:
                 dens[i] = d
         ratios = G.density_ratios(dens)
         support = literal_support(reg, spec, pg)
+        from nyshporka.train import cut as C
+        from nyshporka.train import roster as RO
         from nyshporka.train import twin as TW
 
         twins = TW.line_twins(reg, spec, pg)
+        listed = RO.line_entries(roster_st, pg) if roster_st else {}
+        geo = C.page_geometry(spec.source_run, pg, w) if spec.source_run else None
+        series = G.series_support(merged, (geo or {}).get("boxes") or [],
+                                  int((geo or {}).get("size", [0])[0] or 0)) if geo else set()
         for i, text in enumerate(merged):
             if not text.strip() or conf.get(str(i)) == "low":
                 continue
@@ -684,6 +715,13 @@ def suspects_of(name: str, ws: Workspace | None = None) -> list[dict[str, Any]]:
                 # Той самий запис іншим письмом — незалежне спостереження:
                 # число чи ім'я, яке голоси розсипали, а двійник дав.
                 continue
+            elif i in listed and RO.grounds(text, *listed[i]):
+                # Поіменний індекс дав ту саму особу чи той самий вік.
+                continue
+            elif i in series:
+                # Число лягає в ряд лічильника своєї графи: сусіди згори й знизу
+                # обрамлюють його з кроком не більше трьох.
+                continue
             elif G.suspect(sig, text):
                 why = "голоси розходяться"
             elif G.grounded(text, vs) < G.GROUNDED_MIN and len(text) >= 6:
@@ -691,3 +729,55 @@ def suspects_of(name: str, ws: Workspace | None = None) -> list[dict[str, Any]]:
             if why:
                 out.append({"page": pg, "idx": i, "text": text, "voices": vs, "why": why})
     return out
+
+
+@dataclass
+class LowerReport:
+    set: str
+    lowered: list[str] = field(default_factory=list)   # «сторінка:рядок»
+    missing: list[str] = field(default_factory=list)   # підозрілі без ключа у відповідях
+    files: int = 0
+    imported: ImportReport | None = None
+
+
+def lower_suspects(name: str, *, dry_run: bool = False,
+                   ws: Workspace | None = None) -> LowerReport:
+    """Підозрілі рядки злиття без опори → `low` у відповідях арбітрів і повторний імпорт.
+
+    Для набору, де людина підозрілих свідомо не дивиться: `low` у корпус не
+    йде, тож сумнівний рядок, знятий у `low`, нічого не псує. Опора рахується
+    тією самою `suspects_of` — голоси, людське джерело, двійник, індекс осіб,
+    ряд лічильника; без неї рядок і є підозрілим.
+    """
+    w = ws if ws is not None else workspace()
+    reg = S.registry(w)
+    rep = LowerReport(set=name)
+    want = {f"{s['page']}:{s['idx']}" for s in suspects_of(name, w)}
+    if not want:
+        return rep
+    src = reg.set_dir(name) / TASKS_DIR
+    seen: set[str] = set()
+    for f in sorted(src.glob("*.answer.json")):
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(d, dict):
+            continue
+        hit = [k for k in want & set(d) if isinstance(d[k], dict)]
+        seen.update(hit)
+        changed = False
+        for k in hit:
+            if d[k].get("c") != "low":
+                d[k]["c"] = "low"
+                rep.lowered.append(k)
+                changed = True
+        if changed:
+            rep.files += 1
+            if not dry_run:
+                f.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    rep.missing = sorted(want - seen)
+    if rep.lowered and not dry_run:
+        rep.imported = import_answers(name, ws=w)
+    return rep
+
