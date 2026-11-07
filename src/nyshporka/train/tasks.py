@@ -752,10 +752,17 @@ def lower_suspects(name: str, *, dry_run: bool = False,
     w = ws if ws is not None else workspace()
     reg = S.registry(w)
     rep = LowerReport(set=name)
-    want = {f"{s['page']}:{s['idx']}" for s in suspects_of(name, w)}
+    # Хоч один голос дає ту саму мітку — це опора, хай би решта голосів і
+    # розходилась: «Евдокія» при голосах «Евдокія / омота / Евдокія» не вигадана.
+    want = {f"{s['page']}:{s['idx']}" for s in suspects_of(name, w)
+            if not any(_squash(v) == _squash(s["text"]) for v in s["voices"] if v)}
     if not want:
         return rep
     src = reg.set_dir(name) / TASKS_DIR
+    side = src / LOWERED_FILE
+    before = read_json(side, default={}) if side.is_file() else {}
+    if not isinstance(before, dict):
+        before = {}
     seen: set[str] = set()
     for f in sorted(src.glob("*.answer.json")):
         try:
@@ -769,6 +776,9 @@ def lower_suspects(name: str, *, dry_run: bool = False,
         changed = False
         for k in hit:
             if d[k].get("c") != "low":
+                # Попередня оцінка арбітра — у бічний файл: правило опори може
+                # змінитись, і без неї пониження не переглянути.
+                before.setdefault(k, d[k].get("c"))
                 d[k]["c"] = "low"
                 rep.lowered.append(k)
                 changed = True
@@ -778,6 +788,16 @@ def lower_suspects(name: str, *, dry_run: bool = False,
                 f.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
     rep.missing = sorted(want - seen)
     if rep.lowered and not dry_run:
+        write_json(side, before)
         rep.imported = import_answers(name, ws=w)
     return rep
+
+
+#: Попередні оцінки рядків, понижених `lower_suspects`: {ключ: conf арбітра}.
+LOWERED_FILE = "_lowered.json"
+_SQUASH = re.compile(r"[\s.,:;\-—()\"'«»]")
+
+
+def _squash(s: str) -> str:
+    return _SQUASH.sub("", s or "").lower()
 

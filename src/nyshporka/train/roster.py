@@ -101,6 +101,8 @@ CONFESSION_FORMS = (
     "духовные", "военные", "чиновники", "отставные", "солдаты", "солдатка", "званіе", "имя",
     "отчество", "фамилія", "старообрядцы", "дворовые", "дворовый", "его", "ея", "ее", "ихъ",
     "рожденія", "которые", "которыя", "кто", "токмо", "винословія", "какимъ", "почему",
+    "служитель", "служители", "служителка", "служительница", "служителей", "душей", "душъ",
+    "дьячиха", "пономариха", "просвирня", "попадья", "попадія",
 )
 _CONF_KEYS = frozenset(TW.key(w) for w in CONFESSION_FORMS)
 #: Рядок із назвою церкви, села, округи — назви, яких індекс осіб не має.
@@ -487,28 +489,37 @@ def gate_text(st: dict[str, Any], page: str) -> str:
     return " ".join(p.full for p in _people(pg))
 
 
-def line_entries(st: dict[str, Any], page: str) -> dict[int, tuple[str, Person]]:
-    """{рядок: ("name" | "age" | "age?", особа)}; «age?» — вік, прив'язаний без голосу."""
+def line_entries(st: dict[str, Any], page: str) -> dict[int, tuple[str, Person, str]]:
+    """{рядок: ("name" | "age" | "age?", особа, імена її двору)}; «age?» — вік без голосу.
+
+    Імена двору — бо рядок імені називає й інших: «Жена Григорія Уліяна» — це
+    Уліяна, а Григорій — голова її двору.
+    """
     pg = _page(st, page)
     people = _people(pg)
     sure = {int(x) for x in pg.get("ages_sure") or [] if str(x).isdigit()}
-    out: dict[int, tuple[str, Person]] = {}
+    hh: dict[str, list[str]] = {}
+    for p in people:
+        hh.setdefault(p.household, []).append(p.full)
+    out: dict[int, tuple[str, Person, str]] = {}
     for kind in ("names", "ages"):
         for i, pi in (pg.get(kind) or {}).items():
             if not (str(i).isdigit() and isinstance(pi, int) and 0 <= pi < len(people)):
                 continue
             k = "name" if kind == "names" else ("age" if int(i) in sure else "age?")
-            out[int(i)] = (k, people[pi])
+            p = people[pi]
+            out[int(i)] = (k, p, " ".join(hh.get(p.household, []) if p.household else []))
     return out
 
 
-def grounds(text: str, kind: str, p: Person) -> bool:
-    """Мітка спирається на особу індексу: той самий вік або всі власні назви — її."""
+def grounds(text: str, kind: str, p: Person, household: str = "") -> bool:
+    """Мітка спирається на особу індексу: той самий вік або всі власні назви — її двору."""
     if kind in ("age", "age?"):
         d = _DIGITS.findall(text)
         return bool(d) and bool(p.age) and d[0] == p.age.strip()
     words = name_words(text)
-    return bool(words) and all(TW.support(w, p.full) >= TW.NAME_MIN for w in words)
+    names = f"{p.full} {household}"
+    return bool(words) and all(TW.support(w, names) >= TW.NAME_MIN for w in words)
 
 
 def gate_page(st: dict[str, Any], page: str, merged: list[str], conf: dict[int, str],

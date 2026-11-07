@@ -262,3 +262,24 @@ def test_form_words_are_not_names() -> None:
     assert RO.name_words("Жена Его Марія Григоріева") == ["Марія", "Григоріева"]
     assert RO.name_words("Посполитые и ихъ Домашніе") == []
     assert RO.name_words("Псаломщикъ Причтъ") == []
+
+
+def test_lower_keeps_label_a_voice_reads_and_saves_previous_conf(space: W.Workspace) -> None:
+    RO.build("sp", space.root / "roster.json", ws=space)
+    _answers(space, {
+        "0001:6": ("Дети их Михаил", "high"),   # голос Дяка дає те саме, Писаря — інакше
+        "0001:1": ("102", "med"),               # без опори
+    })
+    T.import_answers("sp", ws=space)
+    lr = T.lower_suspects("sp", ws=space)
+    assert lr.lowered == ["0001:1"]
+    side = S.registry(space).set_dir("sp") / T.TASKS_DIR / T.LOWERED_FILE
+    assert json.loads(side.read_text(encoding="utf-8")) == {"0001:1": "med"}
+
+
+def test_name_line_grounded_by_household() -> None:
+    p = RO.Person(given="Мария", patronymic="Григориева", relation="Жена", age="38",
+                  household="17")
+    assert not RO.grounds("Жена Симеона Марія", "name", p)
+    assert RO.grounds("Жена Симеона Марія", "name", p, "Симеон Леонтиев Крига Мария Григориева")
+    assert RO.name_words("Служителка Пономариха") == []
