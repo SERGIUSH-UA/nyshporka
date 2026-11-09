@@ -1972,6 +1972,7 @@ def map_near(a: MapNearArgs) -> Envelope:
 
     from nyshporka.catalog.query import CatalogMissing, find_map_places, map_places_near
 
+    center: dict[str, Any]
     try:
         at = a.at.strip()
         m = _re.fullmatch(r"\s*(-?\d+(?:\.\d+)?)\s*[,;]\s*(-?\d+(?:\.\d+)?)\s*", at)

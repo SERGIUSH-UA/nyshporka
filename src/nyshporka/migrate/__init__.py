@@ -410,7 +410,8 @@ def _skill_guard(root: Path) -> CheckResult:
 
 #: Домени довідників, яких бракувало опублікованому каталогу до 0.36.0: без них
 #: `nysh church`, `geog near`, РК-парафії й гродські книги відмовляють.
-CATALOG_DOMAINS = ("churches", "places", "rkparishes", "courtbooks")
+#: З 0.45.0 — ще й газетири старих карт (`maps`): без них `nysh map` відмовляє.
+CATALOG_DOMAINS = ("churches", "places", "rkparishes", "courtbooks", "maps")
 
 
 def _catalog_current(root: Path) -> CheckResult:

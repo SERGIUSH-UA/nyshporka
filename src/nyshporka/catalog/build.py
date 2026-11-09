@@ -340,7 +340,7 @@ def build_maps(map_dirs: list[Path], out: Path, *, pack_id: str, taken: str,
                     alt = nm(name.replace("ów", "iw").replace("Ów", "Iw"))
                 norm = nm(name)
 
-                def num(v: str, f: type = float) -> Any:
+                def num(v: str | None, f: type = float) -> Any:
                     return f(v) if v not in ("", None) else None
 
                 batch.append((
