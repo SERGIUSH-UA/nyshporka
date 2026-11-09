@@ -286,6 +286,93 @@ def build_churches(dump_json: Path, out: Path, *, pack_id: str, taken: str,
     return {**res, "churches": n}
 
 
+# ── газетири старих карт ─────────────────────────────────────────────────────
+
+#: Колонки `gazetteer.tsv` карти — джерела під git, з якого збирається пак.
+MAP_COLS = ["key", "name", "kind", "x", "y", "lat", "lng", "reading", "readings",
+            "modern_qid", "modern_name", "modern_admin", "modern_km", "modern_score",
+            "ident", "church_ob_id", "church_name"]
+
+
+def build_maps(map_dirs: list[Path], out: Path, *, pack_id: str, taken: str,
+               source: str = "", verbose: bool = False) -> dict[str, Any]:
+    """Пак газетирів карт: кожна тека — `map.json` (опис і прив'язка) +
+    `gazetteer.tsv` (підписи аркуша).
+
+    🔴 Пак лише переносить те, що звірено в TSV: читання, прив'язку й
+    ототожнення робить видавець, а тут додаються тільки форми для пошуку.
+    """
+    import json
+
+    from nyshporka.utils.translit import normalize_for_matching
+
+    def nm(s: str) -> str:
+        # 🔑 Без пробілів і дефісів: картограф пише складену назву то разом,
+        # то окремо («Kamiennybrod» і «Kamienny brod» на одному аркуші).
+        v = normalize_for_matching(_norm_name(s)) if s else ""
+        return v.replace(" ", "").replace("-", "")
+
+    from nyshporka.karta import map_skeleton
+
+    con, tmp = _open_fresh(out, "maps")
+    files: list[Path] = []
+    n = 0
+    cov: list[tuple[str, str, int, int | None, str]] = []
+    for d in map_dirs:
+        meta = json.loads((d / "map.json").read_text(encoding="utf-8"))
+        tsv = d / "gazetteer.tsv"
+        files += [d / "map.json", tsv]
+        con.execute(
+            "INSERT INTO maps (map_id,title,year,region,holder,authors,scale,width,"
+            "height,georef,method,note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (meta["map_id"], meta["title"], meta.get("year"), meta.get("region", ""),
+             meta.get("holder", ""), meta.get("authors", ""), meta.get("scale", ""),
+             meta.get("width"), meta.get("height"),
+             json.dumps(meta.get("georef") or {}, ensure_ascii=False),
+             meta.get("method", ""), meta.get("note", "")))
+        k = 0
+        with tsv.open(encoding="utf-8", newline="") as fh:
+            batch = []
+            for r in csv.DictReader(fh, delimiter="\t"):
+                name = r["name"]
+                alt = ""
+                if "ów" in name.casefold():
+                    alt = nm(name.replace("ów", "iw").replace("Ów", "Iw"))
+                norm = nm(name)
+
+                def num(v: str, f: type = float) -> Any:
+                    return f(v) if v not in ("", None) else None
+
+                batch.append((
+                    meta["map_id"], r["key"], name, r.get("kind") or "",
+                    num(r.get("x"), int), num(r.get("y"), int),
+                    num(r.get("lat")), num(r.get("lng")),
+                    r.get("reading") or "", r.get("readings") or "",
+                    r.get("modern_qid") or "", r.get("modern_name") or "",
+                    r.get("modern_admin") or "", num(r.get("modern_km")),
+                    num(r.get("modern_score")), r.get("ident") or "none",
+                    num(r.get("church_ob_id"), int), r.get("church_name") or "",
+                    norm, alt if alt != norm else "", nm(r.get("modern_name") or ""),
+                    map_skeleton(name), map_skeleton(r.get("modern_name") or "")))
+            con.executemany(
+                "INSERT INTO map_places (map_id,key,name,kind,x,y,lat,lng,reading,"
+                "readings,modern_qid,modern_name,modern_admin,modern_km,modern_score,"
+                "ident,church_ob_id,church_name,norm,norm_alt,norm_modern,skel,skel_modern) "
+                "VALUES (" + ",".join("?" * 23) + ")", batch)
+            k = len(batch)
+        n += k
+        cov.append(("map", meta["map_id"], k, None, meta["title"][:120]))
+    cov += [("ident", v, c, None, "") for v, c in con.execute(
+        "SELECT ident, COUNT(*) FROM map_places GROUP BY ident")]
+    res = finalize(con, tmp, out, domain="maps", pack_id=pack_id, taken=taken,
+                   source=source, built_from=_digest(files), rows=n, coverage=cov,
+                   note=f"{len(map_dirs)} карт · {n} підписів поселень")
+    if verbose:
+        print(f"✅ {out.name} — {len(map_dirs)} карт · {n} підписів · "
+              f"{res['size'] / 1e6:.2f} МБ")
+    return {**res, "map_places": n}
+
+
 # ── РК-парафії: склад сіл і книги за роками ──────────────────────────────────
 
 def build_rkparishes(parishes_json: Path, out: Path, *, pack_id: str, taken: str,

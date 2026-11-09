@@ -32,9 +32,10 @@ from nyshporka.core import casekey
 
 __all__ = ["Answer", "CatalogMissing", "Coverage", "church_card", "churches_near",
            "confusers", "find_churches", "find_court_persons", "find_court_places",
-           "find_metrics", "find_places", "find_rk_parishes",
+           "find_map_places", "find_metrics", "find_places", "find_rk_parishes",
            "link_churches_to_places",
-           "locate", "locate_all", "locate_name", "place_card", "places_for_fond", "places_near",
+           "locate", "locate_all", "locate_name", "map_places_near", "maps_list",
+           "place_card", "places_for_fond", "places_near",
            "siblings", "uezd_known"]
 
 
@@ -1675,3 +1676,138 @@ def places_near(lat: float, lng: float, km: float = 15.0, limit: int = 100,
             out.append(row)
     out.sort(key=lambda d: (d["km"], -(d["n_cases"] or 0)))
     return Answer(rows=out[:limit], coverage=cov)
+
+
+# ── 🗺 газетири старих карт ──────────────────────────────────────────────────
+#
+# 🔑 Церкви Шади кажуть, ЧИ БУЛА парафія; газетир карти каже, ЧИ СТОЯЛО село
+# на аркуші картографа і під якою назвою — для всіх сіл, а не лише парафіяльних.
+# Шукати можна трьома формами: як на карті (польською), її чергуванням
+# -ów-/-iw- і сучасною назвою ототожненого поселення (кирилицею).
+
+def _map_row(r: sqlite3.Row, pack_id: str, score: int = 0, via: str = "name"
+             ) -> dict[str, Any]:
+    d = _tag(dict(r), pack_id)
+    d["score"] = score
+    d["via"] = via
+    for k in ("norm", "norm_alt", "norm_modern", "skel", "skel_modern"):
+        d.pop(k, None)
+    return d
+
+
+def find_map_places(q: str, limit: int = 40, map_id: str = "") -> Answer:
+    """Підписи старих карт за назвою села — як на карті чи сучасною.
+
+    Збіг за сучасною назвою важить на 4 менше: це ототожнення видавця, а не
+    те, що написав картограф.
+    """
+    packs = open_packs("maps")
+    cov = coverage("maps")
+    # без пробілів і дефісів — як `norm` у паку (складені назви пишуть по-різному)
+    nq = _church_query(q).replace(" ", "").replace("-", "")
+    # кістяк латинки й кирилиці разом (о/і): «Кам'янобрід» ↔ «Kamienny brod»
+    from nyshporka.karta import map_skeleton
+
+    sq = map_skeleton(q)
+    rows: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def add(r: sqlite3.Row, score: int, pack_id: str, via: str) -> None:
+        key = (r["map_id"], r["key"])
+        prev = rows.get(key)
+        if prev is None or prev["score"] < score:
+            rows[key] = _map_row(r, pack_id, score, via)
+
+    where, args = "", []
+    if map_id:
+        where, args = " AND map_id = ?", [map_id]
+    try:
+        for pack_id, con in packs:
+            if not nq:
+                continue
+            for pat, sc in ((nq, 100), (nq + "%", 92), ("%" + nq + "%", 84)):
+                for r in con.execute("SELECT * FROM map_places WHERE (norm LIKE ? "
+                                     "OR norm_alt LIKE ?)" + where + " LIMIT 400",
+                                     [pat, pat, *args]):
+                    add(r, sc, pack_id, "name")
+                for r in con.execute("SELECT * FROM map_places WHERE norm_modern LIKE ?"
+                                     + where + " LIMIT 400", [pat, *args]):
+                    add(r, sc - 4, pack_id, "modern")
+        if nq and len(rows) < limit:
+            try:
+                from rapidfuzz import fuzz
+            except ImportError:
+                fuzz = None  # type: ignore[assignment]
+            if fuzz is not None:
+                for pack_id, con in packs:
+                    for r in con.execute("SELECT * FROM map_places WHERE 1=1" + where,
+                                         args):
+                        s, via = max(fuzz.ratio(nq, r["norm"] or ""),
+                                     fuzz.ratio(nq, r["norm_alt"] or ""),
+                                     fuzz.ratio(sq, r["skel"] or "") if sq else 0), "name"
+                        sm = max(fuzz.ratio(nq, r["norm_modern"] or ""),
+                                 fuzz.ratio(sq, r["skel_modern"] or "") if sq else 0) - 4
+                        if sm > s:
+                            s, via = sm, "modern"
+                        if s >= _CHURCH_MIN:
+                            add(r, int(s * 0.8), pack_id, via)
+    finally:
+        close_all(packs)
+    out = sorted(rows.values(), key=lambda d: (-d["score"], d["name"]))
+    return Answer(rows=out[:limit], coverage=cov)
+
+
+def map_places_near(lat: float, lng: float, km: float = 10.0, limit: int = 100,
+                    map_id: str = "") -> Answer:
+    """Підписи старих карт у колі навколо точки, за відстанню.
+
+    ⚠ Точка підпису — прив'язка аркуша, з похибкою карти (`maps.georef`):
+    коло вужче за цю похибку дає хибний нуль.
+    """
+    from math import cos, radians
+
+    packs = open_packs("maps")
+    cov = coverage("maps")
+    dlat = km / 111.0
+    dlng = km / (111.0 * max(cos(radians(lat)), 0.1))
+    where, args = "", []
+    if map_id:
+        where, args = " AND map_id = ?", [map_id]
+    out: list[dict[str, Any]] = []
+    try:
+        for pack_id, con in packs:
+            for r in con.execute(
+                    "SELECT * FROM map_places WHERE lat BETWEEN ? AND ? "
+                    "AND lng BETWEEN ? AND ?" + where,
+                    [lat - dlat, lat + dlat, lng - dlng, lng + dlng, *args]):
+                d = _haversine_km(lat, lng, r["lat"], r["lng"])
+                if d <= km:
+                    row = _map_row(r, pack_id)
+                    row["km"] = round(d, 1)
+                    out.append(row)
+    finally:
+        close_all(packs)
+    out.sort(key=lambda d: (d["km"], d["name"]))
+    return Answer(rows=out[:limit], coverage=cov)
+
+
+def maps_list() -> Answer:
+    """Карти в паках: назва, рік, власник, похибка прив'язки, скільки підписів."""
+    import json as _json
+
+    packs = open_packs("maps")
+    cov = coverage("maps")
+    out: list[dict[str, Any]] = []
+    try:
+        for pack_id, con in packs:
+            for r in con.execute(
+                    "SELECT m.*, (SELECT COUNT(*) FROM map_places p "
+                    "WHERE p.map_id = m.map_id) AS n FROM maps m ORDER BY year"):
+                d = _tag(dict(r), pack_id)
+                try:
+                    d["georef"] = _json.loads(d.get("georef") or "{}")
+                except ValueError:
+                    d["georef"] = {}
+                out.append(d)
+    finally:
+        close_all(packs)
+    return Answer(rows=out, coverage=cov)

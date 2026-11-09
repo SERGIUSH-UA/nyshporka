@@ -333,3 +333,96 @@ def church_near(
         if pl:
             typer.echo(pl)
     _notes(env)
+
+
+# ── 🗺 газетири старих карт: `nysh map find | near | list` ─────────────────────
+
+map_app = typer.Typer(help="Газетири старих рукописних карт: чи стояло село на "
+                           "аркуші, як підписане, і що це тепер.",
+                      no_args_is_help=True)
+
+_IDENT = {"confirmed": "✓", "probable": "≈", "none": "?"}
+_READ = {"agree": "", "dict": "", "arbiters": " ·арбітри", "disputed": " ·спірне читання"}
+
+
+def _map_line(r: dict[str, Any], *, km: bool = False) -> str:
+    dist = f"{r.get('km', 0):5.1f} км " if km else ""
+    kind = "місто" if r.get("kind") == "town" else "село"
+    modern = (f"{_IDENT.get(r.get('ident') or 'none', '?')} {r['modern_name']}"
+              f" [{(r.get('modern_admin') or '')[:28]}]"
+              if r.get("modern_name") and r.get("ident") != "none" else "? —")
+    ch = f" · ⛪ {r['church_name']} ({r['church_ob_id']})" if r.get("church_ob_id") else ""
+    pt = (f"{r['lat']:.4f}, {r['lng']:.4f}" if r.get("lat") is not None else "—")
+    return (f"  {dist}{r['name']} ({kind}){_READ.get(r.get('reading') or '', '')}"
+            f"  — {r['map_id']} x{r.get('x')} y{r.get('y')}\n"
+            f"        тепер: {modern} · точка {pt}{ch}"
+            + (f"\n        інші читання: {r['readings']}" if r.get("readings") else ""))
+
+
+@map_app.command("find")
+def map_find(
+    q: str = typer.Argument(..., help="назва села — як на карті або сучасна"),
+    map_id: str = typer.Option("", "--map", help="лише ця карта (nysh map list)"),
+    limit: int = typer.Option(20, "--limit", help="скільки показати"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Чи є село на старій карті — як підписане, де, і що це тепер."""
+    from nyshporka import ops as O
+    from nyshporka.cli_emit import answer as _answer
+    from nyshporka.cli_emit import notes as _notes
+
+    env = O.call("map.find", {"q": q, "map_id": map_id, "limit": limit})
+    if _answer(env, as_json):
+        return
+    rows = (env.data or {}).get("places") or []
+    typer.echo(f"🗺 «{q}» → підписів на картах: {len(rows)}")
+    for r in rows:
+        typer.echo(_map_line(r))
+    _notes(env)
+
+
+@map_app.command("near")
+def map_near(
+    at: str = typer.Argument(..., help="«широта,довгота» або назва села"),
+    km: float = typer.Option(10.0, "--km", help="радіус кола"),
+    map_id: str = typer.Option("", "--map", help="лише ця карта"),
+    limit: int = typer.Option(100, "--limit", help="скільки показати"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Підписи старих карт у колі навколо села."""
+    from nyshporka import ops as O
+    from nyshporka.cli_emit import answer as _answer
+    from nyshporka.cli_emit import notes as _notes
+
+    env = O.call("map.near", {"at": at, "km": km, "map_id": map_id, "limit": limit})
+    if _answer(env, as_json):
+        return
+    data = env.data or {}
+    c = data.get("center") or {}
+    rows = data.get("places") or []
+    typer.echo(f"📍 {c.get('how', '')} · {c.get('lat', 0):.4f}, {c.get('lng', 0):.4f}"
+               f" · {km:g} км → підписів {len(rows)}")
+    for r in rows:
+        typer.echo(_map_line(r, km=True))
+    _notes(env)
+
+
+@map_app.command("list")
+def map_list(as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)")
+             ) -> None:
+    """Які старі карти є в паках."""
+    from nyshporka import ops as O
+    from nyshporka.cli_emit import answer as _answer
+    from nyshporka.cli_emit import notes as _notes
+
+    env = O.call("map.list", {})
+    if _answer(env, as_json):
+        return
+    for m in (env.data or {}).get("maps") or []:
+        g = m.get("georef") or {}
+        typer.echo(f"🗺 {m['map_id']} · {m.get('year') or '—'} · підписів {m.get('n')}\n"
+                   f"   {m['title'][:110]}\n"
+                   f"   {m.get('holder') or '—'}\n"
+                   f"   прив'язка: {g.get('anchors', '—')} якорів, похибка медіана "
+                   f"{g.get('median_km', '—')} км, 90 % {g.get('p90_km', '—')} км")
+    _notes(env)

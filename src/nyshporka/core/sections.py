@@ -412,6 +412,10 @@ OP_SCREEN: dict[str, str] = {
     "church.find": "geog",
     "church.card": "geog",
     "church.near": "geog",
+    # 🗺 газетири карт — той самий екран: «що відомо про село», зріз — аркуш картографа
+    "map.find": "geog",
+    "map.near": "geog",
+    "map.list": "geog",
     "fond.list": "fonds",
     "fond.rows": "fonds",
     "fond.take": "fonds",

@@ -1095,6 +1095,15 @@ def _sertse(s: str) -> str:
     return re.sub(r"[aeiou]+$", "", s).replace("o", "i")
 
 
+def map_skeleton(nazva: str) -> str:
+    """Кістяк назви для пошуку по газетирах старих карт: `skeleton` без
+    пробілів і з чергуванням о/і (`Kamienny brod` ↔ `Кам'яний Брід` ↔
+    `Кам'янобрід`). Звичайна нормалізація тут програє: «brod» проти «брід» і
+    «Kamienny» проти «Кам'яний» дають 70–82 при порозі 84."""
+    sk = skeleton(nazva or "")
+    return _sertse(sk) if sk else ""
+
+
 def _skeleti(d: dict[str, Any]) -> tuple[frozenset[str], frozenset[str]]:
     """(назва, псевдоніми) поселення скелетами; рахується раз на поселення."""
     got = d.get("_sk")

@@ -1907,3 +1907,115 @@ def church_near(a: ChurchNearArgs) -> Envelope:
         env.warn("ceiling", f"видача обрізана стелею {a.limit} — звузь радіус")
     env.suggest("parish.near", "ті самі координати — справи покажчика в колі")
     return env
+
+
+# ── 🗺 газетири старих карт: map.find | map.near | map.list ───────────────────
+
+_MAP_NOTE = ("назва — як на аркуші; точка — прив'язка аркуша до місцевості з "
+             "похибкою карти; сучасний відповідник — ототожнення видавця за "
+             "схожістю назви поблизу (ident: confirmed / probable / none), не факт карти")
+
+
+class MapFindArgs(BaseModel):
+    q: str = Field(description="назва села — як на карті (польською) або сучасна, "
+                               "кирилицею")
+    map_id: str = Field(default="", description="лише ця карта (map.list); порожньо — усі")
+    limit: int = Field(default=20, ge=1, le=200)
+
+
+@op("map.find", summary="Чи є село на старій карті — як підписане, де, чим є тепер",
+    args=MapFindArgs, mutates=False, section="material",
+    skill="find-parish",
+    when="чи є село на старій рукописній карті, під якою назвою, і що це тепер")
+def map_find(a: MapFindArgs) -> Envelope:
+    """Підписи газетирів карт за назвою — з точкою й сучасним відповідником.
+
+    🔴 Нуль тут — межа карти й читання, а не «села не було»: картограф ставив
+    не кожне село (на Брацлавській 1790 немає ~40 % парафій бази Шади), а
+    частина підписів прочитана з сумнівом (`reading: disputed`).
+    """
+    from nyshporka.catalog.query import CatalogMissing, find_map_places
+
+    try:
+        ans = find_map_places(a.q, limit=a.limit, map_id=a.map_id)
+    except CatalogMissing as exc:
+        return fail(str(exc))
+    env = ok({"q": a.q, "places": ans.rows})
+    env.covered_by(_coverage_of(ans))
+    env.warn("map_note", _MAP_NOTE)
+    if not ans.rows:
+        env.warn("nothing_found",
+                 "на картах пака такої назви немає — картограф ставив не всі села, "
+                 "а читання бувають спірні: спробуй польське написання або "
+                 "`map.near` навколо сучасного села")
+    else:
+        env.suggest("map.near", "інші підписи карти навколо цієї точки")
+        if any(r.get("church_ob_id") for r in ans.rows):
+            env.suggest("church.card", "церква ~1772 цього села за базою Шади")
+    return env
+
+
+class MapNearArgs(BaseModel):
+    at: str = Field(description="центр кола: «широта,довгота» або назва села "
+                                "(береться перший підпис карти)")
+    km: float = Field(default=10.0, gt=0, le=100, description="радіус, км")
+    map_id: str = Field(default="", description="лише ця карта; порожньо — усі")
+    limit: int = Field(default=100, ge=1, le=500)
+
+
+@op("map.near", summary="Підписи старих карт у колі навколо села",
+    args=MapNearArgs, mutates=False, section="material",
+    skill="find-parish",
+    when="які села стояли на старій карті навколо мого села")
+def map_near(a: MapNearArgs) -> Envelope:
+    import re as _re
+
+    from nyshporka.catalog.query import CatalogMissing, find_map_places, map_places_near
+
+    try:
+        at = a.at.strip()
+        m = _re.fullmatch(r"\s*(-?\d+(?:\.\d+)?)\s*[,;]\s*(-?\d+(?:\.\d+)?)\s*", at)
+        if m:
+            center = {"lat": float(m.group(1)), "lng": float(m.group(2)), "how": "точка"}
+        else:
+            found = [r for r in find_map_places(at, limit=5, map_id=a.map_id).rows
+                     if r.get("lat") is not None]
+            if not found:
+                return fail(f"на картах пака немає «{at}» — центр кола можна задати "
+                            "як «широта,довгота»")
+            f0 = found[0]
+            center = {"lat": f0["lat"], "lng": f0["lng"],
+                      "how": f"{f0['name']} ({f0['map_id']}, оцінка {f0['score']})"}
+        ans = map_places_near(center["lat"], center["lng"], km=a.km, limit=a.limit,
+                              map_id=a.map_id)
+    except CatalogMissing as exc:
+        return fail(str(exc))
+    env = ok({"center": {**center, "km": a.km}, "places": ans.rows})
+    env.covered_by(_coverage_of(ans))
+    if "оцінка" in center["how"]:
+        env.warn("center", f"центр кола: {center['how']}")
+    env.warn("map_note", _MAP_NOTE)
+    if len(ans.rows) >= a.limit:
+        env.warn("ceiling", f"видача обрізана стелею {a.limit} — звузь радіус")
+    env.suggest("church.near", "ті самі координати — церкви ~1772 в колі")
+    return env
+
+
+class MapListArgs(BaseModel):
+    pass
+
+
+@op("map.list", summary="Які старі карти є в паках: рік, власник, похибка прив'язки",
+    args=MapListArgs, mutates=False, section="material",
+    skill="find-parish",
+    when="які старі карти з газетирами є в Нишпорці")
+def map_list(a: MapListArgs) -> Envelope:
+    from nyshporka.catalog.query import CatalogMissing, maps_list
+
+    try:
+        ans = maps_list()
+    except CatalogMissing as exc:
+        return fail(str(exc))
+    env = ok({"maps": ans.rows})
+    env.covered_by(_coverage_of(ans))
+    return env

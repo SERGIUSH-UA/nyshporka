@@ -142,6 +142,59 @@ CREATE INDEX ix_ch_voiv  ON churches(voivodeship);
 CREATE INDEX ix_ch_geo   ON churches(lat, lng);
 """
 
+MAPS = _PRAGMA + _COMMON + """
+-- 🗺 Газетири старих рукописних карт: кожен підпис поселення на аркуші, як
+-- його написав картограф, із точкою на місцевості й сучасним відповідником.
+-- Одна карта — один рядок `maps`; один підпис — один рядок `map_places`.
+--
+-- 🔴 Три різні твердження в одному рядку, і їх не можна змішувати:
+--   1) `name` — що написано на аркуші (читання, з позначкою, як його звірено:
+--      `reading`); це джерело;
+--   2) `lat/lng` — прив'язка аркуша до місцевості за містами-якорями (похибка
+--      карти — у `maps.georef`); це обчислення, не джерело;
+--   3) `modern_*` — найближче сучасне поселення зі схожою назвою (`ident`
+--      каже, наскільки впевнено); це ототожнення, а не факт карти.
+CREATE TABLE maps (
+    map_id     TEXT PRIMARY KEY,   -- braclaw1790
+    title      TEXT NOT NULL,      -- назва з картуша
+    year       INTEGER,
+    region     TEXT,               -- що зображено (воєводство, повіт)
+    holder     TEXT,               -- де оригінал, сигнатура
+    authors    TEXT,
+    scale      TEXT,
+    width INTEGER, height INTEGER, -- аркуш у пікселях скану (система x/y)
+    georef     TEXT,               -- JSON: метод, якорі, похибка (медіана, 90 %)
+    method     TEXT,               -- як читано й звірено
+    note       TEXT
+);
+CREATE TABLE map_places (
+    map_id   TEXT NOT NULL,
+    key      TEXT NOT NULL,        -- стабільний ключ підпису в межах карти
+    name     TEXT NOT NULL,        -- як на карті (польська орфографія карти)
+    kind     TEXT,                 -- town | village
+    x INTEGER, y INTEGER,          -- точка на аркуші
+    lat REAL, lng REAL,            -- з прив'язки аркуша
+    reading  TEXT,                 -- agree | dict | arbiters | disputed
+    readings TEXT,                 -- інші читання через « | »
+    modern_qid   TEXT, modern_name TEXT, modern_admin TEXT,
+    modern_km    REAL,             -- від точки прив'язки до сучасного поселення
+    modern_score REAL,             -- схожість назв 0..1
+    ident    TEXT,                 -- confirmed | probable | none
+    church_ob_id INTEGER,          -- церква ~1772 бази Шади (пак churches)
+    church_name  TEXT,
+    norm     TEXT,                 -- normalize_for_matching(name)
+    norm_alt TEXT,                 -- -ów- → -iw- (Rakówka ↔ Раківка)
+    norm_modern TEXT,              -- normalize_for_matching(modern_name)
+    skel     TEXT,                 -- кістяк назви карти (karta.skeleton + о/і)
+    skel_modern TEXT,              -- кістяк сучасної назви
+    PRIMARY KEY (map_id, key)
+);
+CREATE INDEX ix_mp_norm   ON map_places(norm);
+CREATE INDEX ix_mp_alt    ON map_places(norm_alt);
+CREATE INDEX ix_mp_modern ON map_places(norm_modern);
+CREATE INDEX ix_mp_geo    ON map_places(lat, lng);
+"""
+
 PLACES = _PRAGMA + _COMMON + """
 -- 🗺 Сучасні поселення з координатами (Wikidata). Це не ще один газетир, а
 -- ТОЧКА для кожного села газетира ЦДІАК, у якого точок немає взагалі: без неї
@@ -288,7 +341,7 @@ CREATE INDEX ix_mr_case ON refs(fond, opys, spr);
 """
 
 #: Домен → DDL. Ключ домену входить в ім'я пака: `geog-cdiak-2026.08.sqlite`.
-DDL: dict[str, str] = {"geog": GEOG, "churches": CHURCHES,
+DDL: dict[str, str] = {"geog": GEOG, "churches": CHURCHES, "maps": MAPS,
                        "places": PLACES, "rkparishes": RKPARISHES,
                        "courtbooks": COURTBOOKS, "metrics": METRICS}
 
