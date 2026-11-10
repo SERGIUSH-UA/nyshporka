@@ -725,7 +725,17 @@ def case_dir_for(case_key: str) -> Path | None:
     except Exception:
         return None
     for row in _rows_of(rows, key):
-        for rel in [row.get("path"), *(row.get("extra_paths") or [])]:
+        main = row.get("path")
+        if main:
+            mp = Path(main)
+            mp = mp if mp.is_absolute() else root / mp
+            if _frames_dir(mp) is None and (mp / "_r2_frames.json").is_file():
+                # 🔴 Кадри справи — у бакеті, на диску лише маніфест. Додаткова тека з
+                # кадрами на диску тоді — вирізка (село, кілька аркушів), а не справа:
+                # 11.11.2026 склейка ANRM 211-5-55 (1132 кадри) пакувалась назвою й
+                # 21 кадром вирізки Фузовки з `villages/`.
+                return None
+        for rel in [main, *(row.get("extra_paths") or [])]:
             if not rel:
                 continue
             p = Path(rel)

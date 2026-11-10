@@ -50,6 +50,28 @@ def test_kliuch_z_opysom_znakhodyt_same_tsiu_knygu(biblioteka: Path) -> None:
     assert align.case_dir_for("CDIAK/224-2/49") == biblioteka / "raw/op2-49/pages"
 
 
+def test_kadry_v_baketi_vyrizka_ne_staie_spravoiu(tmp_path: Path,
+                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    """Справа з кадрами в бакеті й вирізка села з кадрами на диску під тим самим ключем."""
+    main = tmp_path / "raw/anrm_211/op5-spr-55-joined"
+    main.mkdir(parents=True)
+    (main / "_r2_frames.json").write_text(json.dumps({"frames": [{"name": "0001.jpg"}]}),
+                                          encoding="utf-8")
+    _sprava(tmp_path, "raw/villages/fuzovka/2118804_0824-0844", 21)
+    rows = [{"key": "ANRM/211/5/55", "repo": "ANRM", "fond": "211", "opys": "5", "spr": "55",
+             "path": "raw/anrm_211/op5-spr-55-joined",
+             "extra_paths": ["raw/villages/fuzovka/2118804_0824-0844"]}]
+    import nyshporka.core.workspace as ws
+    import nyshporka.library as lib
+    monkeypatch.setattr(ws, "workspace", lambda: SimpleNamespace(root=tmp_path, hub=tmp_path))
+    monkeypatch.setattr(lib, "load_library", lambda: rows)
+    assert align.case_dir_for("ANRM/211/5/55") is None
+    # без маніфесту головна тека — порожня тека, і кадри вирізки лишаються доступні як були
+    (main / "_r2_frames.json").unlink()
+    assert align.case_dir_for("ANRM/211/5/55") == \
+        tmp_path / "raw/villages/fuzovka/2118804_0824-0844/pages"
+
+
 def test_nevidomyi_opys_ne_bere_chuzhu_knygu(biblioteka: Path) -> None:
     assert align.case_dir_for("CDIAK/224/3/49") is None
     assert align.case_dir_for("CDIAK/224-3/49") is None
