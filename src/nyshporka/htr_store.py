@@ -23,6 +23,7 @@ import math
 import os
 import re
 import time
+from collections import OrderedDict
 from collections.abc import Iterator, Sequence
 from contextvars import ContextVar
 from pathlib import Path
@@ -1886,7 +1887,22 @@ def _case_dirs_via_registry(run: str) -> list[Path]:
 
 # ── fuzzy-пошук ──────────────────────────────────────────────────────────────
 # Кеш нормалізованих токенів: name → (cache_key, [(page, line_no, raw, [(tok, norm)])])
-_CACHE: dict[str, tuple[str, list[Any]]] = {}
+# 🔴 Зі стелею (LRU за прогонами й рядками разом). Кеш потрібен повторному читанню ТОГО САМОГО
+# прогону в одному процесі (скан, фантоми, парний прохід, кілька формул поспіль). Без стелі процес,
+# що проходить сотні прогонів, тримав увесь їхній текст: 10.11.2026 скан роду по 598 прогонах обходу
+# дійшов до 19 ГБ (~1,7 КБ на рядок індексу), і машині лишилось 0,5 ГБ. Останній прогін лишається
+# в кеші завжди, навіть більший за стелю рядків.
+CASE_INDEX_CACHE_RUNS = 32
+CASE_INDEX_CACHE_LINES = 400_000
+_CACHE: OrderedDict[str, tuple[str, list[Any]]] = OrderedDict()
+
+
+def _trim_case_cache() -> None:
+    """Викинути найдавніше використані прогони, доки кеш не вкладеться в обидві стелі."""
+    total = sum(len(v[1]) for v in _CACHE.values())
+    while len(_CACHE) > 1 and (len(_CACHE) > CASE_INDEX_CACHE_RUNS or total > CASE_INDEX_CACHE_LINES):
+        _, (_, idx) = _CACHE.popitem(last=False)
+        total -= len(idx)
 
 #: Скільки попередніх рядків тримати для склейки розірваного прізвища.
 #: 1 = лише сусідній (стара поведінка). У табличних бланках сегментація зшиває
@@ -2011,6 +2027,7 @@ def _case_index(name: str) -> list[Any]:
     key = f"{meta_path.stat().st_mtime_ns}|{len(txts)}"
     hit = _CACHE.get(name)
     if hit and hit[0] == key:
+        _CACHE.move_to_end(name)
         return hit[1]
     meta = load_meta(name) or {}
     stem2page = {Path(pg).stem: pg for pg in (meta.get("pages") or {})}
@@ -2021,6 +2038,8 @@ def _case_index(name: str) -> list[Any]:
                 txt.read_text(encoding="utf-8").splitlines()):
             index.append((page, ln_no, raw, cands))
     _CACHE[name] = (key, index)
+    _CACHE.move_to_end(name)
+    _trim_case_cache()
     return index
 
 
