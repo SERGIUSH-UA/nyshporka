@@ -196,6 +196,28 @@ def voice_dirs(out_dir: Path) -> tuple[Path, ...]:
     return tuple(sorted(found))
 
 
+def own_voice_dirs(out_dir: Path) -> tuple[Path, ...]:
+    """Голоси саме цього прогону: сестринські теки, що читали ту саму теку кадрів.
+
+    🔴 `voice_dirs` бере будь-яку теку `<прогін>-*`. Склейка `op1-spr-2285-joined`
+    (інша справа, інша тека кадрів) так ставала «голосом» прогону `op1-spr-2285`,
+    і `cases split` заміщував її та різав на частини (10.11.2026, ANRM 88-1-2285).
+    Короткі імена `op1-spr-N` мають десятки справ різних архівів, тож сусід за
+    префіксом — звичайна річ. Голос лишається, коли тека кадрів у мети та сама,
+    що в головного прогону, або одна з них невідома (хмарний слот).
+    """
+    from nyshporka.htr_store import frames_dir_key
+
+    main = frames_dir_key(read_meta(out_dir).get("case_dir"))
+    out: list[Path] = []
+    for v in voice_dirs(out_dir):
+        k = frames_dir_key(read_meta(v).get("case_dir"))
+        if main and k and k != main:
+            continue
+        out.append(v)
+    return tuple(out)
+
+
 def read_meta(out_dir: Path) -> dict[str, Any]:
     """Мета прогону. Побита або відсутня — порожньо, це не привід падати."""
     from nyshporka.utils.atomic import CorruptFileError, read_json

@@ -403,3 +403,160 @@ def test_kray_plivky_pidkazuie_mozhlyvyi_shmatok(space: Path) -> None:
     both = kray.check(dest)
     assert [("першого" in w["text"], "останнього" in w["text"]) for w in both] == [
         (True, False), (False, True)]
+
+
+# ── зняти склейку ────────────────────────────────────────────────────────────
+# ANRM 195-1-50 (10.11.2026): голова на плівці 007787447 (к.911–1120, кінець —
+# «CONTINUED ON»), а склейка взяла наступну плівку 007787448 цілою. Справі на
+# ній належить лише пункт 1 (к.1–69), решта — ще 11 справ фонду 195.
+
+
+def test_znyattia_skleiky_povertaie_chastyny(space: Path, two: tuple[Path, Path]) -> None:
+    from nyshporka.cases import split as SPL
+    from nyshporka.pagestore import store as PS
+    from nyshporka.pagestore.models import PageNote
+
+    head, tail = two
+    PS.annotate_pages(PS.resolve_case("ЦДІАК 127-1012-538"),
+                      [PageNote(scan="0002.jpg", page_type="birth", surnames=["Дідик"])])
+    dest = space / "data" / "raw" / "cdiak_127" / "op1012-spr-535"
+    wrong = [J.Piece(head, "0001.jpg", "0006.jpg"), J.Piece(tail, "0001.jpg", "0005.jpg")]
+    got = J.join(dest, wrong, shifra="ЦДІАК 127-1012-535", rebuild=False)
+    assert sorted(got["retired"]) == sorted([str(head), str(tail)])
+    before = {d: _side(d) for d in (head, tail)}
+
+    proba = J.undo_plan(dest)
+    assert proba["dry_run"] and sorted(proba["runs_removed"]) == sorted(got["runs"].values())
+    assert {d: _side(d) for d in (head, tail)} == before, "проба нічого не пише"
+    assert (dest / J.JOURNAL).is_file()
+
+    done = J.undo(dest, rebuild=False)
+
+    assert sorted(done["runs_removed"]) == ["op1012-spr-535", "op1012-spr-535-diak_v10"]
+    assert not (space / "reports/htr/op1012-spr-535").exists()
+    assert not dest.exists(), "тека склейки прибрана цілком"
+    for d, run in ((head, "film-007800124"), (tail, "film-007800789")):
+        side = _side(d)
+        assert "joined_into" not in side and "joined_runs" not in side
+        assert "superseded" not in _meta(space, run)
+        assert "superseded" not in _meta(space, run + "-diak_v10")
+    assert done["notes_moved"] == 1
+    cf = PS.load_case(PS.resolve_case("ЦДІАК 127-1012-538"))
+    assert list(cf.pages) == ["0002.jpg"] and cf.pages["0002.jpg"].surnames == ["Дідик"]
+
+    # тепер правильна склейка: з хвостової плівки — лише перший пункт
+    right = J.join(dest, [J.Piece(head, "0001.jpg", "0006.jpg"),
+                          J.Piece(tail, "0001.jpg", "0002.jpg")],
+                   shifra="ЦДІАК 127-1012-535", rebuild=False)
+    assert right["frames"] == 8 and right["retired"] == [str(head)]
+    assert [p["key"] for p in _side(tail)["joined_parts"]] == ["CDIAK/127/1012/535"]
+    # а решту хвостової плівки — на справи
+    SPL.split(tail, [("-", "0001.jpg", "0002.jpg"), ("537", "0003.jpg", "0004.jpg"),
+                     ("538", "0005.jpg", "0005.jpg")], rebuild=False)
+    assert _side(tail)["split_into"]
+
+
+def test_znyattia_druhoi_skleiky_vertaie_plivku_v_biblioteku(space: Path) -> None:
+    """Плівку зняло покриття двома склейками (`retire_if_covered`); зняли другу —
+    плівка знову справа, а перша склейка свій шматок тримає."""
+    from nyshporka.cases import db
+
+    a = _r2_film(space, "005613344", 4, shifra="ANRM 211-20-15", run="film-005613344")
+    b = _r2_film(space, "005613345", 6, shifra="ANRM 211-20-16", run="film-005613345")
+    c = _r2_film(space, "005613346", 3, shifra="ANRM 211-20-17", run="film-005613346")
+    db.rebuild(rescan=True)
+    raw = space / "data" / "raw" / "cdiak_127"
+    J.join(raw / "op20-spr-16", [J.Piece(a, "0001.jpg", "0004.jpg"),
+                                 J.Piece(b, "0001.jpg", "0003.jpg")],
+           shifra="ANRM 211-20-16", rebuild=False)
+    after_first = _side(b)
+    J.join(raw / "op20-spr-17", [J.Piece(b, "0004.jpg", "0006.jpg"),
+                                 J.Piece(c, "0001.jpg", "0003.jpg")],
+           shifra="ANRM 211-20-17", rebuild=False)
+    assert _side(b)["split_into"] == ["ANRM/211/20/16", "ANRM/211/20/17"]
+
+    done = J.undo(raw / "op20-spr-17", rebuild=False)
+
+    assert _side(b) == after_first
+    assert "superseded" not in _meta(space, "film-005613345")
+    assert "joined_into" not in _side(c) and "superseded" not in _meta(space, "film-005613346")
+    assert sorted(done["runs_restored"]) == sorted(
+        ["film-005613345", "film-005613345-diak_v10", "film-005613346",
+         "film-005613346-diak_v10"])
+    assert (raw / "op20-spr-16" / J.JOURNAL).is_file(), "перша склейка ціла"
+    assert (space / "reports/htr/op20-spr-16").is_dir()
+
+
+def test_znyattia_lyshaie_zminenyi_prohin(space: Path, two: tuple[Path, Path]) -> None:
+    head, tail = two
+    dest = space / "data" / "raw" / "cdiak_127" / "op1012-spr-535"
+    got = J.join(dest, _pieces(head, tail), shifra="ЦДІАК 127-1012-535", rebuild=False)
+    run = space / "reports" / "htr" / got["runs"][""]
+    (run / "0001_007800124_0005.txt").write_text("вичитано оком\n", encoding="utf-8")
+
+    done = J.undo(dest, rebuild=False)
+
+    assert done["runs_removed"] == ["op1012-spr-535-diak_v10"]
+    assert run.is_dir() and any("змінено після склейки" in k for k in done["kept"])
+
+
+def test_znyattia_kadry_na_dysku_lyshaie_chuzhe(space: Path) -> None:
+    """Кадри на диску: прибираються лише жорсткі посилання склейки, плівки цілі,
+    а чужий файл у теці лишає теку з поясненням."""
+    head, tail = _film(space, "007803765_x", 12), _film(space, "007803766_x", 6)
+    dest = space / "op1-spr-855"
+    J.join(dest, [J.Piece(head, "0009.jpg", "0012.jpg"), J.Piece(tail, "0002.jpg", "0004.jpg")])
+    (dest / "0005_007803766_0002.jpg").unlink()
+    (dest / "0005_007803766_0002.jpg").write_bytes(b"\xff\xd8 vlasnyi \xff\xd9")
+    (dest / "notatka.txt").write_text("моє", encoding="utf-8")
+
+    done = J.undo(dest, rebuild=False)
+
+    assert sorted(p.name for p in dest.iterdir()) == ["0005_007803766_0002.jpg", "notatka.txt"]
+    assert done["files_removed"] == 7, "6 посилань склейки + журнал"
+    assert any("лишились файли не зі склейки" in k for k in done["kept"])
+    assert len(list(head.glob("*.jpg"))) == 12 and len(list(tail.glob("*.jpg"))) == 6
+
+
+def test_skleika_z_imenem_prohonu_ne_holos_teky(space: Path) -> None:
+    """ANRM 88-1-2285 (10.11.2026): тека-шматок з прогоном `op1-spr-2285`; справу
+    зібрано склейкою `op1-spr-2285-joined`, і розкладка теки взяла прогони склейки
+    за свої голоси — заміщувала їх і різала на частини."""
+    from nyshporka.cases import db
+    from nyshporka.cases import split as SPL
+
+    a = _r2_film(space, "007787419", 6, shifra="ANRM 88-1-2285", run="op1-spr-2285")
+    db.rebuild(rescan=True)
+    dest = space / "data" / "raw" / "anrm_88" / "op1-spr-2285-joined"
+    got = J.join(dest, [J.Piece(a, "0001.jpg", "0004.jpg")], shifra="ANRM 88-1-2285", rebuild=False)
+    joined = sorted(got["runs"].values())
+    assert all(r.startswith("op1-spr-2285-") for r in joined), "склейка — сусід за префіксом"
+
+    done = SPL.split(a, [("-", "0001.jpg", "0004.jpg"), ("ANRM 88-1-2286", "0005.jpg", "0006.jpg")],
+                     rebuild=False)
+
+    for r in joined:
+        assert "superseded" not in _meta(space, r), f"{r} — не голос теки"
+    made = {v for p in done["parts"] for v in (p.get("runs") or {}).values()}
+    assert not any("joined" in r for r in made)
+    assert sorted(_json.loads((a / SPL.JOURNAL).read_text(encoding="utf-8"))["runs"]) == [
+        "op1-spr-2285", "op1-spr-2285-diak_v10"]
+
+
+def test_znyattia_bez_skleiky_vidmovliaie(space: Path) -> None:
+    with pytest.raises(J.JoinError, match="склейки в теці немає"):
+        J.undo(space / "nema")
+
+
+def test_operatsiia_undo_proba_nichoho_ne_pyshe(space: Path, two: tuple[Path, Path]) -> None:
+    from nyshporka import ops as O
+
+    head, tail = two
+    dest = space / "data" / "raw" / "cdiak_127" / "op1012-spr-535"
+    J.join(dest, _pieces(head, tail), shifra="ЦДІАК 127-1012-535", rebuild=False)
+
+    env = O.call("cases.join", {"dest": str(dest), "undo": True, "dry_run": True})
+
+    assert env.ok and env.data["dry_run"] is True
+    assert (dest / J.JOURNAL).is_file()
+    assert not O.call("cases.join", {"dest": str(dest)}).ok, "без частин і без --undo — відмова"

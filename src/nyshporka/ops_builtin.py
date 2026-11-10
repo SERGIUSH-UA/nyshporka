@@ -3696,9 +3696,12 @@ def cases_cards(a: CasesCardsArgs) -> Envelope:
 
 class CasesJoinArgs(BaseModel):
     dest: str = Field(description="тека справи, куди зібрати кадри")
-    parts: list[str] = Field(description="частини в порядку плівок: «<тека плівки>=<перший "
+    parts: list[str] = Field(default_factory=list,
+                             description="частини в порядку плівок: «<тека плівки>=<перший "
                                          "файл>..<останній файл>», голова — першою")
     dry_run: bool = Field(default=False, description="лише показати, що ляже")
+    undo: bool = Field(default=False, description="зняти склейку цієї теки: частини стають, "
+                                                  "як були до неї")
     copy_frames: bool = Field(default=False, description="копіювати, якщо жорстке посилання "
                                                          "не створюється (інший том)")
     shifra: str = Field(default="", description="шифра справи; плівки вже прочитано — з нею "
@@ -3723,6 +3726,16 @@ def cases_join(a: CasesJoinArgs) -> Envelope:
     from nyshporka.share.card import CardError, parse_years
 
     try:
+        if a.undo:
+            got = J.undo_plan(a.dest) if a.dry_run else J.undo(a.dest, rebuild=a.rebuild)
+            env = ok(got)
+            for why in got.get("kept") or []:
+                env.warn("kept", why)
+            for note in got.get("notes") or []:
+                env.warn("index", note)
+            return env
+        if not a.parts:
+            return fail("назвіть частини: --part «<тека плівки>=<перший файл>..<останній файл>»")
         pieces = [J.parse_piece(p) for p in a.parts]
         ys = parse_years(a.years) if a.years.strip() else []
         if a.dry_run:

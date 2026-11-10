@@ -26,6 +26,7 @@
 """
 from __future__ import annotations
 
+import contextlib
 import glob
 import json
 import os
@@ -116,7 +117,7 @@ def _piece_runs(src: Path, frames_dir: Path) -> list[str]:
     """
     from nyshporka import htr_store as S
     from nyshporka.cases import split as SPL
-    from nyshporka.cloud.verify import voice_dirs
+    from nyshporka.cloud.verify import own_voice_dirs
 
     journal = _read_json(src / SPL.JOURNAL)
     if journal.get("runs"):
@@ -131,7 +132,7 @@ def _piece_runs(src: Path, frames_dir: Path) -> list[str]:
              for r in by_dir.get(key) or []} - {""}
     runs = set(mains)
     for name in sorted(mains):
-        runs |= {v.name for v in voice_dirs(S.htr_root() / name)}
+        runs |= {v.name for v in own_voice_dirs(S.htr_root() / name)}
     return sorted(runs)
 
 
@@ -635,3 +636,241 @@ def _reindex(runs: list[str], *, rebuild: bool) -> dict[str, Any]:
             out["notes"].append(f"текстовий стор не оновився ({exc}) — "
                                 f"nysh text index --case <справа>")
     return out
+
+
+# ── зняти ────────────────────────────────────────────────────────────────────
+# Склейка, що взяла не ті кадри (10.11.2026, ANRM: десять справ узяли наступну
+# плівку цілою, а справі на ній належав лише перший пункт — решта 73 справи
+# пішли б у пул під чужою шифрою). Перезібрати поверх не можна (`alien`), а
+# руками знімати позначки в паспортах і прогонах — помилятись. Тож `undo`
+# прибирає рівно те, що зробила склейка, і повертає частинам їхній стан.
+
+
+def _here(p: str | Path) -> Path:
+    """Шлях частини з журналу: відносний — від робочої теки або від кореня простору."""
+    from nyshporka.core.workspace import workspace
+
+    q = Path(p)
+    if q.is_absolute() or q.exists():
+        return q
+    return workspace().hub / q
+
+
+def _norm(p: Path) -> str:
+    return os.path.normcase(os.path.abspath(p))
+
+
+def _undo_rows(journal: dict[str, Any]) -> list[list[tuple[str, str]]]:
+    """Кадри кожної частини з журналу: [(ім'я в справі, ім'я в плівці)] за порядком частин."""
+    pieces = journal.get("pieces") or []
+    where = {_norm(_here(str(p.get("src") or ""))): i for i, p in enumerate(pieces)}
+    out: list[list[tuple[str, str]]] = [[] for _ in pieces]
+    for row in journal.get("order") or []:
+        src = _here(str(row.get("src") or ""))
+        i = where.get(_norm(src.parent))
+        if i is not None:
+            out[i].append((str(row.get("dst")), src.name))
+    return out
+
+
+def _carried_is_copy(run_dir: Path, meta: dict[str, Any],
+                     rows: list[list[tuple[str, str]]]) -> bool:
+    """Чи прогін справи досі дослівна вибірка з прогонів частин — тоді його можна прибрати."""
+    import filecmp
+
+    from nyshporka import htr_store as S
+
+    src_runs = [str(j.get("run") or "") for j in meta.get("join_from") or []]
+    back: dict[str, tuple[int, str]] = {}
+    for i, piece in enumerate(rows):
+        for dst, name in piece:
+            back[Path(dst).stem] = (i, Path(name).stem)
+    for f in run_dir.iterdir():
+        if f.name.startswith("_") or f.is_dir():
+            continue
+        stem = f.name.split(".", 1)[0]
+        if stem not in back:
+            return False
+        i, src_stem = back[stem]
+        if i >= len(src_runs) or not src_runs[i]:
+            return False
+        src = S.htr_root() / src_runs[i] / (src_stem + f.name[len(stem):])
+        try:
+            if not filecmp.cmp(src, f, shallow=False):
+                return False
+        except OSError:
+            return False
+    return True
+
+
+def _unsupersede(runs: list[str], ours: set[str]) -> list[str]:
+    """Зняти «заміщено», якщо заміщували прогони цієї склейки."""
+    from nyshporka import htr_store as S
+    from nyshporka.cloud.verify import META_NAME
+
+    back: list[str] = []
+    for run in runs:
+        f = S.htr_root() / str(run) / META_NAME
+        m = _read_json(f)
+        sup = m.get("superseded")
+        if isinstance(sup, dict) and set(map(str, sup.get("by") or [])) & ours:
+            m.pop("superseded")
+            _write_json(f, m)
+            back.append(str(run))
+    return back
+
+
+def _undo(dest: str | Path, *, write: bool, rebuild: bool = True) -> dict[str, Any]:
+    from nyshporka import htr_store as S
+    from nyshporka.cases import split as SPL
+    from nyshporka.cases.chain import sidecar_of
+    from nyshporka.cloud.verify import META_NAME, REMOTE_FRAMES
+    from nyshporka.core.workspace import workspace
+    from nyshporka.share import align
+
+    d = Path(dest)
+    journal = _read_json(d / JOURNAL)
+    if not journal.get("pieces"):
+        raise JoinError(f"склейки в теці немає (файла {JOURNAL} не знайдено): {d}")
+    key = str(journal.get("key") or "")
+    runs = {str(k): str(v) for k, v in (journal.get("runs") or {}).items()}
+    ours = set(runs.values())
+    rows = _undo_rows(journal)
+    pieces = [_here(str(p.get("src") or "")) for p in journal["pieces"]]
+    kept: list[str] = []
+
+    # 1. прогони справи — лише дослівні копії прогонів частин
+    gone: list[str] = []
+    for target in sorted(ours):
+        run_dir = S.htr_root() / target
+        if not run_dir.is_dir():
+            continue
+        meta = _read_json(run_dir / META_NAME)
+        if not meta.get("join_from"):
+            kept.append(f"прогін {target}: не зі склейки — лишаю")
+            continue
+        if not _carried_is_copy(run_dir, meta, rows):
+            kept.append(f"прогін {target}: змінено після склейки — лишаю")
+            continue
+        gone.append(target)
+        if write:
+            shutil.rmtree(run_dir)
+
+    # 2. позначки частин і заміщення їхніх прогонів
+    restored: list[str] = []
+    pieces_out: list[dict[str, Any]] = []
+    for src in pieces:
+        side = src / "_source.json"
+        meta = _read_json(side)
+        did: list[str] = []
+        film_runs: list[str] = []
+        if key and meta.get("joined_into") == key:
+            film_runs = [str(r) for r in meta.get("joined_runs") or []]
+            meta.pop("joined_into", None)
+            meta.pop("joined_runs", None)
+            did.append("joined_into")
+        parts = meta.get(JOINED_PARTS) or []
+        if key and any(p.get("key") == key for p in parts):
+            rest = [p for p in parts if p.get("key") != key]
+            if meta.get("split_into") is not None and not (src / SPL.JOURNAL).exists():
+                # плівку зняла сама склейка (`retire_if_covered`) — тепер покрита не вся
+                film_runs = [str(r) for r in meta.get("joined_runs") or []]
+                for k in ("split_into", "split_at", "joined_runs"):
+                    meta.pop(k, None)
+                did.append("split_into")
+            if rest:
+                meta[JOINED_PARTS] = rest
+            else:
+                meta.pop(JOINED_PARTS, None)
+            did.append(JOINED_PARTS)
+        if write and did:
+            _write_json(side, meta)
+        if film_runs:
+            restored += _unsupersede(film_runs, ours) if write else film_runs
+        pieces_out.append({"dir": str(src), "marks": did})
+
+    # 3. нотатки сховища сторінок — назад у справи частин, під іменами плівок
+    moved = 0
+    shifra = str(journal.get("shifra") or "")
+    dst_ref = SPL._pagestore_ref(shifra) if shifra else None
+    if write and dst_ref is not None:
+        from nyshporka.pagestore import store as PS
+
+        for src, piece in zip(pieces, rows, strict=False):
+            _, smeta = sidecar_of(src)
+            old_key = SPL._old_key(src, smeta)
+            src_ref = SPL._pagestore_ref(old_key) if old_key else None
+            if src_ref is None or not piece:
+                continue
+            rev = dict(piece)
+            moved += PS.move_pages(dst_ref, src_ref, list(rev), rename=rev)["pages"]
+
+    # 4. тека справи: лише те, що поклала склейка
+    removed: list[str] = []
+    if d.is_dir():
+        own = {JOURNAL, align.FS_META}
+        if _read_json(d / REMOTE_FRAMES).get("joined"):
+            own.add(REMOTE_FRAMES)
+        if _read_json(d / "_source.json").get("join_from"):
+            own.add("_source.json")
+        frame_src = {dst: pieces[i] / name for i, piece in enumerate(rows) for dst, name in piece}
+        for f in sorted(d.iterdir()):
+            if f.is_dir():
+                continue
+            if f.name in own or (f.name in frame_src and SPL._same(frame_src[f.name], f)):
+                removed.append(f.name)
+                if write:
+                    f.unlink()
+        if write:
+            from nyshporka.htr.run import seg_cache_dir
+
+            seg = seg_cache_dir(d, workspace().derived)
+            stems = {Path(x).stem for x in frame_src}
+            if seg.is_dir():
+                for f in seg.iterdir():
+                    if f.is_file() and f.name.split(".", 1)[0] in stems:
+                        f.unlink()
+                with contextlib.suppress(OSError):
+                    seg.rmdir()
+            with contextlib.suppress(OSError):
+                d.rmdir()
+            if d.is_dir():
+                kept.append(f"тека {d}: у ній лишились файли не зі склейки")
+
+    out: dict[str, Any] = {"dest": str(d), "key": key, "dry_run": not write,
+                           "runs_removed": gone, "runs_restored": sorted(set(restored)),
+                           "pieces": pieces_out, "files_removed": len(removed),
+                           "notes_moved": moved, "kept": kept}
+    if write:
+        notes: list[str] = []
+        SPL._forget_caches()
+        try:
+            from nyshporka.cases import db
+            from nyshporka.search import store as ST
+
+            if rebuild:
+                db.rebuild(rescan=True)
+            else:
+                notes.append("каталог справ не перебудовано (відкладено) — nysh cases build")
+            if ST.exists():
+                if gone:
+                    SPL._drop_from_store(gone)
+                if restored:
+                    list(ST.ensure_all(sorted(set(restored)), force=True, optimize=False))
+        except Exception as exc:
+            notes.append(f"облік не оновився ({exc}) — nysh cases build")
+        out["notes"] = notes
+    return out
+
+
+def undo_plan(dest: str | Path) -> dict[str, Any]:
+    """Що зняла б `undo`, — нічого не чіпаючи (`--undo --dry-run`)."""
+    return _undo(dest, write=False)
+
+
+def undo(dest: str | Path, *, rebuild: bool = True) -> dict[str, Any]:
+    """Зняти склейку: прибрати лише те, що вона створила, і повернути частинам їхній стан.
+
+    Прогони справи йдуть лише тоді, коли вони досі дослівні копії прогонів
+    частин; змінене після склейки лишається з поясненням у `kept`."""
+    return _undo(dest, write=True, rebuild=rebuild)

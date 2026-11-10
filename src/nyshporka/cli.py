@@ -2527,9 +2527,11 @@ def cases_cards_cmd(
 def cases_join_cmd(
     dest: str = typer.Argument(..., help="тека справи, куди зібрати кадри"),
     part: list[str] = typer.Option(
-        ..., "--part",
+        [], "--part",
         help="«<тека плівки>=<перший файл>..<останній файл>»; у порядку плівок, голова — першою"),
     dry: bool = typer.Option(False, "--dry-run", help="лише показати, що ляже"),
+    undo: bool = typer.Option(False, "--undo",
+                              help="зняти склейку цієї теки (з --dry-run — лише показати)"),
     copy: bool = typer.Option(False, "--copy",
                               help="копіювати, якщо жорстке посилання не створюється"),
     shifra: str = typer.Option("", "--shifra",
@@ -2553,12 +2555,20 @@ def cases_join_cmd(
     from nyshporka import ops as O
     from nyshporka.cli_emit import answer, notes
 
-    env = O.call("cases.join", {"dest": dest, "parts": part, "dry_run": dry,
+    env = O.call("cases.join", {"dest": dest, "parts": part, "dry_run": dry, "undo": undo,
                                 "copy_frames": copy, "shifra": shifra, "title": title,
                                 "years": years, "rebuild": not no_rebuild})
     if answer(env, as_json):
         return
     d = env.data or {}
+    if undo:
+        console.print(f"[bold]{_e(str(d.get('dest')))}[/bold] — склейку "
+                      + ("знято" if not d.get("dry_run") else "зняло б (проба)")
+                      + f": прогонів справи прибрано {len(d.get('runs_removed') or [])}, "
+                        f"прогонів частин повернуто {len(d.get('runs_restored') or [])}, "
+                        f"нотаток сторінок назад {d.get('notes_moved', 0)}")
+        notes(env)
+        return
     console.print(f"[bold]{_e(str(d.get('dest')))}[/bold] — {d.get('frames')} кадрів: "
                   f"{_e(str(d.get('first')))} … {_e(str(d.get('last')))}"
                   + (" · проба, нічого не змінено" if d.get("dry_run") else ""))

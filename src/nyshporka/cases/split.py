@@ -274,7 +274,7 @@ def plan(case_dir: str | Path, specs: list[tuple[str, str, str]]) -> Plan:
     from nyshporka.cases import take
     from nyshporka.cases.chain import sidecar_of
     from nyshporka.cases.register import case_path
-    from nyshporka.cloud.verify import voice_dirs
+    from nyshporka.cloud.verify import own_voice_dirs
     from nyshporka.core.workspace import workspace
     from nyshporka.htr.runname import run_name
     from nyshporka.share import align
@@ -356,7 +356,7 @@ def plan(case_dir: str | Path, specs: list[tuple[str, str, str]]) -> Plan:
              for r in by_dir.get(key) or []} - {""}
     allruns = set(mains)
     for name in sorted(mains):
-        allruns |= {v.name for v in voice_dirs(S.htr_root() / name)}
+        allruns |= {v.name for v in own_voice_dirs(S.htr_root() / name)}
     out.runs = sorted(allruns)
     bases = sorted(n for n in allruns
                    if not any(n != o and n.startswith(o + "-") for o in allruns))
