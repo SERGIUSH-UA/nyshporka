@@ -2362,6 +2362,10 @@ def ocr_page_parseq(im: Image.Image, segmenter, rec, device: str,
     if isinstance(rec, tuple) and len(rec) == 3 and isinstance(rec[1], list):
         rec, extra_recs, beam = rec
     model, (h, w) = rec
+    # 🔴 Скидаємо одразу: ранній вихід «кропів немає» інакше лишив би голоси
+    # попереднього повороту цієї ж сторінки.
+    ocr_page_parseq.side = {}
+    ocr_page_parseq.side_lost = {}
     ctx = seg_ctx or {}
     seg = segmenter.segment(im, ctx.get("stem", ""), ctx.get("orient", 0),
                             ctx.get("enhanced", ""))
@@ -2435,28 +2439,8 @@ def ocr_page_parseq(im: Image.Image, segmenter, rec, device: str,
     # рядок. Рядки, які голос прочитав там, ДЕ основна модель замовчала,
     # рахуються і друкуються в підсумку — мовчазна втрата була б гіршою за саму
     # втрату (на пробі Писар давав 0 порожніх на 233 рядки, Дяк 1-3).
-    side: dict[str, list[str]] = {}
-    lost: dict[str, int] = {}
-    kept_set = set(kept)
-    for tag, eengine, erec in extra_recs:
-        if eengine == "kraken":
-            full = kraken_decode_crops(erec, crops, VOICE_BATCH)
-        elif eengine == "ppocr":
-            full = pp_decode_crops(erec, crops)
-        else:
-            emodel, (eh, ew) = erec
-            etens = tensors if (eh, ew) == (h, w) else [
-                torch.from_numpy(
-                    (np.asarray(c.convert("RGB").resize((ew, eh), Image.LANCZOS),
-                                dtype="float32") / 255.0 - 0.5) / 0.5).permute(2, 0, 1)
-                for c in crops]
-            full = [clean_pysar_text(unicodedata.normalize("NFC", str(t or "")))
-                    for t, _ in _parseq_decode(emodel, etens, device, batch)]
-        side[tag] = [full[g] if g < len(full) else "" for g in kept]
-        n_lost = sum(1 for i, t in enumerate(full)
-                     if t.strip() and i not in kept_set)
-        if n_lost:
-            lost[tag] = n_lost
+    side, lost = _side_voices(extra_recs, crops, kept, device, batch,
+                              tensors=tensors, hw=(h, w))
     if beam > 1:
         # ⚠ beam-тека вирівнюванню не піддається за побудовою: гіпотез на рядок
         # кілька, і рядків у ній більше, ніж у справі. Вона для пошуку, не для
@@ -2473,6 +2457,58 @@ def ocr_page_parseq(im: Image.Image, segmenter, rec, device: str,
     return lines, avg
 
 
+def _side_voices(extra_recs: list, crops: list, kept: list[int], device: str,
+                 batch: int, *, tensors: list | None = None,
+                 hw: tuple[int, int] | None = None
+                 ) -> tuple[dict[str, list[str]], dict[str, int]]:
+    """Голоси ансамблю на ТИХ САМИХ кропах → (тег → рядки, тег → загублено).
+
+    Спільне для PARSeq- і PP-основи: обидві ріжуть рядки `_line_crops`, тож
+    голос читає рівно ті пікселі, що й основна модель, без другої сегментації.
+
+    🔴 Голос вирівнюється по масці основного тексту (`kept`), а не фільтрує
+    порожні самостійно. Доти кожна тека відкидала свої порожні прочитання
+    незалежно — і щойно голоси розходились хоч на одному рядку, `<out>-v12`
+    з'їжджав відносно `<out>` на решту сторінки. Зсув був тихий: обидві теки
+    виглядають нормальним текстом, а рамка з `.lines.json` показує вже не той
+    рядок. Рядки, які голос прочитав там, ДЕ основна модель замовчала,
+    рахуються і друкуються в підсумку — мовчазна втрата була б гіршою за саму
+    втрату (на пробі Писар давав 0 порожніх на 233 рядки, Дяк 1-3).
+
+    `tensors`/`hw` — уже готові входи PARSeq-основи: PARSeq-голос того самого
+    розміру бере їх без повторного масштабування.
+    """
+    side: dict[str, list[str]] = {}
+    lost: dict[str, int] = {}
+    if not extra_recs:
+        return side, lost
+    kept_set = set(kept)
+    for tag, eengine, erec in extra_recs:
+        if eengine == "kraken":
+            full = kraken_decode_crops(erec, crops, VOICE_BATCH)
+        elif eengine == "ppocr":
+            full = pp_decode_crops(erec, crops)
+        else:
+            import torch
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from pysar_lines_infer import clean_pysar_text
+
+            emodel, (eh, ew) = erec
+            etens = tensors if (tensors is not None and hw == (eh, ew)) else [
+                torch.from_numpy(
+                    (np.asarray(c.convert("RGB").resize((ew, eh), Image.LANCZOS),
+                                dtype="float32") / 255.0 - 0.5) / 0.5).permute(2, 0, 1)
+                for c in crops]
+            full = [clean_pysar_text(unicodedata.normalize("NFC", str(t or "")))
+                    for t, _ in _parseq_decode(emodel, etens, device, batch)]
+        side[tag] = [full[g] if g < len(full) else "" for g in kept]
+        n_lost = sum(1 for i, t in enumerate(full)
+                     if t.strip() and i not in kept_set)
+        if n_lost:
+            lost[tag] = n_lost
+    return side, lost
+
+
 def ocr_page_pp(im: Image.Image, segmenter, rec, seg_ctx: dict | None = None
                 ) -> tuple[list[str], float]:
     """Сегментація kraken'ом → кропи Писаря → PP-OCRv6 пачками.
@@ -2485,6 +2521,16 @@ def ocr_page_pp(im: Image.Image, segmenter, rec, seg_ctx: dict | None = None
     Рамки, полігони й кропи вирівняні з рядками так само, як у PARSeq-гілці:
     порожні прочитання випадають, і рамка йде разом зі своїм рядком.
     """
+    # `rec` — або PP-модель `(net, cfg, budget)`, або ансамбль
+    # `(основна, [(тег, рушій, модель), …], beam)`, як у PARSeq-гілці: Регент і
+    # Скриба PPv4 — одна база PP-OCRv6, тож другий читає ті самі кропи.
+    extra_recs: list = []
+    if isinstance(rec, tuple) and len(rec) == 3 and isinstance(rec[1], list):
+        rec, extra_recs, _beam = rec
+    # 🔴 Скидаємо одразу: сторінка без кропів (ранній вихід нижче) інакше
+    # віддала б голоси попереднього повороту чи сторінки.
+    ocr_page_parseq.side = {}
+    ocr_page_parseq.side_lost = {}
     ctx = seg_ctx or {}
     seg = segmenter.segment(im, ctx.get("stem", ""), ctx.get("orient", 0),
                             ctx.get("enhanced", ""))
@@ -2498,16 +2544,23 @@ def ocr_page_pp(im: Image.Image, segmenter, rec, seg_ctx: dict | None = None
     kb: list = []
     kp: list = []
     kc: list = []
+    kept: list[int] = []
     for g, (text, conf) in enumerate(pp_read_crops(rec, crops)):
         if text:
             lines.append(text)
             confs.append(conf)
+            kept.append(g)
             kb.append(boxes[g] if g < len(boxes) else None)
             kp.append(polys[g] if g < len(polys) else None)
             kc.append(crops[g])
     ocr_page_pp.boxes = kb
     ocr_page_pp.polys = kp
     ocr_page_pp.crops = kc
+    if extra_recs and crops:
+        side, lost = _side_voices(extra_recs, crops, kept, "", 0)
+        # ту саму ідіому атрибута читає `process_page`, хоч би яка основа
+        ocr_page_parseq.side = side
+        ocr_page_parseq.side_lost = lost
     return lines, (float(np.mean(confs)) if confs else 0.0)
 
 
@@ -2574,9 +2627,14 @@ def _geom_of(engine: str) -> dict:
     кількістю рядків, тобто повз гард довжин, і мовчки.
     """
     src_fn = {"parseq": ocr_page_parseq, "ppocr": ocr_page_pp}.get(engine, ocr_page)
+    # Голоси ансамблю — так само: вони вирівняні з рядками саме ЦЬОГО повороту.
+    voiced = engine in ("parseq", "ppocr")
     return {"boxes": getattr(src_fn, "boxes", None),
             "polys": getattr(src_fn, "polys", None),
-            "size": getattr(src_fn, "size", None)}
+            "size": getattr(src_fn, "size", None),
+            "side": dict(getattr(ocr_page_parseq, "side", {}) or {}) if voiced else {},
+            "side_lost": (dict(getattr(ocr_page_parseq, "side_lost", {}) or {})
+                          if voiced else {})}
 
 
 def process_page(src: Path, segmenter, rec_model, device: str,
@@ -4627,7 +4685,9 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
     # із Писарем інакше лягає в реєстр кирилицею, і латинський свіп її не бачить
     side_scripts: dict[str, str] = {}
     extra_recs: list = []
-    if engine == "parseq" and (args.models.strip() or args.beam > 1):
+    # PP-основа (Регент, Скриба PPv4) — лише голоси: beam є тільки в PARSeq
+    if (engine == "parseq" and (args.models.strip() or args.beam > 1)) or (
+            engine == "ppocr" and args.models.strip()):
         for spec in [s.strip() for s in args.models.split(",") if s.strip()]:
             mdir = Path(__file__).resolve().parents[1] / "data" / "spotter" / "models"
             p = Path(spec)
@@ -4641,6 +4701,11 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
             if not p.is_file():
                 raise SystemExit(f"[htr-run] нема моделі: {spec}")
             vengine = detect_engine(str(p))
+            if engine == "ppocr" and vengine == "parseq":
+                # PP-гілка не тримає тензорів PARSeq і не знає пристрою для
+                # нього; голос мовчки випав би — тож відмова вголос
+                raise SystemExit(f"[htr-run] голос {p.name} (PARSeq) за PP-основою "
+                                 f"не підтримано: лише PP-OCRv6 і kraken-голоси")
             tag = (p.stem.replace("pysar_cyr_", "").replace("diak_cyr_", "diak_")
                    .replace("skryba_f792_", "skryba_"))
             if vengine == "kraken":
@@ -4657,7 +4722,7 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
                     lambda p=p: load_recognizer(str(p), "parseq", device, half))))
             side_dirs[tag] = out_dir.parent / f"{out_dir.name}-{tag}"
             side_scripts[tag] = model_script(str(p), vengine)
-        if args.beam > 1:
+        if engine == "parseq" and args.beam > 1:
             side_dirs[f"beam{args.beam}"] = out_dir.parent / f"{out_dir.name}-beam{args.beam}"
         for d in side_dirs.values():
             d.mkdir(parents=True, exist_ok=True)
@@ -5117,10 +5182,19 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
         # побічні виходи (ансамбль / beam) — тими самими кропами І вирівняні по
         # масці основного тексту (див. `ocr_page_parseq`), тому рядок N теки
         # голосу — це рядок N основної теки й рамка N з `.lines.json`
+        # 🔴 Голоси — з результату сторінки (`_geom_of` знімає їх разом із
+        # рамками того повороту, що переміг), а не з атрибута функції: гард
+        # орієнтації міг прочитати ще один поворот уже після переможця.
+        _side = res.get("side")
+        if _side is None:
+            _side = getattr(ocr_page_parseq, "side", {}) or {}
+        _side_lost = res.get("side_lost")
+        if _side_lost is None:
+            _side_lost = getattr(ocr_page_parseq, "side_lost", {}) or {}
         for tag, d in side_dirs.items():
-            body = getattr(ocr_page_parseq, "side", {}).get(tag) or []
+            body = _side.get(tag) or []
             atomic_write(d / f"{stem}.txt", "\n".join(body) + ("\n" if body else ""))
-        for tag, k in (getattr(ocr_page_parseq, "side_lost", {}) or {}).items():
+        for tag, k in _side_lost.items():
             side_lost[tag] = side_lost.get(tag, 0) + k
         if cells_dir is not None:
             cells_pass(src, int(res["orient"] or 0))

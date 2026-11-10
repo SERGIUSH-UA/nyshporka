@@ -511,20 +511,31 @@ def resolve_voices(specs: Sequence[str], *, main: Path,
     Письмо дає бойову модель цього письма — для латинки це Скриба. Голос, що
     збігся з основною моделлю чи вже взятим голосом, пропускається.
 
-    🔴 Лише за PARSeq-основою: ансамбль у раннері живе в PARSeq-гілці, а за
-    kraken-основою `--models` він ігнорує з попередженням у лозі — тобто
-    людина чекала б теку голосу, а на диску її не було б.
+    🔴 Лише за PARSeq- чи PP-основою (`.safetensors`: Регент, Скриба PPv4):
+    ансамбль у раннері живе в цих двох гілках, а за класичною kraken-основою
+    (`.mlmodel`) `--models` він ігнорує з попередженням у лозі — тобто людина
+    чекала б теку голосу, а на диску її не було б. За PP-основою голос —
+    PP-OCRv6 або kraken (PARSeq-голосу PP-гілка не тримає).
     """
     specs = [s.strip() for s in specs if s and s.strip()]
     if not specs:
         return ()
     from nyshporka.htr import manifest as M
 
-    if M.active().kind_for_suffix(main.suffix) != "parseq":
+    man = M.active()
+
+    def _kind(p: Path) -> str | None:
+        # Маніфест зараховує `.safetensors` до kraken (той самий пакет, ≥ 7.1),
+        # а раннер читає їх своєю PP-гілкою — і саме вона вміє голоси.
+        return "ppocr" if p.suffix.lower() == ".safetensors" else \
+            man.kind_for_suffix(p.suffix)
+
+    base = _kind(main)
+    if base not in ("parseq", "ppocr"):
         raise ReadError(
-            f"додатковий голос можна дати лише кириличному прогону (основа PARSeq), "
-            f"а основна модель тут — {main.name}. Для латинської справи це окремий "
-            f"прогін `--model`.")
+            f"додатковий голос можна дати лише прогону з основою PARSeq (Писар) чи "
+            f"PP-OCRv6 (Регент, Скриба PPv4, Літописець), а основна модель тут — "
+            f"{main.name}. Для неї це окремий прогін `--model`.")
     out: list[Path] = []
     taken = {main.resolve(), *(Path(h).resolve() for h in have)}
     for spec in specs:
@@ -534,6 +545,12 @@ def resolve_voices(specs: Sequence[str], *, main: Path,
             path, _ = resolve_model(spec)
         if path.resolve() in taken:
             continue
+        if base == "ppocr" and _kind(path) == "parseq":
+            # PP-гілка раннера читає голоси PP-OCRv6 і kraken; PARSeq-голосу за
+            # нею немає — раннер відмовив би вже на машині, після оренди
+            raise ReadError(
+                f"голос {path.name} (PARSeq) за PP-основою {main.name} не "
+                f"підтримано: лише PP-OCRv6 і kraken-голоси")
         taken.add(path.resolve())
         out.append(path)
     return tuple(out)

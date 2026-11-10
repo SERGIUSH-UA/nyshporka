@@ -511,6 +511,30 @@ def test_model_and_with_together_are_refused(space: Path, monkeypatch) -> None:
                  also=["latin"])
 
 
+def test_regent_with_latin_goes_as_one_queue(space: Path, monkeypatch) -> None:
+    """11.11.2026: Регент і Скриба PPv4 — одна база PP-OCRv6, тож `--model
+    regent_v4.safetensors --with latin` — один захід, а не дві черги з двома
+    заливками кадрів і двома сегментаціями."""
+    from nyshporka.cloud import plan as PL
+    from nyshporka.htr import run as R
+
+    case = _wire_case(space, monkeypatch)
+    regent = _named_model(space, monkeypatch, "regent_v4.safetensors", "cyrillic")
+    skryba = space / "skryba_pp_v4.safetensors"
+    skryba.write_bytes(b"\0")
+    real_pick = R.pick_model
+
+    def pick(script, second_voice=True):
+        return (skryba, None) if script == "latin" else real_pick(script, second_voice=second_voice)
+
+    monkeypatch.setattr(R, "pick_model", pick)
+    got = PL.build(case, script="cyrillic", model="regent_v4.safetensors",
+                   also=["latin"])
+    assert got.model == regent
+    assert [p.name for p in got.extra_voices] == ["skryba_pp_v4.safetensors"]
+    assert got.out_dir.name.endswith("-regent_v4")
+
+
 def test_an_unknown_model_is_refused_before_anything_moves(space: Path,
                                                            monkeypatch) -> None:
     from nyshporka.cloud import plan as PL
