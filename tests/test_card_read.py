@@ -238,6 +238,22 @@ def test_read_with_cached_ocr_builds_map(tmp_path: Path, monkeypatch: pytest.Mon
     assert "several_cases" not in codes and "fill_numbers" not in codes
 
 
+def test_foreign_film_flagged_by_fond(tmp_path: Path) -> None:
+    """«Мікрофільм + 1» від ролика ANRM дав французьку плівку: картки без фонду теки."""
+    fr = CR.parse("0004.jpg", "CHALONS EN CHAMPAGNE ETAT CIVIL ITEM 1",
+                  "MICROFILMED BY THE GENEALOGICAL SOCIETY CHALONS EN CHAMPAGNE "
+                  "PROJECT NUMBER FRNC 05100 ROLL NUMBER 501 ITEM 1")
+    assert fr.kind == "item" and fr.project == "FRNC" and fr.fond is None
+    names = _names(20)
+    rows = CR.build_rows(names, {fr.name: fr})
+    rd = CR.Reading(tmp_path, names, True, [], [], "ok", cards={fr.name: fr}, rows=rows)
+    assert "fond_not_seen" in [c for c, _ in CR.checks(rd, None, "211")]
+    ours = CR.parse("0004.jpg", ITEM_RU, ITEM_EN)
+    rd.cards = {ours.name: ours}
+    rd.rows = CR.build_rows(names, rd.cards)
+    assert "fond_not_seen" not in [c for c, _ in CR.checks(rd, None, "211")]
+
+
 def test_no_ocr_off_windows(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(CR.os, "name", "posix")
     with pytest.raises(CR.OcrUnavailable):

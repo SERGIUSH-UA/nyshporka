@@ -371,6 +371,8 @@ class Card:
     contested: bool = False
     #: Номер справи взято з англійського тексту: літеру номера (30А) там губить OCR.
     delo_from_en: bool = False
+    #: Проєкт зйомки GSU з картки: MLDV (Молдова), FRNC (Франція)… — чия це плівка.
+    project: str | None = None
     text: str = ""
 
     @property
@@ -472,8 +474,11 @@ def parse(name: str, ru: str, en: str) -> Card:
     from_en = False
     if delo is None and en_delo and fond and opys and en_fond in (None, fond) and en_opys == opys:
         delo, from_en = en_delo, True
+    # «PROJECT NUMBER MLDV CHS-1», «FRNC 05100»: чотири літери перед серією чи номером проєкту
+    proj = re.search(r"\b([A-Z]{4})\s?(?:CHS|\d{5})", (en or "").upper())
     return Card(
         name=name, kind=k, fond=fond, opys=opys, delo=delo, delo_from_en=from_en,
+        project=proj.group(1) if proj and k in ("item", "end_item", "cont_on") else None,
         part=(part.group(1) or part.group(2)) if part else None,
         years=years[:2],
         selective=bool(re.search(r"ВЫБОРОЧН|ВИБІРКОВ", r)),
@@ -626,17 +631,28 @@ def _merge_volumes(rows: list[Row]) -> list[Row]:
     return out
 
 
-def own_shifra(case_dir: Path) -> tuple[str, str | None]:
-    """Архів і фонд-опис-справа з паспорта теки (справа — лише номер, не «film…»)."""
+def _passport(case_dir: Path) -> dict[str, Any]:
     try:
         meta = json.loads((case_dir / "_source.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return "", None
+        return {}
+    return meta if isinstance(meta, dict) else {}
+
+
+def own_shifra(case_dir: Path) -> tuple[str, str | None]:
+    """Архів і фонд-опис-справа з паспорта теки (справа — лише номер, не «film…»)."""
+    meta = _passport(case_dir)
     repo = str(meta.get("repo") or "")
     f, o, s = (str(meta.get(k) or "").strip() for k in ("fond", "opys", "spr"))
     if f and o and re.fullmatch(r"\d+[А-ЯA-Zа-яa-z]?", s or ""):
         return repo, f"{f}-{o}-{s}"
     return repo, None
+
+
+def own_fond(case_dir: Path) -> str | None:
+    """Фонд теки з паспорта — і тоді, коли справи там нема (тека плівки «film…»)."""
+    f = str(_passport(case_dir).get("fond") or "").strip()
+    return f if re.fullmatch(r"\d+[А-ЯA-Zа-яa-z]?", f) else None
 
 
 def confirm(rows: list[Row], repo: str, own: str | None, *, accept_ocr: bool = False) -> None:
@@ -700,6 +716,7 @@ class Reading:
             "candidates": {"want": len(self.want), "by_tone": self.by_tone, "by_run": self.by_run,
                            "threshold": self.threshold, "missing": len(self.missing)},
             "ocr": self.ocr_state,
+            "projects": sorted({c.project for c in self.cards.values() if c.project}),
             "cards": {k: v for k, v in _count(self.cards).items()},
             "rows": [asdict(r) for r in self.rows],
             "cases": len(self.cases),
@@ -737,16 +754,27 @@ def read(case_dir: str | Path, *, run_ocr: bool = True, accept_ocr: bool = False
     rd.rows = build_rows(c.names, rd.cards)
     repo, own = own_shifra(c.case_dir)
     confirm(rd.rows, repo, own, accept_ocr=accept_ocr)
-    rd.warnings = checks(rd, own)
+    rd.warnings = checks(rd, own, own_fond(c.case_dir))
     return rd
 
 
-def checks(rd: Reading, own: str | None) -> list[tuple[str, str]]:
-    """Що в межах плівки вимагає рішення: продовження, вибірковість, кілька справ, «?»."""
+def checks(rd: Reading, own: str | None, fond: str | None = None) -> list[tuple[str, str]]:
+    """Що в межах плівки вимагає рішення: чужа плівка, продовження, вибірковість, кілька справ, «?»."""
     out: list[tuple[str, str]] = []
     cases = rd.cases
     if rd.ocr_state.startswith("unavailable") and not rd.cards:
         return [("ocr_unavailable", rd.ocr_state.split(":", 1)[-1].strip())]
+    projects = sorted({c.project for c in rd.cards.values() if c.project})
+    if fond and cases and not any(c.fond == fond for c in rd.cards.values()):
+        # 11.11.2026: «мікрофільм + 1» від ролика ANRM 211-20-166 (2351323) дав 2351324 —
+        # французькі акти департаменту Марна (проєкт FRNC); прочитали 1141 кадр чужої плівки
+        out.append(("fond_not_seen",
+                    f"жодна картка не називає фонду теки {fond}"
+                    + (f" (проєкт зйомки {', '.join(projects)})" if projects else "")
+                    + ": плівка, мабуть, чужа — не той ролик; звірте лист, перш ніж розкладати"))
+    if len(projects) > 1:
+        out.append(("projects_mixed", f"на плівці картки кількох проєктів зйомки: "
+                                      f"{', '.join(projects)}"))
     if not cases:
         out.append(("no_cards", "жодної картки з шифрою не прочитано: тека — одна справа без "
                                 "карток зйомки (цифрова зйомка, група = справа) або картки сірі "
