@@ -2491,13 +2491,20 @@ def cases_cards_cmd(
         help="номери справ з карток у порядку плівки, через кому: «923,924,925»"),
     prefix: str = typer.Option("", "--prefix",
                                help="початок шифри до номерів: «ДАЧкО 931-1-»"),
+    no_ocr: bool = typer.Option(False, "--no-ocr",
+                                help="не читати картки (Windows OCR) — лише тон кадру й лист"),
+    accept_ocr: bool = typer.Option(False, "--accept-ocr",
+                                    help="вписати в карту й одиночні прочитання OCR — після "
+                                         "звірки з листом"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
-    """Знайти на плівці картки-мішені й запропонувати межі справ.
+    """Знайти на плівці картки-мішені, прочитати їх і запропонувати межі справ.
 
-    Картки зйомки FamilySearch (початкова з шифрою, «END OF ITEM») видно за
-    тоном кадру. Шифру з листа читаєте ви, вписуєте в карту замість «?» —
-    і далі `nysh cases split <тека> --map <карта>`.
+    Кадри-кандидати — за тоном кадру, а для плівки в бакеті — за байтами на
+    піксель маніфесту й короткими рядками прогону; картки читає Windows OCR.
+    У карту шифра йде лише підтвердженою, решта — «?» з підказкою OCR: звірте
+    з листом, впишіть і далі `nysh cases split <тека> --map <карта>`.
+    Плівка в бакеті — спершу покладіть названі кадри-кандидати в `<тека>/_cards/`.
     """
     from rich.markup import escape as _e
 
@@ -2506,10 +2513,44 @@ def cases_cards_cmd(
 
     env = O.call("cases.cards", {"case_dir": case_dir, "sheet_dir": sheet_dir,
                                  "map_out": map_out, "prefix": prefix,
-                                 "numbers": [n for n in numbers.split(",") if n.strip()]})
+                                 "numbers": [n for n in numbers.split(",") if n.strip()],
+                                 "ocr": not no_ocr, "accept_ocr": accept_ocr})
     if answer(env, as_json):
         return
     d = env.data or {}
+    if d.get("missing"):
+        console.print(f"[bold]{_e(str(d.get('case_dir')))}[/bold] — {d.get('frames')} кадрів · "
+                      f"кандидатів {d.get('want')}, бракує {len(d['missing'])}: "
+                      f"{_e(', '.join(d['missing'][:12]))}"
+                      + (" …" if len(d["missing"]) > 12 else ""))
+        notes(env)
+        return
+    if "rows" in d:
+        cand = d.get("candidates") or {}
+        console.print(f"[bold]{_e(str(d.get('case_dir')))}[/bold] — {d.get('frames')} кадрів · "
+                      f"кандидатів {cand.get('want')} (тон {cand.get('by_tone')}, прогін "
+                      f"{cand.get('by_run')}) · справ {d.get('cases')}, без шифри "
+                      f"{d.get('unconfirmed')}"
+                      + (f" · мікрофільм {d['microfilm']}" if d.get("microfilm") else ""))
+        for r in d["rows"]:
+            if r["kind"] != "case":
+                console.print(f"  [muted]{'поза справами':<22} {r['first']}–{r['last']}[/muted]")
+                continue
+            tag = r["spr"] if r["spr"] != "?" else f"? (OCR {r['ocr'] or '—'})"
+            extra = " ".join(x for x in (
+                "т." + ",".join(r["parts"]) if r["parts"] else "",
+                "–".join(map(str, r["years"])) if r["years"] else "",
+                {"cont_on": "→ інший ролик", "end_item": "", "next_start": "без END",
+                 "end_roll": "до END OF ROLL", "film_end": "до кінця плівки"}.get(r["end_kind"], ""),
+                "← з іншого ролика" if r["cont_from"] or not r["start"] else "",
+                "вибірково" if r["selective"] else "") if x)
+            console.print(f"  {_e(tag):<22} {r['first']}–{r['last']} {_e(extra)}")
+        for p in d.get("sheets") or []:
+            console.print(f"  [muted]лист: {_e(p)}[/muted]")
+        if d.get("map"):
+            console.print(f"  [muted]карта: {_e(str(d['map']))}[/muted]")
+        notes(env)
+        return
     console.print(f"[bold]{_e(str(d.get('frames_dir')))}[/bold] — {d.get('frames')} кадрів · "
                   f"груп карток {d.get('card_runs')} · справ {d.get('cases')}")
     label = {"cards": "картки", "case": "справа", "leader": "ракорд"}

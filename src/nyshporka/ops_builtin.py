@@ -3636,37 +3636,82 @@ class CasesCardsArgs(BaseModel):
                     "заповненою, без «?»; кількість мусить збігтися зі справами")
     prefix: str = Field(default="", description="початок шифри до номерів, напр. "
                                                 "«ДАЧкО 931-1-»; порожньо — номери як є")
+    ocr: bool = Field(default=True, description="прочитати картки (Windows OCR): тип, шифра, роки, "
+                                                "«ВЫБОРОЧНО»; без нього — лише тон кадру й лист на око")
+    accept_ocr: bool = Field(default=False, description="вписати в карту й одиночні прочитання OCR "
+                                                        "(слово людини після звірки з листом)")
 
 
 @op("cases.cards", summary="Знайти на плівці картки-мішені й запропонувати межі справ",
     args=CasesCardsArgs,
     skill="take-delivery",
-    when="плівка з кількома справами: знайти картки-мішені й межі справ")
+    when="плівка з кількома справами чи в бакеті: картки зйомки, межі справ, продовження")
 def cases_cards(a: CasesCardsArgs) -> Envelope:
     """Плівка FamilySearch несе кілька справ, і кожну обрамляють чорні картки
-    зйомки: початкова з шифрою й кінцева «END OF ITEM». Операція знаходить їх
-    за тоном кадру, ділить плівку на відтинки, складає листи карток на око й
-    чернетку карти, де номер кожної справи — «?».
+    зйомки: початкова з шифрою й кінцева «END OF ITEM». Операція знаходить
+    кадри-кандидати (тон кадру; для плівки в бакеті — байти на піксель з
+    маніфесту й короткі рядки прогону), читає картки Windows OCR і складає
+    карту плівки для `cases.split` з перевірками: продовження на іншому
+    ролику, вибіркова зйомка, кілька справ у теці «однієї справи».
 
-    🔴 Шифру з картки читає людина чи агент оком і вписує в карту замість «?»;
-    далі — `cases.split` з цією картою. Машина номера не вгадує.
+    🔴 У карту шифра йде лише підтвердженою: картка називає шифру самої теки,
+    або дві картки справи прочитано однаково й англійський текст не
+    суперечить. Решта — «?» з підказкою `ocr`: людина звіряє з листом карток.
+    Плівка в бакеті, а кадрів-кандидатів у `<тека>/_cards/` немає — операція
+    називає їх (`missing`), і споживач кладе їх туди сам.
     """
     import tempfile
 
+    from nyshporka.cases import cardread as CR
     from nyshporka.cases import cards as CRD
 
+    d = Path(a.case_dir)
+    try:
+        rd = CR.read(d, run_ocr=a.ocr, accept_ocr=a.accept_ocr)
+    except CRD.CardsError as exc:
+        return fail(str(exc))
+    sheets_at = Path(a.sheet_dir) if a.sheet_dir else (
+        Path(tempfile.gettempdir()) / "nyshporka" / "cards" / d.name)
+    if rd.missing:
+        env = ok({"case_dir": str(d), "frames": len(rd.names), "remote": rd.remote, "dgs": rd.dgs,
+                  "want": len(rd.want), "missing": rd.missing,
+                  "cards_dir": str(d / CR.CARDS_DIR)})
+        env.warn("need_frames",
+                 f"бракує {len(rd.missing)} з {len(rd.want)} кадрів-кандидатів: покладіть їх у "
+                 f"{d / CR.CARDS_DIR} під іменами кадрів плівки (досить ширини 600 px) і "
+                 f"повторіть; межі за половиною карток зліплять сусідні справи")
+        return env
+    if rd.cards or rd.remote:
+        if a.numbers:
+            cases = rd.cases
+            if len(a.numbers) != len(cases):
+                return fail(f"справ на плівці {len(cases)}, а номерів {len(a.numbers)}")
+            for row, num in zip(cases, a.numbers, strict=True):
+                row.spr, row.confirmed = a.prefix + num.strip(), "numbers"
+            rd.warnings = [w for w in rd.warnings if w[0] != "fill_numbers"]
+        saved = CR.save(rd, Path(a.map_out) if a.map_out else None)
+        sheets = CR.sheet(rd, sheets_at)
+        env = ok({**rd.as_json(), "map": str(saved.get("map") or ""),
+                  "result": str(saved["result"]), "sheets": [str(p) for p in sheets]})
+        for code, text in rd.warnings:
+            if code == "fill_numbers" and saved.get("map"):
+                text += f"; далі nysh cases split {d} --map {saved['map']}"
+            env.warn(code, text)
+        return env
+    # Розпізнавання немає (не Windows, вимкнено) — межі за тоном кадрів на диску, номери — оком.
     try:
         film = CRD.scan(a.case_dir)
         if a.numbers:
             CRD.apply_numbers(film, [a.prefix + n.strip() for n in a.numbers])
     except CRD.CardsError as exc:
         return fail(str(exc))
-    sheets_at = Path(a.sheet_dir) if a.sheet_dir else (
-        Path(tempfile.gettempdir()) / "nyshporka" / "cards" / film.frames_dir.name)
     sheets = CRD.sheet(film, sheets_at)
     map_path = CRD.write_map(film, a.map_out or sheets_at / "map.json")
     env = ok({**film.as_json(), "sheets": [str(p) for p in sheets],
               "map": str(map_path)})
+    if rd.ocr_state.startswith("unavailable"):
+        env.warn("ocr_unavailable", rd.ocr_state.split(":", 1)[-1].strip()
+                 + " — межі за тоном кадру, шифри читаєте з листа")
     if film.loose:
         env.warn("cards_loose",
                  "картки на цій плівці сірі, не чорні (інша зйомка) — межі знайдено м'якшим "
