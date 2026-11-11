@@ -235,6 +235,20 @@ _CYR_REPO = {"ДАХМО": "DAHMO", "ЦДІАК": "CDIAK", "ДАВІО": "DAVIO"
              "ДАВО": "DAVIO", "ДАОО": "DAOO", "ДАЖО": "DAZHO"}
 
 
+def _cyr_repo(word: str) -> str:
+    """Код архіву з паспорта → латинський код ключа.
+
+    Спершу `_CYR_REPO` (він тримає давні ключі реєстру: ДАВіО → DAVIO, хоча пак
+    каже DAVO), далі пак архівів. Без другого заходу архів поза словником лягав
+    кирилицею: 48 справ ДАЧО 679-4 (11.11.2026) стали `ДАЧО/679/4/…`, і їхні
+    прогони з ключем мети `DACHO/679/4/…` випали в «нічиї».
+    """
+    if word in _CYR_REPO:
+        return _CYR_REPO[word]
+    from nyshporka.library import _repo_of_word
+    return _repo_of_word(word) or word
+
+
 def _ordered_cases(index: LibraryIndex,
                    scans: list[Any] | None = None,
                    unreadable: list[Unreadable] | None = None,
@@ -838,7 +852,7 @@ def collect_rows(index: LibraryIndex | None = None, *,
             #    ключем `ЦДІАК/224/918` — окремим простором імен, у який не влучає ні
             #    `cases show CDIAK/224/918`, ні прив'язка прогону в `overrides.json`.
             if repo:
-                repo = _CYR_REPO.get(repo, repo)
+                repo = _cyr_repo(repo)
                 parsed = (repo, m.group(1).lstrip("0"), m.group(2).lstrip("0"),
                           m.group(3).lstrip("0"))
         if not parsed and meta.get("archive") and meta.get("fond") and meta.get("spr"):
@@ -848,7 +862,7 @@ def collect_rows(index: LibraryIndex | None = None, *,
             # ДАХмО R-6380-1-215 і 1-225 разом зі своїми прогонами.
             from nyshporka.library import _norm_fond, _sidecar_opys
             repo = str(meta["archive"]).strip().upper()
-            parsed = (_CYR_REPO.get(repo, repo), str(_norm_fond(str(meta["fond"]))),
+            parsed = (_cyr_repo(repo), str(_norm_fond(str(meta["fond"]))),
                       str(_sidecar_opys(meta) or ""),
                       str(meta["spr"]).lstrip("0"))
         if not parsed:

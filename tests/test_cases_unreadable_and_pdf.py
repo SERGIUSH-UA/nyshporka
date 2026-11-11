@@ -288,6 +288,24 @@ def test_ordered_case_with_broken_passport_is_reported(space: Path) -> None:
     assert any(r.path == "data/raw/daoo/spr-1" and r.state == "ordered" for r in rows)
 
 
+def test_ordered_case_repo_outside_dict_gets_latin_key(space: Path) -> None:
+    """Архів поза давнім словником бере латинський код із паку архівів.
+
+    11.11.2026 48 справ «ДАЧО 679-4-…» без кадрів на диску лягли під ключем
+    `ДАЧО/679/4/…`, а їхні прогони несли `DACHO/679/4/…` — і випали в нічиї.
+    """
+    from nyshporka.cases.collect import collect_rows
+
+    d = space / "data" / "raw" / "dacho_679" / "op4-spr-540"
+    d.mkdir(parents=True)
+    (d / "_source.json").write_text(
+        '{"shifra": "ДАЧО 679-4-540", "title": "Метричні книги"}', encoding="utf-8")
+    _library()
+    rows, _ = collect_rows()
+    keys = {r.key for r in rows if r.path == "data/raw/dacho_679/op4-spr-540"}
+    assert keys == {"DACHO/679/4/540"}, keys
+
+
 def test_offloaded_case_is_archived_not_ordered(space: Path) -> None:
     """Справа, чиї кадри знято після звірки з копією, — `archived`, а не «замовлено».
 
