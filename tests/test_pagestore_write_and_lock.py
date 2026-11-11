@@ -95,3 +95,17 @@ def test_a_stale_lock_is_still_taken_over(tmp_path: Path) -> None:
     with S._lock(path, timeout=2):
         assert lockp.read_text(encoding="utf-8").strip() == str(os.getpid())
     assert not lockp.exists()
+
+
+def test_publication_year_has_a_page_file(tmp_path: Path, monkeypatch) -> None:
+    """Рік видання `VYD/<код>/<рік>` має файл обліку, як і архівна справа.
+
+    11.11.2026: згадку села, звірену оком на сторінці газети, `pages note`
+    відкинув — «ключ не нової форми», хоча `resolve_case` той самий ключ приймав.
+    """
+    monkeypatch.setattr(S, "pages_root", lambda: tmp_path)
+    ref = S.resolve_case("VYD/PGV_KAM/1846")
+    assert S.case_path(ref) == tmp_path / "VYD" / "PGV_KAM-1846.json"
+    assert S._stem(ref) == "PGV_KAM-1846"
+    with pytest.raises(ValueError):
+        S._stem(S.CaseRef(key="щось/не те", repo="X", fond="1", spr="1", shifra=""))

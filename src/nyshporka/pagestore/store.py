@@ -402,10 +402,7 @@ def case_path(ref: CaseRef) -> Path:
 
     Ім'я — з ключа (`casekey.stem`), архів — тека; збірка — фонд і назва збірки.
     """
-    ck = casekey.parse(ref.key)
-    if ck is None:
-        raise ValueError(f"ключ справи «{ref.key}» не нової форми — облік під ним не пишеться")
-    return pages_root() / ref.repo / f"{casekey.stem(ck)}.json"
+    return pages_root() / ref.repo / f"{_stem(ref)}.json"
 
 
 def _legacy_path(ref: CaseRef) -> Path | None:
@@ -439,10 +436,20 @@ def view_mode() -> str:
 
 
 def _stem(ref: CaseRef) -> str:
+    """Ім'я файла справи в сховищі: `315-1-8433`, а рік видання — `PGV_KAM-1846`.
+
+    Рік друкованого видання (`VYD/<код>/<рік>`) ключем справи не розбирається:
+    опису в нього немає, а код — не номер фонду. `resolve_case` такий ключ
+    приймав, а шлях файла відмовляв, і згадку, звірену оком на сторінці газети,
+    не було куди записати.
+    """
     ck = casekey.parse(ref.key)
-    if ck is None:
-        raise ValueError(f"ключ справи «{ref.key}» не нової форми — облік під ним не пишеться")
-    return casekey.stem(ck)
+    if ck is not None:
+        return casekey.stem(ck)
+    pub = vydannia.parse(ref.key)
+    if pub is not None:
+        return f"{pub[0]}-{pub[1]}"
+    raise ValueError(f"ключ справи «{ref.key}» не нової форми — облік під ним не пишеться")
 
 
 def view_path(ref: CaseRef, project_root: Path | None = None) -> Path:
