@@ -27,6 +27,10 @@ NONE_MARK = "-"
 #: 🔒 Пояснення прапорця рішення автора — одне на всі операції віддачі.
 PRIVATE_OK = ("віддати й справу, позначену private у паспорті: рішення автора "
               "(без нього приватна справа з машини не йде)")
+#: Пояснення обходу назви-заглушки — одне на pack і push.
+STUB_TITLE_OK = ("чому віддати з назвою-заглушкою («Церковні записи (за каталогом "
+                 "FamilySearch)», назви немає): рішення автора, їде з пакетом. Без нього "
+                 "така справа не пакується — назву дає `share card --title`")
 
 
 def _refused(exc: Exception) -> Envelope:
@@ -179,6 +183,7 @@ class SharePackArgs(_CardFields):
                                           "зате прив'язка стане точною")
     partial: str = Field(default="", description="пояснення, чому прочитано не "
                                                  "всю справу; знімає ворота знаменника")
+    stub_title_ok: str = Field(default="", description=STUB_TITLE_OK)
     dry_run: bool = Field(default=False,
                           description="показати, що поїде, і нічого не писати")
     publisher: str = Field(default="", description="ваше ім'я або псевдонім")
@@ -273,7 +278,7 @@ def share_pack(a: SharePackArgs) -> Envelope:
     try:
         got = pack(a.case, Path(a.out) if a.out else None, geometry=a.geometry,
                    hash_frames=a.hash_frames, partial_why=a.partial,
-                   dry_run=a.dry_run,
+                   dry_run=a.dry_run, stub_title_ok=a.stub_title_ok,
                    publisher=a.publisher or defaults["publisher"],
                    contact=_contact(a.contact, defaults["contact"]),
                    site=a.site or defaults["site"], note=a.note,
@@ -873,6 +878,7 @@ class SharePushArgs(BaseModel):
                                                   "просить пул, і віддавати далі, а не "
                                                   "зупиняти пачку")
     private_ok: bool = Field(default=False, description=PRIVATE_OK + "; на всю пачку")
+    stub_title_ok: str = Field(default="", description=STUB_TITLE_OK + "; на всю пачку")
     replace_own: bool = Field(default=False,
                               description="кожна справа заступає свій чинний внесок у "
                                           "тій самій справі, якщо він є (з why)")
@@ -1023,6 +1029,8 @@ def _push(a: SharePushArgs, *, say: Any) -> Envelope:
         if key in seen:
             continue
         seen.add(key)
+        if a.stub_title_ok.strip() and not str(item.get("stub_title_ok") or "").strip():
+            item = {**item, "stub_title_ok": a.stub_title_ok.strip()}
         cherha.append({**item, "private_ok": bool(item.get("private_ok") or a.private_ok),
                        **({B.REPLACE_WHY: a.why.strip()} if a.replace_own else {})})
 

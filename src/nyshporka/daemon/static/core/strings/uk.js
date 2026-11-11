@@ -1335,6 +1335,7 @@ export default {
     'give.st.noboxes': 'у Супрязі без рамок',
     'give.st.partial': 'неповна',
     'give.st.noframes': 'без кадрів',
+    'give.st.notitle': 'без назви',
     'give.st.multi': 'збірна',
     'give.go': 'Віддати: {n}',
     'give.go.why': 'спакувати й залити одним заходом, у Роботах',

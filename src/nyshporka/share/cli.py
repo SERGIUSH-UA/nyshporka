@@ -135,6 +135,8 @@ def _card_args(title: str | None, years: str | None, place: list[str] | None,
 
 _PRIVATE_OK_HELP = ("віддати й справу з позначкою private у паспорті: рішення автора "
                     "(без прапорця приватна справа з машини не йде)")
+_STUB_TITLE_OK_HELP = ("чому віддати з назвою-заглушкою (каталог FS, назви немає): "
+                       "рішення автора, їде з пакетом; без нього така справа не пакується")
 
 
 @app.command("pack")
@@ -189,6 +191,7 @@ def pack_cmd(
                                              "плівці з `nysh share part`; --alpha — "
                                              "частини картотеки. Без прапорця — само"),
     private_ok: bool = typer.Option(False, "--private-ok", help=_PRIVATE_OK_HELP),
+    stub_title_ok: str = typer.Option("", "--stub-title-ok", help=_STUB_TITLE_OK_HELP),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Зібрати пакет прочитаного для обміну.
@@ -208,6 +211,7 @@ def pack_cmd(
         "source_terms": source_terms, "archive_name": archive_name,
         "skip_run": list(skip_run), "segments": segments or by_part is True,
         "segment_files": segment_files, "by_part": by_part, "private_ok": private_ok,
+        "stub_title_ok": stub_title_ok,
         **_card_args(title, years, place, genre, frames, frames_unknown, scans)})
     if _answer(env, as_json):
         return
@@ -554,7 +558,7 @@ def suggest_cmd(
     """Що прочитано, але ще не віддано.
 
     Без аргументів — перелік зі статусами: готова, у пулі без рамок,
-    неповна, без кадрів, збірна. Що вже віддано, вирішує зріз пулу
+    без назви, неповна, без кадрів, збірна. Що вже віддано, вирішує зріз пулу
     (`nysh share sync`); без зрізу — журнал пакувань. `--all` пакує все;
     далі кожен пакет віддається командою `publish`.
     """
@@ -716,6 +720,8 @@ def push_cmd(
                                    "і віддавати далі — для заливки сотень справ без нагляду"),
     private_ok: bool = typer.Option(False, "--private-ok",
                                     help=_PRIVATE_OK_HELP + "; на всю пачку"),
+    stub_title_ok: str = typer.Option("", "--stub-title-ok",
+                                      help=_STUB_TITLE_OK_HELP + "; на всю пачку"),
     replace_own: bool = typer.Option(
         False, "--replace-own",
         help="перечитане заступає свій чинний внесок у тій самій справі, а не стає "
@@ -737,6 +743,7 @@ def push_cmd(
                                 "from_file": from_file, "jobs": jobs, "slots": slots,
                                 "notes": notes,
                                 "wait": wait, "private_ok": private_ok,
+                                "stub_title_ok": stub_title_ok,
                                 "replace_own": replace_own, "why": why})
     if _answer(env, as_json):
         return

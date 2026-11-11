@@ -1399,6 +1399,7 @@ export default {
     'give.st.noboxes': 'w Supriasze bez ramek',
     'give.st.partial': 'niepełna',
     'give.st.noframes': 'bez klatek',
+    'give.st.notitle': 'bez tytułu',
     'give.st.multi': 'zbiorcza',
     'give.go': 'Oddaj: {n}',
     'give.go.why': 'spakować i wysłać jednym ruchem, w Zadaniach',

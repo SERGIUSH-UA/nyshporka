@@ -1050,6 +1050,8 @@ def _geometry_pages(run_dirs: list[Path]) -> int:
 
 #: Поле `extra` маніфесту: чому число кадрів справи невідоме.
 FRAMES_UNKNOWN = "frames_unknown"
+#: Поле `extra` маніфесту: чому автор віддає з назвою-заглушкою.
+STUB_TITLE_OK = "stub_title_ok"
 
 
 def _zbirna_teka(key: str, run_dirs: list[Path]) -> str:
@@ -1162,7 +1164,7 @@ def _kray(case: dict[str, Any]) -> list[dict[str, str]]:
 
 def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
          hash_frames: bool = False, partial_why: str = "",
-         dry_run: bool = False, **meta: Any) -> dict[str, Any]:
+         dry_run: bool = False, stub_title_ok: str = "", **meta: Any) -> dict[str, Any]:
     """Зібрати пакет справи. `dry_run` — показати, що поїде, і нічого не писати.
 
     Пишеться ДВА файли, коли геометрія є на диску: текстовий пакет і пакет
@@ -1176,6 +1178,10 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
     """
     card_fields = meta.pop("card_fields", None) or {}
     remember = bool(meta.pop("remember_card", True))
+    if stub_title_ok.strip():
+        # Рішення автора віддати з заглушкою їде з пакетом: пул і читач бачать,
+        # що назву свідомо не встановлено, а не забули.
+        meta["extra"] = {**(meta.get("extra") or {}), STUB_TITLE_OK: stub_title_ok.strip()}
     m, run_dirs, frames, details = build_manifest(
         scope, hash_frames=hash_frames, card_fields=card_fields, **meta)
     verdict = gates.check(m, partial_why=partial_why)
@@ -1237,6 +1243,14 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
         str(details.get("key") or ""), str(m.case.get("shifra") or ""), m.frames_total)
     if chastyna:
         out.setdefault("pack_refusals", []).append(chastyna)
+    # 🔴 Назва-заглушка — відмова, а не попередження: пачкою (`push --ready`)
+    # попередження ніхто не читає, і в пулі лягли тисячі карток «Церковні
+    # записи (за каталогом FamilySearch)» (11.11.2026). Автор, який іде на
+    # принцип, віддає з `--stub-title-ok "чому"`.
+    zahlushka = "" if stub_title_ok.strip() else opys.zahlushka(m.case, details.get("card"))
+    if zahlushka:
+        out["title_stub"] = zahlushka
+        out.setdefault("pack_refusals", []).append(opys.zahlushka_vidmova(zahlushka))
     from nyshporka.setup import sample as zrazok
     if zrazok.tse_zrazok(str(details.get("key") or ""), [d.name for d in run_dirs]):
         out.setdefault("pack_refusals", []).append(
@@ -1264,6 +1278,8 @@ def pack(scope: str, dest: Path | None = None, *, geometry: bool = True,
         raise PublishError(rozkladena)
     if chastyna:
         raise PublishError(chastyna)
+    if zahlushka:
+        raise PublishError(opys.zahlushka_vidmova(zahlushka))
     if zavelykyi:
         raise PublishError(zavelykyi)
 

@@ -199,9 +199,26 @@ def _boot_workspace_after_reset() -> None:
         W.use(W.Workspace(root=_BOOT, name="збирання", origin="test"))
 
 
+@pytest.fixture(autouse=True)
+def _bez_vidmovy_zahlushky(request: pytest.FixtureRequest,
+                           monkeypatch: pytest.MonkeyPatch) -> None:
+    """Відмову «назва-заглушка» тести пакування не перевіряють — лише свої.
+
+    Тестові справи здебільшого без назви, а перевіряють кадри, геометрію,
+    картку. Відмову за назвою перевіряють тести з маркером `zahlushka`.
+    """
+    if request.node.get_closest_marker("zahlushka"):
+        return
+    from nyshporka.share import opys
+
+    monkeypatch.setattr(opys, "zahlushka", lambda *a, **kw: "")
+
+
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "real_paths: не підміняти функції шляхів — тест перевіряє їх самі")
+    config.addinivalue_line(
+        "markers", "zahlushka: тест перевіряє відмову пакування за назвою-заглушкою")
     _hold_pack_lock(config)
 
 
