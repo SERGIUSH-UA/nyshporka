@@ -1399,6 +1399,7 @@ export default {
     'give.st.noboxes': 'в Супряге без рамок',
     'give.st.partial': 'неполная',
     'give.st.noframes': 'без кадров',
+    'give.st.notitle': 'без названия',
     'give.st.multi': 'сборная',
     'give.go': 'Отдать: {n}',
     'give.go.why': 'упаковать и залить одним заходом, в Работах',

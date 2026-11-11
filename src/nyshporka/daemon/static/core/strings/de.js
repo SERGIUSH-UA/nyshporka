@@ -1399,6 +1399,7 @@ export default {
     'give.st.noboxes': 'in Supriaha ohne Rahmen',
     'give.st.partial': 'unvollständig',
     'give.st.noframes': 'ohne Bilder',
+    'give.st.notitle': 'ohne Titel',
     'give.st.multi': 'Sammelband',
     'give.go': 'Geben: {n}',
     'give.go.why': 'packen und hochladen in einem Zug, unter Aufträge',

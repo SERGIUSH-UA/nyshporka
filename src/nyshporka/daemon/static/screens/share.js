@@ -21,7 +21,7 @@ import { bars as chartBars } from '/ui/chart.js';
 
 /** Стан справи з `share.suggest` (рядок пакета) → ключ підпису. */
 const STATUS = { 'готова': 'ready', 'у пулі без рамок': 'noboxes', 'неповна': 'partial',
-  'без кадрів': 'noframes', 'збірна': 'multi' };
+  'без кадрів': 'noframes', 'збірна': 'multi', 'без назви': 'notitle' };
 const READY = ['готова', 'у пулі без рамок'];
 const stLabel = (s) => (STATUS[s] ? t(`give.st.${STATUS[s]}`) : s || '');
 
@@ -85,7 +85,7 @@ function paintGive(env, again = false) {
     ${GIVE.length ? '<div id="give-lv"></div>' : `<div class="dash-box">${emptyMini('zshyvok', t('give.none'))}</div>`}`, again);
   if (!GIVE.length) return undefined;
   const statuses = [...new Set(GIVE.map((r) => r.status))];
-  const order = ['готова', 'неповна', 'без кадрів', 'у пулі без рамок', 'збірна'];
+  const order = ['готова', 'без назви', 'неповна', 'без кадрів', 'у пулі без рамок', 'збірна'];
   statuses.sort((a, b) => (order.indexOf(a) + 99) % 99 - (order.indexOf(b) + 99) % 99);
   GIVE_LV = listView(el('give-lv'), {
     id: 'give',

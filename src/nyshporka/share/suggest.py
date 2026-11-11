@@ -84,7 +84,10 @@ NEPOVNA = "неповна"
 BEZ_KADRIV = "без кадрів"
 #: Тека кількох справ під ключем першої: віддавати її однією справою не можна.
 ZBIRNA = "збірна"
-STATUSY = (GOTOVA, BEZ_RAMOK, NEPOVNA, BEZ_KADRIV, ZBIRNA)
+#: Прочитана, але назва картки — заглушка: пакування відмовить без назви з
+#: титулки (`share card --title`) чи рішення автора (`--stub-title-ok`).
+BEZ_NAZVY = "без назви"
+STATUSY = (GOTOVA, BEZ_RAMOK, BEZ_NAZVY, NEPOVNA, BEZ_KADRIV, ZBIRNA)
 #: Що можна віддати без `--partial` і без ручної роботи.
 READY_STATUSES = (GOTOVA, BEZ_RAMOK)
 
@@ -380,6 +383,14 @@ def _nepodileni_now() -> list[dict[str, Any]]:
             if chastyna:
                 out[-1]["status"] = NEPOVNA
                 out[-1]["chastyna"] = chastyna
+        if out[-1]["status"] in READY_STATUSES:
+            # Та сама відповідь, що відмова пакування: заглушка замість назви.
+            from nyshporka.share import opys
+
+            zahl = opys.zahlushka_spravy(key, shifra, str(row.get("title") or ""))
+            if zahl:
+                out[-1]["status"] = BEZ_NAZVY
+                out[-1]["title_stub"] = zahl
         zbirna = _zbirna(row, progony.get(key, []))
         if zbirna is not None:
             # 🔴 «Не пропонувати як одну справу за першим числом» (звіт

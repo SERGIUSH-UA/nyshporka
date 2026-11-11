@@ -1399,6 +1399,7 @@ export default {
     'give.st.noboxes': 'dans Supriaha sans cadres',
     'give.st.partial': 'incomplet',
     'give.st.noframes': 'sans images',
+    'give.st.notitle': 'sans titre',
     'give.st.multi': 'composite',
     'give.go': 'Donner : {n}',
     'give.go.why': 'emballer et envoyer d’un coup, dans Tâches',

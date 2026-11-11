@@ -1399,6 +1399,7 @@ export default {
     'give.st.noboxes': 'in Supriaha without boxes',
     'give.st.partial': 'incomplete',
     'give.st.noframes': 'no frames',
+    'give.st.notitle': 'no title',
     'give.st.multi': 'combined',
     'give.go': 'Give: {n}',
     'give.go.why': 'pack and upload in one go, in Jobs',

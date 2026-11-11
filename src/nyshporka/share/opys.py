@@ -105,7 +105,24 @@ def title(side_title: str, row: dict[str, Any] | None, library: str = "") -> str
     із PDF для HTR-черги» там гірше за порожнечу. Реєстр опису вичитаний із
     друкованого опису фонду й таких нотаток не має.
     """
-    return _clean(side_title) or _registry_title(row) or _clean(library)
+    return (_clean(_ne_zahlushka_reiestru(side_title, row)) or _registry_title(row)
+            or _clean(library))
+
+
+def _ne_zahlushka_reiestru(side_title: str, row: dict[str, Any] | None) -> str:
+    """Назва паспорта, якщо це не переписана туди заглушка реєстру.
+
+    🔴 Обходи кладуть у паспорт назву з реєстру опису як є. Заглушку реєстру
+    («Церковні записи, Подільська духовна консисторія (ф. 315)» на сотнях
+    справ) `_registry_title` відкидає, а та сама назва з паспорта йшла в
+    картку як справжня: 11.11.2026 так стояли 46 з 51 справи ф.315 партії.
+    """
+    side = str(side_title or "").strip()
+    if not side or not row:
+        return side
+    if side == str(row.get("title") or "").strip() and not _registry_title(row):
+        return ""
+    return side
 
 
 #: «spr-2462 — рендер із PDF для HTR-черги (Dekanat Bialocerkowski, 1750–1750)»:
@@ -376,9 +393,71 @@ def passport_title(side: dict[str, Any], doc_type: str = "") -> str:
     place = str(side.get("place") or "").strip()
     if not place:
         return ""
-    if doc_type in ("birth", "marriage", "death") and kind:
+    if not kind:
+        # 🔴 Саме місце — не назва: картка «Подільська губ.» виглядає як назва,
+        # а не каже, що це за справа (11.11.2026, п'ять справ ф.315).
+        return ""
+    if doc_type in ("birth", "marriage", "death"):
         kind = f"метрична книга ({kind})"
-    return f"{kind[:1].upper()}{kind[1:]} · {place}" if kind else place
+    return f"{kind[:1].upper()}{kind[1:]} · {place}"
+
+
+#: Звідки назва, коли це не назва справи, а здогад пакувальника з каталогу
+#: FamilySearch чи з паспорта (вид документа й місце).
+ZAHLUSHKA_SRC = frozenset({"catalog", "pasport"})
+
+
+def zahlushka(case: dict[str, Any], kartka: dict[str, Any] | None = None) -> str:
+    """Чому назва картки — не назва справи; порожньо — назва справжня.
+
+    Назва, задана людиною в картці (`share card --title`), — рішення, а не
+    заглушка, навіть коли збіглась із текстом каталогу.
+    """
+    if (kartka or {}).get("title"):
+        return ""
+    nazva = str(case.get("title") or "").strip()
+    if not nazva:
+        return "назви немає: ні паспорт, ні опис архіву її не дали"
+    if str(case.get("title_src") or "") in ZAHLUSHKA_SRC:
+        return f"назву «{nazva}» складено з каталогу чи паспорта — це вид документа, а не назва справи"
+    if _working(nazva):
+        return f"«{nazva}» — заглушка каталогу чи робоча нотатка, а не назва справи"
+    return ""
+
+
+def zahlushka_spravy(key: str, shifra: str, library: str = "") -> str:
+    """Те саме, що `zahlushka`, без збирання пакета — для переліку `suggest`.
+
+    Назву рахує той самий ланцюг, що й пакування: картка → паспорт →
+    реєстр опису → бібліотека; запасна назва з каталогу — заглушка.
+    """
+    from nyshporka.share import card as K
+
+    try:
+        kartka = K.get(key) if key else {}
+    except Exception:
+        kartka = {}
+    if kartka.get("title"):
+        return ""
+    side: dict[str, Any] = {}
+    try:
+        from nyshporka.cases.register import read_sidecar
+        from nyshporka.share import align
+
+        home = align.case_home_for(key) if key else None
+        side = read_sidecar(home) if home is not None else {}
+    except Exception:
+        side = {}
+    row = registry_row(shifra) if shifra else None
+    return zahlushka({"title": title(str(side.get("title") or ""), row, library)})
+
+
+def zahlushka_vidmova(why: str) -> str:
+    """Текст відмови пакування для назви-заглушки — однаковий для pack і suggest."""
+    return (f"{why}. Генеалог, що кадрів не бачив, за такою карткою справи не "
+            f"знайде. Назву з титулки чи першої сторінки: `nysh share card <справа> "
+            f"--title \"…\"` (і --place «с. …, …ський пов.»). Віддати як є, з "
+            f"заглушкою: --stub-title-ok \"чому\"")
 
 
 def _surname(entry: str) -> str:

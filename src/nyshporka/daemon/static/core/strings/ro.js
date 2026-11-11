@@ -1399,6 +1399,7 @@ export default {
     'give.st.noboxes': 'în Supriaha fără chenare',
     'give.st.partial': 'incompletă',
     'give.st.noframes': 'fără cadre',
+    'give.st.notitle': 'fără titlu',
     'give.st.multi': 'compusă',
     'give.go': 'Dă: {n}',
     'give.go.why': 'împachetare și încărcare într-un pas, în Lucrări',
