@@ -299,6 +299,96 @@ def _seg_candidates(seg_dir: Path | None, stem: str, orient: int) -> list[Path]:
     return sorted(seg_dir.glob(f"{stem}.o{orient}*.seg.json.gz"))
 
 
+# ── одна сторінка прогону ────────────────────────────────────────────────────
+@dataclass
+class CutContext:
+    """Усе, що нарізка знає про прогін до першої сторінки."""
+
+    run: str
+    ws: Workspace
+    meta: dict[str, Any]
+    keys: dict[str, str]
+    image_of: Any
+    py: Path | None = None
+    seg_dir: Path | None = None
+
+
+def cut_context(run: str, *, prefer_engine: bool = True, ws: Workspace | None = None,
+                image_of: Any = None, meta: dict[str, Any] | None = None) -> CutContext:
+    """Прогін, готовий до нарізки сторінок: мета, середовище рушіїв, кеш сегментації."""
+    w = ws if ws is not None else workspace()
+    if meta is None:
+        meta = run_meta(run, w)
+    if image_of is None:
+        from nyshporka.htr import view as V
+
+        image_of = V._page_image
+    py = _engine_python() if prefer_engine else None
+    seg_dir: Path | None = None
+    case_dir = str(meta.get("case_dir") or "")
+    if py is not None and case_dir:
+        from nyshporka.htr import run as R
+
+        # 🔴 Стемп теки кешу рахується від АБСОЛЮТНОГО шляху справи (так його
+        # рахував прогін), а мета прогону зберігає шлях відносно простору.
+        # Відносний дав би інший стемп — і кеш «не знаходився б» мовчки.
+        cpath = Path(case_dir)
+        if not cpath.is_absolute():
+            cpath = (w.root / cpath).resolve()
+        seg_dir = R.seg_cache_dir(cpath, w.derived)
+    return CutContext(run=run, ws=w, meta=meta, keys=page_keys(meta), image_of=image_of,
+                      py=py, seg_dir=seg_dir)
+
+
+def cut_page(ctx: CutContext, page: str, out: Path) -> PageCut:
+    """Кропи всіх рядків сторінки `page` (стем) у теку `out` — єдиний шлях нарізки.
+
+    Спершу кеш сегментації через гостя, інакше полігон. Ним ріже і
+    `make_set`, і набір із нотатника (`train.notes`): кроп звіреного рядка
+    мусить бути тим самим, що в наборах із прогону й на читанні.
+    """
+    run, w = ctx.run, ctx.ws
+    known = ctx.meta.get("pages") or {}
+    key = ctx.keys[page]
+    pc = PageCut(page=page, key=key,
+                 orient=int((known.get(key) or {}).get("orient") or 0))
+    geo = page_geometry(run, page, w)
+    if geo is None:
+        pc.error = "прогін не зберіг рамок рядків цієї сторінки"
+        return pc
+    try:
+        im = ctx.image_of(run, key)
+    except Exception as exc:
+        pc.error = f"зображення: {exc}"
+        return pc
+    if ctx.py is not None:
+        geo_f, _ = HL.resolve_geometry(run_dir(run, w), page)
+        src_path = _source_path(run, key, w)
+        cands = _seg_candidates(ctx.seg_dir, page, pc.orient)
+        if geo_f is not None and src_path is not None and cands:
+            got = _guest_cut(ctx.py, src_path, pc.orient, cands, geo_f, out,
+                             enhanced=str((known.get(key) or {}).get("enhanced") or ""))
+            if got.get("ok"):
+                pc.n = int(got.get("n") or 0)
+                pc.source = "seg_cache"
+                pc.size = [int(v) for v in (got.get("size") or geo.get("size") or [])]
+                pc.boxes = geo.get("boxes") or []
+                pc.polys = geo.get("polys") or []
+                pc.widths = [int(b[2]) - int(b[0]) if b else 0 for b in pc.boxes]
+                pc.src = str(src_path)
+                return pc
+            pc.note = str(got.get("why") or "")
+    try:
+        got_pc = cut_page_poly(im, geo, out)
+    except CutError as exc:
+        pc.error = str(exc)
+        return pc
+    got_pc.page, got_pc.orient, got_pc.key = page, pc.orient, key
+    got_pc.note = pc.note
+    got_pc.src = pc.src
+    return got_pc
+
+
 # ── набір із прогону ─────────────────────────────────────────────────────────
 @dataclass
 class CutReport:
@@ -331,7 +421,6 @@ def make_set(run: str, name: str, *, pages: list[str] | None = None, pick: int =
         pages = pick_pages(meta, pick)
         if not pages:
             raise CutError(f"у прогоні «{run}» нема сторінок із ≥{MIN_LINES} рядками")
-    known = meta.get("pages") or {}
     keys = page_keys(meta)
     pages = [Path(p).stem for p in pages]
     unknown = [p for p in pages if p not in keys]
@@ -369,73 +458,13 @@ def make_set(run: str, name: str, *, pages: list[str] | None = None, pick: int =
         cut_meta = {"version": CUT_META_VERSION, "source_run": run,
                     "case_dir": str(meta.get("case_dir") or ""), "pages": {}}
 
-    if image_of is None:
-        from nyshporka.htr import view as V
-
-        image_of = V._page_image
-    py = _engine_python() if prefer_engine else None
-    seg_dir: Path | None = None
-    case_dir = str(meta.get("case_dir") or "")
-    if py is not None and case_dir:
-        from nyshporka.htr import run as R
-
-        # 🔴 Стемп теки кешу рахується від АБСОЛЮТНОГО шляху справи (так його
-        # рахував прогін), а мета прогону зберігає шлях відносно простору.
-        # Відносний дав би інший стемп — і кеш «не знаходився б» мовчки.
-        cpath = Path(case_dir)
-        if not cpath.is_absolute():
-            cpath = (w.root / cpath).resolve()
-        seg_dir = R.seg_cache_dir(cpath, w.derived)
-
+    ctx = cut_context(run, prefer_engine=prefer_engine, ws=w, image_of=image_of, meta=meta)
+    py = ctx.py
     rep = CutReport(set=name, pages=[])
-    rdir = run_dir(run, w)
     for page in pages:
-        key = keys[page]
-        pc = PageCut(page=page, key=key,
-                     orient=int((known.get(key) or {}).get("orient") or 0))
-        geo = page_geometry(run, page, w)
-        if geo is None:
-            pc.error = "прогін не зберіг рамок рядків цієї сторінки"
-            rep.pages.append(pc)
-            continue
-        try:
-            im = image_of(run, key)
-        except Exception as exc:
-            pc.error = f"зображення: {exc}"
-            rep.pages.append(pc)
-            continue
-        out = crops_root / page
-        done = False
-        if py is not None:
-            geo_f, _ = HL.resolve_geometry(rdir, page)
-            src_path = _source_path(run, key, w)
-            cands = _seg_candidates(seg_dir, page, pc.orient)
-            if geo_f is not None and src_path is not None and cands:
-                got = _guest_cut(py, src_path, pc.orient, cands, geo_f, out,
-                                 enhanced=str((known.get(key) or {}).get("enhanced") or ""))
-                if got.get("ok"):
-                    pc.n = int(got.get("n") or 0)
-                    pc.source = "seg_cache"
-                    pc.size = [int(v) for v in (got.get("size") or geo.get("size") or [])]
-                    pc.boxes = geo.get("boxes") or []
-                    pc.polys = geo.get("polys") or []
-                    pc.widths = [int(b[2]) - int(b[0]) if b else 0 for b in pc.boxes]
-                    pc.src = str(src_path)
-                    done = True
-                else:
-                    pc.note = str(got.get("why") or "")
-        if not done:
-            try:
-                got_pc = cut_page_poly(im, geo, out)
-            except CutError as exc:
-                pc.error = str(exc)
-                rep.pages.append(pc)
-                continue
-            got_pc.page, got_pc.orient, got_pc.key = page, pc.orient, key
-            got_pc.note = pc.note
-            got_pc.src = pc.src
-            pc = got_pc
-        cut_meta["pages"][page] = pc.as_meta()
+        pc = cut_page(ctx, page, crops_root / page)
+        if not pc.error:
+            cut_meta["pages"][page] = pc.as_meta()
         rep.pages.append(pc)
 
     write_json(meta_f, cut_meta)
@@ -500,5 +529,5 @@ def _warn_on_segmentation(rep: CutReport) -> None:
             rep.warnings.append(f"{p.page}: кеш сегментації не підійшов ({p.note})")
 
 
-__all__ = ["CutError", "CutReport", "PageCut", "crop_by_poly", "cut_page_poly",
-           "make_set", "page_geometry", "page_text", "pick_pages", "run_meta"]
+__all__ = ["CutContext", "CutError", "CutReport", "PageCut", "crop_by_poly", "cut_context",
+           "cut_page", "cut_page_poly", "make_set", "page_geometry", "page_text", "pick_pages", "run_meta"]

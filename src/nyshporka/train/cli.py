@@ -693,7 +693,8 @@ def from_notes_cmd(
         return
     d = env.data
     console.print(f"набір [bold]{d['set']}[/bold]: звірених рядків {d['readings']}, "
-                  f"з рамкою {d['with_box']}, вирізано {d['cut']}, нових міток {d['marked']}")
+                  f"з рамкою {d['with_box']}, вирізано {d['cut']}, нових міток {d['marked']}, "
+                  f"без полігона {len(d['no_poly'])}, непевних (unsure) {len(d['low'])}")
     _notes(env)
 
 

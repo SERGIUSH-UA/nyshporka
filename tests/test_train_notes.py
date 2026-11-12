@@ -2,8 +2,10 @@
 
 Що бережеться:
 
-  · кроп — рівно той рядок, який звірили: рамка рушія, перерахована на кадр
-    іншого розміру, без сусідів і полів;
+  · кроп — рівно той рядок, який звірили, і той самий, що дає `train cut`:
+    полігон рядка в координатах прогону, без сусідів і полів; рядок без
+    полігона в набір не йде;
+  · читання з певністю `low` — мітка `unsure`, у корпус без прапорця не йде;
   · набір нотатника не змішується з `gt`: корпус бере його джерелом `notes`;
   · повтор не дублює міток;
   · у пул кроп їде сірим JPEG у межах стелі, лише для рядків, яких пул ще не має;
@@ -23,6 +25,9 @@ CASE = "DAHMO/315/8433"
 LINES = ["Кто совершалъ", "Священникъ Петръ", "Іоаннъ Ивановъ Коваль-", "пономъ Гри"]
 BOXES = [[400, 970, 760, 1050], [340, 1190, 810, 1260], [345, 1380, 1900, 1450],
          [345, 1500, 800, 1560]]
+#: Третій рядок — скошений: прямокутник рамки захопив би кути сусідів.
+POLYS = [[[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]] for b in BOXES]
+POLYS[2] = [[345, 1380], [1900, 1400], [1900, 1450], [345, 1430]]
 
 
 @pytest.fixture
@@ -51,8 +56,8 @@ def space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     d = tmp_path / "reports" / "htr" / "проба"
     d.mkdir(parents=True)
     (d / "0004.txt").write_text("\n".join(LINES) + "\n", encoding="utf-8")
-    (d / "0004.lines.json").write_text(json.dumps({"size": [3000, 4500], "boxes": BOXES}),
-                                       encoding="utf-8")
+    (d / "0004.lines.json").write_text(json.dumps({"size": [3000, 4500], "boxes": BOXES,
+                                                   "polys": POLYS}), encoding="utf-8")
     (d / "_htr_meta.json").write_text(json.dumps({
         "model": "pysar_cyr_v17.pt", "script": "cyrillic", "case_dir": str(case_dir),
         "case_key": CASE, "pages": {"0004.jpg": {"lines": len(LINES), "orient": 0}},
@@ -92,7 +97,9 @@ def test_the_pair_is_exactly_the_verified_line(space: Path) -> None:
     crop = space / "data" / "train" / "crops" / got["set"] / "0004" / "line_002.png"
     with Image.open(crop) as im:
         x0, y0, x1, y1 = BOXES[2]
-        assert im.size == ((x1 - x0) * 2, (y1 - y0) * 2), "рамка не перерахована на кадр"
+        # Розмір — у координатах прогону, як у кропів `train cut`, а не кадру
+        # на диску: модель бачить рядок саме таким.
+        assert im.size == (x1 - x0, y1 - y0), "кроп не в координатах прогону"
         assert im.convert("L").getextrema()[1] < 60, "у кроп потрапило поле чи сусід"
     from nyshporka.train import sets as S
 
@@ -260,3 +267,131 @@ def test_a_holdout_case_never_feeds_the_notes_source(space: Path) -> None:
     reg.save(S.SetSpec(name="ho", case="ДАХмО 315-1-8433", role="holdout"))
     it = SRC.read_notes(reg)
     assert it.rows == [] and any("holdout" in n for n in it.notes)
+
+
+def _strip_polys(space: Path) -> None:
+    f = space / "reports" / "htr" / "проба" / "0004.lines.json"
+    f.write_text(json.dumps({"size": [3000, 4500], "boxes": BOXES}), encoding="utf-8")
+
+
+def test_the_crop_is_the_one_train_cut_makes(space: Path) -> None:
+    """Той самий рядок у наборі з нотатника й у нарізці прогону — той самий кроп."""
+    from PIL import Image
+
+    from nyshporka.train import cut as C
+    from nyshporka.train import sets as S
+
+    _read()
+    got = _run("train", "from-notes", CASE)
+    C.make_set("проба", "ref", pages=["0004"])
+    crops = space / "data" / "train" / "crops"
+    mine = crops / got["set"] / "0004" / "line_002.png"
+    assert mine.read_bytes() == (crops / "ref" / "0004" / "line_002.png").read_bytes()
+    with Image.open(mine) as im:
+        # Кут рамки поза полігоном — замаскований: у прямокутнику тут був би
+        # білий папір (або сусідній рядок).
+        assert im.convert("L").getpixel((im.width - 1, 0)) == 0
+    assert sorted(f.name for f in mine.parent.iterdir()) == ["line_002.png"], \
+        "у набір пішли не лише звірені рядки сторінки"
+    reg = S.registry()
+    spec = reg.load(got["set"])
+    meta = json.loads((reg.crops_of(spec) / S.CUT_META_FILE).read_text(encoding="utf-8"))
+    assert meta["pages"]["0004"]["crop_source"] == "poly"
+    assert got["no_poly"] == [] and reg.crop_pages(spec) == {"0004": 1}
+
+
+def test_a_line_with_a_box_but_no_polygon_stays_out(space: Path) -> None:
+    from nyshporka.train import sets as S
+
+    uid = _read()
+    _strip_polys(space)
+    got = _run("train", "from-notes", CASE)
+    assert (got["with_box"], got["cut"], got["marked"]) == (1, 0, 0)
+    assert [r["uid"] for r in got["no_poly"]] == [uid]
+    assert not (space / "data" / "train" / "crops" / got["set"] / "0004").exists()
+    assert S.registry().marks(got["set"]) == {}
+
+
+def test_a_rerun_line_under_the_same_number_stays_out(space: Path) -> None:
+    """Прогін перечитано: під номером 3 інша рамка — кроп ліг би під чужий текст."""
+    uid = _read()
+    f = space / "reports" / "htr" / "проба" / "0004.lines.json"
+    boxes = [*BOXES[:2], [345, 1300, 1900, 1370], BOXES[3]]
+    f.write_text(json.dumps({"size": [3000, 4500], "boxes": boxes, "polys": POLYS}),
+                 encoding="utf-8")
+    got = _run("train", "from-notes", CASE)
+    assert got["cut"] == 0 and [r["uid"] for r in got["no_poly"]] == [uid]
+
+
+def test_an_old_rectangle_crop_leaves_the_set_when_no_polygon(space: Path) -> None:
+    from nyshporka.train import sets as S
+
+    _read()
+    first = _run("train", "from-notes", CASE)
+    reg = S.registry()
+    meta_f = reg.crops_of(reg.load(first["set"])) / S.CUT_META_FILE
+    meta = json.loads(meta_f.read_text(encoding="utf-8"))
+    meta["pages"]["0004"]["crop_source"] = "notebook"      # так писала стара нарізка
+    meta_f.write_text(json.dumps(meta), encoding="utf-8")
+    _strip_polys(space)
+    again = _run("train", "from-notes", CASE)
+    assert len(again["no_poly"]) == 1 and again["withdrawn"] == 1
+    assert reg.marks(first["set"])[("0004", 2)]["status"] == "skip"
+
+
+def test_a_low_confidence_reading_is_not_an_ok_mark(space: Path) -> None:
+    from nyshporka.train import sets as S
+    from nyshporka.train import sources as SRC
+
+    uid = _read("Іоаннъ Ивановъ Ковальскій", "--confidence", "low", "--uncertain", "Ковальскій")
+    got = _run("train", "from-notes", CASE)
+    assert got["low"] == [uid] and got["cut"] == 1
+    reg = S.registry()
+    assert reg.marks(got["set"])[("0004", 2)]["status"] == "unsure"
+    assert reg.stats(got["set"])["by_status"] == {"ok": 0, "skip": 0, "unsure": 1}
+    assert SRC.read_notes(reg).rows == [], "здогад не мусить іти в корпус ручною міткою"
+    assert len(SRC.read_notes(reg, include_unsure=True).rows) == 1
+    assert _run("train", "from-notes", CASE)["marked"] == 0, "повтор роздув мітки"
+
+
+def test_a_medium_confidence_reading_stays_ok(space: Path) -> None:
+    from nyshporka.train import sets as S
+
+    _read("Іоаннъ Ивановъ Ковальскій", "--confidence", "medium")
+    got = _run("train", "from-notes", CASE)
+    assert got["low"] == []
+    assert S.registry().marks(got["set"])[("0004", 2)]["status"] == "ok"
+
+
+def test_a_low_confidence_pool_row_is_not_an_ok_mark(space: Path) -> None:
+    from nyshporka.train import notes as N
+    from nyshporka.train import sets as S
+
+    rows = [{**_row(5, "f" * 32), "confidence": "low"},
+            {**_row(6, "e" * 32), "confidence": "medium"}]
+    got = N.from_pool(rows, lambda uid: _jpeg())
+    assert got["low"] == ["f" * 32]
+    marks = S.registry().marks("pool-dazho-1-73-492")
+    assert marks[("p0531", 4)]["status"] == "unsure" and marks[("p0531", 5)]["status"] == "ok"
+
+
+def test_the_last_mark_of_a_line_wins_for_every_reader(space: Path) -> None:
+    """Ранній `ok` не мусить пережити пізніший `skip` — і навпаки."""
+    from nyshporka.train import corpus as CORP
+    from nyshporka.train import sets as S
+    from nyshporka.train import sources as SRC
+    from nyshporka.train import store as STORE
+
+    _read()
+    got = _run("train", "from-notes", CASE)
+    reg, name = S.registry(), got["set"]
+    reg.append_mark(name, "0004", 2, "Іоаннъ Ивановъ Ковальскій", "skip", by="notebook")
+    assert SRC.read_notes(reg).rows == []
+    assert SRC.read_notes(reg, include_unsure=True).rows == []
+    assert CORP._sets_summary(reg)[1][name]["n_ok"] == 0
+    assert reg.stats(name)["by_status"] == {"ok": 0, "skip": 1, "unsure": 0}
+    lab = STORE.Store(name)
+    assert lab.stats()["cer_lines"] == 0 and lab.page_states()[0]["n_ok"] == 0
+    reg.append_mark(name, "0004", 2, "Іоаннъ Ивановъ Ковальскій", "ok", by="notebook")
+    assert len(SRC.read_notes(reg).rows) == 1
+    assert CORP._sets_summary(reg)[1][name]["n_ok"] == 1

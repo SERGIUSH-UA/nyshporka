@@ -939,8 +939,10 @@ def train_from_notes(a: FromNotesArgs) -> Envelope:
     """Свої записи `reading` справи → набір `notes-<справа>` (кроп ↔ звірене).
 
     🔴 Окреме джерело корпусу (`notes`), а не `gt`: рядки відібрані там, де
-    модель помилилась. Кроп ріжеться з власного кадру за рамкою рушія; кадру
-    немає — запис названо у відповіді, а не загублено.
+    модель помилилась. Кроп ріжеться з власного кадру тією самою нарізкою, що
+    `train cut` (кеш сегментації або полігон рядка); кадру чи полігона немає —
+    запис названо у відповіді (`no_frame`, `no_poly`), а не загублено. Читання
+    з певністю `low` лягає міткою `unsure` (`low`).
     """
     from nyshporka.train import notes as N
 
@@ -958,6 +960,13 @@ def train_from_notes(a: FromNotesArgs) -> Envelope:
     if got["no_frame"]:
         env.warn("no_frame", f"{len(got['no_frame'])} записів без кадру на цій машині — "
                              "у набір не пішли")
+    if got["no_poly"]:
+        env.warn("no_poly", f"{len(got['no_poly'])} записів без полігона рядка в прогоні "
+                            "(лише рамка або геометрія розійшлась) — у набір не пішли: "
+                            "прямокутник захопив би сусідні рядки")
+    if got["low"]:
+        env.warn("low", f"{len(got['low'])} читань із певністю low лягли міткою unsure — "
+                        "у корпус ідуть лише з --include-unsure")
     return env
 
 
@@ -1013,4 +1022,7 @@ def train_from_pool(a: FromPoolArgs) -> Envelope:
     if rep["failed"]:
         env.warn("failed", f"{len(rep['failed'])} записів не взято — причини в `failed`; "
                            "курсор став перед першим із них, тож повтор їх візьме")
+    if rep["low"]:
+        env.warn("low", f"{len(rep['low'])} читань із певністю low лягли міткою unsure — "
+                        "у корпус ідуть лише з --include-unsure")
     return env

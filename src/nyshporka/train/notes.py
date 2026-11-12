@@ -8,8 +8,9 @@
 
 Два входи:
 
-* `from_notes` — свої записи справи; кроп ріжеться з власного кадру за рамкою
-  рушія (`search.textops.line_image`);
+* `from_notes` — свої записи справи; кроп ріже та сама нарізка, що й
+  `train cut` (`cut.cut_page`: кеш сегментації або полігон рядка), а не
+  прямокутна рамка: у рамку щільного письма влазять сусідні рядки;
 * `from_pool` — записи, поширені іншими в Супрягу, разом із кропом, який
   автор прислав сам. Лише для власника проєкту: поширити звірений рядок =
   погодитись, що власник візьме його в трен; іншим пул цих кропів не віддає.
@@ -72,13 +73,52 @@ def _meta_page(reg: S.Registry, spec: S.SetSpec, page: str, info: dict[str, Any]
 
 
 def _mark(reg: S.Registry, name: str, page: str, idx: int, text: str, by: str,
-          have: dict[tuple[str, int], dict[str, Any]]) -> bool:
+          have: dict[tuple[str, int], dict[str, Any]], status: str = "ok") -> bool:
     """Мітка лише нова або змінена: повторний прохід журналу не роздуває."""
     old = have.get((page, idx))
-    if old is not None and str(old.get("text") or "") == text and old.get("status") == "ok":
+    if old is not None and str(old.get("text") or "") == text and old.get("status") == status:
         return False
-    reg.append_mark(name, page, idx, text, "ok", by=by)
+    reg.append_mark(name, page, idx, text, status, by=by)
     return True
+
+
+def mark_status(confidence: Any) -> str:
+    """Статус мітки за певністю читання: `low` — `unsure`, решта — `ok`.
+
+    🔴 `ok` збирачі корпусу беруть як ручну мітку з повною вагою, а `low` —
+    це здогад, який людина сама так назвала. `unsure` лишає рядок у наборі
+    (його видно в `train stats`, його можна довірити оком), але в корпус він
+    іде лише з явним `--include-unsure`.
+    """
+    return "unsure" if str(confidence or "") == "low" else "ok"
+
+
+#: Рамка запису проти рамки рядка в геометрії прогону — допуск на округлення.
+BOX_TOL = 2
+
+
+def _same_box(a: Any, b: Any) -> bool:
+    try:
+        return all(abs(int(x) - int(y)) <= BOX_TOL for x, y in zip(a[:4], b[:4], strict=True))
+    except (TypeError, ValueError):
+        return False
+
+
+def _line_shape(pc: Any, idx: int, bbox: Any) -> str:
+    """Чому рядок `idx` нарізаної сторінки не годиться в набір; порожньо — годиться."""
+    box = pc.boxes[idx] if 0 <= idx < len(pc.boxes) else None
+    if not box:
+        return "рядка з таким номером у геометрії прогону немає"
+    if not _same_box(box, bbox):
+        # Прогін перечитано після звірки: під тим самим номером тепер інший
+        # рядок, і кроп ліг би під чужий текст.
+        return "рамка запису не збігається з рамкою рядка в прогоні"
+    if pc.source == "seg_cache":
+        return ""                           # гість різав полігоном сегментації
+    poly = pc.polys[idx] if idx < len(pc.polys) else None
+    if not poly or len(poly) < 3:
+        return "у прогоні лише рамка рядка, без полігона"
+    return ""
 
 
 #: Звірене слово коротше за це — не «складне»: «Иван», «сынъ», «его» рушій
@@ -120,12 +160,22 @@ def from_notes(case: str, *, ws: Workspace | None = None) -> dict[str, Any]:
     Знаменник у відповіді: скільки читань у нотатнику, скільки з рамкою,
     скільки вирізано, у скількох кадру на цій машині немає — щоб «набір на 3
     рядки» не читався як «у нотатнику 3 рядки».
+
+    🔴 Кроп — полігоном рядка, тим самим шляхом, що `train cut`. Доти різався
+    прямокутник рамки: у 7 з 21 кропа було видно сусідні рядки, в одному —
+    три рядки цілком під міткою середнього (перевірка 12.11.2026). Рядок, для
+    якого в прогоні лишилась тільки рамка, у набір не йде (`no_poly`), а не
+    ріжеться прямокутником мовчки. Читання з певністю `low` лягає міткою
+    `unsure` (`low` у відповіді) — див. `mark_status`.
     """
+    import shutil
+    import tempfile
+
     from nyshporka import htr_store as HS
     from nyshporka.core import casekey
     from nyshporka.pagestore import notebook as NB
     from nyshporka.pagestore import store as PS
-    from nyshporka.search import textops as T
+    from nyshporka.train import cut as C
 
     ref = PS.resolve_case(case)
     cf = PS.load_case(ref)
@@ -149,34 +199,85 @@ def from_notes(case: str, *, ws: Workspace | None = None) -> dict[str, Any]:
                            "readings": len(reads), "with_box": len(boxed), "cut": 0,
                            "marked": 0, "no_box": [n.uid for n in reads if n not in boxed],
                            "word_easy": [n.uid for n in easy],
-                           "no_frame": []}
+                           "no_frame": [], "no_poly": [], "low": []}
     if not boxed and not reg.exists(name):
         return out
     spec = _spec(reg, name, title=f"Нотатник: {ref.shifra or ref.key}", case=ref.key,
                  script=script, origin="notebook")
     reg.save(spec)
     have = reg.marks(name)
-    live_keys: set[tuple[str, int]] = set()
+    crops_root = reg.crops_of(spec)
+    crops_root.mkdir(parents=True, exist_ok=True)
+    was = read_json(crops_root / S.CUT_META_FILE, default={})
+    # Сторінки, чиї кропи лишились від прямокутної нарізки: без свіжого кропа
+    # їхня мітка не лишається чинною.
+    rect = {pg for pg, info in ((was.get("pages") or {}) if isinstance(was, dict) else {}).items()
+            if (info or {}).get("crop_source") == "notebook"}
+    by_page: dict[tuple[str, str], list[Any]] = {}
     for n in boxed:
-        assert n.line is not None and n.line.bbox is not None
-        page = Path(n.page).stem
-        idx = n.line.line_no - 1
-        live_keys.add((page, idx))
-        try:
-            piece = T.line_image(n.line.run, n.page, n.line.bbox)
-        except T.FrameError as exc:
-            out["no_frame"].append({"uid": n.uid, "page": n.page, "why": str(exc)})
-            continue
-        d = reg.crops_of(spec) / page
-        d.mkdir(parents=True, exist_ok=True)
-        piece.save(d / f"line_{idx:03d}.png")
-        out["cut"] += 1
-        _meta_page(reg, spec, page, {"crop_source": "notebook", "run": n.line.run})
-        if _mark(reg, name, page, idx, n.text, "notebook", have):
-            out["marked"] += 1
+        assert n.line is not None
+        by_page.setdefault((n.line.run, Path(n.page).stem), []).append(n)
+    live_keys: set[tuple[str, int]] = set()
+    ctxs: dict[str, Any] = {}
+
+    def no_frame(items: list[Any], page: str, why: str) -> None:
+        for n in items:
+            out["no_frame"].append({"uid": n.uid, "page": n.page, "why": why})
+            # Кадру немає лише на цій машині: вирізаний раніше кроп і його
+            # мітка лишаються — крім прямокутних.
+            if page not in rect:
+                live_keys.add((page, n.line.line_no - 1))
+
+    # Тека з `_` на початку: лічба сторінок набору її не бачить.
+    with tempfile.TemporaryDirectory(dir=crops_root, prefix="_cut-") as tmp:
+        for k, ((run, page), items) in enumerate(sorted(by_page.items())):
+            try:
+                if run not in ctxs:
+                    ctxs[run] = C.cut_context(run, ws=ws)
+                ctx = ctxs[run]
+            except C.CutError as exc:
+                no_frame(items, page, str(exc))
+                continue
+            if page not in ctx.keys:
+                no_frame(items, page, f"прогін «{run}» не має сторінки {page}")
+                continue
+            if C.page_geometry(run, page, ctx.ws) is None:
+                out["no_poly"] += [{"uid": n.uid, "page": n.page,
+                                    "why": "прогін не зберіг геометрії рядків цієї сторінки"}
+                                   for n in items]
+                continue
+            # Сторінка ріжеться цілою, як у `train cut`, а в набір ідуть лише
+            # звірені рядки: так кроп збігається з кропом нарізки побайтно.
+            cut_dir = Path(tmp) / f"{k:04d}"
+            pc = C.cut_page(ctx, page, cut_dir)
+            if pc.error:
+                no_frame(items, page, pc.error)
+                continue
+            for n in items:
+                idx = n.line.line_no - 1
+                why = _line_shape(pc, idx, n.line.bbox)
+                if why:
+                    out["no_poly"].append({"uid": n.uid, "page": n.page, "why": why})
+                    continue
+                piece = cut_dir / f"line_{idx:03d}.png"
+                if not piece.is_file():
+                    no_frame([n], page, "нарізка не дала кропа цього рядка")
+                    continue
+                d = crops_root / page
+                d.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(piece, d / f"line_{idx:03d}.png")
+                live_keys.add((page, idx))
+                out["cut"] += 1
+                _meta_page(reg, spec, page, {"crop_source": pc.source, "run": run})
+                status = mark_status(n.confidence)
+                if status != "ok":
+                    out["low"].append(n.uid)
+                if _mark(reg, name, page, idx, n.text, "notebook", have, status):
+                    out["marked"] += 1
     # 🔴 Відкликане чи перенесене читання мусить вийти з набору: інакше хибна
     # мітка, яку людина вже відкликала, лишалась у корпусі (перевірка 0.26.0).
-    # Мітки лише дописуються, тож вихід — це `skip`, а не видалення.
+    # Мітки лише дописуються, тож вихід — це `skip`, а не видалення. Так само
+    # виходить рядок без полігона, якщо його колись вирізали прямокутником.
     out["withdrawn"] = _withdraw(reg, name, have, live_keys, by="notebook")
     return out
 
@@ -218,7 +319,8 @@ def from_pool(rows: list[dict[str, Any]], fetch: Any, *, dead: list[str] | None 
     """Набори `pool-<книга>` із записів пулу з кропами.
 
     `rows` — записи адмінського переліку пулу (cid — номер кропа, uid, book,
-    shifra, key, page, line, text, by); `fetch(uid) -> bytes` — JPEG кропа;
+    shifra, key, page, line, text, by, confidence); `fetch(uid) -> bytes` — JPEG
+    кропа; запис із `confidence: low` лягає міткою `unsure` (`mark_status`);
     `dead` — uid записів, що в пулі вже не чинні (відкликані, сховані,
     замінені): їхні мітки виходять із наборів як `skip`.
 
@@ -233,7 +335,7 @@ def from_pool(rows: list[dict[str, Any]], fetch: Any, *, dead: list[str] | None 
 
     reg = S.registry(ws)
     out: dict[str, Any] = {"rows": len(rows), "cut": 0, "marked": 0, "sets": {},
-                           "failed": [], "withdrawn": 0}
+                           "failed": [], "withdrawn": 0, "low": []}
     by_book: dict[str, list[dict[str, Any]]] = {}
     for r in rows:
         by_book.setdefault(str(r.get("book") or "unknown"), []).append(r)
@@ -281,8 +383,11 @@ def from_pool(rows: list[dict[str, Any]], fetch: Any, *, dead: list[str] | None 
             piece.save(d / f"line_{idx:03d}.png")
             out["cut"] += 1
             uids[str(r["uid"])] = [page, idx]
+            status = mark_status(r.get("confidence"))
+            if status != "ok":
+                out["low"].append(str(r["uid"]))
             if _mark(reg, name, page, idx, str(r.get("text") or ""),
-                     f"pool:{r.get('by') or '?'}", have):
+                     f"pool:{r.get('by') or '?'}", have, status):
                 out["marked"] += 1
                 n_new += 1
             done.append(cid)
