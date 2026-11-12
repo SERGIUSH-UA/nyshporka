@@ -97,6 +97,23 @@ def test_archival_fold_joins_historical_letters():
     assert n("Сікорскій") == n("Сикорский")
 
 
+def test_normalize_archival_folds_skoropys_letters():
+    """Дипломатичне читання XVII–XVIII ст. сходиться з сучасним написанням."""
+    from nyshporka.utils.translit import normalize_archival as n
+
+    assert n("Ѯенія") == n("Ксенія")
+    assert n("Алеѯандръ") == n("Александр")
+    assert n("Маѯимъ") == n("Максим")
+    assert n("Авѯентій") == n("Авксентий")
+    assert n("Рꙋденко") == n("Руденко")
+    assert n("Ѱалтиръ") == n("Псалтир")
+    assert n("ѿ жены") == n("от жены")
+    assert n("Ꙗковъ") == n("Яков")
+    assert n("кнѧзь") == n("князь")
+    # верхній регістр іде через lower(): велика літера не лишається поза фолдом
+    assert n("ꙊСТИМЪ") == n("устим")
+
+
 def test_slugify_is_ascii_lowercase_and_stable():
     """Slug має бути передбачуваним, а не гарним: за ним лежать імена файлів."""
     from nyshporka.utils.text import slugify
