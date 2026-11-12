@@ -572,6 +572,32 @@ def test_adding_an_archive_survives_a_comma_in_its_name(tmp_path) -> None:
     assert parse_shifra("ДАХмО 315-1-8433").repo == "DAHMO"
 
 
+def test_an_archive_label_with_a_hyphen_is_parsed_whole(tmp_path) -> None:
+    """🔴 Скорочення з дефісом («ANK-NS») — одне слово, а не «NS» з хвостом.
+
+    Розбір шукав шифру з середини слова й відмовляв «архів «NS» невідомий».
+    Відмову ковтав `share.publish._case_block`, тож маніфест їхав у Супрягу
+    без архіву й номерів, і та відповідала 400 «немає ні шифри, ні архіву з
+    номерами» (відгук 12.11.2026, чотири справи Нового Сонча).
+    """
+    from nyshporka.archives import pack as P
+    from nyshporka.cases.register import parse_shifra
+    from nyshporka.core import workspace as W
+    from nyshporka.share.publish import _case_block
+
+    W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
+    P.add_repository("ANKNS", "ANK-NS", "Archiwum Narodowe w Krakowie, Oddział w Nowym Sączu", "PL")
+
+    sh = parse_shifra("ANK-NS 587-1-7")
+    assert (sh.repo, sh.fond, sh.opys, sh.spr) == ("ANKNS", "587", "1", "7")
+    blok = _case_block({"key": "ANKNS/587/1/7", "shifra": "ANK-NS 587-1-7"}, None)
+    assert (blok["repo"], blok["fond"], blok["opys"], blok["spr"]) == ("ANKNS", "587", "1", "7")
+    # Дефіс — лише між літерами: префікс радянського фонду архівом не стає.
+    assert parse_shifra("ДАВіО Р-6129-24-5").repo == "DAVIO"
+    with pytest.raises(Exception, match="архів"):
+        parse_shifra("Р-6129-24-5")
+
+
 @pytest.mark.parametrize("name", [
     'Archiwum: "Cyfrowe"',       # двокрапка й лапки — обидві ламають flow-мапу
     "Архів #1, {особливий}",     # решітка й дужки
