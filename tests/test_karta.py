@@ -660,3 +660,28 @@ def test_selo_v_kartsi_i_manifesti() -> None:
         K.normalize(selo={"qid": "3"})
     case = K.apply({"title": "x"}, pole)
     assert case["karta"] == {"qid": "Q3", "nazva": "Михайлівка", "dzherelo": "людина"}
+
+
+def test_slovo_bahatoslivnoi_nazvy_latynkoiu_ne_tochka() -> None:
+    """🔴 «Muszyna» (Польща) — не «Мушина Гребля» Полтавщини (відгук 12.11.2026).
+
+    Колонка `translit` зшиває латинські форми пробілом, і рушій індексував її
+    по слову: назва з двох слів знаходилась за кожним окремо. Архів поза
+    Україною областю не звужує, тож єдиний збіг на всю країну виходив
+    «однозначно, висока». Латинська форма — лише ціла назва.
+    """
+    from nyshporka.geog.gazetteer import norm_name
+
+    d = heo.Dovidnyk()
+    d.dodaty({"qid": "Q4309078", "name_uk": "Мушина Гребля", "name_ru": "Мушина Гребля",
+              "name_pl": "", "name_en": "Mushyna Hreblia", "kind": "село",
+              "admin": "Полтавський район", "top": "Полтавська область", "country": "UA",
+              "lat": 49.8, "lng": 34.9, "norm_uk": norm_name("Мушина Гребля"),
+              "norm_ru": norm_name("Мушина Гребля"), "norm_alias": "",
+              "translit": "musina grebla musina hreblea mushina greblia"})
+    for place in ("Muszyna", "Muszyna, powiat nowosądecki"):
+        assert heo.pryviazaty(d, repo="ANKNS", title="Księga urodzeń, Muszyna 1882",
+                              place=place, places=[place]) == []
+    # Ціла назва латинкою знаходиться, як і раніше.
+    assert heo._lat("Mushyna Hreblia") in d.trl and heo._lat("Мушина Гребля") in d.trl
+    assert heo._lat("Muszyna") not in d.trl and heo._lat("Hreblia") not in d.trl

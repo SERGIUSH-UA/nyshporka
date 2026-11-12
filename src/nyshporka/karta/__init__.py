@@ -52,7 +52,7 @@ log = logging.getLogger("nyshporka.karta")
 
 #: Номер правил прив'язки. Сервер додає його до відбитка книги (`app.heo.vidbytok`):
 #: зміна правил тут перераховує весь пул без окремого кроку на сервері.
-PRAVYLA = 14
+PRAVYLA = 15
 
 POD = ["вінниц", "хмельниц", "одес"]
 VOL = ["волин", "рівнен", "житомир", "тернопіл", "хмельниц"]
@@ -134,6 +134,8 @@ KVALIFIKATORY = {
     "великая", "малая", "малый", "старая", "старый", "новая", "новый", "старые",
     "новые", "верхняя", "нижняя", "veche", "noua", "mare", "mic", "vechi", "noi",
 }
+#: Друге слово назви міста — прикметник краю: «Подільський», «Волынский».
+PRYKMETNYK = ("ський", "цький", "ский", "цкий")
 #: Відмінки й старі закінчення: «Полонномъ», «Каплинецъ», «Килій», «Луцкѣ».
 KINTSI = [("ого", "е"), ("ом", "е"), ("ом", "ое"), ("ой", "а"), ("ки", "ка"),
           ("ец", "ци"), ("ок", "ки"), ("ий", "ия"), ("ий", "ія"), ("ій", "ія"),
@@ -330,6 +332,8 @@ class Dovidnyk:
         d["adm"] = (d["admin"] or "").lower().translate(STARE)
         kliuchi = {d["norm_uk"], d["norm_ru"], *(d["norm_alias"] or "").split(" | ")} - {None, ""}
         d["kl"] = {k.translate(STARE) for k in kliuchi}
+        korotki: set[str] = set()
+        mistse_osnovy: set[int] = set()
         for k in kliuchi:
             self.idx[k][d["qid"]] = d
             self.idx[k.translate(STARE)][d["qid"]] = d
@@ -338,8 +342,33 @@ class Dovidnyk:
             if len(slova) == 2 and (slova[0] in KVALIFIKATORY) != (slova[1] in KVALIFIKATORY):
                 osnova = slova[1] if slova[0] in KVALIFIKATORY else slova[0]
                 self.kval[osnova.translate(STARE)][d["qid"]] = d
-        for t in (d["translit"] or "").split():
-            self.trl[_lat(t)][d["qid"]] = d
+                korotki.add(osnova)
+                mistse_osnovy.add(slova.index(osnova))
+            elif len(slova) == 2 and d["kind"] in MISTA and slova[1].endswith(PRYKMETNYK):
+                korotki.add(slova[0])
+                mistse_osnovy.add(0)
+        # 🔴 Латинські форми — ЦІЛИМИ назвами, не словами колонки `translit`.
+        # Колонка зшиває форми пробілом, і назва з двох слів у ній не
+        # відрізняється від двох назв: «Мушина Гребля» Полтавщини знаходилась
+        # за самим «Muszyna», а закордонний архів областю вибір не звужує, тож
+        # польське містечко ставало «однозначно, висока» (відгук 12.11.2026).
+        # Форми ключів уже лягли вище; тут — польська й англійська назви.
+        # Коротка форма лишається лише там, де її справді пишуть: основа назви
+        # з уточненням («Motowidłówka» — Велика Мотовилівка) і місто з
+        # прикметником краю («Kamieniec» — Кам'янець-Подільський).
+        d["latynkoiu"] = {_lat(k) for k in kliuchi}
+        for k in korotki:
+            self.trl[_lat(k)][d["qid"]] = d
+        for syra in (d.get("name_pl"), d.get("name_en")):
+            nazva = _norm(_bez_utochnennia(str(syra or "")).split(",")[0])
+            forma = _lat(nazva)
+            if forma:
+                d["latynkoiu"].add(forma)
+                self.trl[forma][d["qid"]] = d
+                # та сама основа в польській формі: «Mohylów» з «Mohylów Podolski»
+                slova = nazva.replace("-", " ").split()
+                if len(slova) == 2 and len(mistse_osnovy) == 1:
+                    self.trl[_lat(slova[next(iter(mistse_osnovy))])][d["qid"]] = d
         self.vsi.append(d)
         if d["kind"] in MISTA:
             self.mista.append(d)
@@ -445,7 +474,7 @@ def _ruchnyi_zapys(s: dict[str, Any]) -> dict[str, Any]:
     return {"qid": f"r:{s['id']}", "name_uk": str(s["nazva"]), "kind": str(s["stan"]),
             "top": oblast, "admin": admin, "country": "MD" if oblast == "Молдова" else "UA",
             "lat": lat, "lng": lng, "norm_uk": _norm(str(s["nazva"])), "norm_ru": "",
-            "norm_alias": " | ".join(_norm(x) for x in inshi), "translit": ""}
+            "norm_alias": " | ".join(_norm(x) for x in inshi)}
 
 
 #: Зібрані довідники: (тека каталогу, відбиток ручних записів) → довідник.
@@ -477,7 +506,7 @@ def dovidnyk(ruchni: list[dict[str, Any]] | None = None, *,
     try:
         for _pid, con in paky:
             for r in con.execute("SELECT qid, name_uk, kind, top, admin, country, lat, lng, "
-                                 "norm_uk, norm_ru, norm_alias, translit FROM modern "
+                                 "norm_uk, norm_ru, norm_alias, name_pl, name_en FROM modern "
                                  "WHERE lat IS NOT NULL"):
                 dov.dodaty(dict(r))
     finally:
@@ -802,8 +831,7 @@ def _kontekst(dov: Dovidnyk, repo: str, title: str, place: str, places: list[str
     if fs:
         shukane = _lat(fs.group(2))
         for m in dov.mista:
-            formy = {_lat(k) for k in m["kl"]} | {_lat(t) for t in (m["translit"] or "").split()}
-            if shukane in formy:
+            if shukane in m["latynkoiu"] or shukane in {_lat(k) for k in m["kl"]}:
                 povit.append(sorted(m["kl"])[0][:6])
     obl_povitu = [o for p in povit for h in dov.povit_hub.get(p, ()) for o in HUBERNIIA[h]]
     zvuzhennia = obl_povitu or obl
