@@ -15,6 +15,14 @@ from nyshporka.train import sets as S
 from nyshporka.train import state as ST
 
 
+def test_names_keep_skoropys_letters() -> None:
+    """Назва з ѯ, ѵ, ѡ, ꙋ — одне слово, а велика Ѯ відкриває назву."""
+    assert M.names_of("сынъ Алеѯѣй лѣтъ 5") == ["Алеѯѣй"]
+    assert M.names_of("жена его Ѯенія Ивановна") == ["Ѯенія", "Ивановна"]
+    assert M.names_of("козакъ Маѯименко") == ["Маѯименко"]
+    assert M.names_of("Кѵпріанъ Рꙋденко") == ["Кѵпріанъ", "Рꙋденко"]
+
+
 def test_names_and_scores() -> None:
     assert M.names_of("Приходскій Священникъ Ѳедоръ Осановскій, Село Ходъ", ["Осановск"]) == ["Ѳедоръ"]
     assert M.name_score("Вишневскій", "иванъ вишневскій сынъ") >= 90
