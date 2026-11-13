@@ -312,7 +312,7 @@ def test_rules_fingerprint_is_versioned_and_can_be_accepted(space: Path) -> None
     from nyshporka.cli import app
     from nyshporka.search import store as ST
 
-    assert ST.rules_hash().startswith("v3:")
+    assert ST.rules_hash().startswith("v4:")
     list(ST.ensure_all(["проба"]))
     conn = ST.connect()
     conn.execute("update meta set value='старий' where key='rules'")
@@ -359,6 +359,80 @@ def test_rules_fingerprint_reads_code_text_not_the_interpreter(
     before = ST.rules_hash.__wrapped__()
     monkeypatch.setattr(ast, "dump", lambda *a, **k: "інша версія Python")
     assert ST.rules_hash.__wrapped__() == before
+
+
+def test_rules_fingerprint_sees_the_fold_tables(monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Зміна таблиці зведення літер міняє відбиток правил.
+
+    12.11.2026 у фолд додали літери скоропису (ꙋ ѯ ѿ…): ключі пошуку стали
+    іншими, а відбиток рахувався лише з тексту функцій і таблиць не бачив —
+    стор лишився «свіжим» зі старими ключами. Кожна таблиця, з якої
+    `normalize_archival` складає ключ, і вираз токенів мусять бути у відбитку.
+    """
+    import re
+
+    from nyshporka import htr_store as S
+    from nyshporka.search import store as ST
+    from nyshporka.utils import translit as T
+
+    before = ST.rules_hash.__wrapped__()
+    with monkeypatch.context() as m:
+        m.setattr(T, "_TAIL_ARCHIVAL_TRANS", {**T._TAIL_ARCHIVAL_TRANS, ord("ꙁ"): "z"})
+        assert ST.rules_hash.__wrapped__() != before, "нова літера у фолді"
+    with monkeypatch.context() as m:
+        m.setattr(T, "_TAIL_ARCHIVAL_TRANS", {**T._TAIL_ARCHIVAL_TRANS, ord("ѯ"): "x"})
+        assert ST.rules_hash.__wrapped__() != before, "інше значення літери"
+    with monkeypatch.context() as m:
+        m.setattr(T, "_PL_DIACRITICS", {**T._PL_DIACRITICS, ord("ő"): "o"})
+        assert ST.rules_hash.__wrapped__() != before, "діакритика"
+    with monkeypatch.context() as m:
+        m.setattr(T, "_PL_DIGRAPHS", (*T._PL_DIGRAPHS, ("tsch", "c")))
+        assert ST.rules_hash.__wrapped__() != before, "диграф"
+    with monkeypatch.context() as m:
+        m.setattr(S, "_TOKEN_RE", re.compile(S._TOKEN_RE.pattern.replace("—", "—=")))
+        assert ST.rules_hash.__wrapped__() != before, "вираз токенів"
+    assert ST.rules_hash.__wrapped__() == before
+
+
+def test_parallel_parse_builds_the_same_store(space: Path, monkeypatch: pytest.MonkeyPatch
+                                              ) -> None:
+    """Розбір у процесах-робітниках дає той самий стор, що й в одному процесі."""
+    import shutil
+
+    from nyshporka import htr_store as S
+    from nyshporka.search import store as ST
+
+    src = S.htr_root() / "проба"
+    names = ["проба"]
+    for i in range(3):
+        shutil.copytree(src, S.htr_root() / f"проба{i}")
+        names.append(f"проба{i}")
+
+    def dump() -> list[tuple]:
+        conn = ST.connect(readonly=True)
+        try:
+            out: list[tuple] = []
+            out += conn.execute("select id, run, stamp, pages, lines, geo, rules from runs "
+                                "order by id").fetchall()
+            out += conn.execute("select id, run_id, page, stem, nlines, geo, raw, cands "
+                                "from pages order by id").fetchall()
+            out += conn.execute("select * from lines order by id").fetchall()
+            out += conn.execute("select rowid from fts where fts match 'lip' order by rowid"
+                                ).fetchall()
+            return out
+        finally:
+            conn.close()
+
+    monkeypatch.setenv(ST.INDEX_WORKERS_ENV, "1")
+    assert len(list(ST.ensure_all(names, force=True))) == len(names)
+    serial = dump()
+    ST.path().unlink()
+    monkeypatch.setenv(ST.INDEX_WORKERS_ENV, "2")
+    assert len(list(ST.ensure_all(names, force=True))) == len(names)
+    assert dump() == serial
+    # Свіжий стор робітників не запускає й нічого не переписує.
+    assert len(list(ST.ensure_all(names))) == len(names)
+    assert dump() == serial
 
 
 def test_a_rebuild_killed_halfway_is_visible_run_by_run(space: Path) -> None:

@@ -62,6 +62,7 @@
 """
 from __future__ import annotations
 
+import collections
 import contextlib
 import functools
 import hashlib
@@ -313,20 +314,31 @@ def rules_hash() -> str:
     parts: list[str] = []
     # `page_candidates` тепер вьюха — правила живуть у повній версії, і саме
     # її зміна мусить робити кандидатів застарілими.
-    for fn in (S.page_candidates_full, T.normalize_archival, successors, _geo_cands):
+    for fn in (S.page_candidates_full, T.normalize_archival, T._digraphs, T._squash,
+               successors, _geo_cands):
         try:
             # Без коментарів: правка коментаря не має вимагати перебудови.
             parts.append(_code_text(fn))
         except (OSError, TypeError, SyntaxError, tokenize.TokenError):
             parts.append(f"{fn.__module__}.{fn.__name__}")
     parts += [str(S.LINE_BREAK_WINDOW), str(COL_GAP), str(SUCC_REACH), str(MARK)]
+    # 🔴 Таблиці зведення літер — ДАНІ, і текст функцій їх не бачить. 12.11.2026
+    # у фолд додали ꙋ ѹ ѯ ѱ ѿ ѧ ꙗ ѥ ꙃ ѻ ѷ: ключі пошуку змінились, а відбиток —
+    # ні, тож стор на 37 тис. прогонів лишився «свіжим» зі старими ключами, і
+    # доганяти його довелося стороннім скриптом із власним станом. Тепер у
+    # відбитку самі таблиці (у тому вигляді, в якому їх застосовує
+    # `normalize_archival`) і вираз, що ріже рядок на токени.
+    parts += [repr(sorted(T._PL_DIACRITICS.items())), repr(T._PL_DIGRAPHS),
+              repr(sorted(T._TAIL_ARCHIVAL_TRANS.items())), S._TOKEN_RE.pattern]
     # 🔴 Префікс версії САМОГО відбитка. Спосіб рахувати (джерело → AST)
     # змінився в минулому коміті, і живий стор на 6.5 ГБ став «застарілим за
     # правилами» без жодної зміни правил (рецензія 08.09, третій раунд). Зміна
     # способу тепер видима як така, а дослідник приймає відбиток без
     # перебудови: `nysh text index --accept-rules`. v3 — текст без коментарів
     # замість `ast.dump`, що залежав від версії Python (див. `_code_text`).
-    return "v3:" + hashlib.blake2b("\n".join(parts).encode("utf-8"), digest_size=8).hexdigest()
+    # v4 — у відбитку таблиці зведення літер і вираз токенів; фолд 12.11.2026
+    # справді змінив ключі, тож цей перехід — перебудова, а не `--accept-rules`.
+    return "v4:" + hashlib.blake2b("\n".join(parts).encode("utf-8"), digest_size=8).hexdigest()
 
 
 def rules_stale(conn: sqlite3.Connection) -> bool:
@@ -712,67 +724,76 @@ def _text_unchanged(d: Path, pages: int, indexed_at: str) -> bool:
     return n > 0 and n == pages
 
 
-def _index(conn: sqlite3.Connection, run: str, *, only_stale: bool, wait: float,
-           waiting: Callable[[], None] | None) -> int | None:
-    """Проіндексувати один прогін. Повертає число рядків.
+#: Рядок сторінки для вставки: номер, токени, рамка (або чотири `None`), наступник.
+ParsedLine = tuple[int, str, "int | None", "int | None", "int | None", "int | None",
+                   "int | None"]
+#: Сторінка для вставки: ім'я, основа, рядків, чи є рамки, сирий текст і
+#: кандидати (zlib), рядки, рядки FTS.
+ParsedPage = tuple[str, str, int, int, bytes, bytes, "list[ParsedLine]",
+                   "list[tuple[int, str]]"]
 
-    🔴 Спершу видалення старого, потім вставка нового, і все в ОДНІЙ
-    транзакції: обірваний захід (Ctrl+C, диск) лишає стор у попередньому
-    стані, а не з половиною справи під свіжим штампом.
+
+def parse_run(run: str) -> dict[str, Any] | None:
+    """Усе, що прогін дає стору, — БЕЗ з'єднання зі стором. `None` — теки немає.
+
+    🔴 Розбір окремо від запису (13.11.2026). Доти `_index` брав замок на запис
+    до першого читання файла й тримав його весь прогін: читання `.txt` і
+    геометрії, кандидати, нормалізація, стиснення йшли під замком, тож ні
+    другий процес, ні друге ядро нічого не давали. Замір на 290 тис. рядків:
+    розбір — 21,6 с, сам запис готового в SQLite — 2,8 с. Тепер розбір не
+    тримає нічого, і його можна рахувати в кількох процесах (`ensure_all`).
+
+    Повертає лише прості типи: результат їде між процесами. Номери рядків —
+    у межах сторінки; `rowid` складає письменник, бо `pages.id` видає стор.
     """
+    got = _run_head(run)
+    if got is None:
+        return None
+    got["pages"] = parse_pages(run, got.pop("txts"))
+    return got
+
+
+def _run_head(run: str) -> dict[str, Any] | None:
+    """Шапка прогону для стору й перелік його `.txt` — без читання сторінок."""
     from nyshporka import htr_store as S
     from nyshporka.search import decode as D
 
     d = D._run_dir(run)
     if d is None:
-        return 0
+        return None
     stamp = stamp_of(run)
     meta = S.load_meta(run) or {}
-    stem2page = {Path(pg).stem: pg for pg in (meta.get("pages") or {})}
-    txts = sorted(d.glob("*.txt"))
-    _begin_write(conn, wait=wait, waiting=waiting)
-    if only_stale:
-        row = conn.execute("select stamp, coalesce(rules,''), coalesce(indexed_at,''), "
-                           "coalesce(pages,0) from runs where run=?", (run,)).fetchone()
-        if row and stamp and row[0] == stamp and row[1] == rules_hash():
-            conn.rollback()
-            return None
-        if (row and stamp and row[1] == rules_hash()
-                and _text_unchanged(d, int(row[3]), str(row[2]))):
-            # Змінилась лише мета: новий штамп і поля з неї, текст — як був.
-            conn.execute(
-                "update runs set stamp=?, case_key=?, case_dir=?, model=?, script=?, "
-                "engine_ids=?, shared=? where run=?",
-                (stamp, _run_key(run, meta), meta.get("case_dir") or "",
-                 meta.get("model") or "", meta.get("script") or "",
-                 json.dumps(S.run_engine_ids(meta)), S.shared_of(meta), run))
-            conn.commit()
-            return None
-    old = conn.execute("select id from runs where run=?", (run,)).fetchone()
-    if old:
-        _delete_run(conn, int(old[0]))
-    if not txts:
-        # 🔴 Тека без жодного `.txt` у стор не лягає: рядок `runs` зі штампом
-        # робив її «свіжою» і «прочесаною», тобто знаменник ріс на прогін, у
-        # якому нема чого шукати (рецензія 08.09, третій раунд).
-        conn.commit()
-        return 0
-    if conn.execute("select 1 from meta where key='rules'").fetchone() is None:
-        conn.execute("insert into meta(key,value) values('rules',?)", (rules_hash(),))
-    conn.execute(
-        "insert into runs(run, stamp, case_key, case_dir, model, script, engine_ids, "
-        "indexed_at, rules, shared) values(?,?,?,?,?,?,?,?,?,?)",
-        (run, stamp, _run_key(run, meta), meta.get("case_dir") or "",
-         meta.get("model") or "", meta.get("script") or "",
-         # 🔴 З мікросекундами: позначка тексту швидкого індексу (`fastidx`) —
-         # саме вона, і перечитаний у ту саму секунду прогін (SQLite міг видати
-         # той самий id) інакше лишився б «тим самим».
-         json.dumps(S.run_engine_ids(meta)),
-         datetime.now().isoformat(timespec="microseconds"),
-         rules_hash(), S.shared_of(meta)))
-    run_id = int(conn.execute("select id from runs where run=?", (run,)).fetchone()[0])
-    n_pages = n_lines = n_geo = 0
-    for txt in txts:
+    return {"run": run, "stamp": stamp, "txts": [t.name for t in sorted(d.glob("*.txt"))],
+            "case_key": (meta.get("case_key") or ""),
+            "case_dir": meta.get("case_dir") or "", "model": meta.get("model") or "",
+            "script": meta.get("script") or "",
+            "engine_ids": json.dumps(S.run_engine_ids(meta)), "shared": S.shared_of(meta)}
+
+
+#: Мета прогону в робітникові: шматки одного прогону йдуть підряд, а мета
+#: великої справи — мегабайти JSON, які не варто читати на кожен шматок.
+_PARSE_META: tuple[str, dict[str, Any], dict[str, str]] | None = None
+
+
+def parse_pages(run: str, names: list[str]) -> list[ParsedPage]:
+    """Сторінки прогону (імена `.txt`) → готове до вставки. Сторінки незалежні:
+    склейки переносу живуть у межах аркуша, тож прогін можна ділити на шматки."""
+    global _PARSE_META
+    from nyshporka import htr_store as S
+    from nyshporka.search import decode as D
+
+    d = D._run_dir(run)
+    if d is None:
+        return []
+    # Ключ — зі штампом: перечитаний прогін має те саме ім'я й іншу мету.
+    key = f"{run}|{stamp_of(run)}"
+    if _PARSE_META is None or _PARSE_META[0] != key:
+        meta = S.load_meta(run) or {}
+        _PARSE_META = (key, meta, {Path(pg).stem: pg for pg in (meta.get("pages") or {})})
+    _key, meta, stem2page = _PARSE_META
+    pages: list[ParsedPage] = []
+    for name in names:
+        txt = d / name
         try:
             text = txt.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -784,14 +805,6 @@ def _index(conn: sqlite3.Connection, run: str, *, only_stale: bool, wait: float,
         # ім'я з «.txt» протікало у вердикти та кроп як неіснуючий скан.
         page = stem2page.get(txt.stem, txt.stem)
         boxes = _geometry_for(d, run, txt.stem, len(lines), meta)
-        conn.execute(
-            "insert into pages(run_id, page, stem, nlines, geo, raw) values(?,?,?,?,?,?)",
-            (run_id, page, txt.stem, len(lines), int(boxes is not None),
-             zlib.compress("\n".join(lines).encode("utf-8"), 6)))
-        pid = int(conn.execute("select last_insert_rowid()").fetchone()[0])
-        rows: list[tuple[int, str, int | None, int | None, int | None, int | None,
-                         int | None]] = []
-        ftsrows: list[tuple[int, str]] = []
         page_lines: list[Line] = []
         for i, ln in enumerate(lines, 1):
             toks = _tokens(ln)
@@ -801,29 +814,129 @@ def _index(conn: sqlite3.Connection, run: str, *, only_stale: bool, wait: float,
             page_lines.append(Line(i, " ".join(toks),
                                    (b[0], b[1], b[2], b[3]) if b else None))
         blob, succ = _page_blob(lines, page_lines, has_geo=bool(boxes))
-        conn.execute("update pages set cands=? where id=?",
-                     (zlib.compress(blob.encode("utf-8"), 6), pid))
+        rows: list[ParsedLine] = []
+        ftsrows: list[tuple[int, str]] = []
         for pl in page_lines:
-            rid = (pid << LINE_BITS) + pl.no
             bx = pl.box
-            nxt = succ.get(pl.no)
-            rows.append((rid, pl.toks,
+            rows.append((pl.no, pl.toks,
                          bx[0] if bx else None, bx[1] if bx else None,
                          bx[2] if bx else None, bx[3] if bx else None,
-                         (pid << LINE_BITS) + nxt if nxt else None))
+                         succ.get(pl.no)))
             norms = " ".join(_norm(tk) for tk in pl.toks.split(" ") if len(tk) >= 3)
             if norms:
-                ftsrows.append((rid, f"{MARK} {norms} {MARK}"))
-        conn.executemany("insert into lines(id,toks,x0,y0,x1,y1,succ) values(?,?,?,?,?,?,?)",
-                         rows)
-        conn.executemany("insert into fts(rowid,norm) values(?,?)", ftsrows)
-        n_pages += 1
+                ftsrows.append((pl.no, f"{MARK} {norms} {MARK}"))
+        pages.append((page, txt.stem, len(lines), int(boxes is not None),
+                      zlib.compress("\n".join(lines).encode("utf-8"), 6),
+                      zlib.compress(blob.encode("utf-8"), 6), rows, ftsrows))
+    return pages
+
+
+def _settle_fresh(conn: sqlite3.Connection, run: str, stamp: str) -> bool:
+    """Під замком: чи прогін уже свіжий (тоді транзакцію закрито, `True`).
+
+    Свіжий — той самий штамп і відбиток правил; або змінилась лише мета, і
+    тоді поновлюються штамп і поля з неї, а текст лишається як був.
+    """
+    from nyshporka import htr_store as S
+    from nyshporka.search import decode as D
+
+    row = conn.execute("select stamp, coalesce(rules,''), coalesce(indexed_at,''), "
+                       "coalesce(pages,0) from runs where run=?", (run,)).fetchone()
+    if row and stamp and row[0] == stamp and row[1] == rules_hash():
+        conn.rollback()
+        return True
+    d = D._run_dir(run)
+    if (row and stamp and d is not None and row[1] == rules_hash()
+            and _text_unchanged(d, int(row[3]), str(row[2]))):
+        meta = S.load_meta(run) or {}
+        conn.execute(
+            "update runs set stamp=?, case_key=?, case_dir=?, model=?, script=?, "
+            "engine_ids=?, shared=? where run=?",
+            (stamp, _run_key(run, meta), meta.get("case_dir") or "",
+             meta.get("model") or "", meta.get("script") or "",
+             json.dumps(S.run_engine_ids(meta)), S.shared_of(meta), run))
+        conn.commit()
+        return True
+    return False
+
+
+def _write_parsed(conn: sqlite3.Connection, got: dict[str, Any]) -> int:
+    """Під замком: старе геть, розібране (`parse_run`) — у стор. Число рядків.
+
+    🔴 Спершу видалення старого, потім вставка нового, і все в ОДНІЙ
+    транзакції: обірваний захід (Ctrl+C, диск) лишає стор у попередньому
+    стані, а не з половиною справи під свіжим штампом.
+    """
+    run = str(got["run"])
+    old = conn.execute("select id from runs where run=?", (run,)).fetchone()
+    if old:
+        _delete_run(conn, int(old[0]))
+    if not got["pages"]:
+        # 🔴 Тека без жодного `.txt` у стор не лягає: рядок `runs` зі штампом
+        # робив її «свіжою» і «прочесаною», тобто знаменник ріс на прогін, у
+        # якому нема чого шукати (рецензія 08.09, третій раунд).
+        conn.commit()
+        return 0
+    if conn.execute("select 1 from meta where key='rules'").fetchone() is None:
+        conn.execute("insert into meta(key,value) values('rules',?)", (rules_hash(),))
+    cur = conn.execute(
+        "insert into runs(run, stamp, case_key, case_dir, model, script, engine_ids, "
+        "indexed_at, rules, shared) values(?,?,?,?,?,?,?,?,?,?)",
+        (run, got["stamp"], _run_key(run, {"case_key": got["case_key"]}), got["case_dir"],
+         got["model"], got["script"], got["engine_ids"],
+         # 🔴 З мікросекундами: позначка тексту швидкого індексу (`fastidx`) —
+         # саме вона, і перечитаний у ту саму секунду прогін (SQLite міг видати
+         # той самий id) інакше лишився б «тим самим».
+         datetime.now().isoformat(timespec="microseconds"),
+         rules_hash(), got["shared"]))
+    run_id = int(cur.lastrowid or 0)
+    n_lines = n_geo = 0
+    for page, stem, nlines, geo, raw, cands, rows, ftsrows in got["pages"]:
+        cur = conn.execute(
+            "insert into pages(run_id, page, stem, nlines, geo, raw, cands) "
+            "values(?,?,?,?,?,?,?)", (run_id, page, stem, nlines, geo, raw, cands))
+        base = int(cur.lastrowid or 0) << LINE_BITS
+        conn.executemany(
+            "insert into lines(id,toks,x0,y0,x1,y1,succ) values(?,?,?,?,?,?,?)",
+            [(base + no, toks, x0, y0, x1, y1, base + nxt if nxt else None)
+             for no, toks, x0, y0, x1, y1, nxt in rows])
+        conn.executemany("insert into fts(rowid,norm) values(?,?)",
+                         [(base + no, norm) for no, norm in ftsrows])
         n_lines += len(rows)
-        n_geo += int(boxes is not None)
+        n_geo += geo
     conn.execute("update runs set pages=?, lines=?, geo=? where id=?",
-                 (n_pages, n_lines, n_geo, run_id))
+                 (len(got["pages"]), n_lines, n_geo, run_id))
     conn.commit()
     return n_lines
+
+
+def _index(conn: sqlite3.Connection, run: str, *, only_stale: bool, wait: float,
+           waiting: Callable[[], None] | None,
+           parsed: dict[str, Any] | None = None) -> int | None:
+    """Проіндексувати один прогін. Повертає число рядків.
+
+    Замок на запис береться двічі й обидва рази ненадовго: спершу — спитати,
+    чи прогін уже свіжий (тоді його й не розбирають), удруге — покласти
+    розібране. Між ними (`parse_run`) стор вільний для інших письменників, тож
+    свіжість під другим замком питається знову: прогін міг зібрати сусід.
+    `parsed` — уже розібране робітником `ensure_all`.
+    """
+    from nyshporka.search import decode as D
+
+    if D._run_dir(run) is None:
+        return 0
+    if only_stale and parsed is None:
+        _begin_write(conn, wait=wait, waiting=waiting)
+        if _settle_fresh(conn, run, stamp_of(run)):
+            return None
+        conn.rollback()
+    got = parsed if parsed is not None else parse_run(run)
+    if got is None:
+        return 0
+    _begin_write(conn, wait=wait, waiting=waiting)
+    if only_stale and _settle_fresh(conn, run, str(got["stamp"])):
+        return None
+    return _write_parsed(conn, got)
 
 
 def restamp_meta_only(runs: list[str], *, conn: sqlite3.Connection | None = None,
@@ -896,6 +1009,139 @@ def ensure(run: str, conn: sqlite3.Connection | None = None) -> bool:
 LOCKED_SKIPPED: list[str] = []
 
 
+#: Від скількох прогонів збірка розбирає їх у процесах-робітниках: старт
+#: процесу — секунди, на одній справі він дорожчий за саму роботу.
+PARALLEL_RUNS = 8
+#: Скільки розібраних шматків на робітника чекає письменника. Розібране —
+#: це готова вставка в пам'яті (≈150 байтів на рядок), тож черга обмежена:
+#: письменник відстав — робітники стоять, а не їдять пам'ять.
+AHEAD_PER_WORKER = 3
+#: Скільки сторінок в одному завданні робітника.
+CHUNK_PAGES = 64
+#: Пам'ять одного робітника розбору, ГБ, — для розрахунку їх числа від заліза.
+INDEX_WORKER_GB = 0.6
+#: Перебити число робітників розбору (1 — усе в одному процесі, як раніше).
+INDEX_WORKERS_ENV = "NYSHPORKA_INDEX_WORKERS"
+
+
+def index_workers(n_runs: int) -> int:
+    """Скільки процесів дати розбору прогонів: від заліза, не більше прогонів."""
+    raw = os.environ.get(INDEX_WORKERS_ENV, "").strip()
+    try:
+        n = int(raw) if raw else 0
+    except ValueError:
+        n = 0
+    if n <= 0:
+        n = _hardware_workers(INDEX_WORKER_GB) if n_runs >= PARALLEL_RUNS else 1
+    return max(1, min(n, n_runs))
+
+
+class _ParseAhead:
+    """Розбір прогонів наперед у процесах, видача — у порядку переліку.
+
+    🔴 Порядок запису лишається порядком переліку: сторінки прогону лягають у
+    стор підряд, і на цьому тримається пошук у межах справи (`_fts_rows` бере
+    відрізок rowid). Тому робітники лише рахують, а пише один процес.
+
+    🔴 Одиниця роботи — шматок сторінок, а не прогін. Прогони різняться на три
+    порядки (сотня рядків — пів мільйона); коли завданням був цілий прогін,
+    великий розбирався одним ядром, черга за ним стояла, і письменник 40 %
+    часу чекав (замір 13.11.2026: 6 і 10 робітників давали ті самі 40 тис.
+    рядків/с).
+
+    Прогін, у якого змінилась лише мета, наперед не розбирається: його
+    закриває `_settle_fresh` без читання тексту (22.10.2026 таких було 9 394).
+    """
+
+    def __init__(self, todo: list[str], conn: sqlite3.Connection, *, force: bool) -> None:
+        self._tasks = self._plan(todo)
+        #: (прогін, шапка або None, майбутній шматок або None) у порядку переліку.
+        self._queue: collections.deque[tuple[str, Any, Any]] = collections.deque()
+        self._pool: Any = None
+        self._meta_only: Callable[[str], bool] = lambda run: False
+        self._workers = index_workers(len(todo))
+        if self._workers <= 1:
+            return
+        import multiprocessing as mp
+        from concurrent.futures import ProcessPoolExecutor
+
+        from nyshporka.core.workspace import workspace
+
+        if not force:
+            from nyshporka.search import decode as D
+
+            rules_now = rules_hash()
+            rows = {str(r[0]): (int(r[1] or 0), str(r[2] or "")) for r in conn.execute(
+                "select run, coalesce(pages,0), coalesce(indexed_at,'') from runs "
+                "where coalesce(rules,'')=?", (rules_now,))}
+
+            def meta_only(run: str) -> bool:
+                row = rows.get(run)
+                d = D._run_dir(run) if row else None
+                return bool(row and d is not None and _text_unchanged(d, row[0], row[1]))
+
+            self._meta_only = meta_only
+        self._pool = ProcessPoolExecutor(
+            max_workers=self._workers, mp_context=mp.get_context("spawn"),
+            initializer=_block_init, initargs=(workspace(),))
+
+    def _plan(self, todo: list[str]) -> Iterator[tuple[str, Any, Any]]:
+        """Завдання в порядку переліку: перший шматок прогону несе його шапку."""
+        for run in todo:
+            if self._meta_only(run):
+                yield run, None, None
+                continue
+            head = _run_head(run)
+            if head is None:
+                yield run, None, None
+                continue
+            names: list[str] = head.pop("txts")
+            chunks = [names[i:i + CHUNK_PAGES] for i in range(0, len(names), CHUNK_PAGES)]
+            head["chunks"] = len(chunks)
+            head["pages"] = []
+            if not chunks:
+                yield run, head, None
+            for k, chunk in enumerate(chunks):
+                yield run, (head if k == 0 else None), chunk
+
+    def _refill(self) -> None:
+        while self._pool is not None and len(self._queue) < self._workers * AHEAD_PER_WORKER:
+            task = next(self._tasks, None)
+            if task is None:
+                return
+            run, head, chunk = task
+            fut = self._pool.submit(parse_pages, run, chunk) if chunk is not None else None
+            self._queue.append((run, head, fut))
+
+    def take(self, run: str) -> dict[str, Any] | None:
+        """Розібране для `run`, або `None` — тоді `_index` розбере сам."""
+        if self._pool is None:
+            return None
+        self._refill()
+        name, head, fut = self._queue.popleft()
+        if name != run:
+            raise RuntimeError(f"порядок розбору зламано: чекав {run}, прийшов {name}")
+        if head is None:
+            return None
+        left = int(head.pop("chunks"))
+        while True:
+            if fut is not None:
+                head["pages"] += fut.result()
+                left -= 1
+            self._refill()
+            if left <= 0:
+                return dict(head)
+            name, _none, fut = self._queue.popleft()
+            if name != run:
+                raise RuntimeError(f"порядок розбору зламано: чекав {run}, прийшов {name}")
+
+    def close(self) -> None:
+        pool, self._pool = self._pool, None
+        self._queue.clear()
+        if pool is not None:
+            pool.shutdown(wait=True, cancel_futures=True)
+
+
 def ensure_all(runs: list[str], *, force: bool = False, reset_rules: bool = False,
                progress: Callable[[int, int, str], None] | None = None,
                optimize: bool | None = None,
@@ -917,6 +1163,7 @@ def ensure_all(runs: list[str], *, force: bool = False, reset_rules: bool = Fals
     built = 0
     LOCKED_SKIPPED.clear()
     conn = connect(migrate=True)
+    ahead: _ParseAhead | None = None
     try:
         if force and reset_rules:
             conn.execute("delete from meta where key='rules'")
@@ -952,6 +1199,8 @@ def ensure_all(runs: list[str], *, force: bool = False, reset_rules: bool = Fals
 
             with contextlib.suppress(Exception):
                 _ROWS.update({str(r.get("name")): r for r in S.list_cases()})
+        # Розбір наперед у процесах-робітниках; запис — тут, у порядку переліку.
+        ahead = _ParseAhead(todo, conn, force=force)
         for i, run in enumerate(todo, 1):
             if gave_up:
                 # Стор тримають довше за `INDEX_WAIT_SEC`: решту не чекаємо по
@@ -968,12 +1217,9 @@ def ensure_all(runs: list[str], *, force: bool = False, reset_rules: bool = Fals
                 P.report(i, total, PHASE_WAIT)
 
             try:
-                if force:
-                    got: int | None = index_run(conn, run, wait=INDEX_WAIT_SEC,
-                                                waiting=waiting)
-                else:
-                    got = index_run_if_stale(conn, run, wait=INDEX_WAIT_SEC,
-                                             waiting=waiting)
+                got: int | None = _index(conn, run, only_stale=not force,
+                                         wait=INDEX_WAIT_SEC, waiting=waiting,
+                                         parsed=ahead.take(run))
             except sqlite3.OperationalError as exc:
                 if not _locked_error(exc):
                     raise
@@ -981,6 +1227,7 @@ def ensure_all(runs: list[str], *, force: bool = False, reset_rules: bool = Fals
                     conn.rollback()
                 LOCKED_SKIPPED.append(run)
                 gave_up = True
+                ahead.close()
                 continue
             if got is None:
                 # Уже зібрав інший процес, поки ми чекали замка.
@@ -1002,6 +1249,8 @@ def ensure_all(runs: list[str], *, force: bool = False, reset_rules: bool = Fals
                 with contextlib.suppress(sqlite3.Error):
                     conn.rollback()
     finally:
+        if ahead is not None:
+            ahead.close()
         _ROWS.clear()
         conn.close()
 
