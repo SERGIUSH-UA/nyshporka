@@ -414,7 +414,7 @@ def test_parallel_parse_builds_the_same_store(space: Path, monkeypatch: pytest.M
             out: list[tuple] = []
             out += conn.execute("select id, run, stamp, pages, lines, geo, rules from runs "
                                 "order by id").fetchall()
-            out += conn.execute("select id, run_id, page, stem, nlines, geo, raw, cands "
+            out += conn.execute("select id, run_id, page, stem, nlines, geo, raw, cands, boxes "
                                 "from pages order by id").fetchall()
             out += conn.execute("select rowid from fts where fts match 'lip' order by rowid"
                                 ).fetchall()
@@ -452,6 +452,17 @@ def test_flat_expr_is_a_superset_of_the_phrase(space: Path) -> None:
     finally:
         conn.close()
     assert hit and tail
+
+
+def test_boxes_blob_round_trips(space: Path) -> None:
+    from nyshporka.search import store as ST
+
+    lines = [ST.Line(1, "а", (1, 2, 30, 40)), ST.Line(2, "б", None),
+             ST.Line(7, "в", (5, 60, 700, 8000))]
+    blob = ST._boxes_pack(lines, {1: 7})
+    assert ST._boxes_unpack(blob) == {1: ((1, 2, 30, 40), 7), 7: ((5, 60, 700, 8000), None)}
+    assert ST._boxes_pack([ST.Line(1, "а", None)], {}) is None
+    assert ST._boxes_unpack(None) == {}
 
 
 def test_full_index_drops_the_previous_schema_file(space: Path) -> None:
