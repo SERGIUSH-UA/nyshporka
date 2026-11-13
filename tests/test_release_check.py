@@ -79,6 +79,9 @@ def test_forgotten_version_changelog_and_note(repo: Path) -> None:
     assert "## [0.2.0]" in errors
     assert "[Unreleased] лишились записи" in errors
     assert "whats-new" in errors
+    # журнал ведеться українською: той самий розділ під заголовком «Невипущене»
+    _commit(repo, {RC.CHANGELOG: "## [Невипущене]\n\n- нове\n\n## [0.1.0]\n\n- перше\n"})
+    assert "[Невипущене] лишились записи" in " ".join(RC.check("0.2.0").errors)
 
 
 def test_a_migration_newer_than_the_release_is_refused(repo: Path) -> None:

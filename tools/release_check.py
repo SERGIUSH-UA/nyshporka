@@ -11,8 +11,8 @@ CI перевіряється саме те, що піде в тег. Лише s
 Помилка (код 1) — реліз вийде зламаним або без знання для агента:
 
 * `__version__` не та, що в тегу;
-* у CHANGELOG немає розділу `## [<версія>]`, або в `[Unreleased]` лишились
-  записи (їх забули перенести);
+* у CHANGELOG немає розділу `## [<версія>]`, або в `[Unreleased]` / `[Невипущене]`
+  лишились записи (їх забули перенести);
 * у `docs/whats-new.md` немає розділу версії;
 * міграція агента новіша за реліз — вона не спрацює, бо `pending` показує
   лише міграції не новіші за пакет (так файл `0.24.md` мовчав би в 0.23.3);
@@ -44,6 +44,9 @@ CHANGELOG = "CHANGELOG.md"
 WHATS_NEW = "docs/whats-new.md"
 MIGRATIONS = "src/nyshporka/migrate/data"
 SKILLS = ".claude/skills"
+#: Заголовок розділу ще не випущеного: журнал ведеться українською, шаблон
+#: Keep a Changelog — англійською; обидва означають те саме.
+UNRELEASED = ("Unreleased", "Невипущене")
 
 
 def version_key(v: str) -> tuple[int, ...]:
@@ -131,8 +134,10 @@ def check(version: str, ref: str = "HEAD", prev: str | None = None) -> Report:
     if not sections.get(version):
         rep.errors.append(f"у {CHANGELOG} немає розділу «## [{version}] — <дата>» "
                           f"або він порожній")
-    if re.search(r"^\s*[-*] ", sections.get("Unreleased", ""), re.M):
-        rep.errors.append(f"у {CHANGELOG} під [Unreleased] лишились записи — "
+    left = [name for name in UNRELEASED
+            if re.search(r"^\s*[-*] ", sections.get(name, ""), re.M)]
+    if left:
+        rep.errors.append(f"у {CHANGELOG} під [{left[0]}] лишились записи — "
                           f"перенести в розділ {version}")
 
     if not section(version, read(ref, WHATS_NEW)):
@@ -168,7 +173,7 @@ def check(version: str, ref: str = "HEAD", prev: str | None = None) -> Report:
                 f"немає. Якщо змінилась поведінка — теза в {MIGRATIONS}/<версія>.md")
         old = changelog_sections(read(prev, CHANGELOG))
         edited = [v for v, body in old.items()
-                  if v != "Unreleased" and v in sections and sections[v] != body]
+                  if v not in UNRELEASED and v in sections and sections[v] != body]
         if edited:
             rep.warnings.append(f"правлено розділи вже випущених версій у {CHANGELOG}: "
                                 f"{', '.join(edited)} — нове має йти в {version}")
