@@ -92,6 +92,14 @@ MERGE_MAX_DOCS = 10_000_000
 #: рядків (замір на живому сторі — у `merge_cost`); більше лишається повному
 #: догону (`text index --fast`).
 MERGE_WAIT_DOCS = 4_000_000
+#: Повна збірка зупиняється й чекає злиття, щойно воно відстало на стільки
+#: рядків (`merge_cost`). Спокійний каскад переписує до ~12 млн (рівень із 8
+#: сегментів до `MERGE_MAX_DOCS` плюс нижчі), тож двічі більше — це вже черга.
+#: 🔴 Без цього письменник обганяв злиття: на 544 млн рядків у теці стояло 683
+#: сегменти, процес тримав ~6 ГБ власної пам'яті й до 16 ГБ відображених файлів,
+#: система знімала його через брак пам'яті, а обрив лишав усі дрібні сегменти
+#: наступному запуску (бойова збірка 13.11.2026, п'ять запусків).
+MERGE_BACKLOG_DOCS = 24_000_000
 
 
 def available() -> bool:
@@ -528,41 +536,62 @@ def sync(conn: sqlite3.Connection, *,
     threads = _writer_threads()
     if only is not None:
         threads = _point_threads(sum(_lines_of(conn, todo).values()))
+    elif merge_cost() > MERGE_BACKLOG_DOCS:
+        # Обірвана збірка лишила чергу злиття: спершу звести її одним потоком,
+        # а не відкривати всі дрібні сегменти під повним письменником.
+        if not _merge_now(index, lock_wait):
+            return {"added": 0, "removed": 0, "lines": 0, "busy": True}
     w = _open_writer(index, threads, lock_wait)
     if w is None:
         return {"added": 0, "removed": 0, "lines": 0, "busy": True}
-    lines = since = 0
+    lines = since = added = 0
     cheap = True
+    lost = False                # письменника після чекання злиття взяв інший процес
+    runs = _by_run(conn, todo, threads)
     try:
         for rid in [*gone, *todo]:
             w.delete_documents_by_term("run", rid)
         import tantivy
 
-        for i, (rid, fields) in enumerate(_by_run(conn, todo, threads), 1):
+        for i, (rid, fields) in enumerate(runs, 1):
             if progress:
                 progress(i, len(todo), "індекс Tantivy")
             for p, no, c, x, y in fields:
                 w.add_document(tantivy.Document(pid=p, ln=no, run=rid, c=c, x=x, y=y))
             lines += len(fields)
             since += len(fields)
+            added = i
             st[rid] = now[rid][0]
             if since >= COMMIT_EVERY:
                 w.commit()
                 _save_state(st)
                 since = 0
-        for rid in gone:
-            st.pop(rid, None)
-        w.commit()
-        _save_state(st)
-        cheap = only is None or merge_cost() <= MERGE_WAIT_DOCS
-        if cheap:
-            w.wait_merging_threads()
-        else:
-            del w               # відпустити замок письменника одразу, злиття не чекаючи
+                if only is None and merge_cost() > MERGE_BACKLOG_DOCS:
+                    # Злиття відстало: дочекатись його, перш ніж писати далі.
+                    # `wait_merging_threads` забирає письменника — відкрити знову.
+                    w.wait_merging_threads()
+                    w = _open_writer(index, threads, LOCK_WAIT_SEC)
+                    if w is None:
+                        lost = True
+                        break
+        if not lost:
+            for rid in gone:
+                st.pop(rid, None)
+            w.commit()
+            _save_state(st)
+            cheap = only is None or merge_cost() <= MERGE_WAIT_DOCS
+            if cheap:
+                w.wait_merging_threads()
+            else:
+                del w               # відпустити замок письменника одразу, злиття не чекаючи
     except BaseException:
         with contextlib.suppress(Exception):
             w.rollback()
         raise
+    finally:
+        runs.close()
+    if lost:
+        return {"added": added, "removed": 0, "lines": lines, "busy": True, "catchup": catchup}
     out = {"added": len(todo), "removed": len(gone), "lines": lines, "busy": False,
            "catchup": catchup}
     if not cheap:

@@ -443,6 +443,68 @@ def test_a_full_build_of_tens_of_thousands_of_runs_fits_the_sql_limit(space: Pat
     assert all(got[rid] for rid in real), "справжні прогони мають дати поля"
 
 
+def test_a_full_build_waits_for_a_merge_backlog_and_writes_on(
+        space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Злиття відстало — повна збірка чекає його й пише далі новим письменником:
+    індекс той самий, що без чекання."""
+    import shutil
+
+    from nyshporka import htr_store as S
+    from nyshporka.search import fastidx as FX
+
+    stems = [S._norm("Вербищинскій"), S._norm("Шевчук"), S._norm("Ковальскій")]
+    _build()
+    plain = sorted(FX.candidates(stems))
+    shutil.rmtree(FX.path())
+    FX._ANSWERS.clear()
+    opened: list[int] = []
+    real = FX._open_writer
+
+    def spy(index, threads, wait):
+        opened.append(threads)
+        return real(index, threads, wait)
+
+    monkeypatch.setattr(FX, "_open_writer", spy)
+    monkeypatch.setattr(FX, "COMMIT_EVERY", 1)
+    monkeypatch.setattr(FX, "MERGE_BACKLOG_DOCS", -1)
+    got = _build()
+    assert len(opened) >= 2, "чекання злиття не спрацювало — тест міряв би звичайний шлях"
+    assert got["added"] == 2 and not got["busy"]
+    assert len(plain) >= 3, "перевірка беззмістовна: замало кандидатів"
+    assert sorted(FX.candidates(stems)) == plain
+
+
+def test_a_writer_taken_during_the_merge_wait_leaves_a_resumable_build(
+        space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Поки збірка чекала злиття, письменника взяв інший процес: зроблене
+    збережено, відповідь каже `busy`, наступний догін доробляє решту."""
+    from nyshporka import htr_store as S
+    from nyshporka.search import fastidx as FX
+
+    real = FX._open_writer
+    calls: list[int] = []
+
+    def once(index, threads, wait):
+        # Перші два відкриття — зведення черги на старті й сам письменник
+        # збірки; третє, після чекання злиття, уже «зайняте».
+        calls.append(threads)
+        return real(index, threads, wait) if len(calls) <= 2 else None
+
+    monkeypatch.setattr(FX, "_open_writer", once)
+    monkeypatch.setattr(FX, "COMMIT_EVERY", 1)
+    monkeypatch.setattr(FX, "MERGE_BACKLOG_DOCS", -1)
+    got = _build()
+    assert got["busy"] and got["added"] == 1
+    assert len(FX.state()) == 1
+    monkeypatch.setattr(FX, "_open_writer", real)
+    monkeypatch.setattr(FX, "MERGE_BACKLOG_DOCS", 10**12)
+    again = _build()
+    assert again["added"] == 1 and not again["busy"]
+    assert len(FX.state()) == 2
+    stems = [S._norm("Вербищинскій"), S._norm("Ковальскій")]
+    assert len(FX.candidates(stems)) >= 2
+
+
 def test_parallel_rerank_gives_the_same_rows(space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Дооцінка воркерами — ті самі рядки й бали, що в одному процесі."""
     import concurrent.futures as CF
