@@ -282,9 +282,14 @@ def _by_run(conn: sqlite3.Connection, todo: list[int], threads: int
     from nyshporka.core.cpu import usable_cores
     from nyshporka.search import store as ST
 
-    marks = ",".join("?" * len(todo))
-    pages = conn.execute(f"select coalesce(sum(pages), 0) from runs where id in ({marks})",
-                         todo).fetchone()[0] if todo else 0
+    # Шматками: повна збірка — десятки тисяч прогонів, а SQLite бере не більше
+    # 32 766 параметрів на запит («too many SQL variables», 13.11.2026, 37 361 прогін).
+    pages = 0
+    for i in range(0, len(todo), 500):
+        chunk = todo[i:i + 500]
+        marks = ",".join("?" * len(chunk))
+        pages += conn.execute(f"select coalesce(sum(pages), 0) from runs where id in ({marks})",
+                              chunk).fetchone()[0]
     workers = min(ST.sweep_workers(len(todo), worker_gb=ST.FAST_WORKER_GB),
                   max(1, usable_cores() - threads - 1))
     if pages < PARALLEL_PAGES or workers < 2:

@@ -425,6 +425,24 @@ def test_parallel_build_gives_the_same_index(space: Path, monkeypatch: pytest.Mo
     assert sorted(FX.candidates(stems)) == one
 
 
+def test_a_full_build_of_tens_of_thousands_of_runs_fits_the_sql_limit(space: Path) -> None:
+    """Повна збірка питає стор про всі прогони разом: 40 тисяч ідентифікаторів не
+    мають упертись у стелю параметрів SQLite («too many SQL variables»)."""
+    from nyshporka.search import fastidx as FX
+    from nyshporka.search import store as ST
+
+    _build()
+    conn = ST.connect(readonly=True)
+    try:
+        real = [r[0] for r in conn.execute("select id from runs order by id")]
+        todo = real + list(range(1_000_000, 1_040_000))
+        got = dict(FX._by_run(conn, todo, 2))
+    finally:
+        conn.close()
+    assert len(got) == len(todo)
+    assert all(got[rid] for rid in real), "справжні прогони мають дати поля"
+
+
 def test_parallel_rerank_gives_the_same_rows(space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Дооцінка воркерами — ті самі рядки й бали, що в одному процесі."""
     import concurrent.futures as CF
