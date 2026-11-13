@@ -72,7 +72,7 @@ CC BY-NC-SA 4.0 автор надає такий дозвіл:
 > Ваги Нишпорки (Писар v28) © Serhii Dalishchynskyi, CC BY-SA 4.0 —
 > https://github.com/SERGIUSH-UA/nyshporka
 
-> Ваги Нишпорки (Писар v29) © Serhii Dalishchynskyi, CC BY-NC-SA 4.0 з
+> Ваги Нишпорки (Писар v31) © Serhii Dalishchynskyi, CC BY-NC-SA 4.0 з
 > додатковим дозволом — https://github.com/SERGIUSH-UA/nyshporka
 
 ## 4. Похідні ваги

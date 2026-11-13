@@ -26,20 +26,23 @@ OLD = "pysar_cyr_v17.pt, diak_cyr_v4.mlmodel"
 
 NEWEST = "pysar_cyr_v28.pt, diak_cyr_v10.safetensors"
 NEWEST5 = "pysar_cyr_v29.pt, diak_cyr_v12.safetensors"
+NEWEST6 = "pysar_cyr_v31.pt, diak_cyr_v15.safetensors"
 
 
 def test_rang_za_pokolinniam_z_pakiv_vag() -> None:
-    # покоління — з тегу релізу ваг: weights-v5 (v29/v12) > weights-v3 (v28/v10) >
-    # weights-v2 (v19/v6) > weights-v1 (v17/v4); weights-v4 — лише спеціаліст Логофет
-    assert C.model_rank(_row("RGIA 1-1-1", "u", NEWEST5)) == (2, 0, 0, 0)
-    assert C.model_rank(_row("RGIA 1-1-1", "u", NEWEST)) == (0, 2, 0, 0)
-    assert C.model_rank(_row("RGIA 1-1-1", "u", NEW)) == (0, 0, 2, 0)
-    assert C.model_rank(_row("RGIA 1-1-1", "u", OLD)) == (0, 0, 0, 2)
-    assert C.model_rank(_row("RGIA 1-1-1", "u", "pysar_cyr_v19.pt, diak_cyr_v4.mlmodel")) == (0, 0, 1, 1)
+    # покоління — з тегу релізу ваг: weights-v6 (v31/v15) > weights-v5 (v29/v12) >
+    # weights-v3 (v28/v10) > weights-v2 (v19/v6) > weights-v1 (v17/v4);
+    # weights-v4 — лише спеціаліст Логофет
+    assert C.model_rank(_row("RGIA 1-1-1", "u", NEWEST6)) == (2, 0, 0, 0, 0)
+    assert C.model_rank(_row("RGIA 1-1-1", "u", NEWEST5)) == (0, 2, 0, 0, 0)
+    assert C.model_rank(_row("RGIA 1-1-1", "u", NEWEST)) == (0, 0, 2, 0, 0)
+    assert C.model_rank(_row("RGIA 1-1-1", "u", NEW)) == (0, 0, 0, 2, 0)
+    assert C.model_rank(_row("RGIA 1-1-1", "u", OLD)) == (0, 0, 0, 0, 2)
+    assert C.model_rank(_row("RGIA 1-1-1", "u", "pysar_cyr_v19.pt, diak_cyr_v4.mlmodel")) == (0, 0, 0, 1, 1)
     # власна модель поза переліком паків не важить нічого
-    assert C.model_rank(_row("RGIA 1-1-1", "u", "moia_model.pt")) == (0, 0, 0, 0)
+    assert C.model_rank(_row("RGIA 1-1-1", "u", "moia_model.pt")) == (0, 0, 0, 0, 0)
     # шлях і регістр не заважають упізнати модель
-    assert C.model_rank(_row("RGIA 1-1-1", "u", r"C:\m\PYSAR_CYR_V19.pt")) == (0, 0, 1, 0)
+    assert C.model_rank(_row("RGIA 1-1-1", "u", r"C:\m\PYSAR_CYR_V19.pt")) == (0, 0, 0, 1, 0)
 
 
 def test_dva_zaminenykh_pokolinnia_ne_rivni() -> None:
@@ -48,6 +51,7 @@ def test_dva_zaminenykh_pokolinnia_ne_rivni() -> None:
     assert C.model_rank(_row("RGIA 1-1-1", "u", NEW)) > C.model_rank(_row("RGIA 1-1-1", "u", OLD))
     assert C.model_rank(_row("RGIA 1-1-1", "u", NEWEST)) > C.model_rank(_row("RGIA 1-1-1", "u", NEW))
     assert C.model_rank(_row("RGIA 1-1-1", "u", NEWEST5)) > C.model_rank(_row("RGIA 1-1-1", "u", NEWEST))
+    assert C.model_rank(_row("RGIA 1-1-1", "u", NEWEST6)) > C.model_rank(_row("RGIA 1-1-1", "u", NEWEST5))
 
 
 def test_najnovishi_boiovi_a_bez_nykh_poperedni() -> None:
