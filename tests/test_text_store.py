@@ -414,9 +414,8 @@ def test_parallel_parse_builds_the_same_store(space: Path, monkeypatch: pytest.M
             out: list[tuple] = []
             out += conn.execute("select id, run, stamp, pages, lines, geo, rules from runs "
                                 "order by id").fetchall()
-            out += conn.execute("select id, run_id, page, stem, nlines, geo, raw, cands "
+            out += conn.execute("select id, run_id, page, stem, nlines, geo, raw, cands, boxes "
                                 "from pages order by id").fetchall()
-            out += conn.execute("select * from lines order by id").fetchall()
             out += conn.execute("select rowid from fts where fts match 'lip' order by rowid"
                                 ).fetchall()
             return out
@@ -433,6 +432,57 @@ def test_parallel_parse_builds_the_same_store(space: Path, monkeypatch: pytest.M
     # Свіжий стор робітників не запускає й нічого не переписує.
     assert len(list(ST.ensure_all(names))) == len(names)
     assert dump() == serial
+
+
+def test_flat_expr_is_a_superset_of_the_phrase(space: Path) -> None:
+    """Індекс без позицій: фраза розкладається на «і»-трійки й нічого не губить."""
+    from nyshporka.search import store as ST
+
+    assert ST._flat_expr('"kov"') == '"kov"'
+    assert ST._flat_expr('"koval"') == '("kov" AND "ova" AND "val")'
+    assert ST._flat_expr('("lipo" AND "kom") OR "| lip"') == \
+        '(("lip" AND "ipo") AND "kom") OR ("| l" AND " li" AND "lip")'
+    list(ST.ensure_all(["проба"]))
+    conn = ST.connect(readonly=True)
+    try:
+        ids = dict(ST._run_ids(conn, ["проба"]))
+        # Фраза довша за трійку — запит не падає й знаходить рядок зі словом.
+        hit = list(ST._fts_rows(conn, '"lipovenkom"', list(ids.values())))
+        tail = list(ST._fts_rows(conn, f'"lipoven {ST.MARK}"', list(ids.values())))
+    finally:
+        conn.close()
+    assert hit and tail
+
+
+def test_boxes_blob_round_trips(space: Path) -> None:
+    from nyshporka.search import store as ST
+
+    lines = [ST.Line(1, "а", (1, 2, 30, 40)), ST.Line(2, "б", None),
+             ST.Line(7, "в", (5, 60, 700, 8000))]
+    blob = ST._boxes_pack(lines, {1: 7})
+    assert ST._boxes_unpack(blob) == {1: ((1, 2, 30, 40), 7), 7: ((5, 60, 700, 8000), None)}
+    assert ST._boxes_pack([ST.Line(1, "а", None)], {}) is None
+    assert ST._boxes_unpack(None) == {}
+
+
+def test_full_index_drops_the_previous_schema_file(space: Path) -> None:
+    """Повна збірка прибирає стор попередньої схеми; точкова — ні."""
+    from nyshporka.cli import app
+    from nyshporka.search import store as ST
+
+    ST.path().parent.mkdir(parents=True, exist_ok=True)
+    old = ST.path().parent / ST.LEGACY_FILE
+    old.write_bytes(b"x" * 100)
+    (ST.path().parent / f"{ST.LEGACY_FILE}-wal").write_bytes(b"y")
+    res = runner.invoke(app, ["text", "index", "--case", "проба"])
+    assert res.exit_code == 0, res.output
+    assert old.is_file(), "точкова збірка старого стору не чіпає"
+    res = runner.invoke(app, ["text", "state"])
+    assert "попередньої схеми" in res.output
+    res = runner.invoke(app, ["text", "index"])
+    assert res.exit_code == 0, res.output
+    assert not ST.legacy_files()
+    assert ST.exists()
 
 
 def test_a_rebuild_killed_halfway_is_visible_run_by_run(space: Path) -> None:

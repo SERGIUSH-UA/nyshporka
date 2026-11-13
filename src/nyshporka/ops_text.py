@@ -103,7 +103,15 @@ def text_state(a: TextStateArgs) -> Envelope:
             return fail(f"звірка блобів не вдалась ({type(exc).__name__}: {exc})")
     if (fast := _fast_state()) is not None:
         st["fast"] = fast
+    legacy = sum(f.stat().st_size for f in ST.legacy_files())
+    if legacy:
+        st["legacy_bytes"] = legacy
     env = ok(st)
+    if legacy:
+        env.warn("legacy_store",
+                 f"поруч лежить стор попередньої схеми ({legacy / 2 ** 30:.1f} ГБ): пошук його "
+                 f"не читає; повна збірка `nysh text index` збере новий стор із прогонів "
+                 f"і прибере старий файл")
     if fast and fast["behind"]:
         env.warn("fast_behind",
                  f"швидкий індекс охоплює {fast['covered']} прогонів із {fast['runs']}: "
@@ -222,9 +230,14 @@ def text_index(a: TextIndexArgs) -> Envelope:
     # сегменти стору під замком на запис, і `--rebuild --case X` на сторі в 52 ГБ
     # висів понад дві хвилини (убито), тримаючи замок для наглядачів хмари
     # (25.10.2026). Те саме чекало б будь-яку справу від 50 прогонів.
+    # Стор попередньої схеми чинний код не читає; повна збірка починає з того,
+    # що прибирає його: на диску, де стор ледве вміщався, двом не стати.
+    legacy_freed = 0 if a.case else ST.drop_legacy()
     built = sum(1 for _ in ST.ensure_all(runs, force=a.rebuild, reset_rules=not a.case,
                                          optimize=False if a.case else None))
     st = ST.stats(runs if a.case else None)
+    if legacy_freed:
+        st["legacy_freed_bytes"] = legacy_freed
     # Справа названа й `--fast` не просили — догнати швидкий індекс лише для неї
     # (`fastidx.sync`, параметр `only`): повний догін і злиття — без справи.
     fast = _fast_sync(a.fast, runs if a.case and not a.fast else None)
