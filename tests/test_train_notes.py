@@ -438,3 +438,15 @@ def test_the_last_mark_of_a_line_wins_for_every_reader(space: Path) -> None:
     reg.append_mark(name, "0004", 2, "Іоаннъ Ивановъ Ковальскій", "ok", by="notebook")
     assert len(SRC.read_notes(reg).rows) == 1
     assert CORP._sets_summary(reg)[1][name]["n_ok"] == 1
+
+
+def test_a_broken_polygon_does_not_blacken_the_crop() -> None:
+    """Вироджений полігон чи полігон поза рамкою — кроп лишається прямокутним."""
+    from nyshporka.search import textops as T
+
+    size = (200, 40)
+    assert T.poly_mask(size, [(0, 5), (200, 0), (200, 35), (0, 40)]) is not None
+    assert T.poly_mask(size, [(0, 0), (100, 20), (200, 40)]) is None, "точки на одній прямій"
+    assert T.poly_mask(size, [(500, 500), (700, 500), (700, 540), (500, 540)]) is None, "поза рамкою"
+    assert T.poly_mask(size, [(0, 0), (20, 0), (20, 4), (0, 4)]) is None, "інший масштаб"
+

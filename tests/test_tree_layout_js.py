@@ -24,3 +24,15 @@ def test_tree_layout_invariants_hold_under_node() -> None:
                          capture_output=True, text=True, encoding="utf-8", errors="replace",
                          timeout=120)
     assert run.returncode == 0, (run.stdout + run.stderr)[-3000:]
+
+
+def test_frame_lookup_holds_under_node() -> None:
+    """Перехід до аркуша за набраним номером чи назвою (`core/framefind.js`)."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node не встановлено")
+    run = subprocess.run([node, "--test", str(ROOT / "tests" / "js" / "framefind.test.mjs")],
+                         capture_output=True, text=True, encoding="utf-8", errors="replace",
+                         timeout=120)
+    assert run.returncode == 0, (run.stdout + run.stderr)[-3000:]
+

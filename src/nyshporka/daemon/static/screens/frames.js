@@ -26,6 +26,7 @@ import { ic } from '/ui/icons.js';
 import { attachCombobox, cbValue } from '/ui/combobox.js';
 import { pathField } from '../core/paths.js';
 import { lightbox } from '/ui/lightbox.js';
+import { frameIndex } from '../core/framefind.js';
 
 
 /**
@@ -157,6 +158,10 @@ function framesBar() {
       <button data-act="frames.step" data-arg="1"
         ${FS.i + 1 < FS.frames.length ? '' : ' disabled'}
         title="${esc(t('view.next.key'))}">${t('view.next')}</button>
+      <form class="row" data-act="frames.find" title="${esc(t('frames.find.why'))}">
+        <input id="fr-find" name="q" size="9" autocomplete="off" inputmode="search"
+          placeholder="${esc(t('frames.find'))}" aria-label="${esc(t('frames.find.why'))}">
+      </form>
       <button data-act="frames.zoom" data-arg="-25">${t('view.zoom.out')}</button>
       <button data-act="frames.zoom" data-arg="fit">${t('view.zoom.fit')}</button>
       <button data-act="frames.zoom" data-arg="25">${t('view.zoom.in')}</button>
@@ -288,6 +293,22 @@ Object.assign(ACTIONS, {
   'frames.step': (_ev, elm) => framesShow(FS.i + Number(elm.dataset.arg || 0)),
 
   'frames.goto': () => framesShow(Number((el('fr-page') || {}).value || 0)),
+
+  // Помічник називає знахідку ім'ям кадру чи номером — людина вписує його сюди,
+  // а не гортає список на тисячі рядків.
+  'frames.find': (ev) => {
+    ev.preventDefault();
+    const input = el('fr-find');
+    if (!input) return undefined;
+    const i = frameIndex(FS.frames, input.value);
+    if (i < 0) {
+      input.setCustomValidity(t('frames.find.none'));
+      input.reportValidity();
+      input.addEventListener('input', () => input.setCustomValidity(''), { once: true });
+      return undefined;
+    }
+    return framesShow(i);
+  },
 
   'frames.zoom': (_ev, elm) => {
     const wrap = document.querySelector('#fr-stage .stage-wrap');

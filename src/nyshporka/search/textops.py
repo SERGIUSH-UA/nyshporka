@@ -410,15 +410,34 @@ def line_image(run: str, page: str, bbox: Sequence[float], *,
     piece = im.crop(box)
     im.close()
     if poly and len(poly) >= 3:
-        from PIL import Image, ImageDraw
+        from PIL import Image
 
-        mask = Image.new("L", piece.size, 0)
-        ImageDraw.Draw(mask).polygon(
-            [(float(x) * k - box[0], float(y) * k - box[1]) for x, y in poly], fill=255)
-        black = Image.new(piece.mode, piece.size, "black")
-        black.paste(piece, mask=mask)
-        piece = black
+        mask = poly_mask(piece.size,
+                         [(float(x) * k - box[0], float(y) * k - box[1]) for x, y in poly])
+        if mask is not None:
+            black = Image.new(piece.mode, piece.size, "black")
+            black.paste(piece, mask=mask)
+            piece = black
     return piece
+
+
+#: Найменша частка рамки, яку мусить покрити полігон рядка, щоб кроп різали ним.
+POLY_MIN_COVER = 0.2
+
+
+def poly_mask(size: tuple[int, int], pts: Sequence[tuple[float, float]]) -> Any:
+    """Маска полігона в координатах кропа; None — полігон негодящий.
+
+    Вироджений полігон (точки на одній прямій), полігон поза рамкою чи в іншому
+    масштабі дав би чорний кроп замість рядка. Такий відкидається, і кроп
+    лишається прямокутним: рядок із сусідами кращий за порожній.
+    """
+    from PIL import Image, ImageDraw
+
+    mask = Image.new("L", size, 0)
+    ImageDraw.Draw(mask).polygon(list(pts), fill=255)
+    cover = sum(mask.histogram()[128:]) / max(1, size[0] * size[1])
+    return mask if cover >= POLY_MIN_COVER else None
 
 
 def crop(scope: str, page: str, line: int, *, with_next: bool = True, wide: bool = False,
