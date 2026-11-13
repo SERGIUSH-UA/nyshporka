@@ -183,6 +183,49 @@ def test_push_sends_a_grey_jpeg_only_for_lines_the_pool_lacks(space: Path,
     assert _run("note", "push", CASE, "--no-pages")["crops"]["sent"] == 0 and not sent
 
 
+def _pushed_crop(space: Path, monkeypatch, geometry: dict | None = None):
+    """Кроп, який `note push` віддав би в пул, з білого кадру: чорне — лише маска."""
+    from PIL import Image
+
+    from nyshporka.share import upload
+
+    Image.new("RGB", (6000, 9000), "white").save(
+        space / "data" / "raw" / "dahmo_315" / "spr-8433" / "0004.jpg", quality=50)
+    uid = _read("Іоаннъ Ивановъ Ковальскій", "--share")
+    if geometry is not None:
+        (space / "reports" / "htr" / "проба" / "0004.lines.json").write_text(
+            json.dumps(geometry), encoding="utf-8")
+    sent: list[bytes] = []
+    monkeypatch.setattr(upload, "token", lambda: "t0k")
+    monkeypatch.setattr(upload, "_request", lambda *a, **k: {
+        "book": "dahmo-315-1-8433", "accepted": [uid], "need_crop": [uid]})
+    monkeypatch.setattr(upload, "_put_bytes", lambda url, blob, **k: sent.append(blob) or 204)
+    assert _run("note", "push", CASE, "--no-pages")["crops"]["sent"] == 1
+    return Image.open(io.BytesIO(sent[0]))
+
+
+def test_the_pushed_crop_is_cut_by_the_line_polygon(space: Path, monkeypatch) -> None:
+    """Похилий рядок: кути рамки поза полігоном — сусідні рядки, у пул вони не їдуть."""
+    with _pushed_crop(space, monkeypatch) as im:
+        w, h = im.size
+        assert (w, h) == (2000, 90)                  # рамка 3110×140 кадру, зведена до стелі
+        assert im.getpixel((w - 10, 5)) < 60         # над рядком праворуч — поза полігоном
+        assert im.getpixel((10, h - 5)) < 60         # під рядком ліворуч — поза полігоном
+        assert im.getpixel((w // 2, h // 2)) > 200   # сам рядок
+
+
+@pytest.mark.parametrize("geometry", [
+    {"size": [3000, 4500], "boxes": BOXES},                       # прогін без полігонів
+    # прогін перечитано: під тим самим номером інша рамка — чужий полігон не береться
+    {"size": [3000, 4500], "polys": POLYS,
+     "boxes": [*BOXES[:2], [345, 1300, 1900, 1370], BOXES[3]]},
+])
+def test_the_pushed_crop_falls_back_to_the_box(space: Path, monkeypatch, geometry) -> None:
+    with _pushed_crop(space, monkeypatch, geometry) as im:
+        w, h = im.size
+        assert im.getpixel((w - 10, 5)) > 200 and im.getpixel((10, h - 5)) > 200
+
+
 def test_the_dry_run_says_what_sharing_a_line_means(space: Path) -> None:
     from nyshporka import ops as O
 

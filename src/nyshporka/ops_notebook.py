@@ -488,12 +488,20 @@ CROP_MAX_WIDTH = 2000
 
 
 def crop_jpeg(n: Any) -> bytes:
-    """Сірий JPEG рядка за рамкою рушія — у межах стелі пулу."""
+    """Сірий JPEG рядка — у межах стелі пулу.
+
+    🔴 Полігоном рядка, коли прогін його зберіг і рамка запису та сама, що в
+    прогоні: прямокутник рамки похилого рядка захоплює сусідів, і в пул їхав
+    кроп із чужим текстом під звіреним читанням (те саме, що `train from-notes`
+    до 0.46.0). Без полігона — рамкою, як і раніше: запис без кропа пулу
+    корисний менше, ніж із прямокутним.
+    """
     import io
 
     from nyshporka.search import textops as T
 
-    piece = T.line_image(n.line.run, n.page, n.line.bbox).convert("L")
+    poly = T.line_poly(n.line.run, n.page, n.line.line_no, n.line.bbox)
+    piece = T.line_image(n.line.run, n.page, n.line.bbox, poly=poly).convert("L")
     if piece.width > CROP_MAX_WIDTH:
         piece = piece.resize((CROP_MAX_WIDTH,
                               max(1, round(piece.height * CROP_MAX_WIDTH / piece.width))))

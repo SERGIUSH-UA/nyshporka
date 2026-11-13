@@ -360,11 +360,45 @@ def engine_frame(run: str, page: str) -> dict[str, Any]:
             "frame_source": frame_source}
 
 
-def line_image(run: str, page: str, bbox: Sequence[float]) -> Any:
+#: Рамка запису проти рамки рядка в геометрії прогону — допуск на округлення
+#: (той самий, що в `train.notes.BOX_TOL`).
+LINE_BOX_TOL = 2
+
+
+def line_poly(run: str, page: str, line_no: int,
+              bbox: Sequence[float]) -> list[list[float]] | None:
+    """Полігон рядка `line_no` (з одиниці) з геометрії прогону; немає — None.
+
+    Полігон береться лише тоді, коли рамка рядка в прогоні та сама, що в записі:
+    прогін могли перечитати після звірки, і під тим самим номером тоді лежить
+    інший рядок — його фігура обрізала б кроп звіреного.
+    """
+    from nyshporka import htr_store as S
+
+    geom = S.page_lines(run, page) or {}
+    boxes, polys = geom.get("boxes") or [], geom.get("polys") or []
+    i = int(line_no) - 1
+    if not (0 <= i < len(boxes) and i < len(polys)):
+        return None
+    box, poly = boxes[i], polys[i]
+    if not box or not poly or len(poly) < 3 or len(box) < 4 or len(bbox) < 4:
+        return None
+    if any(abs(float(a) - float(b)) > LINE_BOX_TOL
+           for a, b in zip(box[:4], bbox[:4], strict=True)):
+        return None
+    return [[float(x), float(y)] for x, y in poly]
+
+
+def line_image(run: str, page: str, bbox: Sequence[float], *,
+               poly: Sequence[Sequence[float]] | None = None) -> Any:
     """Рядок за рамкою рушія — PIL-зображення без полів і без сусідів.
 
     Для навчальної пари: кроп мусить бути саме тим рядком, який звірено, а не
     смугою з наступним, як у кропа пошуку (`crop(with_next=True)`).
+
+    З `poly` (координати прогону, як і рамка) усе поза фігурою рядка — чорне:
+    рядок скоропису йде похило, і прямокутник рамки захоплює сусідів. Чорне, а
+    не біле — як у `train.cut.crop_by_poly` і в нарізці kraken.
     """
     fr = engine_frame(run, page)
     im, k = fr["image"], fr["k"]
@@ -375,6 +409,15 @@ def line_image(run: str, page: str, bbox: Sequence[float]) -> Any:
         raise FrameError(f"рамка {list(bbox)} поза кадром {run} · {page}")
     piece = im.crop(box)
     im.close()
+    if poly and len(poly) >= 3:
+        from PIL import Image, ImageDraw
+
+        mask = Image.new("L", piece.size, 0)
+        ImageDraw.Draw(mask).polygon(
+            [(float(x) * k - box[0], float(y) * k - box[1]) for x, y in poly], fill=255)
+        black = Image.new(piece.mode, piece.size, "black")
+        black.paste(piece, mask=mask)
+        piece = black
     return piece
 
 
