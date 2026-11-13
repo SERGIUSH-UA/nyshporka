@@ -20,10 +20,11 @@
 * `runs` — прогін, його штамп свіжості, ключ справи, модель;
 * `pages` — сторінка прогону з СИРИМ текстом (zlib), щоб контекст, регекс і
   картка справи не торкались диска з кадрами;
-* `pages.boxes` — рамки рядків сторінки з `.lines.json` і наступники за
-  колонкою одним стиснутим блобом (коли прогін записав геометрію). Окремої
-  таблиці рядків немає: токени рядка — це сирий текст сторінки, порізаний тим
-  самим виразом, а рамка потрібна лише після знахідки (кроп, контекст);
+* рамок рядків у сторі НЕМАЄ, як і окремої таблиці рядків. Токени рядка — це
+  сирий текст сторінки, порізаний тим самим виразом; рамка потрібна лише після
+  знахідки (кроп, контекст за колонкою) і тоді береться з `.lines.json` теки
+  прогону (`_page_lines`). При збірці геометрія читається лише заради склейок
+  за колонкою, які лягають у кандидатів;
 * `fts` — FTS5 з тригамами по НОРМАЛІЗОВАНОМУ рядку, без вмісту й без позицій
   (`detail=none`): лише «у яких рядках є ця трійка»;
 * `pages.cands` — ГОТОВІ кандидати кожного рядка сторінки (норми одиночних
@@ -49,7 +50,8 @@
 🔴 Схема 4 (13.11.2026) — удвічі менший стор. До неї той самий текст лежав
 чотири рази: сирий, токенами в таблиці `lines`, кандидатами й тригамами з
 позиціями. Замір на 8,9 млн рядків: 138 байтів на рядок → 70 (без `lines` —
-95, FTS без позицій — ще −25), запис у півтора раза швидший. FTS без позицій
+95, FTS без позицій — ще −25), запис у півтора раза швидший; рамки рядків,
+винесені зі стору зовсім, — ще −9 байтів на рядок. FTS без позицій
 не приймає фраз, довших за трійку, тож фраза розкладається на «і»-трійки
 (`_flat_expr`): це завжди ширше за фразу, тобто без втрат; зайвих рядків на
 оцінку — до 4 % (12 прізвищ, широкий і вузький передфільтр).
@@ -74,7 +76,6 @@
 """
 from __future__ import annotations
 
-import array
 import collections
 import contextlib
 import functools
@@ -165,7 +166,7 @@ create table if not exists runs(
 create table if not exists pages(
     id integer primary key, run_id int not null, page text not null,
     stem text not null, nlines int default 0, geo int default 0, raw blob,
-    cands blob, boxes blob);
+    cands blob);
 create index if not exists pages_run on pages(run_id, stem);
 create virtual table if not exists fts using fts5(
     norm, content='', tokenize='trigram', contentless_delete=1, detail=none);
@@ -762,44 +763,8 @@ def _text_unchanged(d: Path, pages: int, indexed_at: str) -> bool:
 
 
 #: Сторінка для вставки: ім'я, основа, рядків у файлі, чи є рамки, сирий текст
-#: і кандидати (zlib), рамки (`_boxes_pack`) або `None`, рядків із токенами,
-#: рядки FTS (номер рядка, норма).
-ParsedPage = tuple[str, str, int, int, bytes, bytes, "bytes | None", int,
-                   "list[tuple[int, str]]"]
-#: Чисел на рядок у блобі рамок: номер, x0, y0, x1, y1, наступник (0 — немає).
-BOX_INTS = 6
-
-
-def _boxes_pack(lines: list[Line], succ: dict[int, int]) -> bytes | None:
-    """Рамки й наступники сторінки → стиснутий блоб; без рамок — `None`.
-
-    int32 від молодшого байта, по `BOX_INTS` чисел на рядок із рамкою. Сусідні
-    рядки схожі, тож zlib стискає це до ~6 байтів на рядок — проти ~40 у
-    таблиці `lines`, де кожен рядок ніс ще й свій rowid і токени.
-    """
-    a = array.array("i")
-    for ln in lines:
-        if ln.box is None:
-            continue
-        a.extend((ln.no, ln.box[0], ln.box[1], ln.box[2], ln.box[3], succ.get(ln.no, 0)))
-    if not a:
-        return None
-    if sys.byteorder == "big":
-        a.byteswap()
-    return zlib.compress(a.tobytes(), 6)
-
-
-def _boxes_unpack(blob: bytes | None
-                  ) -> dict[int, tuple[tuple[int, int, int, int], int | None]]:
-    """Блоб рамок → {номер рядка: (рамка, наступник або None)}."""
-    if not blob:
-        return {}
-    a = array.array("i")
-    a.frombytes(zlib.decompress(blob))
-    if sys.byteorder == "big":
-        a.byteswap()
-    return {a[i]: ((a[i + 1], a[i + 2], a[i + 3], a[i + 4]), a[i + 5] or None)
-            for i in range(0, len(a) - BOX_INTS + 1, BOX_INTS)}
+#: і кандидати (zlib), рядків із токенами, рядки FTS (номер рядка, норма).
+ParsedPage = tuple[str, str, int, int, bytes, bytes, int, "list[tuple[int, str]]"]
 
 
 def parse_run(run: str) -> dict[str, Any] | None:
@@ -882,7 +847,7 @@ def parse_pages(run: str, names: list[str]) -> list[ParsedPage]:
             b = boxes[i - 1] if boxes else None
             page_lines.append(Line(i, " ".join(toks),
                                    (b[0], b[1], b[2], b[3]) if b else None))
-        blob, succ = _page_blob(lines, page_lines, has_geo=bool(boxes))
+        blob, _succ = _page_blob(lines, page_lines, has_geo=bool(boxes))
         ftsrows: list[tuple[int, str]] = []
         for pl in page_lines:
             norms = " ".join(_norm(tk) for tk in pl.toks.split(" ") if len(tk) >= 3)
@@ -890,8 +855,7 @@ def parse_pages(run: str, names: list[str]) -> list[ParsedPage]:
                 ftsrows.append((pl.no, f"{MARK} {norms} {MARK}"))
         pages.append((page, txt.stem, len(lines), int(boxes is not None),
                       zlib.compress("\n".join(lines).encode("utf-8"), 6),
-                      zlib.compress(blob.encode("utf-8"), 6),
-                      _boxes_pack(page_lines, succ), len(page_lines), ftsrows))
+                      zlib.compress(blob.encode("utf-8"), 6), len(page_lines), ftsrows))
     return pages
 
 
@@ -955,10 +919,10 @@ def _write_parsed(conn: sqlite3.Connection, got: dict[str, Any]) -> int:
          rules_hash(), got["shared"]))
     run_id = int(cur.lastrowid or 0)
     n_lines = n_geo = 0
-    for page, stem, nlines, geo, raw, cands, boxes, n_rows, ftsrows in got["pages"]:
+    for page, stem, nlines, geo, raw, cands, n_rows, ftsrows in got["pages"]:
         cur = conn.execute(
-            "insert into pages(run_id, page, stem, nlines, geo, raw, cands, boxes) "
-            "values(?,?,?,?,?,?,?,?)", (run_id, page, stem, nlines, geo, raw, cands, boxes))
+            "insert into pages(run_id, page, stem, nlines, geo, raw, cands) "
+            "values(?,?,?,?,?,?,?)", (run_id, page, stem, nlines, geo, raw, cands))
         base = int(cur.lastrowid or 0) << LINE_BITS
         conn.executemany("insert into fts(rowid,norm) values(?,?)",
                          [(base + no, norm) for no, norm in ftsrows])
@@ -1498,32 +1462,61 @@ def _raw_lines(conn: sqlite3.Connection, pid: int) -> list[str]:
     return zlib.decompress(row[0]).decode("utf-8").split("\n")
 
 
+def _page_geometry(conn: sqlite3.Connection, pid: int
+                   ) -> tuple[list[str], list[list[int]] | None]:
+    """Сирі рядки сторінки зі стору і їхні рамки з теки прогону (або `None`).
+
+    🔴 Рамок у сторі немає: вони потрібні лише після знахідки, а займали десяту
+    частину файла. Тут — один малий файл геометрії на сторінку, яку людина чи
+    гортач справді відкрили; кроп поруч однаково читає цілий кадр. Сторінка,
+    зібрана без рамок (`geo=0`), диска не торкається зовсім.
+    """
+    from nyshporka import htr_store as S
+    from nyshporka.search import decode as D
+
+    row = conn.execute(
+        "select p.raw, p.stem, p.nlines, p.geo, r.run from pages p "
+        "join runs r on r.id=p.run_id where p.id=?", (pid,)).fetchone()
+    if not row or row[0] is None:
+        return [], None
+    lines = zlib.decompress(row[0]).decode("utf-8").split("\n")
+    if not row[3]:
+        return lines, None
+    run = str(row[4])
+    d = D._run_dir(run)
+    if d is None:
+        return lines, None
+    return lines, _geometry_for(d, run, str(row[1]), int(row[2] or 0), S.load_meta(run) or {})
+
+
 def _page_lines(conn: sqlite3.Connection, pid: int) -> list[Line]:
-    """Рядки сторінки з токенами, рамкою й наступником.
+    """Рядки сторінки з токенами, рамкою й наступником за колонкою.
 
     Токени — сирий текст сторінки, порізаний тим самим виразом, що й при
-    збірці; рамки й наступники — з блоба `pages.boxes`. Рядок без жодного
-    токена не повертається, як і раніше.
+    збірці; рамки — з теки прогону (`_page_geometry`), наступники рахуються
+    з них тим самим `successors`, що й при збірці. Рядок без жодного токена
+    не повертається.
     """
-    row = conn.execute("select raw, boxes from pages where id=?", (pid,)).fetchone()
-    if not row or row[0] is None:
-        return []
-    boxes = _boxes_unpack(row[1])
+    raw, boxes = _page_geometry(conn, pid)
     out: list[Line] = []
-    for no, ln in enumerate(zlib.decompress(row[0]).decode("utf-8").split("\n"), 1):
+    for no, ln in enumerate(raw, 1):
         toks = _tokens(ln)
         if not toks:
             continue
-        box, succ = boxes.get(no, (None, None))
-        out.append(Line(no, " ".join(toks), box, succ))
+        b = boxes[no - 1] if boxes and no <= len(boxes) else None
+        out.append(Line(no, " ".join(toks), (b[0], b[1], b[2], b[3]) if b else None))
+    if boxes:
+        for ln in out:
+            ln.succ = None
+        succ = successors(out)
+        for ln in out:
+            ln.succ = succ.get(ln.no)
     return out
 
 
 def _page_boxes(conn: sqlite3.Connection, pid: int) -> dict[int, tuple[int, int, int, int]]:
-    """Рамки рядків сторінки: {номер рядка: рамка} — без тексту й кандидатів,
-    які каналу запису не потрібні."""
-    row = conn.execute("select boxes from pages where id=?", (pid,)).fetchone()
-    return {no: box for no, (box, _succ) in _boxes_unpack(row[0] if row else None).items()}
+    """Рамки рядків сторінки: {номер рядка: рамка} — для рядків із токенами."""
+    return {ln.no: ln.box for ln in _page_lines(conn, pid) if ln.box}
 
 
 # ── склейка за колонкою ──────────────────────────────────────────────────────
