@@ -1259,6 +1259,21 @@ def ensure_all(runs: list[str], *, force: bool = False, reset_rules: bool = Fals
             elif got > 0:
                 built += 1
                 yield run
+        # 🔴 Спільний відбиток стору (`meta.rules`) доганяє поштучний. Він
+        # ставився лише раз, при першій збірці, тож після зміни правил і
+        # повного догону звичайним `text index` стор і далі казав «відбиток не
+        # збігається, перебудуйте» — хоч жодного прогону на старих правилах
+        # уже не було (замір 13.11.2026). Поки хоч один такий є — не чіпаємо:
+        # тоді бреше не він, а змішаний стор, і про це каже `rules_other`.
+        with contextlib.suppress(sqlite3.Error):
+            if (conn.execute("select 1 from runs limit 1").fetchone()
+                    and not conn.execute("select 1 from runs where coalesce(rules,'')<>? "
+                                         "limit 1", (rules_now,)).fetchone()
+                    and conn.execute("select 1 from meta where key='rules' and value<>?",
+                                     (rules_now,)).fetchone()):
+                conn.execute("insert or replace into meta(key,value) values('rules',?)",
+                             (rules_now,))
+                conn.commit()
         # `optimize` зливає ВСІ сегменти FTS під write-lock — на 6.5 ГБ це
         # не для кожного `index --case`; лише коли зібрано багато або примусово.
         # Зайнятий стор — не причина валити вже зроблену індексацію: злиття

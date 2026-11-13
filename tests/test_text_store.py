@@ -474,6 +474,47 @@ def test_full_index_drops_the_previous_schema_file(space: Path) -> None:
     assert ST.exists()
 
 
+def test_plain_index_catches_up_after_a_fold_change(
+        space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Зміну таблиці фолду доганяє звичайна збірка, і стор після неї не «застарілий».
+
+    Прогін, зібраний до зміни, одразу видно як зібраний іншим правилом; після
+    `ensure_all` без прапорців ключі в індексі нові, а спільний відбиток стору
+    збігається з чинним (доти він лишався старим і радив `--rebuild`).
+    """
+    from nyshporka import htr_store as S
+    from nyshporka.search import store as ST
+    from nyshporka.utils import translit as T
+
+    list(ST.ensure_all(["проба"]))
+    assert ST.stats()["rules_stale"] is False
+
+    def count(tri: str) -> int:
+        conn = ST.connect(readonly=True)
+        try:
+            return int(conn.execute("select count(*) from fts where fts match ?",
+                                    (f'"{tri}"',)).fetchone()[0])
+        finally:
+            conn.close()
+
+    assert count("sel") and not count("sil")          # «селѣ» → sele
+    monkeypatch.setattr(T, "_TAIL_ARCHIVAL_TRANS",
+                        {**T._TAIL_ARCHIVAL_TRANS, ord("е"): "i"})
+    ST.rules_hash.cache_clear()
+    S._norm.cache_clear()
+    try:
+        st = ST.stats()
+        assert st["rules_stale"] is True and st["rules_other"] == 1
+        assert list(ST.ensure_all(["проба"])) == ["проба"]
+        st = ST.stats()
+        assert st["rules_other"] == 0 and st["rules_stale"] is False
+        assert count("sil") and not count("sel")
+    finally:
+        monkeypatch.undo()
+        ST.rules_hash.cache_clear()
+        S._norm.cache_clear()
+
+
 def test_a_rebuild_killed_halfway_is_visible_run_by_run(space: Path) -> None:
     """🔴 Спільний відбиток правил бреше на користь свіжості.
 
