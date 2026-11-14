@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -292,6 +293,25 @@ def test_povne_vikno_trymaie_pauzu(
     with pytest.raises(vyklyky.Vidmova):
         vyklyky.zapustyty("a.b", {})
     assert stan["supriaha_pauzy"]["a.b"]["prychyna"] == "vikno"
+
+
+def test_dovha_pauza_ne_dovshe_hodyny(
+    monkeypatch: pytest.MonkeyPatch, stan: dict[str, Any]
+) -> None:
+    """13.11.2026: сервер велів чекати 18 діб, власник розширив вікно за дві години,
+    а клієнт відмовляв сам собі до грудня. Пауза — не довша за годину, а старий
+    запис із днями не зупиняє запит."""
+    pul = Pul(monkeypatch)
+    pul.post["/m/vyklyky"] = vyklyky.Vidmova(
+        "limit", status=429, retry_after=1_558_880, prychyna="vikno", vycherpano=True)
+    with pytest.raises(vyklyky.Vidmova):
+        vyklyky.zapustyty("a.b", {})
+    do = stan["supriaha_pauzy"]["a.b"]["do"]
+    assert do - time.time() <= vyklyky.PAUZA_MAKS + 1
+
+    stan["supriaha_pauzy"]["a.b"]["do"] = time.time() + 1_558_880  # запис старого клієнта
+    pul.post["/m/vyklyky"] = {"id": 3, "stan": "chekaie"}
+    assert vyklyky.zapustyty("a.b", {})["id"] == 3
 
 
 def test_vidmova_rozbyraie_prychynu_i_vikna() -> None:

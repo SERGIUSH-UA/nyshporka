@@ -29,6 +29,11 @@ OPYS_MAKS = 1000
 TEKST_MAKS = 4000
 #: Причини, за яких новий запит не змінить відповіді: повтор лише стукає в сервер.
 PAUZA_PRYCHYNY = ("odnochasno", "chasto")
+#: Найдовша пауза, яку клієнт тримає сам, не питаючи сервер. Вікно норми може
+#: розширити власник: 13.11.2026 сервер велів чекати 18 діб, вікно підняли за
+#: дві години, а клієнт так і відмовляв сам собі текстом «повторіть за 1558880 с».
+#: Година — один зайвий запит на годину, якщо норму справді вичерпано.
+PAUZA_MAKS = 3600
 
 
 class Vidmova(C.PoolError):
@@ -143,7 +148,8 @@ def _pereviryty_pauzu(operatsiia: str) -> None:
     if not isinstance(zapys, dict):
         return
     zalyshok = int(float(zapys.get("do") or 0) - time.time()) + 1
-    if zalyshok > 1:
+    # Довша за PAUZA_MAKS — запис старого клієнта: такій вірити не можна, питаємо сервер.
+    if 1 < zalyshok <= PAUZA_MAKS + 1:
         raise Vidmova(str(zapys.get("tekst") or "сервер велів зачекати"), status=429,
                       retry_after=zalyshok, prychyna=str(zapys.get("prychyna") or ""))
 
@@ -154,7 +160,8 @@ def _zapamiataty_pauzu(operatsiia: str, exc: Vidmova) -> None:
     from nyshporka.core import workspace as W
 
     W.state_set(**{W.KEY_SUPRIAHA_PAUZY: {**_pauzy(), operatsiia: {
-        "do": time.time() + exc.retry_after, "tekst": str(exc), "prychyna": exc.prychyna}}})
+        "do": time.time() + min(exc.retry_after, PAUZA_MAKS), "tekst": str(exc),
+        "prychyna": exc.prychyna}}})
 
 
 def zniaty_pauzy() -> None:
