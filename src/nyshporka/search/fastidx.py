@@ -42,7 +42,7 @@ import re
 import shutil
 import sqlite3
 import zlib
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -279,7 +279,7 @@ def _writer_threads() -> int:
 
 
 def _by_run(conn: sqlite3.Connection, todo: list[int], threads: int
-            ) -> Iterator[tuple[int, list[Fields]]]:
+            ) -> Generator[tuple[int, list[Fields]], None, None]:
     """(прогін, його поля): воркерами, коли збірка велика, інакше в цьому процесі.
 
     🔴 Текст полів — чистий Python і майже половина часу збірки (той самий замір:
@@ -536,11 +536,10 @@ def sync(conn: sqlite3.Connection, *,
     threads = _writer_threads()
     if only is not None:
         threads = _point_threads(sum(_lines_of(conn, todo).values()))
-    elif merge_cost() > MERGE_BACKLOG_DOCS:
+    elif merge_cost() > MERGE_BACKLOG_DOCS and not _merge_now(index, lock_wait):
         # Обірвана збірка лишила чергу злиття: спершу звести її одним потоком,
         # а не відкривати всі дрібні сегменти під повним письменником.
-        if not _merge_now(index, lock_wait):
-            return {"added": 0, "removed": 0, "lines": 0, "busy": True}
+        return {"added": 0, "removed": 0, "lines": 0, "busy": True}
     w = _open_writer(index, threads, lock_wait)
     if w is None:
         return {"added": 0, "removed": 0, "lines": 0, "busy": True}
@@ -570,10 +569,11 @@ def sync(conn: sqlite3.Connection, *,
                     # Злиття відстало: дочекатись його, перш ніж писати далі.
                     # `wait_merging_threads` забирає письменника — відкрити знову.
                     w.wait_merging_threads()
-                    w = _open_writer(index, threads, LOCK_WAIT_SEC)
-                    if w is None:
+                    reopened = _open_writer(index, threads, LOCK_WAIT_SEC)
+                    if reopened is None:
                         lost = True
                         break
+                    w = reopened
         if not lost:
             for rid in gone:
                 st.pop(rid, None)
