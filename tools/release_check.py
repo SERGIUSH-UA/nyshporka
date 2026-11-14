@@ -112,6 +112,25 @@ def migration_version(text: str) -> str:
     return m.group(1) if m else ""
 
 
+def _front(text: str) -> str:
+    """YAML-шапка міграції: тези (`stale`) і кроки (`steps`) живуть у ній."""
+    m = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n", text, re.S)
+    return m.group(1) if m else ""
+
+
+def rewording_only(old: str, new: str) -> list[tuple[str, str]]:
+    """Пари «було → стало», якщо правка лише переписала рядки тіла нотатки.
+
+    Порожньо — правка несе нове: зачеплено шапку (тези, кроки) або змінилась
+    кількість рядків (дописано чи прибрано абзац). Таке простір, що міграцію
+    вже пройшов, не побачить, і воно мусить іти в міграцію нового релізу.
+    """
+    a, b = old.splitlines(), new.splitlines()
+    if not old or _front(old) != _front(new) or len(a) != len(b):
+        return []
+    return [(x, y) for x, y in zip(a, b, strict=True) if x != y]
+
+
 # ── перевірка ────────────────────────────────────────────────────────────────
 @dataclass
 class Report:
@@ -161,6 +180,17 @@ def check(version: str, ref: str = "HEAD", prev: str | None = None) -> Report:
             if path.startswith(MIGRATIONS + "/") and path.endswith(".md"):
                 mv = migration_version(read(ref, path))
                 if mv and version_key(mv) <= version_key(prev):
+                    reworded = rewording_only(read(prev, path), read(ref, path))
+                    if reworded:
+                        # Правка слів у вже сказаному (14.11.2026: із рядка замірів
+                        # прибрано назву чужого індексу) нової тези не несе — але
+                        # показати її людині треба: тезу можна сховати й у заміні.
+                        rep.warnings.append(
+                            f"{path} (версія {mv} вже випущена): змінено формулювання "
+                            f"{len(reworded)} рядк. без нових — перевірити оком: "
+                            + "; ".join(f"«{a.strip()[:60]}» → «{b.strip()[:60]}»"
+                                        for a, b in reworded[:3]))
+                        continue
                     rep.errors.append(
                         f"{path} змінено після {prev}, а версія {mv} вже випущена: простір, "
                         f"що її пройшов, нових тез не побачить. Перенести в міграцію "

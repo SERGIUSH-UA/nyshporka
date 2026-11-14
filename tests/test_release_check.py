@@ -99,6 +99,26 @@ def test_a_thesis_added_to_a_released_migration_is_refused(repo: Path) -> None:
     assert any("0.1.md" in e and "вже випущена" in e for e in errors)
 
 
+def test_a_reworded_line_of_a_released_migration_only_warns(repo: Path) -> None:
+    """14.11.2026: із рядка замірів у `0.46.0.md` прибрано назву чужого індексу —
+    нової тези немає, а ворота не пускали жоден наступний реліз."""
+    _commit(repo, {**_release("0.1.1"),
+                   f"{RC.MIGRATIONS}/0.1.md": MIG.format(v="0.1", extra="").replace(
+                       "# Міграція 0.1", "# Міграція версії 0.1")})
+    rep = RC.check("0.1.1")
+    assert rep.errors == []
+    assert any("0.1.md" in w and "формулювання" in w for w in rep.warnings)
+
+
+def test_a_changed_header_of_a_released_migration_is_refused(repo: Path) -> None:
+    """Шапка — це тези й кроки: рядок замінено, кількість рядків та сама, а
+    простір, що міграцію пройшов, нового кроку не побачить."""
+    _commit(repo, {**_release("0.1.1"),
+                   f"{RC.MIGRATIONS}/0.1.md": MIG.format(v="0.1", extra="").replace(
+                       "title: t", "title: інше")})
+    assert any("0.1.md" in e and "вже випущена" in e for e in RC.check("0.1.1").errors)
+
+
 def test_changed_skills_without_a_migration_warn(repo: Path) -> None:
     _commit(repo, {**_release("0.2.0"), f"{RC.SKILLS}/read-case/SKILL.md": "нова поведінка\n"})
     rep = RC.check("0.2.0")
