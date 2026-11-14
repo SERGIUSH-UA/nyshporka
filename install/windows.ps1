@@ -1516,7 +1516,12 @@ function Install-CatalogFromRelease {
             return $false
         }
         $pack = Join-Path $tmp 'pack'
-        Expand-Archive -LiteralPath $zip -DestinationPath $pack -Force
+        # ⚠ .NET, а не `Expand-Archive`, з тієї ж причини, що й хеш вище: 5.1 з
+        # вікна PowerShell 7 бере його модуль Archive і падає на «Cannot find an
+        # overload for ExtractToDirectory» (14.11.2026). Тека нова, тож -Force
+        # не потрібен.
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [IO.Compression.ZipFile]::ExtractToDirectory($zip, $pack)
         $rc = Invoke-Logged $Nysh catalog install --from $pack --origin $name
         if ($rc -eq 0) {
             Say (M 'cat.ok' $tag) Green
@@ -1541,7 +1546,9 @@ if ($seed -and (Get-NativeLine $nysh catalog origin) -eq $seed.Name) {
     Say (M 'cat.same' $seed.Name) DarkGray
 } elseif ($seed) {
     $tmp = Join-Path $env:TEMP ('nysh-catalog-' + [guid]::NewGuid().ToString('N'))
-    Expand-Archive -Path $seed.FullName -DestinationPath $tmp -Force
+    # ⚠ .NET, а не `Expand-Archive`: див. `Install-CatalogFromRelease` вище.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [IO.Compression.ZipFile]::ExtractToDirectory($seed.FullName, $tmp)
     $null = Invoke-Logged $nysh catalog install --from $tmp --origin $seed.Name
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 } elseif ($NoCatalog) {
