@@ -1203,7 +1203,8 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
         raise GoRefused(
             f"{exc}. Оренду дає окремий пакет-плагін: "
             f"`pip install \"nyshporka[rent]\"`, далі "
-            f"`nysh cloud rent login`.") from None
+            f"`nysh cloud rent login` (акаунта в провайдера ще немає — "
+            f"`nysh cloud rent signup`).") from None
     if not bills(b):
         raise GoRefused(
             f"«{backend}» нічого не орендує — `nysh cloud go` веде захід з "

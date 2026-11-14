@@ -777,7 +777,8 @@ def _rent() -> Check:
         return Check("Оренда", "ok", f"{head}; {RENT_DEFAULT} — готовий{tail}")
     if state is False:
         return Check("Оренда", "warn", f"{head}; {RENT_DEFAULT} — немає ключа{tail}",
-                     "дати ключ провайдера: `nysh cloud rent login`")
+                     "дати ключ провайдера: `nysh cloud rent login`; акаунта "
+                     "ще немає — `nysh cloud rent signup`")
     return Check("Оренда", "ok",
                  f"{head}; {RENT_DEFAULT} — плагін є, чи є ключ — невідомо{tail}",
                  "перевірити ключ і баланс: `nysh cloud rent status`")

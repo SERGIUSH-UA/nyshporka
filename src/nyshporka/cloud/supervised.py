@@ -121,7 +121,8 @@ def gpurunner_cmd() -> list[str]:
     raise SupervisorMissing(
         "наглядача хмарних прогонів немає: `nysh cloud go` на орендованій "
         "машині веде його. Поставте: `pip install \"nyshporka[rent]\"`, "
-        "далі `nysh cloud rent login`. Читати на СВОЇЙ "
+        "далі `nysh cloud rent login` (акаунта в провайдера ще немає — "
+        "`nysh cloud rent signup`). Читати на СВОЇЙ "
         "машині по SSH можна й без нього: `nysh cloud go --thin` або "
         "`nysh cloud start <тека> --host <машина>`.")
 

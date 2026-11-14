@@ -246,7 +246,8 @@ def _print_plan(p: CloudPlan) -> None:
 #: свій SDK, свій акаунт і своя тарифікація в ядрі не живуть.
 _RENT_HINT = ("бекенда оренди немає. Його дає окремий пакет-плагін: "
               "`pip install \"nyshporka[rent]\"`, далі — "
-              "`nysh cloud rent login`. Що є зараз: `nysh cloud hosts list`")
+              "`nysh cloud rent login` (акаунта в провайдера ще немає — "
+              "`nysh cloud rent signup`). Що є зараз: `nysh cloud hosts list`")
 
 
 def _usd(value: float | None, digits: int = 2) -> str:
@@ -1482,6 +1483,70 @@ def _print_account(view: _Account) -> None:
                 f"{r['status'] or 'стан невідомий'} · {whose}", highlight=False)
 
 
+#: Адреса РЕЄСТРАЦІЇ у провайдера — для того, хто акаунта ще не має. Першим
+#: питаємо сам бекенд (`signup_url()`); таблиця — на випадок старішого пакета
+#: оренди, який цього методу ще не знає. Адреса Vast реферальна: проєкт дістає
+#: від провайдера частку з поповнень, людині це нічого не коштує. 🔴 Чіпляється
+#: реферал лише в мить реєстрації, тому голу адресу провайдера новачкові не
+#: показуємо ніде — ні тут, ні в документації, ні в скілі помічника.
+SIGNUP_URLS = {"vast": "https://cloud.vast.ai/?ref_id=623398"}
+
+
+def signup_url(backend: str, b: object | None = None) -> str:
+    """Адреса реєстрації для бекенда або `""`, коли її ніхто не знає."""
+    fn = getattr(b, "signup_url", None)
+    if callable(fn):
+        try:
+            got = str(fn() or "").strip()
+        except Exception:
+            got = ""
+        if got.startswith("https://"):
+            return got
+    return SIGNUP_URLS.get(backend, "")
+
+
+@rent_app.command("signup")
+@route("cloud rent signup", tier="rare", skill="run-case-remote",
+       when="у людини ще немає акаунта в провайдера оренди — сторінка "
+            "реєстрації; іншої адреси не давати")
+def rent_signup(
+    backend: str = typer.Option("vast", "--backend", "-b", help="бекенд оренди"),
+    no_open: bool = typer.Option(
+        False, "--no-open", help="лише надрукувати адресу, браузера не відкривати"),
+) -> None:
+    """Завести акаунт у провайдера оренди: відкрити сторінку реєстрації.
+
+    Крок для того, хто провайдером ще не користувався. Працює й без пакета
+    оренди. Після реєстрації — поповнити баланс на кілька доларів, узяти ключ
+    API в кабінеті й віддати його: `nysh cloud rent login`.
+    """
+    from nyshporka.cloud import registry as REG
+
+    url = signup_url(backend, REG.load().get(backend))
+    if not url:
+        console.print(f"[err]адреси реєстрації для «{backend}» немає — дивіться "
+                      f"документацію цього бекенда[/err]")
+        raise typer.Exit(code=1)
+    opened = False
+    if not no_open:
+        import webbrowser
+
+        try:
+            opened = bool(webbrowser.open(url))
+        except Exception:
+            opened = False
+    console.print(("сторінку реєстрації відкрито в браузері: " if opened
+                   else "сторінка реєстрації: ") + url, highlight=False,
+                  soft_wrap=True)
+    console.print("  1. зареєструйтесь за цим посиланням і поповніть баланс "
+                  "на кілька доларів\n"
+                  "  2. у кабінеті: Account → API Keys → створіть ключ\n"
+                  "  3. віддайте ключ: nysh cloud rent login")
+    console.print("[muted]посилання реферальне: вам воно нічого не коштує, а "
+                  "Нишпорка дістає від провайдера невелику частку з ваших "
+                  "поповнень[/muted]")
+
+
 #: Звідки взяти ключ, якщо його не дали прапорцем. Загальне ім'я — перше; друге
 #: складається з імені бекенда (`VAST_API_KEY`), бо саме так його вже тримають
 #: ті, хто користувався провайдером раніше.
@@ -1515,6 +1580,13 @@ def rent_login(
     secret = (key or os.environ.get(ENV_RENT_KEY, "")
               or os.environ.get(f"{backend.upper()}_API_KEY", "")).strip()
     if not secret:
+        url = signup_url(backend, b)
+        if url:
+            # Ключ питаємо в людини, яка, можливо, акаунта ще не має: адреса
+            # реєстрації мусить бути в неї перед очима саме тут.
+            console.print(f"[muted]акаунта ще немає? реєстрація: {url} "
+                          f"(або: nysh cloud rent signup)[/muted]",
+                          highlight=False, soft_wrap=True)
         secret = str(typer.prompt(f"ключ API «{backend}»", hide_input=True)).strip()
     if not secret:
         console.print("[err]ключ порожній[/err]")

@@ -977,6 +977,46 @@ def test_login_hands_the_key_over_and_never_prints_it(cli, monkeypatch) -> None:
     assert KEY_TEXT not in asked.output, "прихований запит нічого не відлунює"
 
 
+def test_signup_opens_the_referral_page(cli, monkeypatch) -> None:
+    """Реферал чіпляється лише при реєстрації: новачок мусить потрапити на
+    адресу з `ref_id`, а не на голу сторінку провайдера."""
+    import webbrowser
+
+    from nyshporka.cloud import cli as C
+
+    runner, app, backend = cli
+    opened: list[str] = []
+    monkeypatch.setattr(webbrowser, "open", lambda url: opened.append(url) or True)
+
+    got = runner.invoke(app, ["rent", "signup"])
+    url = C.SIGNUP_URLS["vast"]
+    assert got.exit_code == 0 and opened == [url]
+    assert "ref_id=" in url and url in got.output.replace("\n", "")
+    assert "nysh cloud rent login" in got.output and "реферальне" in got.output
+
+    quiet = runner.invoke(app, ["rent", "signup", "--no-open"])
+    assert quiet.exit_code == 0 and opened == [url], "з --no-open браузер не чіпаємо"
+
+    # Адресу, яку назвав сам пакет оренди, беремо першою.
+    backend.signup_url = lambda: "https://example.org/?ref=1"
+    runner.invoke(app, ["rent", "signup"])
+    assert opened[-1] == "https://example.org/?ref=1"
+
+    assert runner.invoke(app, ["rent", "signup", "-b", "nope"]).exit_code == 1
+
+
+def test_login_prompt_shows_where_to_sign_up(cli, monkeypatch) -> None:
+    from nyshporka.cloud import cli as C
+
+    runner, app, _ = cli
+    monkeypatch.delenv("NYSHPORKA_RENT_KEY", raising=False)
+    monkeypatch.delenv("VAST_API_KEY", raising=False)
+    asked = runner.invoke(app, ["rent", "login"], input=KEY_TEXT + "\n")
+    assert C.SIGNUP_URLS["vast"] in asked.output.replace("\n", "")
+    with_key = runner.invoke(app, ["rent", "login", "--key", KEY_TEXT])
+    assert "ref_id=" not in with_key.output, "ключ уже є — реєстрація ні до чого"
+
+
 def test_a_key_the_provider_rejected_is_a_failed_login(cli) -> None:
     """🔴 Бекенд зберігає й відхилений ключ, а відмову кладе в `problems`: «метод
     не кинув» ще не означає «увійшли»."""
