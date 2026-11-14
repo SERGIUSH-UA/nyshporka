@@ -83,6 +83,29 @@ def test_fresh_space_gets_a_local_repo(space: Path) -> None:
     assert not again.created and _git(space, "rev-list", "--count", "HEAD").strip() == "1"
 
 
+def test_first_snapshot_leaves_big_files_and_share_packs_out(
+        space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Тека з оригіналами, яку людина поклала сама, не копіюється в `.git`."""
+    monkeypatch.setattr(V, "BIG_FILE", 4000)
+    originals = space / "data" / "originals"
+    originals.mkdir(parents=True)
+    (originals / "книга [1818] #1.pdf").write_bytes(b"x" * 5000)
+    (originals / "опис.txt").write_text("малий файл", encoding="utf-8")
+    outbox = space / "data" / "share" / "outbox"
+    outbox.mkdir(parents=True)
+    (outbox / "пакет.tar").write_bytes(b"y" * 10)
+    (space / "data" / "share" / "journal.jsonl").write_text("{}\n", encoding="utf-8")
+    rep = V.ensure_repo(space)
+    assert rep.big == ["data/originals/книга [1818] #1.pdf"]
+    assert any("великих файлів" in n for n in rep.notes)
+    tracked = _git(space, "ls-files").splitlines()
+    assert "data/originals/опис.txt" in tracked, "малий файл поруч іде в історію"
+    assert "data/share/journal.jsonl" in tracked, "журнал обміну лишається в історії"
+    assert not [t for t in tracked if t.endswith((".pdf", ".tar"))]
+    assert (originals / "книга [1818] #1.pdf").stat().st_size == 5000, "файл на місці"
+    assert _git(space, "status", "--porcelain").strip() == "", "і не висить невідстеженим"
+
+
 def test_existing_repo_is_left_to_its_owner(space: Path) -> None:
     _git(space, "init", "-q")
     _git(space, "config", "user.email", "t")
