@@ -1,3 +1,4 @@
+{% from "_macros.j2" import gallery %}
 ---
 title: {{ place.name | q }}
 ---
@@ -36,6 +37,19 @@ title: {{ place.name | q }}
 [<span class="nysh-pc__name">{{ entry.name }}</span><span class="nysh-pc__years">{{ entry.context }}</span>](../persons/{{ entry.id }}.md){ .nysh-pc }
 {% endfor %}
 </div>
+{% endif %}
+
+{% if documents %}
+## {{ t("documents") }} { #documents }
+
+{{ gallery(documents) }}
+{% endif %}
+
+{% if media_lines %}
+## {{ t("media") }} { #media }
+
+{{ media_lines | join('
+') }}
 {% endif %}
 
 {% if place.period_notes %}

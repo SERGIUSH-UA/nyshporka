@@ -489,7 +489,12 @@ def _build(
     for pl in places:
         out = docs_dir / "places" / f"{pl.id}.md"
         out.write_text(
-            place_tpl.render(place=pl, related_persons=related_by_place.get(pl.id, [])),
+            place_tpl.render(
+                place=pl,
+                related_persons=related_by_place.get(pl.id, []),
+                documents=citation_docs.get(pl.id, []),
+                media_lines=[_media_line(m) for m in pl.media],
+            ),
             encoding="utf-8",
         )
 
@@ -927,6 +932,10 @@ def _public_citation_docs(project_root: Path, docs_dir: Path,
     return by_page
 
 
+_MEDIA_LOCAL = {"photo": "локальне фото", "document": "документ у сторі доказів",
+                "other": "локальний файл"}
+
+
 def _media_line(m: MediaRef) -> str:
     parts: list[str] = ["- "]
     if m.caption:
@@ -934,7 +943,7 @@ def _media_line(m: MediaRef) -> str:
     if m.url:
         parts.append(f"[оригінал]({m.url})")
     else:
-        parts.append("локальне фото")
+        parts.append(_MEDIA_LOCAL.get(m.type, "локальний файл"))
     if m.sha256:
         parts.append(f" `{m.sha256[:12]}…`")
     return "".join(parts)

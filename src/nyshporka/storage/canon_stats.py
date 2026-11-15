@@ -92,7 +92,15 @@ def _totals(con: sqlite3.Connection) -> dict[str, int]:
         "facts": _one(con, "SELECT count(*) FROM facts"),
         "citations": _one(con, "SELECT count(*) FROM citations"),
         "media": _one(con, "SELECT count(*) FROM media"),
+        "place_media": _one_if(con, "place_media"),
     }
+
+
+def _one_if(con: sqlite3.Connection, table: str) -> int:
+    """Рядки таблиці, якої в базі, зібраній старшою Нишпоркою, ще могло не бути."""
+    found = con.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()
+    return _one(con, f"SELECT count(*) FROM {table}") if found else 0
 
 
 def _facts_by_type(con: sqlite3.Connection) -> list[dict[str, Any]]:

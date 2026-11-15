@@ -144,6 +144,16 @@ CREATE TABLE media (
 );
 CREATE INDEX idx_media_person ON media(person_id);
 
+CREATE TABLE place_media (
+    place_id TEXT NOT NULL REFERENCES places(id),
+    sha256 TEXT,
+    path TEXT,
+    url TEXT,
+    caption TEXT,
+    type TEXT NOT NULL
+);
+CREATE INDEX idx_place_media_place ON place_media(place_id);
+
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 
@@ -382,6 +392,12 @@ def _write_sqlite(
                 pl.notes,
             ),
         )
+        for m in pl.media:
+            cur.execute(
+                "INSERT INTO place_media (place_id, sha256, path, url, caption, type) "
+                "VALUES (?,?,?,?,?,?)",
+                (pl.id, m.sha256, m.path, m.url, m.caption, m.type),
+            )
 
     for p in persons:
         cur.execute(

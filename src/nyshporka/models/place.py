@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from nyshporka.models.common import LangCode
+from nyshporka.models.common import LangCode, MediaRef
 
 
 class Place(BaseModel):
@@ -22,5 +22,9 @@ class Place(BaseModel):
     period_notes: str = Field(
         default="",
         description="Зміни приналежності в часі (напр. «1939-1944 — рейхскомісаріат»).",
+    )
+    media: list[MediaRef] = Field(
+        default_factory=list,
+        description="Докази про саме місце: вирізка з карти, рядок довідника поселень, фото.",
     )
     notes: str = ""
