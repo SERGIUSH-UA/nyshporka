@@ -58,7 +58,7 @@ def _wire_pp(monkeypatch, main_reads: list[str], voice_reads: list[str]):
 
     crops = [f"crop{i}" for i in range(len(main_reads))]
 
-    def fake_line_crops(im, seg):
+    def fake_line_crops(im, seg, lift=0.0):
         fake_line_crops.boxes = [[i, 0, i + 1, 1] for i in range(len(crops))]
         fake_line_crops.polys = [None] * len(crops)
         return list(crops)
