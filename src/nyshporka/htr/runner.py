@@ -1366,8 +1366,53 @@ def kraken_decode_crops(voice: tuple, crops: list, batch: int = 1) -> list[str]:
     return _decode_in_batches(crops, batch, run_batch, run_one, after_batch_error)
 
 
-def _line_crops(im: Image.Image, seg) -> list:
+#: Запас угору для кропів PP-моделей, частка висоти рядка (`--pp-line-lift`).
+#: 0 — вимкнено, кроп тотожний попередньому.
+PP_LINE_LIFT = [0.0]
+
+
+def _lift_lines(seg, lift: float):
+    """Сегментація, у якій межа кожного рядка піднята вгору на `lift` медіанної висоти рядка.
+
+    Шов kraken між сусідніми рядками тулиться до тіла рядка (штраф за віддалення від базової
+    лінії) і проходить ПІД виносними літерами скоропису XVI–XVII ст.: у кропі їх немає, хоча
+    модель їх знає. Замір на власних назвах із друкованих видань (Регент, 15.11.2026, 10,5 тис.
+    назв): запас 10 % під час читання дає +5 пп назв, прочитаних точно, будь-якій версії, без
+    трену. Піднімаються лише точки межі над базовою лінією; низ і сама лінія не рухаються, тож
+    випрямлення рядка лишається тим самим. Геометрія рядка у виході (рамки, полігони) — вихідна.
+    """
+    import dataclasses
+
+    hs = []
+    for ln in seg.lines:
+        pts = list(getattr(ln, "boundary", None) or [])
+        if pts:
+            ys = [p[1] for p in pts]
+            hs.append(max(ys) - min(ys))
+    if not hs:
+        return seg
+    d = round(lift * float(np.median(hs)))
+    if d <= 0:
+        return seg
+    out = []
+    for ln in seg.lines:
+        pts = list(getattr(ln, "boundary", None) or [])
+        base = sorted((float(x), float(y)) for x, y in (getattr(ln, "baseline", None) or []))
+        if not pts or len(base) < 2:
+            out.append(ln)
+            continue
+        bx = [x for x, _ in base]
+        by = [y for _, y in base]
+        new = [(x, max(0, int(y) - d)) if y < float(np.interp(x, bx, by)) else (x, y) for x, y in pts]
+        out.append(dataclasses.replace(ln, boundary=new))
+    return dataclasses.replace(seg, lines=out)
+
+
+def _line_crops(im: Image.Image, seg, lift: float = 0.0) -> list:
     """Кропи рядків із сегментації.
+
+    `lift` > 0 — кропи вирізаються з межею, піднятою вгору (`_lift_lines`); рамки й полігони,
+    що лягають поруч із кропом, лишаються вихідними.
 
     Спершу одним проходом по всій сегментації, і лише при збої — порядково.
     Чому саме так (заміряно на ф.196 спр.14536 кадр 0002, 72-74 рядки, кадр
@@ -1415,6 +1460,7 @@ def _line_crops(im: Image.Image, seg) -> list:
         _line_crops.polys.append(p)
 
     _reset()
+    cut = _lift_lines(seg, lift) if lift > 0 else seg     # ріжемо з `cut`, геометрію беремо з `seg`
     try:
         crops = []
         # 🔴 `strict=False` тут свідомий, а не забутий. `extract_polygons` —
@@ -1423,7 +1469,7 @@ def _line_crops(im: Image.Image, seg) -> list:
         # сторінку через припущення; мовчки обрізати — прив'язати кроп до чужої
         # геометрії рядка, а це вже спотворення тексту, якого не видно.
         # Тому: не падаємо, але розбіжність називаємо вголос.
-        _polys = list(extract_polygons(im, seg))
+        _polys = list(extract_polygons(im, cut))
         if len(_polys) != len(seg.lines):
             print(f"[htr-run] ⚠ сегментація віддала {len(_polys)} вирізок на "
                   f"{len(seg.lines)} рядків — прив'язка геометрії на цій "
@@ -1437,9 +1483,9 @@ def _line_crops(im: Image.Image, seg) -> list:
         pass
     crops = []
     _reset()
-    for ln in seg.lines:
+    for ln, cln in zip(seg.lines, cut.lines, strict=True):
         try:
-            one = dataclasses.replace(seg, lines=[ln])
+            one = dataclasses.replace(seg, lines=[cln])
             crop, _ = next(extract_polygons(im, one))
         except Exception:
             continue
@@ -2534,7 +2580,7 @@ def ocr_page_pp(im: Image.Image, segmenter, rec, seg_ctx: dict | None = None
     ctx = seg_ctx or {}
     seg = segmenter.segment(im, ctx.get("stem", ""), ctx.get("orient", 0),
                             ctx.get("enhanced", ""))
-    crops = _line_crops(im, seg)
+    crops = _line_crops(im, seg, PP_LINE_LIFT[0])
     _note_line_extent(crops)
     boxes = list(getattr(_line_crops, "boxes", []) or [])
     polys = list(getattr(_line_crops, "polys", []) or [])
@@ -4097,6 +4143,9 @@ def main() -> int:
     ap.add_argument("--max-endpoints", type=int, default=400,
                     help="стеля кінців скелета в сегментації (400 = рідні "
                          "kraken ≈ 200 рядків на сторінку)")
+    ap.add_argument("--pp-line-lift", type=float, default=0.0,
+                    help="запас угору для кропів PP-моделей, частка висоти рядка "
+                         "(0.1 для Регента: виносні літери; 0 = вимкнено)")
     ap.add_argument("--ceiling-retry", type=int, default=1600,
                     help="якщо стеля різала — перепустити саме ЦЮ сторінку з "
                          "такою стелею (0 = не перепускати)")
@@ -4186,6 +4235,9 @@ def main() -> int:
                          "Моделі вантажаться ОДИН раз, справи йдуть по черзі; файл "
                          "може дописуватись під час роботи")
     args = ap.parse_args()
+    PP_LINE_LIFT[0] = max(0.0, float(args.pp_line_lift))
+    if PP_LINE_LIFT[0]:
+        print(f"[htr-run] кропи PP-моделей із запасом угору {PP_LINE_LIFT[0]:.0%} висоти рядка", flush=True)
 
     # Дані, яких раннер не має знати сам: чиє прізвище рятуємо, яка шифра справи,
     # що робити після прогону. Усе приходить ззовні, тож модуль лишається

@@ -417,3 +417,14 @@ def test_missing_engines_is_its_own_refusal_with_the_console_fix(space: Path,
     env = O.call("read.plan", {"case_dir": str(case)})
     assert not env.ok and "рушіїв" in env.error
     assert [n.op for n in env.next] == ["htr.install"]
+
+
+def test_regent_reads_with_line_lift_and_others_do_not():
+    """Запас угору вмикає модель: Регент — 10 % висоти рядка, решта — без прапора."""
+    from nyshporka.htr.run import pp_line_lift
+
+    assert pp_line_lift("T:/models/regent_v6.safetensors") == 0.1
+    assert pp_line_lift("Regent_v20s_e03.safetensors") == 0.1
+    assert pp_line_lift("diak_cyr_v6.safetensors") == 0.0
+    assert pp_line_lift("pysar_cyr_v31.pt") == 0.0
+    assert pp_line_lift("skryba_pp_v4.safetensors") == 0.0

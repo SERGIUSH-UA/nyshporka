@@ -29,6 +29,19 @@ from nyshporka.htr.pick import ScriptGuess
 _IMG_EXT = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
 
 
+#: Запас угору для кропів рядка, частка висоти рядка — за префіксом імені основної моделі.
+#: Регент: шов між рядками проходить під виносними літерами скоропису XVI–XVII ст.; із запасом 10 % на власних
+#: назвах із друкованих видань бойове читання 53 сторінок дало 69,9 → 75,8 % назв, прочитаних точно (пошуком
+#: 95,8 → 95,6 %), і так само для попередньої версії (63,9 → 70,3 %). Для інших моделей не міряно — не вмикати.
+PP_LINE_LIFT: dict[str, float] = {"regent_": 0.1}
+
+
+def pp_line_lift(model: str | Path) -> float:
+    """Запас угору для основної моделі читання (0 — без запасу)."""
+    name = Path(str(model)).name.lower()
+    return next((v for k, v in PP_LINE_LIFT.items() if name.startswith(k)), 0.0)
+
+
 class ReadError(RuntimeError):
     """Прогін не можна почати — з поясненням, що саме заважає."""
 
@@ -126,6 +139,10 @@ class Plan:
                "--out-dir", str(self.out_dir),
                "--model", str(self.model),
                "--script", self.script]
+        lift = pp_line_lift(self.model)
+        if lift:
+            # ⬆ Запас угору для виносних літер: вмикає модель, а не людина.
+            cmd += ["--pp-line-lift", f"{lift:g}"]
         if self.seg_cache is not None:
             cmd += ["--seg-cache-dir", str(self.seg_cache)]
         if self.voices:
