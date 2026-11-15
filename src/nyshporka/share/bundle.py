@@ -26,15 +26,19 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import lzma
+import os
 import re
 import tarfile
+import tempfile
 import time
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Final
 
 from nyshporka.htr import layout as HL
+from nyshporka.share import geomcodec
 from nyshporka.utils import tarsafe
 
 #: Розширення пакета. Одне слово, щоб його впізнавали й ті, хто Нишпорки не має.
@@ -90,6 +94,27 @@ PACKED_GEOMETRY = "*.lines.json"
 #: їде розтиснутою під ім'ям `*.lines.json`: формат пулу не міняється, бо
 #: старі клієнти учасників інакше пакета не приймуть. Сам пакет і так tar.gz.
 PACKED_GEOMETRY_GZ = "*.lines.json.gz"
+
+#: 🗜 Щільний пакет геометрії: tar під xz, сторінка — щільним записом
+#: (`share.geomcodec`) під іменем `*.lines.bin`. Проти tar.gz із JSON це 39 % обсягу
+#: (замір 15.11.2026 на 12 пакетах пулу). Читач (`_open`) розгортає його в ту саму
+#: розкладку `*.lines.json`, тож решта коду різниці не бачить.
+#:
+#: 🔴 Пишеться лише на явну вимогу (`write(compact=True)` або змінна
+#: `NYSH_GEOM_PACK=xz`): клієнти до цієї версії відкривають пакет як tar.gz і щільний
+#: відкинуть як «не пакет обміну». Типовим він стане, коли читати його вмітимуть
+#: і сервер порталу, і більшість клієнтів.
+GEOM_BIN_SUFFIX = ".lines.bin"
+GEOM_JSON_SUFFIX = ".lines.json"
+XZ_PRESET: Final = 6
+ENV_GEOM_PACK = "NYSH_GEOM_PACK"
+_XZ_MAGIC = b"\xfd7zXZ\x00"
+
+
+def compact_wanted() -> bool:
+    """Чи писати пакет геометрії щільним за замовчуванням на цій машині."""
+    return (os.environ.get(ENV_GEOM_PACK) or "").strip().lower() == "xz"
+
 
 #: Два ВЗАЄМОВИКЛЮЧНІ набори: текстовий пакет і пакет геометрії.
 #:
@@ -499,10 +524,22 @@ def plan(run_dirs: list[Path], *, patterns: tuple[str, ...] = PACKED) -> dict[st
             "chars": sum(v.chars for v in voices)}
 
 
+def _writer(tmp: Path, compact: bool) -> tarfile.TarFile:
+    """Відкрити пакет на запис: щільний — tar під xz, звичайний — tar.gz."""
+    if compact:
+        return tarfile.open(tmp, "w:xz", preset=XZ_PRESET)
+    return tarfile.open(tmp, "w:gz", compresslevel=GZ_LEVEL)
+
+
 def write(dest: Path, manifest: Manifest, run_dirs: list[Path], *,
           frames: list[dict[str, Any]] | None = None,
-          patterns: tuple[str, ...] = PACKED) -> dict[str, Any]:
+          patterns: tuple[str, ...] = PACKED,
+          compact: bool | None = None) -> dict[str, Any]:
     """Зібрати пакет. Повертає шлях, розмір і sha256 — рядок для каталогу.
+
+    `compact` — щільний пакет геометрії (`GEOM_BIN_SUFFIX`); лише для набору
+    `PACKED_GEOM`, текстовий пакет лишається tar.gz завжди. `None` — як велить
+    `compact_wanted()`.
 
     Пишеться в `.part` і перейменовується: обірвана збірка не лишає файлу, що
     виглядає як готовий пакет.
@@ -519,7 +556,11 @@ def write(dest: Path, manifest: Manifest, run_dirs: list[Path], *,
     # 9 жме 6 с, 6 — 1,7 с, а пакет більший на 1 % (замір 21.10.2026). Стиснення
     # було найдовшим кроком пакування, тож пачка в Супрягу впиралась саме в нього.
     # Пул упізнає повтор за хешем змісту, а не байтами пакета — рівень на це не впливає.
-    with tarfile.open(tmp, "w:gz", compresslevel=GZ_LEVEL) as tar:
+    if compact is None:
+        compact = compact_wanted()
+    compact = bool(compact) and patterns == PACKED_GEOM
+    opened = _writer(tmp, compact)
+    with opened as tar:
         _add_bytes(tar, MANIFEST_NAME, body.encode("utf-8"))
         _add_bytes(tar, README_NAME, readme(manifest).encode("utf-8"))
         if frames:
@@ -530,6 +571,9 @@ def write(dest: Path, manifest: Manifest, run_dirs: list[Path], *,
                 arc = f"{RUNS_SUB}/{d.name}/{arc_name(f)}"
                 if f.name == META_NAME:
                     _add_bytes(tar, arc, _clean_meta_bytes(f))
+                elif compact and arc.endswith(GEOM_JSON_SUFFIX):
+                    _add_bytes(tar, arc[: -len(GEOM_JSON_SUFFIX)] + GEOM_BIN_SUFFIX,
+                               _compact_page(HL.geometry_bytes(f)))
                 elif f.name.endswith(HL.GZ_SUFFIX):
                     _add_bytes(tar, arc, HL.geometry_bytes(f))
                 else:
@@ -537,6 +581,19 @@ def write(dest: Path, manifest: Manifest, run_dirs: list[Path], *,
     tmp.replace(dest)
     return {"path": str(dest), "bytes": dest.stat().st_size,
             "sha256": sha256_of(dest)}
+
+
+def _compact_page(raw: bytes) -> bytes:
+    """JSON сторінки геометрії → щільний запис. Сторінка, що не розбирається, — помилка
+    пакування: покладену «як є» під щільним іменем читач не розбере."""
+    try:
+        page = json.loads(raw.decode("utf-8"))
+    except ValueError as exc:
+        raise BundleError(f"сторінка геометрії не розбирається: {exc}") from exc
+    try:
+        return geomcodec.encode_page(page)
+    except geomcodec.GeomCodecError as exc:
+        raise BundleError(f"сторінка геометрії не лягає в щільний запис: {exc}") from exc
 
 
 def _clean_meta_bytes(path: Path) -> bytes:
@@ -557,6 +614,45 @@ def _add_bytes(tar: tarfile.TarFile, name: str, blob: bytes) -> None:
     info.size = len(blob)
     info.mtime = int(time.time())
     tar.addfile(info, io.BytesIO(blob))
+
+
+def recode(src: Path, dest: Path, *, compact: bool) -> dict[str, Any]:
+    """Перекодувати готовий пакет геометрії між звичайним і щільним виглядом.
+
+    Члени, їхній порядок і час лишаються; сторінки геометрії після перекодування
+    звіряються з оригіналом, і розбіжність — `BundleError`, а не тихо інші рамки.
+    Потрібне серверу пулу: старі пакети стають щільними без участі авторів, а
+    клієнтові, що щільного ще не читає, можна віддати звичайний.
+    """
+    src, dest = Path(src), Path(dest)
+    tmp = dest.with_name(dest.name + ".part")
+    opened = _writer(tmp, compact)
+    pages = 0
+    try:
+        with _open(src) as tar, opened as out:
+            for member in tar.getmembers():
+                if not member.isfile():
+                    continue
+                fh = tar.extractfile(member)
+                blob = fh.read() if fh is not None else b""
+                name = member.name
+                if compact and name.endswith(GEOM_JSON_SUFFIX):
+                    packed = _compact_page(blob)
+                    if json.dumps(geomcodec.decode_page(packed), ensure_ascii=False) != \
+                            json.dumps(json.loads(blob.decode("utf-8")), ensure_ascii=False):
+                        raise BundleError(f"{src.name}: {name} після перекодування інша")
+                    blob, name = packed, name[: -len(GEOM_JSON_SUFFIX)] + GEOM_BIN_SUFFIX
+                    pages += 1
+                info = tarfile.TarInfo(name)
+                info.size = len(blob)
+                info.mtime = member.mtime
+                out.addfile(info, io.BytesIO(blob))
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    tmp.replace(dest)
+    return {"path": str(dest), "bytes": dest.stat().st_size, "sha256": sha256_of(dest),
+            "pages": pages}
 
 
 def sha256_of(path: Path) -> str:
@@ -594,13 +690,72 @@ MAX_DOWNLOAD_BYTES = 2 << 30
 TOP_LEVEL = frozenset({MANIFEST_NAME, FRAMES_NAME, README_NAME})
 
 
-def _open(path: Path) -> tarfile.TarFile:
-    """Відкрити пакет; битий чи не-gzip файл — `BundleError` з причиною."""
+def is_compact(path: Path) -> bool:
+    """Чи це щільний пакет геометрії (tar під xz)."""
     try:
+        with Path(path).open("rb") as fh:
+            return fh.read(len(_XZ_MAGIC)) == _XZ_MAGIC
+    except OSError:
+        return False
+
+
+def _open(path: Path) -> tarfile.TarFile:
+    """Відкрити пакет; битий чи чужий файл — `BundleError` з причиною.
+
+    Єдині двері читання: щільний пакет геометрії звідси виходить уже розгорнутим
+    у звичну розкладку (`_expand_compact`), і жоден читач далі про нього не знає.
+    """
+    try:
+        if is_compact(path):
+            return _expand_compact(Path(path))
         return tarfile.open(path, "r:gz")
-    except (tarfile.TarError, EOFError, OSError, ValueError) as exc:
+    except (tarfile.TarError, lzma.LZMAError, EOFError, OSError, ValueError) as exc:
         raise BundleError(f"{Path(path).name} — не пакет обміну (не tar.gz або "
                           f"обрізаний): {exc}") from exc
+
+
+def _expand_compact(path: Path) -> tarfile.TarFile:
+    """Щільний пакет → тимчасовий нестиснутий tar зі сторінками `*.lines.json`.
+
+    🔴 Стелі діють уже тут, а не лише в читачів: xz жме сильніше за gzip, і пакет
+    на кілька мегабайтів від незнайомця інакше розгорнувся б на весь диск ще до
+    першої перевірки. Тимчасовий файл зникає разом із поверненим об'єктом.
+    """
+    tmp = tempfile.TemporaryFile(prefix="nyshgeom-")  # noqa: SIM115 — живе, доки живий tar
+    try:
+        count = total = 0
+        with tarfile.open(path, "r:xz") as src, tarfile.open(fileobj=tmp, mode="w:") as dst:
+            for member in src:
+                count += 1
+                total += member.size
+                if count > MAX_MEMBERS or total > MAX_TOTAL_BYTES:
+                    raise BundleError(f"{path.name}: пакет більший за стелю розпакування")
+                if not member.isfile():
+                    continue
+                if member.size > MAX_MEMBER_BYTES:
+                    raise BundleError(f"{path.name}: {member.name} більший за стелю файла")
+                fh = src.extractfile(member)
+                blob = fh.read() if fh is not None else b""
+                name = member.name
+                if name.endswith(GEOM_BIN_SUFFIX):
+                    try:
+                        page = geomcodec.decode_page(blob)
+                    except geomcodec.GeomCodecError as exc:
+                        raise BundleError(f"{path.name}: {name} — {exc}") from exc
+                    blob = json.dumps(page, ensure_ascii=False).encode("utf-8")
+                    name = name[: -len(GEOM_BIN_SUFFIX)] + GEOM_JSON_SUFFIX
+                    total += len(blob)
+                    if len(blob) > MAX_MEMBER_BYTES or total > MAX_TOTAL_BYTES:
+                        raise BundleError(f"{path.name}: {name} більший за стелю розпакування")
+                info = tarfile.TarInfo(name)
+                info.size = len(blob)
+                info.mtime = member.mtime
+                dst.addfile(info, io.BytesIO(blob))
+        tmp.seek(0)
+        return tarfile.open(fileobj=tmp, mode="r:")
+    except BaseException:
+        tmp.close()
+        raise
 
 
 def _member_bytes(tar: tarfile.TarFile, name: str, cap: int) -> bytes | None:
@@ -840,7 +995,7 @@ def members(path: Path) -> list[tuple[str, str]]:
     повідомити про нього постфактум.
     """
     out: list[tuple[str, str]] = []
-    with tarfile.open(path, "r:gz") as tar:
+    with _open(path) as tar:
         for name in tar.getnames():
             parts = PurePosixPath(name).parts
             if len(parts) >= 3 and parts[0] == RUNS_SUB:
