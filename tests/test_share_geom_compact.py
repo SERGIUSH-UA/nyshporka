@@ -63,6 +63,10 @@ def _storinka(seed: int, lines: int = 40) -> dict[str, Any]:
     {"polys": [[[True, 2], [3, 4]]]},                      # bool — не ціле
     {"polys": [[[1, 2], [3, 4, 5]]]},                      # точки різної довжини
     {"boxes": [[-5, 0, 10 ** 12, -(10 ** 12)]]},           # від'ємні й великі
+    {"boxes": [[1, 2 ** 70, 3, 4]]},                      # поза int64 — у залишку
+    {"polys": [[[0, 0], [40000, -40000], [1, 1]]]},      # різниці ширші за int16
+    {"polys": [[[0, 0], [128, -128], [1, 127], [-126, 0], [10 ** 10, 5]]]},  # межі байта
+    {"polys": [[[1, 2]], "рядок", None]},               # не список і не null
     {"z": 1, "polys": [[[9, 9]]], "a": {"вкладене": [1, "два", None]}, "boxes": "рядок"},
 ])
 def test_kodek_povertaie_tu_samu_storinku(page: dict[str, Any]) -> None:
@@ -81,9 +85,30 @@ def test_kodek_shchilnishyi_za_json() -> None:
     assert len(lzma.compress(shchilno)) < 0.75 * len(zlib.compress(tekst, 6))
 
 
+def _zapys(head: bytes, tail: bytes = b"") -> bytes:
+    return geomcodec.MAGIC + len(head).to_bytes(4, "little") + head + tail
+
+
+def _u32(*values: int) -> bytes:
+    return b"".join(v.to_bytes(4, "little") for v in values)
+
+
+_HEAD = json.dumps({"k": ["polys"], "p": {"polys": 0}}, separators=(",", ":")).encode()
+
+
 @pytest.mark.parametrize("raw", [
     b"", b"XXX", geomcodec.MAGIC, geomcodec.MAGIC + b"\x05{}",
-    geomcodec.MAGIC + b"\x02{}",                           # заголовок без полів k/p
+    _zapys(b"{}"),                                         # заголовок без полів k/p
+    _zapys(b"[1,2]"),                                      # заголовок не об'єкт
+    _zapys(b'{"k":["x"],"p":{}}'),                         # щільне поле, якого немає
+    _zapys(_HEAD),                                         # потоку поля немає
+    _zapys(_HEAD, _u32(1, 1) + _u32(0) + b"z" + _u32(0)),          # тип масиву
+    # опис обіцяє полігон на 5 точок, а різниць немає
+    _zapys(_HEAD, _u32(4, 1, 2, 5, 2) + _u32(0) + b"h" + _u32(0)),
+    # мітка великої різниці є, а самої різниці немає
+    _zapys(_HEAD, _u32(3, 1, 1, 1) + _u32(1) + b"\x80" + b"h" + _u32(0)),
+    # велика різниця є, а мітки на неї немає
+    _zapys(_HEAD, _u32(3, 1, 1, 1) + _u32(1) + b"\x05" + b"h" + _u32(1) + b"\x00\x01"),
 ])
 def test_kodek_vidmovliaie_bytomu_zapysu(raw: bytes) -> None:
     with pytest.raises(geomcodec.GeomCodecError):
@@ -91,11 +116,14 @@ def test_kodek_vidmovliaie_bytomu_zapysu(raw: bytes) -> None:
 
 
 def test_kodek_ne_viryt_lichylnyku() -> None:
-    """🔴 Кілька байтів, що оголошують мільярд точок, не мають виділити пам'ять під них."""
-    head = json.dumps({"k": ["polys"], "p": {"polys": 0}}, separators=(",", ":")).encode()
-    out = bytearray()
-    geomcodec._put(10 ** 9, out)
-    raw = geomcodec.MAGIC + bytes([len(head)]) + head + bytes(out)
+    """🔴 Кілька байтів, що оголошують мільярд чисел, не мають виділити пам'ять під них."""
+    raw = _zapys(_HEAD, (10 ** 9).to_bytes(4, "little"))
+    with pytest.raises(geomcodec.GeomCodecError, match="лічильник"):
+        geomcodec.decode_page(raw)
+    raw = _zapys(_HEAD, _u32(1, 0) + _u32(10 ** 9))
+    with pytest.raises(geomcodec.GeomCodecError, match="лічильник"):
+        geomcodec.decode_page(raw)
+    raw = _zapys(_HEAD, _u32(1, 0) + _u32(0) + b"q" + _u32(10 ** 9))
     with pytest.raises(geomcodec.GeomCodecError, match="лічильник"):
         geomcodec.decode_page(raw)
 

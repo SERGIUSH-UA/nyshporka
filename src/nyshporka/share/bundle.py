@@ -619,8 +619,8 @@ def _add_bytes(tar: tarfile.TarFile, name: str, blob: bytes) -> None:
 def recode(src: Path, dest: Path, *, compact: bool) -> dict[str, Any]:
     """Перекодувати готовий пакет геометрії між звичайним і щільним виглядом.
 
-    Члени, їхній порядок і час лишаються; сторінки геометрії після перекодування
-    звіряються з оригіналом, і розбіжність — `BundleError`, а не тихо інші рамки.
+    Члени, їхній порядок і час лишаються; рамки ті самі до числа (кодек звіряє
+    кожну сторінку з оригіналом на записі).
     Потрібне серверу пулу: старі пакети стають щільними без участі авторів, а
     клієнтові, що щільного ще не читає, можна віддати звичайний.
     """
@@ -637,11 +637,9 @@ def recode(src: Path, dest: Path, *, compact: bool) -> dict[str, Any]:
                 blob = fh.read() if fh is not None else b""
                 name = member.name
                 if compact and name.endswith(GEOM_JSON_SUFFIX):
-                    packed = _compact_page(blob)
-                    if json.dumps(geomcodec.decode_page(packed), ensure_ascii=False) != \
-                            json.dumps(json.loads(blob.decode("utf-8")), ensure_ascii=False):
-                        raise BundleError(f"{src.name}: {name} після перекодування інша")
-                    blob, name = packed, name[: -len(GEOM_JSON_SUFFIX)] + GEOM_BIN_SUFFIX
+                    # звірка з оригіналом — усередині `geomcodec.encode_page`
+                    blob = _compact_page(blob)
+                    name = name[: -len(GEOM_JSON_SUFFIX)] + GEOM_BIN_SUFFIX
                     pages += 1
                 info = tarfile.TarInfo(name)
                 info.size = len(blob)
