@@ -1704,6 +1704,8 @@ export default {
     'export.rows': 'rânduri: {n}',
     'nav.update': 'Actualizări',
     'bell.title': 'Noutăți: versiune, modele, Supriaha',
+    'support.link': 'Susține Nyshporka',
+    'support.title': 'Susține Nyshporka: server, stocare și dezvoltare',
     'bell.ago.now': 'chiar acum',
     'bell.ago.min': 'acum {n} min',
     'bell.ago.h': 'acum {n} h',

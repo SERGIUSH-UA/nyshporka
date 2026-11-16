@@ -302,6 +302,13 @@ def info() -> None:
                     if intel_mac() else "[muted]немає — nysh htr install[/muted]")
         console.print(f"  {label:8s} {mark}")
 
+    # Підтримка — лише тут, у «про застосунок»: робочі команди й `--json` її не
+    # друкують, щоб не дратувати людину й не їсти контекст агента.
+    from nyshporka.brand.manifest import active as brand_manifest
+
+    if url := brand_manifest().support_url:
+        console.print(f"\n  [muted]підтримати Нишпорку: {url}[/muted]")
+
 
 @app.command()
 @route("sources", op="sources.list")

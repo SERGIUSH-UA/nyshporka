@@ -1637,6 +1637,8 @@ export default {
     'export.rows': 'рядків: {n}',
     'nav.update': 'Оновлення',
     'bell.title': 'Новини: версія, моделі, Супряга',
+    'support.link': 'Підтримати Нишпорку',
+    'support.title': 'Підтримати Нишпорку: сервер, сховище й розробка',
     'bell.ago.now': 'щойно',
     'bell.ago.min': '{n} хв тому',
     'bell.ago.h': '{n} год тому',

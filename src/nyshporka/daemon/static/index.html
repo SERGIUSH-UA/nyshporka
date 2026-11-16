@@ -97,6 +97,12 @@
       aria-haspopup="true" aria-expanded="false" data-i18n-title="bell.title"><svg class="ic ic-o" aria-hidden="true"><use href="#i-bell"/></svg><b class="bell-n" id="bell-n" hidden></b></button>
     <div class="hmenu-pop right bell-pop" id="bell-menu" hidden></div>
   </div>
+  <!--
+    ♡ Підтримати проєкт — тиха іконка, без підпису й без нагадувань. Адресу
+    ставить `fillHeader()` з `SUPPORT_URL` (core/bits.js), щоб вона жила в одному місці.
+  -->
+  <a class="bell" id="support-link" target="_blank" rel="noopener" hidden
+    data-i18n-title="support.title"><svg class="ic ic-o" aria-hidden="true"><use href="#i-heart"/></svg></a>
   <!-- Профіль Супряги: хто ви в спільноті й скільки віддано. -->
   <div class="hmenu">
     <button type="button" class="chip" id="me-chip" data-act="menu.toggle" data-arg="me-menu"

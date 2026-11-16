@@ -1704,6 +1704,8 @@ export default {
     'export.rows': 'rows: {n}',
     'nav.update': 'Updates',
     'bell.title': 'News: version, models, Supriaha',
+    'support.link': 'Support Nyshporka',
+    'support.title': 'Support Nyshporka: server, storage and development',
     'bell.ago.now': 'just now',
     'bell.ago.min': '{n} min ago',
     'bell.ago.h': '{n} h ago',

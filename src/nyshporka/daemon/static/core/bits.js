@@ -9,6 +9,13 @@ import { ic } from '/ui/icons.js';
 import { esc } from './view.js';
 import { t, tOr, tn } from './strings.js';
 
+/**
+ * Сторінка підтримки проєкту — База monobank (з 16.11.2026). Копія
+ * `identity.support_url` з `brand/data/brand.yaml`: інтерфейс не ходить по неї
+ * на сервер, бо працює й без мережі до порталу.
+ */
+export const SUPPORT_URL = 'https://base.monobank.ua/CdsvLxcCGxySmi';
+
 /** `<dl class="kv">` з пар; порожні значення випадають. */
 export function kv(rows) {
   const body = rows.filter(([, v]) => v !== undefined && v !== null && v !== '')

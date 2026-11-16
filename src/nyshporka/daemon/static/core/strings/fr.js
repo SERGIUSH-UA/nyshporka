@@ -1704,6 +1704,8 @@ export default {
     'export.rows': 'lignes : {n}',
     'nav.update': 'Mises à jour',
     'bell.title': 'Nouvelles : version, modèles, Supriaha',
+    'support.link': 'Soutenir Nyshporka',
+    'support.title': 'Soutenir Nyshporka : serveur, stockage et développement',
     'bell.ago.now': 'à l’instant',
     'bell.ago.min': 'il y a {n} min',
     'bell.ago.h': 'il y a {n} h',

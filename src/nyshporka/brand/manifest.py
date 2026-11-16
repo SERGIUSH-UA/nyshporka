@@ -132,6 +132,9 @@ class Brand:
     line_en: str
     mascot: str
     mark_shape: str
+    #: Сторінка підтримки проєкту (База monobank, з 16.11.2026). Одна адреса на
+    #: CLI; інтерфейс у браузері тримає копію в `core/bits.js` (`SUPPORT_URL`).
+    support_url: str
     #: Яку тему видно без вибору користувача.
     theme_default: str
     groups: tuple[Group, ...]
@@ -305,6 +308,7 @@ def _build(raw: dict[str, Any]) -> Brand:
         line_en=str(ident.get("line_en") or ""),
         mascot=str(ident.get("mascot") or ""),
         mark_shape=str(ident.get("mark") or ""),
+        support_url=str(ident.get("support_url") or ""),
         theme_default=str(raw.get("theme_default") or "dark"),
         groups=tuple(Group(id=str(g.get("group") or ""),
                            title=str(g.get("title") or ""),

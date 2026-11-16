@@ -15,6 +15,7 @@ import { openModal, closeModal, confirmAct } from './modal.js';
 import { renderWarnings } from './view.js';
 import { schemaFormHtml, schemaValues } from './schemaform.js';
 import { bellMenu, fillBell } from './bell.js';
+import { SUPPORT_URL } from './bits.js';
 import { copyText } from './bits.js';
 import { loadProjects, projectColor, projectChip, projectBadge } from './projects.js';
 
@@ -166,7 +167,9 @@ function meMenu() {
     ${item('feedback', 'envelope', 'nav.feedback', 'me.feedback.why')}
     ${m.consent ? `<p class="hm-why">${esc(t('me.consent').replace('{c}', m.consent))}</p>` : ''}
     <a class="hm-link" href="https://nyshporka.online/" target="_blank" rel="noopener">${ic('link', 'ic-o')}<span>${
-      t('me.portal')} ↗</span></a>`;
+      t('me.portal')} ↗</span></a>
+    <a class="hm-link" href="${SUPPORT_URL}" target="_blank" rel="noopener">${ic('heart', 'ic-o')}<span>${
+      esc(t('support.link'))} ↗</span></a>`;
 }
 
 // ── «Що зробити?» ────────────────────────────────────────────────────────────
@@ -353,8 +356,19 @@ function wire() {
   });
 }
 
+/** Іконка підтримки у верхній смузі: адреса з однієї константи, підказка — мовою людини. */
+function fillSupport() {
+  const a = el('support-link');
+  if (!a) return;
+  a.href = SUPPORT_URL;
+  a.title = t('support.title');
+  a.setAttribute('aria-label', t('support.title'));
+  a.hidden = false;
+}
+
 export function fillHeader() {
   wire();
+  fillSupport();
   fillProject();
   fillMe();
   fillBell();

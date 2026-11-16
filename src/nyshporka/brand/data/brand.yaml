@@ -37,6 +37,7 @@ identity:
   line_en: Reads the hand. Brings back what it found.
   mascot: marten
   mark: paw            # лапка з лупою в центральній подушечці
+  support_url: https://base.monobank.ua/CdsvLxcCGxySmi   # підтримати проєкт (База monobank)
 
 # ── яка тема базова ──────────────────────────────────────────────────────────
 # 🔴 ТЕМНА, і це перевертає те, як було. Раніше базовою стояла світла, а темна

@@ -104,4 +104,5 @@
   <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.4M12 19v2.4M2.6 12h2.4M19 12h2.4M5.4 5.4l1.7 1.7M16.9 16.9l1.7 1.7M18.6 5.4l-1.7 1.7M7.1 16.9l-1.7 1.7"/></symbol>
   <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.2 14.8A8.6 8.6 0 0 1 9.2 3.8a8.6 8.6 0 1 0 11 11Z"/></symbol>
   <symbol id="i-contrast" data-plain="1" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.8"/><path d="M12 3.2a8.8 8.8 0 0 1 0 17.6z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 19.6c-4.6-2.9-7.8-6-7.8-9.6a4.1 4.1 0 0 1 7.8-1.9 4.1 4.1 0 0 1 7.8 1.9c0 3.6-3.2 6.7-7.8 9.6z"/></symbol>
 </defs></svg>

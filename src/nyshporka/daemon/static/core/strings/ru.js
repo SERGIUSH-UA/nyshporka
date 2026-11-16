@@ -1704,6 +1704,8 @@ export default {
     'export.rows': 'строк: {n}',
     'nav.update': 'Обновления',
     'bell.title': 'Новости: версия, модели, Супряга',
+    'support.link': 'Поддержать Нышпорку',
+    'support.title': 'Поддержать Нышпорку: сервер, хранилище и разработка',
     'bell.ago.now': 'только что',
     'bell.ago.min': '{n} мин назад',
     'bell.ago.h': '{n} ч назад',
