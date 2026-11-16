@@ -38,6 +38,19 @@
    "license": "CC BY-NC-SA 4.0"
   },
   {
+   "id": "diak-cyr-v16",
+   "kind": "model",
+   "label": "Дяк-Літописець v16 — кирилиця, другий голос",
+   "filename": "diak_cyr_v16.safetensors",
+   "sha256": "87675a3fc7fe830c4a08134f559ad674a9534e86274f8c28cb20865e04b0da69",
+   "size": 63781228,
+   "release": "weights-v7",
+   "script": "cyrillic",
+   "engine": "kraken",
+   "note": "PP-OCRv6: читає ті самі кропи, що й Писар, і помиляється інакше — витягує прізвища, яких Писар не бачить",
+   "license": "CC BY-NC-SA 4.0"
+  },
+  {
    "id": "diak-cyr-v15",
    "kind": "model",
    "label": "Дяк-Літописець v15 — кирилиця, другий голос",
@@ -48,7 +61,8 @@
    "script": "cyrillic",
    "engine": "kraken",
    "note": "PP-OCRv6: читає ті самі кропи, що й Писар, і помиляється інакше — витягує прізвища, яких Писар не бачить",
-   "license": "CC BY-NC-SA 4.0"
+   "license": "CC BY-NC-SA 4.0",
+   "superseded": true
   },
   {
    "id": "pysar-cyr-v29",
