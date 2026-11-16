@@ -60,8 +60,8 @@ exclude_docs: |
   README.md
 
 extra:
-  # Сторінка підтримки проєкту для підвалу; порожня — пункту немає (16.11.2026 — WayForPay).
-  support_url: ""
+  # Сторінка підтримки проєкту для підвалу; порожня — пункту немає (з 16.11.2026 — Ko-fi).
+  support_url: https://ko-fi.com/nyshporka
 
 extra_css:
   - stylesheets/brand.css
