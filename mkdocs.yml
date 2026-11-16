@@ -59,6 +59,10 @@ theme:
 exclude_docs: |
   README.md
 
+extra:
+  # Сторінка підтримки проєкту для підвалу; порожня — пункту немає (16.11.2026 — WayForPay).
+  support_url: ""
+
 extra_css:
   - stylesheets/brand.css
   - stylesheets/portal-docs.css

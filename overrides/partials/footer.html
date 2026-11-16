@@ -53,8 +53,11 @@
         <h2>{{ s.t.proiekt }}</h2>
         <ul>
           <li><a href="{{ s.portal }}/pro">{{ s.t.pro_pravyla }}</a></li>
-          {#- Адреса — копія `identity.support_url` з `brand/data/brand.yaml`. -#}
-          <li><a href="https://base.monobank.ua/CdsvLxcCGxySmi" target="_blank" rel="noopener">{{ s.t.pidtrymaty }}</a></li>
+          {#- Адреса — `extra.support_url` у mkdocs.yml (копія `identity.support_url` з
+              `brand/data/brand.yaml`); порожня — пункту немає. -#}
+          {%- if config.extra.support_url %}
+          <li><a href="{{ config.extra.support_url }}" target="_blank" rel="noopener">{{ s.t.pidtrymaty }}</a></li>
+          {%- endif %}
           <li>{{ config.copyright }}</li>
         </ul>
       </div>

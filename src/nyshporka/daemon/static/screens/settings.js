@@ -88,7 +88,7 @@ function renderVersion() {
     <p><button data-act="nav" data-arg="update">${ic('arrow-up', 'ic-sm')} ${t('nav.update')}</button>
       <button data-act="nav" data-arg="feedback">${ic('envelope', 'ic-sm')} ${t('nav.feedback')}</button>
       <a class="btn ghost" href="/?step=lang#welcome">${ic('hand', 'ic-sm')} ${t('set.welcome')}</a>
-      <a class="btn ghost" href="${SUPPORT_URL}" target="_blank" rel="noopener">${ic('heart', 'ic-sm')} ${t('support.link')} ↗</a></p>`;
+      ${SUPPORT_URL ? `<a class="btn ghost" href="${SUPPORT_URL}" target="_blank" rel="noopener">${ic('heart', 'ic-sm')} ${t('support.link')} ↗</a>` : ''}</p>`;
   callOp('notices.state', { lang: LANG }).then((env) => {
     const nb = el('net-box');
     if (nb && env.ok) nb.innerHTML = netBox((env.data || {}).settings || {}, (env.data || {}).logged_in);

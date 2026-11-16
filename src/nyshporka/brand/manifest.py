@@ -132,8 +132,8 @@ class Brand:
     line_en: str
     mascot: str
     mark_shape: str
-    #: Сторінка підтримки проєкту (База monobank, з 16.11.2026). Одна адреса на
-    #: CLI; інтерфейс у браузері тримає копію в `core/bits.js` (`SUPPORT_URL`).
+    #: Сторінка підтримки проєкту; порожня — підтримка не показується. Одна адреса
+    #: на CLI; інтерфейс у браузері тримає копію в `core/bits.js` (`SUPPORT_URL`).
     support_url: str
     #: Яку тему видно без вибору користувача.
     theme_default: str

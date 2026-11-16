@@ -10,11 +10,12 @@ import { esc } from './view.js';
 import { t, tOr, tn } from './strings.js';
 
 /**
- * Сторінка підтримки проєкту — База monobank (з 16.11.2026). Копія
- * `identity.support_url` з `brand/data/brand.yaml`: інтерфейс не ходить по неї
- * на сервер, бо працює й без мережі до порталу.
+ * Сторінка підтримки проєкту. Копія `identity.support_url` з
+ * `brand/data/brand.yaml`: інтерфейс не ходить по неї на сервер, бо працює й без
+ * мережі до порталу. 🔴 Порожня — іконки, пункту меню й кнопки немає (16.11.2026
+ * «Базі» monobank відмовили у верифікації; далі — WayForPay).
  */
-export const SUPPORT_URL = 'https://base.monobank.ua/CdsvLxcCGxySmi';
+export const SUPPORT_URL = '';
 
 /** `<dl class="kv">` з пар; порожні значення випадають. */
 export function kv(rows) {

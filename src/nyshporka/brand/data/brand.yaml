@@ -37,7 +37,9 @@ identity:
   line_en: Reads the hand. Brings back what it found.
   mascot: marten
   mark: paw            # лапка з лупою в центральній подушечці
-  support_url: https://base.monobank.ua/CdsvLxcCGxySmi   # підтримати проєкт (База monobank)
+  # Сторінка підтримки проєкту. Порожня — підтримка не показується ніде (вікно,
+  # nysh info). 16.11.2026 «Базі» monobank відмовили; далі — WayForPay.
+  support_url: ""
 
 # ── яка тема базова ──────────────────────────────────────────────────────────
 # 🔴 ТЕМНА, і це перевертає те, як було. Раніше базовою стояла світла, а темна
