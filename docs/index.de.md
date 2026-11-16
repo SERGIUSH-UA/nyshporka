@@ -6,9 +6,10 @@
 
 <p align="center"><em>Liest die Handschrift. Bringt das Gefundene.</em></p>
 
-**Nyshporka hilft, Vorfahren in Archivdokumenten zu suchen** — in
-Kirchenbüchern, Beichtlisten, Revisionslisten des 18.–19. Jahrhunderts. Sie
-arbeitet aber nicht wie ein gewöhnliches Programm.
+**Nyshporka ist ein KI-Assistent für Genealogen und alle, die die
+Vergangenheit anhand alter Handschriften erforschen.** Sie sagen, wen und wo
+Sie suchen, und der Assistent findet die passenden Archivbücher, liest die alte
+Handschrift und zeigt das Gefundene direkt auf dem Scan.
 
 ## Die Arbeit macht der Assistent, entscheiden tun Sie
 
@@ -17,19 +18,19 @@ arbeitet aber nicht wie ein gewöhnliches Programm.
 </p>
 
 Einem Assistenten wie Claude oder ChatGPT kann man erlauben, auf Ihrem
-Computer zu arbeiten: Ordner öffnen, Programme starten, Ergebnisse speichern —
+Computer zu arbeiten: Ordner öffnen, Programme starten, Ergebnisse speichern
 und dabei jedes Mal um Ihre Erlaubnis bitten. Einen solchen Assistenten nennt
 man **Agenten**.
 
 Nyshporka ist genau für ihn gemacht. Sie schreiben in ganz normalen Worten:
 *„Hier ist ein Ordner mit Scans der Kirchenbücher von Chechelnyk — finde alle
-Kowalskis“*. Der Assistent liest die handschriftlichen Blätter, sucht den
-Nachnamen und bringt die gefundenen Zeilen direkt auf dem Scan, mit der
-Blattnummer.
+Kowalskis“*. Der Agent findet selbst heraus, in welchen Büchern Einträge zum
+Dorf stehen können, besorgt die Scans, liest die Handschrift und zeigt die
+Zeilen mit dem Nachnamen auf der Seite, mit der Blattnummer.
 
-**Ob das Ihre Familie ist, entscheiden Sie.** Ebenso entscheiden Sie, was Sie
-im Archiv bestellen und ob Sie Gelesenes teilen. Der Assistent zeigt, er
-zieht keine Schlüsse an Ihrer Stelle.
+Sie sehen sich diese Zeilen an und entscheiden selbst, ob es Ihre Vorfahren
+sind. Ebenso entscheiden Sie, was Sie im Archiv bestellen und ob Sie Gelesenes
+teilen. Der Assistent zeigt, was er gefunden hat, die Schlüsse ziehen Sie.
 
 !!! tip "Videokurs"
 
@@ -52,24 +53,38 @@ Handschrift. Nyshporka gibt ihm:
 
 * **Wissen, wo was liegt** — Archivverzeichnisse, Findbücher der Bestände,
   eine Liste der Dörfer und Pfarreien;
-* **die Fähigkeit, Handschrift zu lesen** — drei Lesemodelle, trainiert an
+* **die Fähigkeit, Handschrift zu lesen** — eigene Lesemodelle, trainiert an
   ukrainischen, moldauischen und polnischen Archiven: **Pysar** und **Diak**
   lesen Kyrillisch, **Skryba** liest Lateinschrift;
 * **ein Gedächtnis** — was schon durchgesehen und gefunden ist, damit
   dieselben Blätter nicht ein zweites Mal durchgeblättert werden;
-* **Regeln ehrlicher Arbeit** — „nicht gefunden“ immer mit Erklärung, wie
-  viele Blätter durchgesehen wurden.
+* **Regeln ehrlicher Arbeit** — jeder Fund ist auf dem Scan zu sehen, und
+  „nicht gefunden“ kommt immer mit der Erklärung, wie viele Blätter
+  durchgesehen wurden.
 
-## Warum das ein anderer Ansatz ist
+## Fertige Schaltflächen gibt es hier nicht
 
 Ein gewöhnliches Programm kann genau das, was man ihm eingebaut hat: so viele
 Schaltflächen, so viele Möglichkeiten. Nyshporka gibt dem Assistenten
-einzelne Fähigkeiten — eine Akte finden, ein Blatt lesen, einen Nachnamen
-finden, einen Fund festhalten —, und er setzt daraus genau das zusammen, was
-Ihre Frage verlangt: *„Mach eine Tabelle aller Trauungen in diesem Dorf in den
-1820er Jahren“*, auch wenn dafür niemand eine eigene Schaltfläche gebaut hat.
-Und je klüger die Assistenten werden, desto mehr kann Nyshporka — sogar ohne
-Update.
+einzelne Fähigkeiten: eine Akte finden, ein Blatt lesen, einen Nachnamen
+finden, einen Fund festhalten. Daraus setzt er zusammen, was Ihre Frage
+verlangt, auch wenn dafür niemand einen eigenen Befehl gebaut hat: *„Mach eine
+Tabelle aller Trauungen in diesem Dorf in den 1820er Jahren“*. So wird der
+ganze Weg abgedeckt: von „wo suchen“ bis zum Stammbaum, in dem an jedem Fakt
+ein Ausschnitt des Scans hängt, und weiter zur Familienwebsite mit Baum und
+Karte. Und je klüger die Assistenten werden, desto mehr kann Nyshporka, sogar
+ohne Update.
+
+## Nicht nur Vorfahren
+
+Gesucht werden kann nicht nur ein Nachname, sondern auch der Name eines Dorfes,
+ein Wort oder ein Ereignis. Darum erforscht man anhand derselben Bücher auch
+die Geschichte eines Dorfes oder einer Pfarrei, einer Kirche oder eines
+Klosters, örtlicher Bräuche oder die Biografie einer bekannten Person. Die
+Geschichte des eigenen Dorfes lässt sich zum Beispiel aus den Burggerichtsbüchern
+des 17. Jahrhunderts herauslesen: Nyshporka findet in Tausenden Seiten jede
+Erwähnung des Dorfes, seiner Menschen und Ereignisse und zeigt jede auf dem
+Scan. Mehr unter [nicht nur Ahnenforschung](how-it-works.md#ne-lyshe-rodovid).
 
 ## Was Sie brauchen
 

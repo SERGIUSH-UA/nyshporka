@@ -6,9 +6,10 @@
 
 <p align="center"><em>Reads the manuscript. Brings back what it finds.</em></p>
 
-**Nyshporka helps you look for your ancestors in archival documents** — parish
-registers, confession lists, revision lists of the 18th–19th centuries. But it
-does not work like an ordinary program.
+**Nyshporka is an AI assistant for genealogists and anyone researching the
+past through old manuscripts.** You say whom and where you are looking for, and
+the assistant finds the right archive books, reads the old manuscript and shows
+what it found right on the scan.
 
 ## The assistant does the work, you decide
 
@@ -17,17 +18,19 @@ does not work like an ordinary program.
 </p>
 
 An assistant such as Claude or ChatGPT can be allowed to work on your
-computer: open folders, run programs, save the results — and ask your
+computer: open folders, run programs, save the results, asking your
 permission every time. An assistant like this is called an **agent**.
 
 Nyshporka is made precisely for it. You write in plain words:
 *“here is a folder of scans of the Chechelnyk parish registers — find all the Kovalskyis”*.
-The assistant reads the handwritten folios, looks for the surname and brings
-back the lines it has found right on the scan, with the folio number.
+The agent works out for itself which books may hold records about the village,
+fetches the scans, reads the manuscript and shows the lines with the surname
+on the page, with the folio number.
 
-**Whether this is your family is for you to decide.** In the same way, you decide
-what to order from the archive and whether to share what has been read. The
-assistant shows; it does not draw conclusions for you.
+You look at these lines and decide for yourself whether they are your
+ancestors. In the same way, you decide what to order from the archive and
+whether to share what has been read. The assistant shows what it found, and
+the conclusions are yours.
 
 !!! tip "Video lessons"
 
@@ -51,23 +54,36 @@ manuscript. Nyshporka gives it:
 
 * **knowledge of where things are** — archive guides, fond inventories, lists of
   villages and parishes;
-* **the ability to read manuscripts** — three reading models trained on
+* **the ability to read manuscripts** — our own reading models trained on
   Ukrainian, Moldovan and Polish archives: **Pysar** and **Diak** read Cyrillic,
   **Skryba** reads Latin script;
 * **memory** — what has already been looked through and found, so that the same
   folios are not leafed through twice;
-* **rules of honest work** — “not found” always comes with an explanation of how
-  many folios were looked through.
+* **rules of honest work** — every find can be seen on the scan, and “not
+  found” always comes with an explanation of how many folios were looked
+  through.
 
-## Why this is a different approach
+## There are no ready-made buttons
 
 An ordinary program can do exactly what was built into it: as many buttons, as
-many possibilities. Nyshporka gives the assistant separate skills — find a
-file, read a folio, find a surname, record a discovery — and the assistant
-combines them into what your particular question needs: *“make a table of all
-the marriages in this village in the 1820s”*, even though nobody ever made a
-separate button for that. And the cleverer assistants become, the more
-Nyshporka can do — even without an update.
+many possibilities. Nyshporka gives the assistant separate skills: find a
+file, read a folio, find a surname, record a discovery. From them it puts
+together what your question needs, even if nobody ever made a separate command
+for it: *“make a table of all the marriages in this village in the 1820s”*.
+This is how the whole way is covered: from “where to look” to a family tree in
+which every fact has a crop of the scan attached, and on to a family website
+with a tree and a map. And the cleverer assistants become, the more Nyshporka
+can do, even without an update.
+
+## Not only ancestors
+
+You can search not only for a surname but also for the name of a village, a
+word or an event. So the same books are used to research the history of a
+village or parish, of a church or monastery, of local customs, or the
+biography of a well-known person. For example, the history of your own village
+can be read out of the 17th-century castle court books: Nyshporka finds every
+mention of the village, its people and events among thousands of pages and
+shows each one on the scan. More in [not only genealogy](how-it-works.md#ne-lyshe-rodovid).
 
 ## What you need
 

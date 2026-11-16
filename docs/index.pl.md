@@ -6,9 +6,10 @@
 
 <p align="center"><em>Czyta rękopis. Przynosi to, co znalazła.</em></p>
 
-**Nyshporka pomaga szukać przodków w dokumentach archiwalnych** — księgach
-metrykalnych, spisach spowiadających się, rewizjach z XVIII–XIX wieku. Ale
-nie działa tak jak zwykły program.
+**Nyshporka to asystent AI dla genealogów i wszystkich, którzy badają
+przeszłość na podstawie starych rękopisów.** Mówisz, kogo i gdzie szukasz, a
+asystent znajduje potrzebne księgi archiwalne, czyta stary rękopis i pokazuje
+znalezione wprost na skanie.
 
 ## Pracę wykonuje asystent, decydujesz Ty
 
@@ -17,17 +18,17 @@ nie działa tak jak zwykły program.
 </p>
 
 Asystentowi takiemu jak Claude czy ChatGPT można pozwolić pracować na Twoim
-komputerze: otwierać foldery, uruchamiać programy, zapisywać wynik — i za
-każdym razem pytać o Twoją zgodę. Takiego asystenta nazywa się **agentem**.
+komputerze: otwierać foldery, uruchamiać programy, zapisywać wynik, za każdym
+razem pytając o Twoją zgodę. Takiego asystenta nazywa się **agentem**.
 
 Nyshporka powstała właśnie dla niego. Piszesz zwykłymi słowami:
 *„oto folder ze skanami ksiąg metrykalnych z Czeczelnika — znajdź wszystkich Kowalskich”*.
-Asystent czyta rękopiśmienne karty, szuka nazwiska i przynosi znalezione
-wiersze wprost na skanie, z numerem karty.
+Agent sam ustala, w jakich księgach mogą być wpisy o wsi, pobiera skany,
+czyta rękopis i pokazuje wiersze z nazwiskiem na stronie, z numerem karty.
 
-**Czy to Twój ród — decydujesz Ty.** Tak samo Ty decydujesz, co zamówić w
-archiwum i czy dzielić się odczytanym tekstem. Asystent pokazuje, a nie
-wyciąga wniosków za Ciebie.
+Patrzysz na te wiersze i sam decydujesz, czy to Twoi przodkowie. Tak samo
+decydujesz, co zamówić w archiwum i czy dzielić się odczytanym tekstem.
+Asystent pokazuje znalezione, a wnioski wyciągasz Ty.
 
 !!! tip "Lekcje wideo"
 
@@ -51,23 +52,34 @@ Nyshporka daje mu:
 
 * **wiedzę, co gdzie leży** — informatory archiwów, inwentarze zespołów, wykaz
   wsi i parafii;
-* **umiejętność czytania rękopisów** — trzy modele odczytu, wytrenowane na
+* **umiejętność czytania rękopisów** — własne modele odczytu, wytrenowane na
   archiwach ukraińskich, mołdawskich i polskich: **Pysar** i **Diak** czytają
   cyrylicę, **Skryba** — alfabet łaciński;
 * **pamięć** — co już przejrzano i znaleziono, żeby nie kartkować tych samych
   kart drugi raz;
-* **zasady uczciwej pracy** — „nie znalazłem” zawsze z wyjaśnieniem, ile kart
-  przejrzano.
+* **zasady uczciwej pracy** — każde znalezisko widać na skanie, a „nie
+  znalazłem” zawsze z wyjaśnieniem, ile kart przejrzano.
 
-## Dlaczego to inne podejście
+## Gotowych przycisków tu nie ma
 
-Zwykły program potrafi dokładnie to, co w nim zaprogramowano: ile przycisków —
-tyle możliwości. Nyshporka natomiast daje asystentowi osobne umiejętności —
-znaleźć jednostkę, odczytać kartę, znaleźć nazwisko, zapisać znalezisko — a on
-składa z nich to, czego potrzeba akurat dla Twojego pytania: *„zrób tabelę
-wszystkich ślubów w tej wsi z lat 20. XIX wieku”*, choć osobnego przycisku do
-tego nikt nie zrobił. A im mądrzejsi stają się asystenci, tym więcej potrafi
-Nyshporka — nawet bez aktualizacji.
+Zwykły program potrafi dokładnie to, co w nim zaprogramowano: ile przycisków,
+tyle możliwości. Nyshporka daje asystentowi osobne umiejętności: znaleźć
+jednostkę, odczytać kartę, znaleźć nazwisko, zapisać znalezisko. Z nich składa
+on to, czego potrzeba dla Twojego pytania, choć osobnego polecenia do tego nikt
+nie zrobił: *„zrób tabelę wszystkich ślubów w tej wsi z lat 20. XIX wieku”*.
+Tak przechodzi się całą drogę: od „gdzie szukać” do rodowodu, w którym przy
+każdym fakcie jest wycinek skanu, i dalej do strony rodu z drzewem i mapą. A im
+mądrzejsi stają się asystenci, tym więcej potrafi Nyshporka, nawet bez
+aktualizacji.
+
+## Nie tylko przodkowie
+
+Szukać można nie tylko nazwiska, ale też nazwy wsi, słowa czy wydarzenia.
+Dlatego w tych samych księgach bada się historię wsi i parafii, kościoła czy
+klasztoru, miejscowych zwyczajów, biografię znanej osoby. Na przykład historię
+własnej wsi można wyczytać z XVII-wiecznych ksiąg grodzkich: Nyshporka znajdzie
+wśród tysięcy stron każdą wzmiankę o wsi, ludziach i wydarzeniach i pokaże
+każdą na skanie. Więcej: [nie tylko genealogia](how-it-works.md#ne-lyshe-rodovid).
 
 ## Czego potrzeba
 

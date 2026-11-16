@@ -6,9 +6,10 @@
 
 <p align="center"><em>Citește manuscrisul. Aduce ce a găsit.</em></p>
 
-**Nyshporka vă ajută să căutați strămoșii în documentele de arhivă** —
-registre metrice, liste de spovedanie, revizii din secolele XVIII–XIX. Dar nu
-funcționează ca un program obișnuit.
+**Nyshporka este un asistent AI pentru genealogiști și pentru toți cei care
+cercetează trecutul după manuscrise vechi.** Spuneți pe cine și unde căutați,
+iar asistentul găsește registrele de arhivă potrivite, citește manuscrisul
+vechi și arată ce a găsit direct pe scanare.
 
 ## Munca o face asistentul, decideți dumneavoastră
 
@@ -18,17 +19,19 @@ funcționează ca un program obișnuit.
 
 Unui asistent precum Claude sau ChatGPT i se poate permite să lucreze pe
 calculatorul dumneavoastră: să deschidă dosare, să pornească programe, să
-salveze rezultatul — și de fiecare dată să vă ceară permisiunea. Un astfel de
+salveze rezultatul, cerându-vă de fiecare dată permisiunea. Un astfel de
 asistent se numește **agent**.
 
 Nyshporka este făcută tocmai pentru el. Îi scrieți cu cuvinte obișnuite:
 *„iată dosarul cu scanările registrelor metrice din Chechelnyk — găsește-i pe
-toți Kovalski”*. Asistentul citește filele scrise de mână, caută numele de
-familie și vă aduce rândurile găsite direct pe scanare, cu numărul filei.
+toți Kovalski”*. Agentul stabilește singur în ce registre pot fi înscrieri
+despre sat, aduce scanările, citește manuscrisul și arată rândurile cu numele de
+familie pe pagină, cu numărul filei.
 
-**Dacă este neamul dumneavoastră — decideți dumneavoastră.** La fel decideți
-ce să comandați la arhivă și dacă să împărtășiți ce s-a citit. Asistentul
-arată, nu trage concluzii în locul dumneavoastră.
+Vă uitați la aceste rânduri și decideți singur dacă sunt strămoșii
+dumneavoastră. La fel decideți ce să comandați la arhivă și dacă să
+împărtășiți ce s-a citit. Asistentul arată ce a găsit, iar concluziile le
+trageți dumneavoastră.
 
 !!! tip "Lecții video"
 
@@ -51,23 +54,36 @@ Nyshporka îi dă:
 
 * **știința unde se află fiecare lucru** — ghiduri ale arhivelor, inventare
   ale fondurilor, liste de sate și parohii;
-* **priceperea de a citi manuscrisul** — trei modele de citire, antrenate pe
+* **priceperea de a citi manuscrisul** — modele proprii de citire, antrenate pe
   arhive ucrainene, moldovenești și poloneze: **Pysar** și **Diak** citesc
   chirilica, **Skryba** — alfabetul latin;
 * **memorie** — ce s-a consultat și ce s-a găsit deja, ca să nu răsfoiască
   aceleași file a doua oară;
-* **reguli de lucru cinstit** — „nu am găsit” vine mereu cu explicația câte
-  file au fost consultate.
+* **reguli de lucru cinstit** — fiecare descoperire se vede pe scanare, iar „nu
+  am găsit” vine mereu cu explicația câte file au fost consultate.
 
-## De ce este o altă abordare
+## Butoane gata făcute nu există aici
 
 Un program obișnuit știe exact ce i s-a pus în el: câte butoane, atâtea
-posibilități. Nyshporka îi dă asistentului priceperi separate — să găsească un
+posibilități. Nyshporka îi dă asistentului priceperi separate: să găsească un
 dosar, să citească o filă, să găsească un nume de familie, să noteze o
-descoperire — iar el le combină exact pentru întrebarea dumneavoastră:
-*„fă un tabel cu toate căsătoriile din acest sat din anii 1820”*, deși nimeni
-nu a făcut un buton separat pentru asta. Și cu cât asistenții devin mai
-inteligenți, cu atât Nyshporka știe mai multe — chiar și fără actualizare.
+descoperire. Din ele el alcătuiește ce are nevoie întrebarea dumneavoastră,
+chiar dacă nimeni nu a făcut o comandă separată pentru asta: *„fă un tabel cu
+toate căsătoriile din acest sat din anii 1820”*. Așa se parcurge tot drumul: de
+la „unde să caut” până la arborele genealogic în care fiecare fapt are atașat
+un decupaj din scanare, și mai departe la site-ul neamului, cu arbore și hartă.
+Și cu cât asistenții devin mai inteligenți, cu atât Nyshporka știe mai multe,
+chiar și fără actualizare.
+
+## Nu doar strămoși
+
+Se poate căuta nu doar un nume de familie, ci și numele unui sat, un cuvânt sau
+un eveniment. De aceea, în aceleași registre se cercetează istoria unui sat sau
+a unei parohii, a unei biserici sau a unei mănăstiri, obiceiurile locale,
+biografia unei persoane cunoscute. De exemplu, istoria propriului sat poate fi
+citită din registrele tribunalelor de cetate din secolul al XVII-lea: Nyshporka
+găsește printre mii de pagini fiecare mențiune despre sat, oameni și
+evenimente și o arată pe scanare. Mai multe: [nu doar genealogie](how-it-works.md#ne-lyshe-rodovid).
 
 ## Ce este necesar
 

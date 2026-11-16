@@ -6,9 +6,10 @@
 
 <p align="center"><em>Lit le manuscrit. Rapporte ce qu'elle a trouvé.</em></p>
 
-**Nyshporka aide à rechercher des ancêtres dans les documents d'archives** —
-registres paroissiaux, listes de confession, révisions des XVIIIe–XIXe siècles.
-Mais elle ne fonctionne pas comme un programme ordinaire.
+**Nyshporka est un assistant IA pour les généalogistes et pour tous ceux qui
+étudient le passé à travers de vieux manuscrits.** Vous dites qui vous cherchez
+et où, et l'assistant trouve les bons registres d'archives, lit le vieux
+manuscrit et montre ce qu'il a trouvé directement sur le scan.
 
 ## L'assistant fait le travail, vous décidez
 
@@ -17,18 +18,20 @@ Mais elle ne fonctionne pas comme un programme ordinaire.
 </p>
 
 Un assistant comme Claude ou ChatGPT peut être autorisé à travailler sur votre
-ordinateur : ouvrir des répertoires, lancer des programmes, enregistrer le
-résultat — en vous demandant chaque fois votre permission. Un tel assistant
+ordinateur : ouvrir des répertoires, lancer des programmes, enregistrer le
+résultat, en vous demandant chaque fois votre permission. Un tel assistant
 s'appelle un **agent**.
 
-Nyshporka est faite précisément pour lui. Vous écrivez avec des mots ordinaires :
-*« voici un répertoire avec les scans des registres paroissiaux de Chechelnyk — trouve tous les Kovalskyi »*.
-L'assistant lit les feuillets manuscrits, cherche le nom de famille et rapporte
-les lignes trouvées directement sur le scan, avec le numéro du feuillet.
+Nyshporka est faite précisément pour lui. Vous écrivez avec des mots ordinaires :
+*« voici un répertoire avec les scans des registres paroissiaux de Chechelnyk — trouve tous les Kovalskyi »*.
+L'agent détermine lui-même dans quels registres le village peut apparaître,
+récupère les scans, lit le manuscrit et montre les lignes avec le nom de
+famille sur la page, avec le numéro du feuillet.
 
-**S'il s'agit de votre famille, c'est vous qui le décidez.** De même, c'est vous
-qui décidez quoi commander aux archives et s'il faut partager ce qui a été lu.
-L'assistant montre ; il ne tire pas de conclusions à votre place.
+Vous regardez ces lignes et décidez vous-même s'il s'agit de vos ancêtres. De
+même, c'est vous qui décidez quoi commander aux archives et s'il faut partager
+ce qui a été lu. L'assistant montre ce qu'il a trouvé, les conclusions sont les
+vôtres.
 
 !!! tip "Leçons vidéo"
 
@@ -52,23 +55,36 @@ manuscrit ancien. Nyshporka lui donne :
 
 * **le savoir où se trouve quoi** — guides des archives, inventaires des fonds,
   liste des villages et des paroisses ;
-* **la capacité de lire un manuscrit** — trois modèles de lecture, entraînés sur
+* **la capacité de lire un manuscrit** — des modèles de lecture propres, entraînés sur
   des archives ukrainiennes, moldaves et polonaises : **Pysar** et **Diak**
   lisent le cyrillique, **Skryba** l'écriture latine ;
 * **la mémoire** — ce qui a déjà été examiné et trouvé, pour ne pas feuilleter
   deux fois les mêmes feuillets ;
-* **des règles de travail honnête** — un « rien trouvé » est toujours accompagné
-  du nombre de feuillets examinés.
+* **des règles de travail honnête** — chaque trouvaille se voit sur le scan, et
+  un « rien trouvé » est toujours accompagné du nombre de feuillets examinés.
 
-## Pourquoi c'est une autre approche
+## Il n'y a pas ici de boutons tout faits
 
-Un programme ordinaire sait faire exactement ce qu'on y a mis : autant de
+Un programme ordinaire sait faire exactement ce qu'on y a mis : autant de
 boutons, autant de possibilités. Nyshporka donne à l'assistant des savoir-faire
-séparés — trouver un dossier, lire un feuillet, trouver un nom, noter une
-trouvaille —, et il les combine selon votre question précise : *« fais un
-tableau de tous les mariages de ce village dans les années 1820 »*, même si
-personne n'a créé de bouton pour cela. Et plus les assistants deviennent
-intelligents, plus Nyshporka en sait faire — même sans mise à jour.
+séparés : trouver un dossier, lire un feuillet, trouver un nom, noter une
+trouvaille. Il les combine selon votre question, même si personne n'a créé de
+commande pour cela : *« fais un tableau de tous les mariages de ce village dans
+les années 1820 »*. C'est ainsi que l'on parcourt tout le chemin : de « où
+chercher » à la généalogie où chaque fait est accompagné d'un extrait du scan,
+puis au site de la famille avec arbre et carte. Et plus les assistants
+deviennent intelligents, plus Nyshporka en sait faire, même sans mise à jour.
+
+## Pas seulement les ancêtres
+
+On peut chercher non seulement un nom de famille, mais aussi le nom d'un
+village, un mot ou un événement. Les mêmes registres servent donc à étudier
+l'histoire d'un village ou d'une paroisse, d'une église ou d'un monastère, des
+coutumes locales, la biographie d'une personne connue. Par exemple, l'histoire
+de son propre village peut se lire dans les registres des tribunaux de château
+du XVIIe siècle : Nyshporka retrouve dans des milliers de pages chaque mention
+du village, de ses habitants et des événements, et montre chacune sur le scan.
+Plus de détails : [pas seulement la généalogie](how-it-works.md#ne-lyshe-rodovid).
 
 ## Ce qu'il faut
 
