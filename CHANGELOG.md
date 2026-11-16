@@ -24,6 +24,8 @@
   нічого нового не друкують. Адреса — `identity.support_url` у `brand/data/brand.yaml`;
   у вікні — `SUPPORT_URL` (`core/bits.js`), у документації — `extra.support_url`
   (`mkdocs.yml`). Порожня адреса ховає підтримку скрізь. Новий значок `i-heart` у спрайті.
+  Адреса веде на `https://nyshporka.online/pidtrymaty`: оплата WayForPay гривнею, з-за
+  кордону — Ko-fi.
 
 ### Змінено
 - Опис пакета й головна документації: Нишпорка — ШІ-помічник для генеалогів і

@@ -61,7 +61,7 @@ exclude_docs: |
 
 extra:
   # Сторінка підтримки проєкту для підвалу; порожня — пункту немає (з 16.11.2026 — Ko-fi).
-  support_url: https://ko-fi.com/nyshporka
+  support_url: https://nyshporka.online/pidtrymaty
 
 extra_css:
   - stylesheets/brand.css

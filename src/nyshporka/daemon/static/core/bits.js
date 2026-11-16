@@ -13,9 +13,10 @@ import { t, tOr, tn } from './strings.js';
  * Сторінка підтримки проєкту. Копія `identity.support_url` з
  * `brand/data/brand.yaml`: інтерфейс не ходить по неї на сервер, бо працює й без
  * мережі до порталу. 🔴 Порожня — іконки, пункту меню й кнопки немає (16.11.2026
- * «Базі» monobank відмовили у верифікації; з того ж дня — Ko-fi).
+ * «Базі» monobank відмовили у верифікації; відтоді — власна сторінка порталу
+ * з оплатою WayForPay, а Ko-fi — на ній, для оплати з-за кордону).
  */
-export const SUPPORT_URL = 'https://ko-fi.com/nyshporka';
+export const SUPPORT_URL = 'https://nyshporka.online/pidtrymaty';
 
 /** `<dl class="kv">` з пар; порожні значення випадають. */
 export function kv(rows) {
