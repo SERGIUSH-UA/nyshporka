@@ -30,6 +30,22 @@ from pathlib import Path
 #: Що дописується до кожної відмови: CPU — це повільно, але робочо.
 CPU_NOTE = "лишаю CPU-збірку (читання піде ~20 с – 1 хв/стор замість ~10–15 с на карті)"
 
+# ── карта Apple (MPS): дзеркало раннера ──────────────────────────────────────
+#: Дзеркало `htr.runner.DEVICE_ENV`, `SEG_DEVICE_PROVEN_ON` і `proven_devices`.
+#: 🔴 Раннер у процесі застосунку не імпортується: при імпорті він виставляє
+#: ліміти потоків BLAS і `TORCH_DISABLE_NATIVE_JIT` тому процесу, що його
+#: вантажить. Рівність копій звіряє `tests/test_htr_mps.py`.
+DEVICE_ENV = "NYSH_HTR_DEVICE"
+SEG_DEVICE_PROVEN_ON: dict[str, tuple[str, ...]] = {"mps": ("2.14",)}
+
+
+def proven_devices(torch_version: str) -> frozenset[str]:
+    """Пристрої, доведені для цієї версії torch (`2.14.0+cpu` → `2.14`)."""
+    mm = ".".join(str(torch_version or "").split("+")[0].split(".")[:2])
+    return frozenset(d for d, versions in SEG_DEVICE_PROVEN_ON.items()
+                     if mm and mm in versions)
+
+
 #: Форма, у якій `nvidia-smi` віддає compute capability. Усе інше — не число.
 _CAPABILITY = re.compile(r"^\d+\.\d+$")
 

@@ -4065,7 +4065,8 @@ def htr_install(
     console.print(f"\npython : {rep.python or '—'}")
     console.print(f"kraken : {rep.kraken or '—'}")
     console.print(f"torch  : {rep.torch or '—'}  cuda={rep.cuda} "
-                  f"capability={rep.capability or '—'}")
+                  f"capability={rep.capability or '—'}"
+                  + ("  mps=True" if rep.mps else ""))
     for p in rep.problems:
         console.print(f"[warn]⚠ {p}[/warn]")
     if rep.missing:

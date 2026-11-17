@@ -102,10 +102,19 @@ def test_conda_tool_prefers_what_is_already_on_the_machine(monkeypatch) -> None:
 def test_macos_skips_the_cuda_step(monkeypatch, tmp_path, capsys) -> None:
     """CUDA на macOS немає за побудовою — питати nvidia-smi там означає друкувати
     «карти не видно» на кожному Mac."""
+    import platform
+
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setattr(env, "_probe", lambda *a, **k: pytest.fail("проба torch на macOS зайва"))
+    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
     env._ensure_cuda(tmp_path, M.load())
     assert "CPU" in capsys.readouterr().out
+
+    # Apple Silicon: колесо з PyPI уже несе MPS — «лишаю CPU-збірку» було б неправдою.
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    env._ensure_cuda(tmp_path, M.load())
+    out = capsys.readouterr().out
+    assert "MPS" in out and "CPU" not in out
 
 
 def test_htr_extra_carries_no_torch_into_the_app() -> None:

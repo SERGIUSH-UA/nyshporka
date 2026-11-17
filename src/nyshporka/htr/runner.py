@@ -588,20 +588,43 @@ def _device_slug(device: str) -> str:
 #: «на Mac читає картою» залежало б від того, яку кнопку натиснуто.
 DEVICE_ENV = "NYSH_HTR_DEVICE"
 
-#: Пристрої, на яких сегментація ДОВЕДЕНО та сама, що на процесорі й CUDA:
-#: `kraken_lineage_verify --device-b <пристрій>` на справжніх кадрах, полігони,
-#: рамки й тексти побайтово. Поки пристрою тут немає, (а) `auto` його не обирає,
-#: (б) його сегментація лягає в кеш під власним ключем (`Segmenter._full_key`):
-#: не доведена тотожність не має права ні брати чужий кеш, ні псувати його
-#: іншим машинам, що ділять простір чи Супрягу.
+#: Пристрій → версії torch (`major.minor`), на яких сегментацію ДОВЕДЕНО тією самою,
+#: що на процесорі й CUDA: `kraken_lineage_verify --device cpu --device-b <пристрій>`
+#: на справжніх кадрах, полігони, рамки й тексти побайтово. Поки пристрою для
+#: torch цього процесу тут немає, (а) `auto` його не обирає, (б) його сегментація
+#: лягає в кеш під власним ключем (`Segmenter._full_key`): не доведена тотожність
+#: не має права ні брати чужий кеш, ні псувати його іншим машинам, що ділять
+#: простір чи Супрягу.
+#: 🔴 Версія torch у парі не для краси: ядра MPS — частина збірки torch, і нова
+#: збірка — нова реалізація. Доведене на одній версії на іншу не переноситься;
+#: новий рядок — лише після нового «✓ ТОТОЖНО».
+#:
+#: MPS на torch 2.14 — 17.11.2026, Apple M5 Pro, macOS 27.2, kraken 7.1.1: три звірки
+#: `--device cpu --device-b mps` на 16 кадрах із відкритих фондів (метрична книга
+#: 1882 р.; латинські, чеські й англійські книги, французький реєстр XV–XVI ст.,
+#: розворот 24 Мпікс, кадр 369×897; на двох піднято контраст): сегментація 24/24,
+#: рамки 24/24, тексти 3921/3921 рядків — Писар v31, Скриба-PP v3 і Дяк v16
+#: голосом. Не перевірено: перепуск зі стелею (щільних таблиць у вибірці не було).
+SEG_DEVICE_PROVEN_ON: dict[str, tuple[str, ...]] = {"mps": ("2.14",)}
+
+#: Доведені пристрої для torch ЦЬОГО процесу. Виставляє `main` одразу після
+#: імпорту torch (`proven_devices`); до того — порожньо, тобто нічого не доведено.
 SEG_DEVICE_PROVEN: frozenset[str] = frozenset()
+
+
+def proven_devices(torch_version: str,
+                   table: dict[str, tuple[str, ...]] | None = None) -> frozenset[str]:
+    """Пристрої, доведені для цієї версії torch (`2.14.0+cpu` → `2.14`)."""
+    mm = ".".join(str(torch_version or "").split("+")[0].split(".")[:2])
+    rows = SEG_DEVICE_PROVEN_ON if table is None else table
+    return frozenset(d for d, versions in rows.items() if mm and mm in versions)
 
 #: Що приймає `--device`.
 _DEVICE_RE = re.compile(r"^(auto|cpu|mps|cuda(:\d+)?)$")
 
 
 def resolve_device(requested: str, *, cuda_ok: bool, mps_ok: bool,
-                   proven: frozenset[str] = SEG_DEVICE_PROVEN) -> tuple[str, str]:
+                   proven: frozenset[str] | None = None) -> tuple[str, str]:
     """Запитаний пристрій → `(пристрій, пояснення для лога або '')`.
 
     `auto` бере карту NVIDIA, коли вона є, далі MPS — лише доведений
@@ -613,6 +636,7 @@ def resolve_device(requested: str, *, cuda_ok: bool, mps_ok: bool,
     право на нього — властивість сегментації: інші полігони рядків дали б інший
     текст без сліду в лозі.
     """
+    proven = SEG_DEVICE_PROVEN if proven is None else proven
     req = (requested or "auto").strip().lower()
     if not _DEVICE_RE.match(req):
         raise ValueError(f"невідомий пристрій {requested!r}: auto · cpu · mps · cuda[:N]")
@@ -1972,10 +1996,16 @@ SEG_LINEAGE = {"7.0.2": "7.0.2", "7.1.1": "7.0.2"}
 SEG_KRAKEN = SEG_LINEAGE.get(KRAKEN_PIN_VERSION, KRAKEN_PIN_VERSION)
 
 
-def _made_by() -> dict:
-    """Чим справді порахована сегментація — поза ключем, для слідства."""
+def _made_by(device: str = "") -> dict:
+    """Чим справді порахована сегментація — поза ключем, для слідства.
+
+    Пристрій — теж сюди: коли MPS доведений, його сегментація ділить ключ із
+    процесорною, і без цього поля вже не сказати, де її порахували."""
     t = sys.modules.get("torch")
-    return {"kraken": KRAKEN_PIN_VERSION, "torch": str(getattr(t, "__version__", ""))}
+    out = {"kraken": KRAKEN_PIN_VERSION, "torch": str(getattr(t, "__version__", ""))}
+    if device:
+        out["device"] = device.split(":")[0]
+    return out
 
 
 def _seg_to_blob(seg) -> dict:
@@ -2350,7 +2380,7 @@ class Segmenter:
             tmp = f.with_suffix(f".{os.getpid()}.tmp")
             with gzip.open(tmp, "wt", encoding="utf-8") as fh:
                 json.dump({"key": {**self._full_key(), "enhanced": enhanced},
-                           "seg": _seg_to_blob(seg), "made_by": _made_by()},
+                           "seg": _seg_to_blob(seg), "made_by": _made_by(self._device)},
                           fh, ensure_ascii=False)
             os.replace(tmp, f)
             self.written += 1
@@ -4626,6 +4656,7 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
         return 2
 
     import torch
+    globals()["SEG_DEVICE_PROVEN"] = proven_devices(str(getattr(torch, "__version__", "")))
     try:
         device, why = resolve_device(args.device, cuda_ok=torch.cuda.is_available(),
                                      mps_ok=mps_available(torch))

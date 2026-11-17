@@ -169,3 +169,104 @@ def test_pp_fuse_does_not_ask_mps_for_float64() -> None:
     body = src[src.index("def _fold("):]
     assert ".double()" not in body, "float64 на пристрої моделі — на MPS це TypeError"
     assert 't.device.type == "mps"' in src
+
+
+# ── доведеність прив'язана до версії torch ────────────────────────────────────
+
+def test_proven_devices_follow_the_torch_version() -> None:
+    """🔴 Ядра MPS — частина збірки torch: доведене на 2.14 на 2.15 не переноситься."""
+    table = {"mps": ("2.14",)}
+    assert R.proven_devices("2.14.0", table) == frozenset({"mps"})
+    assert R.proven_devices("2.14.1+cpu", table) == frozenset({"mps"})
+    assert R.proven_devices("2.15.0", table) == frozenset()
+    assert R.proven_devices("", table) == frozenset()
+
+
+def test_runner_sets_the_proven_devices_before_choosing_one() -> None:
+    """Доведеність рахується з torch ЦЬОГО процесу — до вибору пристрою, бо
+    `auto` і ключ кешу читають саме її."""
+    src = RUNNER_SRC.read_text(encoding="utf-8")
+    sets = src.index('globals()["SEG_DEVICE_PROVEN"] = proven_devices(')
+    assert sets < src.index("device, why = resolve_device(", sets)
+
+
+def test_mps_segmentation_says_where_it_was_made() -> None:
+    """Доведений MPS ділить ключ із процесором, тож пристрій лишається поза ключем."""
+    assert R._made_by("mps")["device"] == "mps"
+    assert R._made_by("cuda:1")["device"] == "cuda"
+    assert "device" not in R._made_by()
+
+
+# ── доктор на Mac ─────────────────────────────────────────────────────────────
+
+def _doctor_on_mac(monkeypatch: pytest.MonkeyPatch, torch_v: str, proven: tuple[str, ...],
+                   env: str = "") -> object:
+    from nyshporka.htr.env import EnvReport
+    from nyshporka.setup import doctor
+
+    monkeypatch.setattr(doctor, "_engine_report",
+                        lambda: EnvReport(ok=True, python=Path("py"), torch=torch_v,
+                                          cuda=False, mps=True))
+    from nyshporka.htr import gpu
+
+    monkeypatch.setattr(gpu, "SEG_DEVICE_PROVEN_ON", {"mps": proven} if proven else {})
+    if env:
+        monkeypatch.setenv(R.DEVICE_ENV, env)
+    else:
+        monkeypatch.delenv(R.DEVICE_ENV, raising=False)
+    return doctor._torch()
+
+
+def test_doctor_does_not_call_an_apple_mac_cardless(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Доти рядок казав «CUDA недоступна · карти драйвер не показує» — на машині,
+    де карта є в самому чипі."""
+    got = _doctor_on_mac(monkeypatch, "2.14.0", ("2.14",))
+    assert got.level == "ok" and "MPS" in got.detail  # type: ignore[attr-defined]
+    assert "CUDA" not in got.detail  # type: ignore[attr-defined]
+
+
+def test_doctor_says_when_the_card_is_there_but_unproven(monkeypatch: pytest.MonkeyPatch) -> None:
+    got = _doctor_on_mac(monkeypatch, "2.15.0", ("2.14",))
+    assert got.level == "warn" and "процесор" in got.detail  # type: ignore[attr-defined]
+    assert f"{R.DEVICE_ENV}=mps" in got.fix  # type: ignore[attr-defined]
+    chosen = _doctor_on_mac(monkeypatch, "2.15.0", ("2.14",), env="mps")
+    assert chosen.level == "ok" and "окремо" in chosen.detail  # type: ignore[attr-defined]
+
+
+def test_doctor_names_a_machine_pinned_to_the_cpu(monkeypatch: pytest.MonkeyPatch) -> None:
+    got = _doctor_on_mac(monkeypatch, "2.14.0", ("2.14",), env="cpu")
+    assert got.level == "warn" and f"{R.DEVICE_ENV}=cpu" in got.detail  # type: ignore[attr-defined]
+
+
+def test_the_app_mirror_matches_the_runner() -> None:
+    """Застосунок не імпортує раннер (той при імпорті міняє ліміти потоків
+    процесу), тож тримає копію — і копія не сміє розійтись мовчки."""
+    from nyshporka.htr import gpu
+
+    assert gpu.DEVICE_ENV == R.DEVICE_ENV
+    assert gpu.SEG_DEVICE_PROVEN_ON == R.SEG_DEVICE_PROVEN_ON
+    for v in ("2.13.1", "2.14.0", "2.14.2+cpu", "2.15.0", ""):
+        assert gpu.proven_devices(v) == R.proven_devices(v)
+
+
+def test_doctor_does_not_import_the_runner() -> None:
+    src = (ROOT / "src" / "nyshporka" / "setup" / "doctor.py").read_text(encoding="utf-8")
+    assert "htr.runner import" not in src and "htr import runner" not in src
+
+
+def test_proven_mps_is_chosen_by_auto_on_torch_214() -> None:
+    """Звірка 17.11.2026 (24 сегментації, 3921 рядок тотожні) — MPS доведений для
+    torch 2.14, тож на Apple Silicon `auto` читає картою."""
+    proven = R.proven_devices("2.14.0")
+    assert "mps" in proven
+    assert R.resolve_device("auto", cuda_ok=False, mps_ok=True, proven=proven)[0] == "mps"
+    assert R.resolve_device("auto", cuda_ok=True, mps_ok=True, proven=proven)[0] == "cuda:0"
+
+
+def test_proven_mps_shares_the_cache_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Доведена сегментація ділить ключ із процесорною: справа, сегментована на
+    Mac, не сегментується вдруге на машині з карткою NVIDIA — і навпаки."""
+    monkeypatch.setattr(R, "SEG_DEVICE_PROVEN", R.proven_devices("2.14.0"))
+    assert _key("mps") == _key("cpu")
+    monkeypatch.setattr(R, "SEG_DEVICE_PROVEN", R.proven_devices("2.15.0"))
+    assert _key("mps") == {**_key("cpu"), "device": "mps"}

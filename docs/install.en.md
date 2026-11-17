@@ -265,6 +265,12 @@ powershell -ExecutionPolicy Bypass -File "$env:TEMP\nysh-install.ps1"
     Python and torch from conda-forge, because PyPI has no torch wheels for it newer
     than 2.2.2.
 
+    **A Mac with Apple Silicon (M1–M5).** It reads on the chip's built-in GPU on its
+    own — nothing to switch on: `nysh doctor` shows «карта Apple (MPS)» in the
+    «Прискорення (GPU)» line. A page with two voices takes ~5–8 s instead of ~1 min
+    on the processor, and the text is the same to the character. To force the
+    processor: `NYSH_HTR_DEVICE=cpu`.
+
     **You don't need a graphics card.** Without one, a page is read in ~20 s – 1 min
     (depending on the processor and how many lines the page has); with a card —
     in ~10–15 s. Speeding up with a card is a separate step; `nysh doctor`

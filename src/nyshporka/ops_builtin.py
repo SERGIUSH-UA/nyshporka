@@ -5376,7 +5376,7 @@ def htr_env(a: EnvArgs) -> Envelope:
     rep = E.inspect(venv)
     env = ok({"ok": rep.ok, "python": str(rep.python or ""), "kraken": rep.kraken,
               "torch": rep.torch, "cuda": rep.cuda, "capability": rep.capability,
-              "missing": list(rep.missing)})
+              "mps": rep.mps, "missing": list(rep.missing)})
     for p in rep.problems:
         env.warn("engine_problem", p)
     if rep.missing:
@@ -5411,7 +5411,8 @@ def htr_install(_: NoArgs) -> Envelope:
         return fail(str(exc))
     progress.report(1, 1, "")
     env = ok({"ok": rep.ok, "python": str(rep.python or ""), "kraken": rep.kraken,
-              "torch": rep.torch, "cuda": rep.cuda, "missing": list(rep.missing)})
+              "torch": rep.torch, "cuda": rep.cuda, "mps": rep.mps,
+              "missing": list(rep.missing)})
     for p in rep.problems:
         env.warn("engine_problem", p)
     if rep.missing:
