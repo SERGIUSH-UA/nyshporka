@@ -856,8 +856,8 @@ def stages_summary(total: dict[str, float], pages: int, device: str,
         return ""
     on_card = device.startswith("cuda")
     dev = "карта" if on_card else "процесор"
-    # Патч sato ставиться лише на карті (та сама умова, що при встановленні
-    # патча): прапорець без карти не переносить sato нікуди.
+    # Без карти патч sato рахує torch на процесорі — процесор і є місцем
+    # рахунку; прапорець без карти не переносить sato нікуди.
     sato_where = "карта" if gpu_sato and on_card else "процесор"
 
     def s(k: str) -> str:
@@ -4193,9 +4193,10 @@ def main() -> int:
                          "Дефолт ON, вимикач --no-seg-resize")
     ap.add_argument("--gpu-sato", action=argparse.BooleanOptionalAction,
                     default=True,
-                    help="рахувати sato на карті (43%% часу сторінки; вихід "
-                         "еквівалентний CPU-версії — див. gpu_sato_verify.py). "
-                         "Дефолт ON на cuda, вимикач --no-gpu-sato")
+                    help="рахувати sato через torch на пристрої прогону (43%% "
+                         "часу сторінки; вихід еквівалентний skimage — див. "
+                         "gpu_sato_verify.py). Без карти — на процесорі, і там "
+                         "теж швидше за skimage. Дефолт ON, вимикач --no-gpu-sato")
     # 🔴 Стеля рядків у сегментації. kraken ріже при >400 кінців скелета, тобто
     # ~200 рядків на сторінку, і робить це мовчки: помилки немає, декод виглядає
     # повним, у меті лишається рівне `lines: 200`. Викидає найдрібніші
@@ -4707,14 +4708,25 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
         if sigmas:
             print(f"[htr-run] sato sigmas={list(sigmas)} (рідні kraken — 1,3,5,7,9)",
                   flush=True)
-        if args.gpu_sato and device.startswith("cuda"):
+        if args.gpu_sato:
             # ставиться поверх звуження sigmas — той самий патч skimage.filters.sato,
-            # але згортки йдуть на карті. Вихід звірено з CPU-версією до float32-епсилону
-            # (`nyshporka.htr.patches.gpu_sato_verify`), тож полігони не змінюються.
+            # але згортки рахує torch на пристрої прогону. Вихід звірено з
+            # skimage до float32-епсилону (`nyshporka.htr.patches.gpu_sato_verify`),
+            # тож полігони не змінюються.
+            #
+            # 🔴 Без карти патч теж ставиться — на процесор. Доти умова була
+            # `device.startswith("cuda")`, і машина без NVIDIA (Mac, ноутбук,
+            # CPU-образ Docker) рахувала найдорожчий крок сторінки повільним
+            # шляхом skimage, хоча та сама математика на torch швидша й там.
+            # Замір 17.11.2026, Apple M5 Pro, кадр 1800×2800, sigmas (1,3),
+            # mode=constant (як кличе kraken): skimage 1.79 с; torch на 1 потоці
+            # 1.06 с (×1.7), на 4 — 0.53 с (×3.4); max|Δ| 1.5e-07 при діапазоні 0.40.
+            # Виграш є й на одному потоці, тож шард із урізаними потоками не програє.
             sys.path.insert(0, str(_PATCHES_DIR))
             from gpu_sato import install_gpu_sato
             used = install_gpu_sato(sigmas or (1, 3, 5, 7, 9), device=device)
-            print(f"[htr-run] sato НА GPU, sigmas={list(used)}", flush=True)
+            where = "GPU" if device.startswith("cuda") else device
+            print(f"[htr-run] sato через torch НА {where}, sigmas={list(used)}", flush=True)
         elif not args.gpu_sato:
             # вимкнення прискорення має бути гучним: різниця ×2 у часі сторінки, і
             # найдешевший спосіб її діагностувати — побачити причину в шапці логу
