@@ -580,6 +580,70 @@ def _device_slug(device: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "", device) or "cuda"
 
 
+# ── пристрій прогону ──────────────────────────────────────────────────────────
+#: Змінна середовища, якою машина обирає пристрій для всіх прогонів одразу —
+#: з командного рядка, застосунку й черги. Явний `--device` її перекриває.
+#: 🔴 Змінна, а не прапорець `nysh read`: прогони стартують із трьох облич і
+#: черги демона, і прапорець, доданий одному, лишив би решту на старому шляху —
+#: «на Mac читає картою» залежало б від того, яку кнопку натиснуто.
+DEVICE_ENV = "NYSH_HTR_DEVICE"
+
+#: Пристрої, на яких сегментація ДОВЕДЕНО та сама, що на процесорі й CUDA:
+#: `kraken_lineage_verify --device-b <пристрій>` на справжніх кадрах, полігони,
+#: рамки й тексти побайтово. Поки пристрою тут немає, (а) `auto` його не обирає,
+#: (б) його сегментація лягає в кеш під власним ключем (`Segmenter._full_key`):
+#: не доведена тотожність не має права ні брати чужий кеш, ні псувати його
+#: іншим машинам, що ділять простір чи Супрягу.
+SEG_DEVICE_PROVEN: frozenset[str] = frozenset()
+
+#: Що приймає `--device`.
+_DEVICE_RE = re.compile(r"^(auto|cpu|mps|cuda(:\d+)?)$")
+
+
+def resolve_device(requested: str, *, cuda_ok: bool, mps_ok: bool,
+                   proven: frozenset[str] = SEG_DEVICE_PROVEN) -> tuple[str, str]:
+    """Запитаний пристрій → `(пристрій, пояснення для лога або '')`.
+
+    `auto` бере карту NVIDIA, коли вона є, далі MPS — лише доведений
+    (`SEG_DEVICE_PROVEN`), інакше процесор. Явно названий пристрій, якого на
+    машині немає, падає на процесор із поясненням: так було для `cuda:0` і
+    доти, а прогін, що відмовився стартувати, гірший за повільний.
+
+    🔴 MPS тут не обирається «бо доступний». Доступність — властивість заліза, а
+    право на нього — властивість сегментації: інші полігони рядків дали б інший
+    текст без сліду в лозі.
+    """
+    req = (requested or "auto").strip().lower()
+    if not _DEVICE_RE.match(req):
+        raise ValueError(f"невідомий пристрій {requested!r}: auto · cpu · mps · cuda[:N]")
+    if req == "auto":
+        if cuda_ok:
+            return "cuda:0", ""
+        if mps_ok and "mps" in proven:
+            return "mps", ""
+        return "cpu", ""
+    if req.startswith("cuda") and not cuda_ok:
+        return "cpu", "CUDA недоступна — падаю на cpu (~20 с – 1 хв/стор)"
+    if req == "mps" and not mps_ok:
+        return "cpu", "MPS недоступний (не Apple Silicon або torch без MPS) — падаю на cpu"
+    return req, ""
+
+
+def mps_available(torch: Any) -> bool:
+    """Чи є в цьому torch робочий MPS. Старі збірки не мають `backends.mps` зовсім."""
+    mps = getattr(getattr(torch, "backends", None), "mps", None)
+    try:
+        return bool(mps is not None and mps.is_available())
+    except Exception:
+        return False
+
+
+def on_accelerator(device: str) -> bool:
+    """Чи йде прогін на карті — NVIDIA чи Apple. Для того, що «рахується на карті»;
+    усе, що кличе `torch.cuda.*`, і далі питає саме `cuda`."""
+    return device.startswith("cuda") or device == "mps"
+
+
 #: Секунди поточної сторінки за етапами; скидаються перед кожною сторінкою.
 #: 🔴 Навіщо: «карта ледь зайнята» людина читала як «читає процесором», хоча
 #: на карті йшли і мережа сегментації, і sato, і розпізнавання — просто
@@ -854,7 +918,7 @@ def stages_summary(total: dict[str, float], pages: int, device: str,
     """Середня сторінка за етапами з позначкою, де кожен рахується."""
     if not pages or not total:
         return ""
-    on_card = device.startswith("cuda")
+    on_card = on_accelerator(device)
     dev = "карта" if on_card else "процесор"
     # Без карти патч sato рахує torch на процесорі — процесор і є місцем
     # рахунку; прапорець без карти не переносить sato нікуди.
@@ -915,6 +979,9 @@ def machine_label(device: str) -> str:
             return torch.cuda.get_device_name(torch.device(device))
         except Exception:
             return device
+    if device == "mps":
+        # Карта Apple своєї назви в torch не має: вона частина того самого чипа.
+        return f"{_cpu_name()} · карта Apple (MPS)"
     return f"{_cpu_name()}, {os.cpu_count() or '?'} потоків"
 
 
@@ -1140,6 +1207,19 @@ def load_pp(model: str, device: str) -> tuple:
         total_mb = torch.cuda.get_device_properties(idx).total_memory / 2**20
         mb = max(256.0, min(float(PP_VRAM_MB), 0.5 * total_mb))
         budget_px = mb / PP_MB_PER_KPX * 1000
+    elif device == "mps":
+        # Lightning Fabric знає Apple-карту як окремий акселератор, і пристрій
+        # там один.
+        # 🔴 Стелі пікселів пачки тут НЕМАЄ — як на процесорі, і це не недогляд.
+        # PP-модель не інваріантна до пачки: ті самі 120 рядків Дяка, читані
+        # пачками й по одному, збіглись лише в 41 (17.11.2026). Перша редакція
+        # рахувала стелю від `torch.mps.recommended_max_memory()`, і пачки
+        # складались інакше, ніж на процесорі: 72 з 376 рядків голосу розійшлись.
+        # З тією самою розкладкою MPS і процесор дали 120/120 тотожних — пачками
+        # і по одному. Пам'ять пачки й так обмежена `PP_BATCH` рядками, а
+        # пам'ять Apple-карти — це пам'ять машини.
+        cfg = RecognitionInferenceConfig(accelerator="mps", device=1,
+                                         batch_size=PP_BATCH, num_line_workers=0)
     else:
         cfg = RecognitionInferenceConfig(accelerator="cpu", batch_size=PP_BATCH,
                                          num_line_workers=0)
@@ -2228,6 +2308,12 @@ class Segmenter:
         # ключ їй потрібен; але платити за це знеціненням усього кешу не можна.
         if self._autocast:
             k["autocast"] = True
+        # 🔴 Той самий принцип для пристрою: поле з'являється ЛИШЕ на пристрої,
+        # тотожність якого ще не доведено (`SEG_DEVICE_PROVEN`). Ключі CUDA й
+        # процесора лишаються байт у байт тими самими, а сегментація MPS не
+        # бере чужого кешу й не підкладає свій прогонам інших машин.
+        if self._device == "mps" and "mps" not in SEG_DEVICE_PROVEN:
+            k["device"] = "mps"
         k["v"] = SEG_CACHE_VERSION
         return k
 
@@ -4020,7 +4106,10 @@ def main() -> int:
     ap.add_argument("--model", required=True,
                     help="модель розпізнавання: .mlmodel (kraken/Скриба) "
                          "або .pt (PARSeq/Писар) — рушій визначається розширенням")
-    ap.add_argument("--device", default="cuda:0")
+    ap.add_argument("--device", default=os.environ.get(DEVICE_ENV) or "auto",
+                    help="auto · cpu · mps · cuda[:N]; auto = карта NVIDIA, далі "
+                         "доведений MPS, інакше процесор. Дефолт машини — змінна "
+                         f"{DEVICE_ENV}")
     ap.add_argument("--limit", type=int, default=0, help="перші N сторінок")
     ap.add_argument("--pages", default="", help="діапазони 1-based: '1-50,60'")
     # None = «не задано» → розв'язується за рушієм (kraken і parseq мають різні
@@ -4537,10 +4626,15 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
         return 2
 
     import torch
-    device = args.device
-    if device.startswith("cuda") and not torch.cuda.is_available():
-        print("[htr-run] CUDA недоступна — падаю на cpu (~20 с – 1 хв/стор)", flush=True)
-        device = "cpu"
+    try:
+        device, why = resolve_device(args.device, cuda_ok=torch.cuda.is_available(),
+                                     mps_ok=mps_available(torch))
+    except ValueError as exc:
+        print(f"[htr-run] ✖ {exc}", flush=True)
+        emit(prog, "done", pages=0, skipped=0, failed=0, error=str(exc))
+        return 2
+    if why:
+        print(f"[htr-run] {why}", flush=True)
 
     shard_k, shard_n = parse_shard(args.shard)
     claim_mode = bool(args.claim) and shard_n > 1

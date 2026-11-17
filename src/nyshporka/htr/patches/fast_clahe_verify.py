@@ -1,11 +1,16 @@
 """Звірка `fast_clahe.equalize_adapthist_fast` з skimage на справжніх кадрах — до біта.
 
-    <інтерпретатор рушіїв> fast_clahe_verify.py <тека справи> [N] [--all]
+    <інтерпретатор рушіїв> fast_clahe_verify.py <тека справи> [N] [--all] [--device mps]
 
 Береться N кадрів (рівномірно); без `--all` — лише ті, які раннер справді
 підсилює (контраст нижче порогу `auto`). Кадр зводиться до висоти 3100, як
 перед хмарою. Порівнюється сам `equalize_adapthist` (float) і весь
 `enhance_image('clahesmooth')` (uint8, те, що йде в сегментацію).
+
+`--device` — пристрій звірки (типово `cuda:0`). 🔴 Рівність до біта на CUDA не
+доводить її на MPS: інтерполяцію там рахує інша реалізація torch. Тому пристрій,
+якого ще немає серед доведених (`fast_clahe.PROVEN`), звіряється саме цим
+скриптом, і лише після «✓» дописується туди.
 """
 from __future__ import annotations
 
@@ -28,13 +33,14 @@ def main() -> int:
     case = Path(sys.argv[1])
     n = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else 20
     every = "--all" in sys.argv
+    device = sys.argv[sys.argv.index("--device") + 1] if "--device" in sys.argv else "cuda:0"
     from skimage.exposure import equalize_adapthist
 
     import fast_clahe
     import runner as R
 
-    if not fast_clahe.install("cuda:0", verbose=True):
-        print("✗ fast_clahe не встановився — немає карти чи інша версія skimage")
+    if not fast_clahe.install(device, verbose=True, unproven=True):
+        print(f"✗ fast_clahe не встановився на {device} — немає пристрою чи інша версія skimage")
         return 2
     files = sorted(p for p in case.iterdir() if p.suffix.lower() in (".jpg", ".jpeg", ".png"))
     step = max(1, len(files) // (n * (1 if every else 3)))
@@ -63,7 +69,7 @@ def main() -> int:
         # і весь шлях раннера: з патчем і без
         fast_clahe.STATE["device"] = None
         e1 = np.asarray(R.enhance_image(im, "clahesmooth"))
-        fast_clahe.STATE["device"] = "cuda:0"
+        fast_clahe.STATE["device"] = device
         e2 = np.asarray(R.enhance_image(im, "clahesmooth"))
         ok = ok and np.array_equal(e1, e2)
         same += ok

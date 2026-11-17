@@ -185,15 +185,34 @@ def _clahe(image, kernel_size, clip_limit, nbins, dev):
     return result
 
 
-def install(device: str, verbose: bool = False) -> bool:
-    """Увімкнути CLAHE на карті для `enhance_image`. False — лишається skimage."""
+#: Пристрої, на яких інтерполяцію ДОВЕДЕНО рівною skimage до біта
+#: (`fast_clahe_verify.py <справа> --all --device <пристрій>` на справжніх кадрах).
+#: Префікс: `cuda` покриває `cuda:N`.
+#: ⚠ MPS сюди не потрапляє: у нього немає float64, а рівність до біта тримається
+#: саме на множенні у float64 (нижче, `edge_mapped.to(torch.float64)`). Звірка
+#: 17.11.2026 (M5 Pro, 8 кадрів метричної книги): усі 8 рівні, але лише тому, що
+#: кожен блок відступив на skimage (16 відступів), і шлях вийшов повільнішим за
+#: сам skimage (×0.69). Без float64 патч на MPS не має чого дати.
+PROVEN: tuple[str, ...] = ("cuda",)
+
+
+def proven(device: str) -> bool:
+    """Чи доведено патч на цьому пристрої."""
+    return any(device == p or device.startswith(p + ":") for p in PROVEN)
+
+
+def install(device: str, verbose: bool = False, unproven: bool = False) -> bool:
+    """Увімкнути CLAHE на карті для `enhance_image`. False — лишається skimage.
+
+    `unproven` — лише для звірки: вона і вирішує, чи пристрій потрапить у `PROVEN`.
+    """
     import importlib.metadata as md
 
     try:
         ver = md.version("scikit-image")
     except md.PackageNotFoundError:
         ver = "?"
-    if not device.startswith("cuda") or ver != TESTED_SKIMAGE:
+    if not (proven(device) or (unproven and device != "cpu")) or ver != TESTED_SKIMAGE:
         if verbose:
             print(f"[fast-clahe] лишається skimage (пристрій {device}, scikit-image "
                   f"{ver}; звірено на {TESTED_SKIMAGE})", flush=True)
