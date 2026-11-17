@@ -47,6 +47,13 @@ install. The assistant goes last (step 3 explains why).
        “Run anyway”. This is how Windows greets every program that few people
        have downloaded yet. If an antivirus calls the installer a trojan and
        removes the file, see [“The antivirus called the installer a trojan”](#defender).
+
+       If the window says **“Smart App Control blocked part of this app”**
+       instead, there is no “Run” button, and the installer will not start
+       while that feature is on: it is not digitally signed yet. To turn it
+       off: “Windows Security” → “App & browser control” → “Smart App Control
+       settings” → “Off”, then run the installer again. On some versions of
+       Windows 11 it can only be turned back on by reinstalling the system.
     3. On the page «Де жити Нишпорці» (Where Nyshporka will live) choose a folder
        on a drive with plenty of space (about 10 GB needed), for example
        `D:\Genealogy\Nyshporka`. This one folder will hold everything: the

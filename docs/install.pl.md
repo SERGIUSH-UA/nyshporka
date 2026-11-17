@@ -46,6 +46,15 @@ program odczytu rękopisów. Asystenta — na końcu (dlaczego — w kroku 3).
        „Więcej informacji” → „Uruchom mimo to”. Tak Windows wita każdy program,
        który pobrało jeszcze niewiele osób. Jeśli zaś antywirus nazywa
        instalator trojanem i usuwa plik, zobacz [„Antywirus nazwał instalator trojanem”](#defender).
+
+       Jeśli natomiast okno mówi, że część aplikacji zablokowała
+       **Inteligentna kontrola aplikacji** (Smart App Control) — przycisku
+       „Uruchom” tam nie ma i instalator nie ruszy, dopóki ta funkcja jest
+       włączona: nie ma jeszcze podpisu cyfrowego. Wyłączenie: „Zabezpieczenia
+       Windows” → „Kontrola aplikacji i przeglądarki” → ustawienia Smart App
+       Control → „Wyłączone”, potem uruchom instalator ponownie. W części
+       wersji Windows 11 włączyć ją z powrotem można tylko przez ponowną
+       instalację systemu.
     3. Na stronie «Де жити Нишпорці» (Gdzie będzie mieszkać Nyshporka) wybierz
        folder na dysku z dużą ilością miejsca (potrzeba około 10 GB), na
        przykład `D:\Genealogy\Nyshporka`. W tym jednym folderze będzie

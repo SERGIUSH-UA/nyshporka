@@ -49,6 +49,15 @@ manuscrits ne s'installe pas. L'assistant en dernier (pourquoi — à l'étape 3
        que Windows accueille tout programme encore peu téléchargé. Si en
        revanche un antivirus qualifie l'installateur de cheval de Troie et
        supprime le fichier, voir [« L'antivirus a qualifié l'installateur de cheval de Troie »](#defender).
+
+       Si la fenêtre indique plutôt que **Smart App Control** (Contrôle
+       intelligent des applications) a bloqué une partie de cette application,
+       il n'y a pas de bouton « Exécuter », et l'installateur ne démarrera pas
+       tant que cette fonction est activée : il n'a pas encore de signature
+       numérique. Pour la désactiver : « Sécurité Windows » → « Contrôle des
+       applications et du navigateur » → paramètres de Smart App Control →
+       « Désactivé », puis relancez l'installateur. Sur certaines versions de
+       Windows 11, elle ne peut être réactivée qu'en réinstallant le système.
     3. Sur la page « Де жити Нишпорці » (Où vivra Nyshporka), choisissez un
        répertoire sur un disque avec beaucoup de place (environ 10 Go
        nécessaires), par exemple `D:\Genealogy\Nyshporka`. Ce seul répertoire

@@ -49,6 +49,15 @@ citire a manuscriselor. Asistentul — ultimul (de ce — la pasul 3).
        informații” → „Executare oricum”. Așa întâmpină Windows orice program
        pe care încă puțini l-au descărcat. Dacă însă antivirusul numește
        programul de instalare troian și șterge fișierul, vedeți [„Antivirusul a numit programul de instalare troian”](#defender).
+
+       Dacă însă fereastra spune că o parte a aplicației a fost blocată de
+       **Smart App Control** — acolo nu există butonul „Executare”, iar
+       programul de instalare nu pornește cât timp funcția este activă: încă
+       nu are semnătură digitală. Dezactivare: „Securitate Windows” →
+       „Control aplicații și browser” → setările Smart App Control →
+       „Dezactivat”, apoi porniți din nou programul de instalare. Pe unele
+       versiuni de Windows 11 funcția poate fi reactivată doar prin
+       reinstalarea sistemului.
     3. Pe pagina «Де жити Нишпорці» (Unde va locui Nyshporka) alegeți un director
        pe un disc cu mult spațiu (sunt necesari circa 10 GB), de exemplu
        `D:\Genealogy\Nyshporka`. În acest singur director va sta tot: programul,

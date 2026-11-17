@@ -51,6 +51,16 @@ Schritt 3).
        jedes Programm, das bisher nur wenige heruntergeladen haben. Nennt ein
        Virenschutz das Installationsprogramm dagegen einen Trojaner und entfernt
        die Datei, siehe [„Der Virenschutz hält das Installationsprogramm für einen Trojaner“](#defender).
+
+       Meldet das Fenster dagegen, **Smart App Control** (Intelligente
+       App-Steuerung) habe einen Teil dieser App blockiert, gibt es dort keine
+       Schaltfläche „Ausführen“, und das Installationsprogramm startet nicht,
+       solange die Funktion eingeschaltet ist: Es ist noch nicht digital
+       signiert. Ausschalten: „Windows-Sicherheit“ → „App- & Browsersteuerung“
+       → Einstellungen für Smart App Control → „Aus“, danach das
+       Installationsprogramm erneut starten. Auf manchen Versionen von
+       Windows 11 lässt sich die Funktion nur durch eine Neuinstallation des
+       Systems wieder einschalten.
     3. Wählen Sie auf der Seite «Де жити Нишпорці» (Wo Nyshporka wohnen wird)
        einen Ordner auf einem Laufwerk mit viel Platz (etwa 10 GB nötig),
        zum Beispiel `D:\Genealogy\Nyshporka`. In diesem einen Ordner liegt
