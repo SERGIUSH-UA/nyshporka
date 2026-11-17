@@ -4716,7 +4716,7 @@ class ReadArgs(BaseModel):
     seg_height: int = Field(default=0, ge=0, le=4000,
                             description="висота сегментації; єдиний важіль, "
                                         "що коштує якістю пошуку")
-    device: str = Field(default="", description="cuda:0 · cpu")
+    device: str = Field(default="", description="cuda:0 · mps · cpu")
 
 
 # `agent=False`: план рахує й сам `read.start`, а людині він потрібен окремо —

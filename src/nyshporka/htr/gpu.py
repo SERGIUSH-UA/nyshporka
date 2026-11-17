@@ -26,6 +26,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 #: Що дописується до кожної відмови: CPU — це повільно, але робочо.
 CPU_NOTE = "лишаю CPU-збірку (читання піде ~20 с – 1 хв/стор замість ~10–15 с на карті)"
@@ -44,6 +45,45 @@ def proven_devices(torch_version: str) -> frozenset[str]:
     mm = ".".join(str(torch_version or "").split("+")[0].split(".")[:2])
     return frozenset(d for d, versions in SEG_DEVICE_PROVEN_ON.items()
                      if mm and mm in versions)
+
+
+def shard_device(engine_report: Any = None) -> str:
+    """Де читатимуть шарди: `cuda`, `mps` або `''` (процесор).
+
+    Шарди вирішуються в процесі застосунку, а пристрій кожен процес раннера
+    обирає сам (`runner.resolve_device`, типово `auto`). Тож тут — дзеркало того
+    вибору: розійдись вони, шарди планувались би під карту, а читали б
+    процесором (і билися б за ядра), або навпаки.
+
+    `engine_report` — огляд середовища рушіїв (`env.EnvReport`); за замовчуванням
+    береться кешований, і лише на macOS: деінде MPS немає за побудовою.
+    """
+    import sys
+
+    chosen = os.environ.get(DEVICE_ENV, "").strip().lower() or "auto"
+    if chosen == "cpu":
+        return ""
+    if chosen != "mps" and detect_card() is not None:
+        return "cuda"
+    if chosen not in ("auto", "mps") or sys.platform != "darwin":
+        return ""
+    rep = engine_report if engine_report is not None else _engine_report()
+    if rep is None or not getattr(rep, "mps", False):
+        return ""
+    if chosen == "mps" or "mps" in proven_devices(getattr(rep, "torch", "")):
+        return "mps"
+    return ""
+
+
+def _engine_report() -> Any:
+    """Кешований огляд середовища рушіїв або None, коли простору чи середовища немає."""
+    try:
+        from nyshporka.htr import env as E
+        from nyshporka.setup.doctor import engine_venv
+
+        return E.inspect_cached(engine_venv())
+    except Exception:
+        return None
 
 
 #: Форма, у якій `nvidia-smi` віддає compute capability. Усе інше — не число.

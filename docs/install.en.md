@@ -268,7 +268,8 @@ powershell -ExecutionPolicy Bypass -File "$env:TEMP\nysh-install.ps1"
     **A Mac with Apple Silicon (M1–M5).** It reads on the chip's built-in GPU on its
     own — nothing to switch on: `nysh doctor` shows «карта Apple (MPS)» in the
     «Прискорення (GPU)» line. A page with two voices takes ~5–8 s instead of ~1 min
-    on the processor, and the text is the same to the character. To force the
+    on the processor, and the text is the same to the character. `nysh read <folder>
+    --workers 2` gives another ~1.7× (more than two adds almost nothing). To force the
     processor: `NYSH_HTR_DEVICE=cpu`.
 
     **You don't need a graphics card.** Without one, a page is read in ~20 s – 1 min

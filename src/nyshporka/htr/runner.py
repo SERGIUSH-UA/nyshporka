@@ -1046,6 +1046,12 @@ def install_gpu_lock(lock_path: Path, device: str, keep_cache: bool = False) -> 
                     if device.startswith("cuda") and not keep_cache:
                         import torch
                         torch.cuda.empty_cache()
+                    elif device == "mps" and not keep_cache:
+                        # Пам'ять Apple-карти — пам'ять машини: кеш алокатора
+                        # Metal, не відданий після forward, тримав би її
+                        # гігабайтами в кожному шарді одночасно.
+                        import torch
+                        torch.mps.empty_cache()
         return locked
 
     blla.compute_segmentation_map = under_lock(blla.compute_segmentation_map)
@@ -5117,11 +5123,11 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
     # пік VRAM по етапах і повтор після OOM — ДО лока: обгортка має лягти
     # під нього, щоб повтор пікового етапу теж ішов під локом
     install_vram_stages(device, keep_cache=args.keep_cache)
-    if not args.gpu_lock and shard_n > 1 and device.startswith("cuda"):
+    if not args.gpu_lock and shard_n > 1 and on_accelerator(device):
         args.gpu_lock = str(out_dir / f"_gpu.{_device_slug(device)}.lock")
         print(f"[htr-run] лок GPU-фази виведено сам: {Path(args.gpu_lock).name} "
               f"(шардів {shard_n} на {device})", flush=True)
-    if args.gpu_lock and device.startswith("cuda") and not (
+    if args.gpu_lock and on_accelerator(device) and not (
             cache is not None and cache.get("gpu_lock")):
         install_gpu_lock(Path(args.gpu_lock), device, keep_cache=args.keep_cache)
         print(f"[htr-run] GPU-фаза під локом {Path(args.gpu_lock).name}", flush=True)
