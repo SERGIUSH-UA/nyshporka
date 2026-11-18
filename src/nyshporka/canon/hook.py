@@ -25,15 +25,22 @@ CANONICAL = "data/canonical/"
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".webp", ".bmp"}
 MARKERS = ("nyshporka canon precommit", "pre_commit_citations")
 
+#: Змінна, якою процес Нишпорки, що сам комітить, передає хуку свій інтерпретатор.
+PYTHON_ENV = "NYSHPORKA_PYTHON"
+
 HOOK = """#!/bin/sh
 # встановлено: nysh canon hook --install
-root="$(git rev-parse --show-toplevel)"
-py="{interpreter}"
-[ -x "$py" ] || py="$root/.venv/Scripts/python.exe"
-[ -x "$py" ] || py="$root/.venv/bin/python"
-[ -x "$py" ] || py=python
 # Нагадування про міграцію агента в коміті — шум, а не допомога.
-NYSHPORKA_NO_MIGRATION_NAG=1 exec "$py" -m nyshporka canon precommit
+export NYSHPORKA_NO_MIGRATION_NAG=1
+root="$(git rev-parse --show-toplevel)"
+for py in "${NYSHPORKA_PYTHON:-}" "{interpreter}" \\
+          "$root/.venv/Scripts/python.exe" "$root/.venv/bin/python"; do
+  [ -n "$py" ] && [ -x "$py" ] && exec "$py" -m nyshporka canon precommit
+done
+command -v nysh >/dev/null 2>&1 && exec nysh canon precommit
+echo "pre-commit канону: Нишпорку не знайдено на цій машині." >&2
+echo "  Перевстановіть хук: nysh canon hook --install" >&2
+exit 1
 """
 
 
@@ -45,6 +52,14 @@ def hook_script() -> str:
     коміт або відмовляв без пояснення, або перевірка канону не робилась
     зовсім. Тека хуків своя на кожній машині (`.git/hooks` не версіонується),
     тож повний шлях тут безпечний.
+
+    🔴 Але `.git` їде разом із простором, коли його копіюють на іншу машину
+    (#30), і там записаного шляху немає. Тому порядок такий: інтерпретатор
+    процесу, що комітить сам (`NYSHPORKA_PYTHON`, його ставить `vcs`), далі
+    записаний, `.venv` простору, `nysh` із PATH. Падіння на голий `python`
+    прибрано: системний Python Нишпорки не імпортує, і коміт відмовляв
+    повідомленням про модуль, з якого не видно, що робити. Тепер хук каже,
+    як себе перевстановити.
     """
     return HOOK.replace("{interpreter}", Path(sys.executable).as_posix())
 
