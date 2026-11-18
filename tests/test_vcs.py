@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -142,6 +143,69 @@ def test_broken_canon_is_not_saved(space: Path) -> None:
     with pytest.raises(V.VcsError):
         V.save(W.workspace(), "зламане")
     assert _git(space, "rev-parse", "HEAD") == head
+
+
+def _as_if_copied_from_another_machine(space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Хук із чужим інтерпретатором і PATH, де немає Python із Нишпоркою.
+
+    Так виглядає простір, скопійований цілком на інший комп'ютер: `.git/hooks`
+    їде разом із текою, а записаного в хуку шляху там немає (#30).
+    """
+    hook = space / ".git" / "hooks" / "pre-commit"
+    text = hook.read_text(encoding="utf-8")
+    hook.write_text(text.replace(Path(sys.executable).as_posix(),
+                                 "/інша-машина/nysh/python"),
+                    encoding="utf-8", newline="\n")
+    # Лише git і sh (на Windows хук запускає sh з PATH): Python тут немає.
+    tools = {str(Path(t).parent) for t in (shutil.which("git"), shutil.which("sh")) if t}
+    assert not any(shutil.which(py, path=os.pathsep.join(tools)) for py in ("python", "nysh"))
+    monkeypatch.setenv("PATH", os.pathsep.join(sorted(tools)))
+
+
+def test_history_saves_in_a_space_copied_from_another_machine(
+        space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Скопійований простір: коміт історії не відмовляє через хук."""
+    V.ensure_repo(space)
+    _as_if_copied_from_another_machine(space, monkeypatch)
+    _card(space, "I9004", "Степан")
+    assert V.save(W.workspace(), "картка після переїзду")
+
+
+def test_copied_space_hook_still_blocks_broken_canon(
+        space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Хук після переїзду не вимикається: зламаний канон і далі не проходить."""
+    V.ensure_repo(space)
+    _as_if_copied_from_another_machine(space, monkeypatch)
+    head = _git(space, "rev-parse", "HEAD")
+    _card(space, "I9003", "Зламаний", parent_family="F9404")
+    with pytest.raises(V.VcsError, match="F9404"):
+        V.save(W.workspace(), "зламане")
+    assert _git(space, "rev-parse", "HEAD") == head
+
+
+def test_copied_space_hook_falls_back_to_nysh_then_says_how_to_fix(
+        space: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ручний `git commit` у скопійованому просторі: `nysh` з PATH, а без нього — порада."""
+    V.ensure_repo(space)
+    _as_if_copied_from_another_machine(space, monkeypatch)
+    _card(space, "I9006", "Остап")
+    _git(space, "add", "-A")
+    commit = ["git", "commit", "-qm", "руками"]
+    res = subprocess.run(commit, cwd=space, capture_output=True)
+    assert res.returncode != 0
+    assert "nysh canon hook --install" in res.stderr.decode("utf-8")
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    called = tmp_path / "nysh-called"
+    fake = bin_dir / "nysh"
+    fake.write_text(f'#!/bin/sh\necho "$@" > "{called.as_posix()}"\n',
+                    encoding="utf-8", newline="\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", os.pathsep.join([str(bin_dir), os.environ["PATH"]]))
+    res = subprocess.run(commit, cwd=space, capture_output=True)
+    assert res.returncode == 0, res.stderr.decode("utf-8")
+    assert called.read_text(encoding="utf-8").strip() == "canon precommit"
 
 
 def test_green_canon_check_saves_itself_only_where_nyshporka_keeps_history(space: Path) -> None:

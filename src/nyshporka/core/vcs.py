@@ -19,9 +19,11 @@
 """
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -43,9 +45,14 @@ def git_available() -> bool:
 
 
 def _git(root: Path, *args: str, check: bool = True, stdin: bytes | None = None) -> str:
+    from nyshporka.canon.hook import PYTHON_ENV
+
+    # Хук канону бере цей інтерпретатор першим: у скопійованому з іншої машини
+    # просторі записаного в хуку шляху немає, а коміт історії має пройти (#30).
+    env = {**os.environ, PYTHON_ENV: sys.executable}
     try:
         out = subprocess.run(["git", "-c", "core.quotepath=false", *args], cwd=root,
-                             capture_output=True, timeout=120, input=stdin)
+                             capture_output=True, timeout=120, input=stdin, env=env)
     except (OSError, subprocess.SubprocessError) as exc:
         raise VcsError(f"git недоступний: {exc}") from exc
     if check and out.returncode != 0:
