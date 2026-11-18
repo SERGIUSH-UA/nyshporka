@@ -152,9 +152,17 @@ ausgeschaltet, Sie schalten sie ein (`nysh share setup`).
 
 ### Kann ich die Forschung auf einen anderen Computer übertragen?
 
-Ja: Der Arbeitsordner ist ein gewöhnlicher Ordner, man kann ihn vollständig
-kopieren. Die Beschreibung jeder Akte liegt im Ordner der Akte selbst, sie
-zieht also mit ihr um, auch zu einer Kollegin oder einem Kollegen.
+Ja. Schließen Sie auf dem alten Rechner das Nyshporka-Fenster und führen Sie
+`nysh workspace export <Ordner auf einem Laufwerk>` aus: Die Kopie wird Datei
+für Datei geprüft, und ein erneuter Lauf in denselben Ordner kopiert nur das
+Geänderte. `--with-roots` nimmt Scan-Ordner außerhalb des Arbeitsordners mit,
+`--with-data` Verzeichnisse und Modellgewichte für einen Rechner ohne Internet.
+Auf dem neuen Rechner installieren Sie Nyshporka und führen
+`nysh workspace import <Ordner der Kopie>` aus: Der Arbeitsordner wird
+wiederhergestellt, Scan-Ordner kommen an ihre neuen Orte, und der Befehl nennt,
+was noch zu tun ist (Lese-Engines, Anmeldung bei Supriaha). Die Beschreibung
+jeder Akte liegt im Ordner der Akte selbst, eine einzelne Akte lässt sich also
+weiterhin als einfache Ordnerkopie an Kolleginnen und Kollegen weitergeben.
 
 ## Updates und Deinstallation
 
