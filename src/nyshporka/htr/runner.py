@@ -1079,24 +1079,30 @@ PP_CANVAS_MPX = 40.0
 #: побітово той самий, розпізнавання −7% (V100, 10 сторінок). Вимикач — `--no-pp-fuse`.
 PP_FUSE = True
 #: Точність основи PP-моделі на карті (`patches/pp_fp16.py`), `--pp-precision`.
-#: 🔴 Дефолт — fp32. fp16 на справжніх сторінках у 5.5 раза ПОВІЛЬНІШИЙ (V100,
-#: 10 сторінок, сегментація з кешу: розпізнавання 19.8 проти 3.6 с/стор): кожна
-#: нова ширина рядка — новий вибір ядер cuDNN для половинної точності, а
-#: ширина в кожній пачці інша. Окремий прохід по тих самих формах (замір
-#: однієї пачки) показує навпаки виграш — тому fp16 лише явно, для заміру.
-PP_PRECISION = "fp32"
+#: `auto` (дефолт з 18.11.2026) — fp16 з кошиками форм там, де є тензорні ядра
+#: (те саме правило, що для Писаря, `pysar_fp16_wanted`), інакше fp32.
+#: Без кошиків fp16 на справжніх сторінках у 5.5 раза ПОВІЛЬНІШИЙ: кожна нова
+#: форма пачки — новий вибір ядер cuDNN (V100, 04.10.2026). З кошиками 64 px форм
+#: кілька десятків, і розпізнавання на V100 швидше на 59 % (бенч 240 сторінок
+#: ДАХмО 315-1-7709, три голоси, 18.11.2026). Якість не гірша: «індекс FS» (178 рук,
+#: Дяк v16) прізвища 59.0 → 60.8 %, мірило назв Регента 95.7 → 95.9 % пошуком;
+#: на GTX 1650 той самий fp16 учетверо повільніший — тому `auto`, а не fp16 скрізь.
+PP_PRECISION = "auto"
+#: Крок кошика ширини, px (`patches/pp_bucket.py`, `--pp-bucket`); діє лише з fp16.
+#: 64 замість 256: той самий приріст темпу (+59 % проти +47 %) і вдвічі менша зміна
+#: тексту голосу. 0 — без кошиків.
+PP_BUCKET = 64
 
 
-def _pp_half(rec) -> None:  # type: ignore[no-untyped-def]
-    """Увімкнути fp16 основи (лише `--pp-precision fp16`); збій — лише попередження."""
+def _pp_half(rec, why: str = "") -> None:  # type: ignore[no-untyped-def]
+    """Увімкнути fp16 основи PP-моделі; збій — лише попередження."""
     try:
         if str(_PATCHES_DIR) not in sys.path:
             sys.path.insert(0, str(_PATCHES_DIR))
         import pp_fp16
 
         pp_fp16.enable_fp16(rec)
-        print("[htr-run] PP-точність: fp16 основа (на справжніх сторінках повільніше "
-              "за fp32 — лише для заміру)", flush=True)
+        print(f"[htr-run] PP-точність: fp16 основа ({why})", flush=True)
     except Exception as exc:  # прискорювач, а не умова роботи
         print(f"[htr-run] ⚠ fp16 для PP-моделі не ввімкнено ({type(exc).__name__}: "
               f"{exc}) — читаю у fp32", flush=True)
@@ -1142,9 +1148,35 @@ def load_pp(model: str, device: str) -> tuple:
         except Exception as exc:  # прискорювач, а не умова роботи
             print(f"[htr-run] ⚠ злиття BN у PP-моделі не вдалося ({type(exc).__name__}: "
                   f"{exc}) — читаю без нього", flush=True)
-    if device.startswith("cuda") and PP_PRECISION == "fp16":
-        _pp_half(task.net.nn)
+    half, why = pp_fp16_wanted(PP_PRECISION, device)
+    if half:
+        _pp_half(task.net.nn, why)
+        if PP_BUCKET > 0:
+            _pp_bucket(task.net.nn, PP_BUCKET)
     return task.net, cfg, budget_px
+
+
+def pp_fp16_wanted(mode: str, device: str) -> tuple[bool, str]:
+    """Чи читати PP-модель у fp16: (так/ні, причина). `auto` — за картою, як Писар."""
+    if mode == "fp32" or not device.startswith("cuda"):
+        return False, "fp32" if mode == "fp32" else "не cuda"
+    if mode == "fp16":
+        return True, "примусово"
+    return pysar_fp16_wanted("auto", device)
+
+
+def _pp_bucket(rec, step: int) -> None:  # type: ignore[no-untyped-def]
+    """Кошики форм пачки для PP (`patches/pp_bucket.py`); збій — лише попередження."""
+    try:
+        if str(_PATCHES_DIR) not in sys.path:
+            sys.path.insert(0, str(_PATCHES_DIR))
+        import pp_bucket
+
+        pp_bucket.enable_bucket(rec, step)
+        print(f"[htr-run] PP: кошики форм, крок {step} px", flush=True)
+    except Exception as exc:  # прискорювач, а не умова роботи
+        print(f"[htr-run] ⚠ кошики форм для PP не ввімкнено ({type(exc).__name__}: "
+              f"{exc})", flush=True)
 
 
 def _pp_scaled_width(crop, height: int) -> float:
@@ -4059,9 +4091,12 @@ def main() -> int:
     ap.add_argument("--pp-fuse", action=argparse.BooleanOptionalAction, default=PP_FUSE,
                     help="злиття BatchNorm і гілок RepDWConv у PP-моделі перед читанням "
                          "(текст той самий, на 11–13%% швидше)")
-    ap.add_argument("--pp-precision", choices=("fp32", "fp16"), default=PP_PRECISION,
-                    help="точність основи PP-моделі на карті; fp16 на справжніх сторінках "
-                         "повільніший (нові ширини рядків), лише для заміру")
+    ap.add_argument("--pp-precision", choices=("auto", "fp32", "fp16"), default=PP_PRECISION,
+                    help="точність основи PP-моделі на карті: auto — fp16 з кошиками форм "
+                         "там, де є тензорні ядра (Volta і новіші, крім GTX 16xx), інакше fp32")
+    ap.add_argument("--pp-bucket", type=int, default=PP_BUCKET,
+                    help="крок кошика ширини пачки PP у fp16, px (0 — без кошиків; без них "
+                         "fp16 повільніший за fp32)")
     ap.add_argument("--pp-vram-mb", type=int, default=PP_VRAM_MB,
                     help="скільки VRAM дати одній пачці PP-OCRv6 у шарді, МБ (пачка "
                          "закривається раніше, ніж вилізе за бюджет)")
@@ -4544,6 +4579,11 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
                   # на частці рядків (див. `pysar_fp16_wanted`)
                   "pysar_fp16": (engine == "parseq"
                                  and pysar_fp16_wanted(args.pysar_fp16, device)[0]),
+                  # точність PP-голосів/основи — та сама причина: fp16 з кошиками
+                  # змінює ~7 % символів PP-тексту (див. `PP_PRECISION`)
+                  "pp_fp16": pp_fp16_wanted(args.pp_precision, device)[0],
+                  "pp_bucket": (max(0, int(args.pp_bucket))
+                                if pp_fp16_wanted(args.pp_precision, device)[0] else 0),
                   # 🧵 те саме міркування, що й з контрастом: злиття міняє самі
                   # рядки, тож два прогони однією моделлю по одній справі дадуть
                   # різний текст і різну їх кількість. Без запису в меті
@@ -4574,7 +4614,7 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
     meta_base = {k: v for k, v in meta.items()
                  if k in ("version", "case_dir", "case_key", "frames_total",
                           "model", "device", "engine", "script", "enhance",
-                          "voice_batch", "merge_split_lines")}
+                          "voice_batch", "merge_split_lines", "pp_fp16", "pp_bucket")}
     saves = 0
     # стан гарда переживає рестарт: без цього кожен запуск (×N шардів) починав
     # 15 очних ставок наново — на 5 рестартах це дало 60% гардованих сторінок
@@ -4722,6 +4762,7 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
     globals()["PP_VRAM_MB"] = max(0, int(args.pp_vram_mb))
     globals()["PP_FUSE"] = bool(args.pp_fuse)
     globals()["PP_PRECISION"] = str(args.pp_precision)
+    globals()["PP_BUCKET"] = max(0, int(args.pp_bucket))
     if engine == "ppocr" and not warm:
         print(f"[htr-run] PP-OCRv6: кропи пачками до {PP_BATCH} рядків у межах бюджету "
               f"VRAM, за шириною, без процесів-нарізувачів", flush=True)
@@ -5480,6 +5521,10 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
             "script": side_scripts.get(tag, script), "started": meta.get("started"),
             # саме цю мету бачить пошук; батч голосу — властивість тексту в теці
             "voice_batch": max(1, int(args.voice_batch)),
+            # точність PP — властивість тексту голосу (fp16 + кошики міняють ~7 % символів)
+            "pp_fp16": pp_fp16_wanted(args.pp_precision, device)[0],
+            "pp_bucket": (max(0, int(args.pp_bucket))
+                          if pp_fp16_wanted(args.pp_precision, device)[0] else 0),
             "updated": datetime.now().isoformat(timespec="seconds"),
             "pages": pages_meta, "done": len(pages_meta), "failed": []},
             ensure_ascii=False, indent=1))

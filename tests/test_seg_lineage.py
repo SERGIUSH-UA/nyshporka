@@ -141,13 +141,17 @@ class _Half:
         return rec
 
 
-def test_pp_reads_fp32_unless_asked(monkeypatch) -> None:
-    """🔴 fp16 на справжніх сторінках у 5.5 раза повільніший (V100: 19.8 проти
-    3.6 с/стор на розпізнавання) — кожна нова ширина рядка коштує вибору ядер.
-    Тож дефолт — fp32, а латка кличеться лише з `--pp-precision fp16`."""
-    assert R.PP_PRECISION == "fp32"
-    assert 'if device.startswith("cuda") and PP_PRECISION == "fp16":' in RUNNER_SRC
-    assert '"--pp-precision", choices=("fp32", "fp16")' in RUNNER_SRC
+def test_pp_fp16_only_with_buckets_and_tensor_cores(monkeypatch) -> None:
+    """🔴 fp16 без кошиків на справжніх сторінках у 5.5 раза повільніший (V100: 19.8
+    проти 3.6 с/стор) — кожна нова форма пачки коштує вибору ядер. З кошиками 64 px
+    форми повторюються, і розпізнавання на V100 швидше на 59 % (18.11.2026); на GTX 1650
+    той самий fp16 учетверо повільніший. Тож дефолт — `auto` (за картою), і fp16
+    вмикається лише разом із кошиками."""
+    assert R.PP_PRECISION == "auto"
+    assert R.PP_BUCKET == 64
+    assert "half, why = pp_fp16_wanted(PP_PRECISION, device)" in RUNNER_SRC
+    assert "_pp_half(task.net.nn, why)\n        if PP_BUCKET > 0:" in RUNNER_SRC
+    assert '"--pp-precision", choices=("auto", "fp32", "fp16")' in RUNNER_SRC
     assert "calibrate" not in RUNNER_SRC, "калібрування на одній пачці бреше — його немає"
 
 

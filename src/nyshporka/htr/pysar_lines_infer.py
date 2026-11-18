@@ -74,8 +74,10 @@ def load_pysar(ckpt: Path, device: str) -> Any:
         dec_mlp_ratio=int(cfg.get("dec_mlp_ratio", 4)),
         dec_depth=int(cfg.get("dec_depth", 1)),
         perm_num=6, perm_forward=True, perm_mirrored=True,
-        decode_ar=bool(cfg.get("decode_ar", True)),
-        refine_iters=int(cfg.get("refine_iters", 1)),
+        decode_ar=(os.environ["NYSH_PYSAR_DECODE"] != "nar")
+        if os.environ.get("NYSH_PYSAR_DECODE") else bool(cfg.get("decode_ar", True)),
+        refine_iters=int(os.environ["NYSH_PYSAR_REFINE"])
+        if os.environ.get("NYSH_PYSAR_REFINE") else int(cfg.get("refine_iters", 1)),
         dropout=float(cfg.get("dropout", 0.1)),
     )
     if isinstance(kwargs["patch_size"], int):

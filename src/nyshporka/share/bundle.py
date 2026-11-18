@@ -146,7 +146,8 @@ META_STRIPPED = ("case_dir", "case_dir_cloud", "logs", "review")
 #: дослідника — і жодне з них не було в чорному списку. Отримувачу потрібне
 #: інше: чим і як читали та скільки зроблено.
 META_KEPT = ("version", "case_key", "frames_total", "model", "engine", "script",
-             "enhance", "merge_split_lines", "voice_batch", "started", "updated",
+             "enhance", "merge_split_lines", "voice_batch", "pp_fp16", "pp_bucket",
+             "started", "updated",
              "done", "failed", "missing", "quarantined", "pages")
 
 #: Поля запису сторінки в `pages` мети, які їдуть. Решта (пам'ять процесу,
