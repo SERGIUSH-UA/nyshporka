@@ -156,10 +156,22 @@ def _as_if_copied_from_another_machine(space: Path, monkeypatch: pytest.MonkeyPa
     hook.write_text(text.replace(Path(sys.executable).as_posix(),
                                  "/інша-машина/nysh/python"),
                     encoding="utf-8", newline="\n")
-    # Лише git і sh (на Windows хук запускає sh з PATH): Python тут немає.
-    tools = {str(Path(t).parent) for t in (shutil.which("git"), shutil.which("sh")) if t}
-    assert not any(shutil.which(py, path=os.pathsep.join(tools)) for py in ("python", "nysh"))
-    monkeypatch.setenv("PATH", os.pathsep.join(sorted(tools)))
+    git = shutil.which("git")
+    assert git is not None
+    if sys.platform == "win32":
+        # Теки git і sh (хук запускає sh із PATH) — Python у них немає.
+        tools = sorted({str(Path(t).parent) for t in (git, shutil.which("sh")) if t})
+    else:
+        # На Linux і macOS git лежить у /usr/bin поруч із python, тож у PATH —
+        # окрема тека з одним git; хук стартує за шебангом `/bin/sh`.
+        only = space.parent / "only-git"
+        only.mkdir(exist_ok=True)
+        if not (only / "git").exists():
+            (only / "git").symlink_to(git)
+        tools = [str(only)]
+    assert not any(shutil.which(py, path=os.pathsep.join(tools))
+                   for py in ("python", "python3", "nysh"))
+    monkeypatch.setenv("PATH", os.pathsep.join(tools))
 
 
 def test_history_saves_in_a_space_copied_from_another_machine(
