@@ -139,9 +139,16 @@ odczytanego tekstu — oba tryby są domyślnie wyłączone, włączasz je Ty
 
 ### Czy można przenieść badania na inny komputer?
 
-Tak: folder roboczy to zwykły folder, można go skopiować w całości. Opis każdej
-jednostki leży w samym folderze jednostki, więc przenosi się razem z nim — także
-do kolegi.
+Tak. Na starym komputerze zamknij okno Nyshporki i uruchom
+`nysh workspace export <folder na dysku>`: kopia jest sprawdzana plik po pliku,
+a ponowne uruchomienie do tego samego folderu dokopiowuje tylko zmiany.
+`--with-roots` dołącza foldery ze skanami spoza przestrzeni roboczej,
+`--with-data` — słowniki i wagi modeli dla komputera bez internetu. Na nowym
+komputerze zainstaluj Nyshporkę i uruchom `nysh workspace import <folder kopii>`:
+przestrzeń zostanie odtworzona, foldery ze skanami trafią na nowe miejsca, a
+polecenie wymieni, co jeszcze trzeba zrobić (silniki odczytu, logowanie do
+Supriahi). Opis każdej jednostki leży w samym folderze jednostki, więc pojedynczą
+jednostkę nadal można przekazać koledze zwykłą kopią folderu.
 
 ## Aktualizacja i usuwanie
 

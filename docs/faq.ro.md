@@ -144,9 +144,17 @@ dumneavoastră (`nysh share setup`).
 
 ### Se poate muta cercetarea pe alt calculator?
 
-Da: directorul de lucru este un director obișnuit, poate fi copiat în
-întregime. Descrierea fiecărui dosar se află în directorul dosarului însuși,
-așa că se mută împreună cu el, inclusiv la un coleg.
+Da. Pe calculatorul vechi închideți fereastra Nyshporka și rulați
+`nysh workspace export <director pe un disc>`: copia este verificată fișier cu
+fișier, iar o nouă rulare în același director copiază doar ce s-a schimbat.
+`--with-roots` adaugă directoarele cu scanări aflate în afara spațiului de
+lucru, `--with-data` — cataloagele și ponderile modelelor pentru un calculator
+fără internet. Pe calculatorul nou instalați Nyshporka și rulați
+`nysh workspace import <directorul copiei>`: spațiul este refăcut, directoarele
+cu scanări ajung în noile locuri, iar comanda spune ce a mai rămas de făcut
+(motoarele de citire, autentificarea în Supriaha). Descrierea fiecărui dosar se
+află în directorul dosarului însuși, așa că un singur dosar poate fi dat în
+continuare unui coleg printr-o simplă copie a directorului.
 
 ## Actualizare și dezinstalare
 
