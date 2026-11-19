@@ -679,7 +679,21 @@ class _Density:
 
         series = F.series_of(key) if self.batch else None
         if series is None:
-            return probe()
+            got = probe()
+            if got is not None:
+                return got
+            # 🔴 Вибірці нема з чого міряти (кадри лише в R2 — маніфест без jpg):
+            # без цього наглядач брав типові 60 рядк/стор і вдвічі занижував
+            # темп. ЦДІАК 2-1-22 (19.11.2026): припущено 60, сусіди опису — 38,
+            # прогноз 4 962 стор/год проти факту 7 716. Сусіди хибять на
+            # нетиповій справі, але менше за сліпе типове число.
+            near = F.neighbour_lines_per_page(key)
+            if near is None:
+                return None
+            lines, n = near
+            say("density", f"щільність {lines:g} рядк/стор — вибірки зробити не вдалось, "
+                           f"медіана {n} прочитаних справ того самого опису")
+            return lines
         near = F.neighbour_lines_per_page(key)
         if near is not None:
             lines, n = near

@@ -137,6 +137,25 @@ def test_a_single_case_is_probed_even_with_neighbours(tmp_path: Path, probes) ->
     assert probes.kinds == [(F.DENSITY_PROBE_SAMPLE, None)], "одиночна — 40 кадрів, без сеансу"
 
 
+def test_a_single_case_without_frames_falls_back_to_neighbours(tmp_path: Path, probes,
+                                                               monkeypatch) -> None:
+    """ЦДІАК 2-1-22, 19.11.2026: кадри лише в R2, вибірка порожня — наглядач брав
+    типові 60 рядк/стор при сусідах 38 і занижував темп на третину."""
+    monkeypatch.setattr(F, "lines_per_page_probe", lambda *a, **k: None)
+    said: list[str] = []
+    got = G._Density(batch=False).of(tmp_path / "out", tmp_path / "spr-70",
+                                     "DARO/R-740/2/70", lambda kind, s: said.append(s))
+    assert got == 82.0
+    assert any("вибірки зробити не вдалось" in s for s in said)
+
+
+def test_a_single_case_without_frames_or_neighbours_stays_unknown(
+        tmp_path: Path, probes, monkeypatch) -> None:
+    monkeypatch.setattr(F, "lines_per_page_probe", lambda *a, **k: None)
+    assert G._Density(batch=False).of(tmp_path / "out", tmp_path / "spr-75",
+                                      "DAHMO/315/75", lambda kind, s: None) is None
+
+
 def test_own_reading_beats_neighbours(tmp_path: Path, probes) -> None:
     out = tmp_path / "out"
     out.mkdir()
