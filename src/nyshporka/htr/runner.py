@@ -1088,6 +1088,11 @@ PP_FUSE = True
 #: Дяк v16) прізвища 59.0 → 60.8 %, мірило назв Регента 95.7 → 95.9 % пошуком;
 #: на GTX 1650 той самий fp16 учетверо повільніший — тому `auto`, а не fp16 скрізь.
 PP_PRECISION = "auto"
+#: Як часто віддавати кеш алокатора після PP-читання сторінки (1 — щоразу, як
+#: було). Ручка заміру: `NYSH_PP_EMPTY_EVERY`.
+PP_EMPTY_EVERY = max(1, int(os.environ.get("NYSH_PP_EMPTY_EVERY", "1") or 1))
+_PP_EMPTY_N: list[int] = [0]
+
 #: Крок кошика ширини, px (`patches/pp_bucket.py`, `--pp-bucket`); діє лише з fp16.
 #: 64 замість 256: той самий приріст темпу (+59 % проти +47 %) і вдвічі менша зміна
 #: тексту голосу. 0 — без кошиків.
@@ -1239,6 +1244,8 @@ def pp_read_crops(pp: tuple, crops: list) -> list[tuple[str, float]]:
 
     net, cfg, budget_px = pp
     height = int(net.input[2]) or 96
+    _pp_clock = [0.0]
+    _t_all = time.perf_counter()
     out: list[tuple[str, float]] = [("", 0.0)] * len(crops)
     order = sorted((i for i, c in enumerate(crops) if c.width > 0 and c.height > 0),
                    key=lambda i: _pp_scaled_width(crops[i], height))
@@ -1255,7 +1262,9 @@ def pp_read_crops(pp: tuple, crops: list) -> list[tuple[str, float]]:
         seg = Segmentation(type="bbox", imagename="crops", text_direction="horizontal-lr",
                            script_detection=False, lines=lines)
         cfg.batch_size = len(idxs)            # уся пачка — один прохід мережі
+        t0 = time.perf_counter()
         recs = list(net.predict(im=cv, segmentation=seg))
+        _pp_clock[0] += time.perf_counter() - t0
         if len(recs) != len(idxs):
             raise RuntimeError(f"PP віддав {len(recs)} рядків із {len(idxs)}")
         res = []
@@ -1284,8 +1293,18 @@ def pp_read_crops(pp: tuple, crops: list) -> list[tuple[str, float]]:
             out[i] = r
     if cuda:
         # пачки різної форми фрагментують кеш алокатора; без цього `reserved`
-        # росте від сторінки до сторінки, доки не вилізе за фізичну VRAM
-        torch.cuda.empty_cache()
+        # росте від сторінки до сторінки, доки не вилізе за фізичну VRAM.
+        # `NYSH_PP_EMPTY_EVERY=N` — віддавати кеш раз на N викликів (замір
+        # 19.11.2026: чи не з'їдають синхронізації драйвера час трьох голосів).
+        _PP_EMPTY_N[0] += 1
+        if _PP_EMPTY_N[0] % PP_EMPTY_EVERY == 0:
+            t_e = time.perf_counter()
+            torch.cuda.empty_cache()
+            STAGES["pp_empty_cache"] = STAGES.get("pp_empty_cache", 0.0) + time.perf_counter() - t_e
+    # Час PP-читання: увесь виклик і прохід kraken `predict` (вирізання рядка з
+    # полотна, масштаб, мережа, CTC). Різниця — склеювання полотна й пачок.
+    STAGES["pp_total"] = STAGES.get("pp_total", 0.0) + time.perf_counter() - _t_all
+    STAGES["pp_predict"] = STAGES.get("pp_predict", 0.0) + _pp_clock[0]
     return out
 
 
@@ -2562,29 +2581,39 @@ def _side_voices(extra_recs: list, crops: list, kept: list[int], device: str,
         return side, lost
     kept_set = set(kept)
     for tag, eengine, erec in extra_recs:
-        if eengine == "kraken":
-            full = kraken_decode_crops(erec, crops, VOICE_BATCH)
-        elif eengine == "ppocr":
-            full = pp_decode_crops(erec, crops)
-        else:
-            import torch
-            sys.path.insert(0, str(Path(__file__).resolve().parent))
-            from pysar_lines_infer import clean_pysar_text
-
-            emodel, (eh, ew) = erec
-            etens = tensors if (tensors is not None and hw == (eh, ew)) else [
-                torch.from_numpy(
-                    (np.asarray(c.convert("RGB").resize((ew, eh), Image.LANCZOS),
-                                dtype="float32") / 255.0 - 0.5) / 0.5).permute(2, 0, 1)
-                for c in crops]
-            full = [clean_pysar_text(unicodedata.normalize("NFC", str(t or "")))
-                    for t, _ in _parseq_decode(emodel, etens, device, batch)]
-        side[tag] = [full[g] if g < len(full) else "" for g in kept]
-        n_lost = sum(1 for i, t in enumerate(full)
-                     if t.strip() and i not in kept_set)
-        if n_lost:
-            lost[tag] = n_lost
+        t_v = time.perf_counter()
+        _voice_read(side, lost, tag, eengine, erec, crops, kept, kept_set, device, batch,
+                    tensors, hw)
+        STAGES[f"voice:{tag}"] = STAGES.get(f"voice:{tag}", 0.0) + time.perf_counter() - t_v
     return side, lost
+
+
+def _voice_read(side: dict, lost: dict, tag: str, eengine: str, erec: Any, crops: list,
+                kept: list[int], kept_set: set, device: str, batch: int,
+                tensors: list | None, hw: tuple[int, int] | None) -> None:
+    """Один голос ансамблю на готових кропах (тіло `_side_voices`, винесене під таймер)."""
+    if eengine == "kraken":
+        full = kraken_decode_crops(erec, crops, VOICE_BATCH)
+    elif eengine == "ppocr":
+        full = pp_decode_crops(erec, crops)
+    else:
+        import torch
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from pysar_lines_infer import clean_pysar_text
+
+        emodel, (eh, ew) = erec
+        etens = tensors if (tensors is not None and hw == (eh, ew)) else [
+            torch.from_numpy(
+                (np.asarray(c.convert("RGB").resize((ew, eh), Image.LANCZOS),
+                            dtype="float32") / 255.0 - 0.5) / 0.5).permute(2, 0, 1)
+            for c in crops]
+        full = [clean_pysar_text(unicodedata.normalize("NFC", str(t or "")))
+                for t, _ in _parseq_decode(emodel, etens, device, batch)]
+    side[tag] = [full[g] if g < len(full) else "" for g in kept]
+    n_lost = sum(1 for i, t in enumerate(full)
+                 if t.strip() and i not in kept_set)
+    if n_lost:
+        lost[tag] = n_lost
 
 
 def ocr_page_pp(im: Image.Image, segmenter, rec, seg_ctx: dict | None = None
