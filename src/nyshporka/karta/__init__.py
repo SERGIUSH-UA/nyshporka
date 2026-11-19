@@ -1543,12 +1543,27 @@ def znaity_selo(tekst: str, *, repo: str = "") -> dict[str, Any]:
     if not kand:
         raise KartaError(f"«{nazva}» немає в довіднику поселень — перевірте написання "
                          "(сучасна назва, називний відмінок)")
-    pidkazky = [_norm(_PIDKAZKA_SLUZHBOVI.sub(" ", c)).translate(STARE)[:6]
+    pidkazky = [_norm(_PIDKAZKA_SLUZHBOVI.sub(" ", c)).translate(STARE)
                 for c in chastyny[1:]]
     pidkazky = [p for p in pidkazky if len(p) >= 3]
     if pidkazky:
-        kand = [d for d in kand
-                if all(p in (d["adm"] + " " + d["obl"]).translate(STARE) for p in pidkazky)]
+        def _z_koreniamy(rows: list[dict[str, Any]], n: int) -> list[dict[str, Any]]:
+            return [d for d in rows
+                    if all(p[:n] in (d["adm"] + " " + d["obl"]).translate(STARE)
+                           for p in pidkazky)]
+
+        # Шість літер зводять українську й російську форму району («Голованівськ» і
+        # «Голованевский» паку). 🔴 Але вони ж зливали сусідні райони з тим самим
+        # початком: «корост» — і Коростишівський, і Коростенський, тож Слобідку
+        # Коростишівського району назвати було неможливо (19.11.2026). Двозначно —
+        # звужуємо довшим коренем підказки, доки лишається хоч один кандидат.
+        kand = _z_koreniamy(kand, 6)
+        n = 7
+        while len(kand) > 1 and not _odne(kand) and n <= max(map(len, pidkazky)):
+            vuzhche = _z_koreniamy(kand, n)
+            if not vuzhche:
+                break
+            kand, n = vuzhche, n + 1
     else:
         obl = oblasti_arkhivu(repo) if repo else ()
         v = [d for d in kand if any(o in d["obl"] for o in obl)]
