@@ -347,6 +347,26 @@ def test_a_second_folder_with_a_passport_gives_the_case_its_opys(space: Path) ->
     assert got[0].shifra == "ЦДІАК 2-1-43"
 
 
+def test_cloud_go_never_takes_a_key_from_another_archive(space: Path) -> None:
+    """19.11.2026: паспорт теки щойно записано, бібліотека справи ще не знає, а
+    ANRM має той самий фонд 2 і справу 31 — `_pick` віддавав ANRM/2/2/31, і
+    текст ЦДІАК 2-1-31 ліг під молдовську справу."""
+    from nyshporka.cloud import go
+
+    anrm = _folder(space, "anrm_2/spr-31")
+    R.describe(anrm, shifra="ANRM 2-2-31", title="Формулярні списки")
+    _rebuild()
+    cd = _folder(space, "cdiak_2/spr-31")
+    (cd / "_source.json").write_text(json.dumps(
+        {"shifra": "ЦДІАК 2-1-31", "case_key": "CDIAK/2/31"}, ensure_ascii=False),
+        encoding="utf-8")
+    ref = go.resolve_case(str(cd))
+    assert not ref.key.startswith("ANRM"), ref.key
+    # коли бібліотека справу вже знає — ключ саме її
+    _rebuild()
+    assert go.resolve_case(str(cd)).key == "CDIAK/2/1/31"
+
+
 @pytest.mark.parametrize("arg", ["ДАДнО R-1234-15-20", "ДАДнО Р-1234-15-20",
                                  "ДАДнО Р-1234 оп.15 спр.20", "DADNO/R-1234/15/20"])
 def test_cloud_go_finds_the_case_by_a_human_shifra(space: Path, arg: str) -> None:
