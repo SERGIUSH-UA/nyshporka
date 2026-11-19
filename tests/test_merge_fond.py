@@ -174,6 +174,29 @@ def test_ocr_opys_brings_the_family_name_without_winning_the_title() -> None:
     assert r2["surnames"] == []
 
 
+def test_eye_on_the_opys_overrides_years_folios_and_old_number() -> None:
+    """🔴 ЦДІАК ф.2 (19.11.2026): Duck дав справі 73 роки 1634–1636, справі 181 —
+    діапазон фонду 1640–1800, а машинопис опису каже 1773 і 1795. «Перше
+    непорожнє» в порядку слабкі → сильні віддавало роки покажчику."""
+    from nyshporka.fonds.merge.sources import blank_row
+    r = blank_row(("1", "73", ""))
+    _fuse_fields(r, {"year_from": "1634", "year_to": "1636"}, "duck")
+    _fuse_fields(r, {"year_from": "1773", "year_to": "1773", "folios": "1084"}, "wikisource")
+    _fuse_fields(r, {"year_from": "1773", "year_to": "1773", "folios": "1080",
+                     "dv_no": "318"}, "manual")
+    assert (r["year_from"], r["year_to"], r["years_src"]) == ("1773", "1773", "manual")
+    assert (r["folios"], r["folios_src"], r["dv_no"]) == ("1080", "manual", "318")
+
+
+def test_manual_without_years_keeps_what_others_gave() -> None:
+    from nyshporka.fonds.merge.sources import blank_row
+    r = blank_row(("1", "5", ""))
+    _fuse_fields(r, {"year_from": "1801", "year_to": "1802", "folios": "40"}, "wikisource")
+    _fuse_fields(r, {"title": "Справа"}, "manual")
+    assert (r["year_from"], r["year_to"], r["years_src"]) == ("1801", "1802", "wikisource")
+    assert (r["folios"], r["folios_src"]) == ("40", "wikisource")
+
+
 def test_registry_only_source_still_names_the_case(run) -> None:
     """Справа, про яку знає лише покажчик, доходить із заголовком (спр.2)."""
     r = _rows(run()[2])["1-2"]
