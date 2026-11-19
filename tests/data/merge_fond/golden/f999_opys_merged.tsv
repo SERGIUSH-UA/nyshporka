@@ -10,7 +10,7 @@ opys	spr_int	spr_letter	title	title_src	title_alt	year_from	year_to	years_src	fo
 1	9		Метрична книга с. Ясенів	wikisource		1836	1840	wikisource	150	wikisource		ЦДІАК 999-1-9 Ясенів.pdf	https://commons.example/9	80000000	210	1		80000000					data/raw/cdiak_999/999-1-9																													commons,wikisource						
 1	10		Метрична книга с. Вишневе	duck		1841	1843	fs	40	duck																												104123456	2233033	https://www.familysearch.org/search/film/104123456	Metrical	Vyshneve	412						https://duck.example/10	0		duck,fs						
 1	11		Метрична книга с. Терни	wikisource		1846	1850	wikisource	90	wikisource																																				91011	https://babynyar.example/archive/case/91011	250				babynyar,wikisource						
-1	12		Метрична книга с. Ялинка та приписних сіл	manual		1841	1845	archium	60	archium																																		70012	https://arch.example/file/70012							archium,manual						
+1	12		Метрична книга с. Ялинка та приписних сіл	manual		1841	1845	manual	62	manual	14																																	70012	https://arch.example/file/70012							archium,manual						
 1	13		Метрична книга с. Ольхове	ocr					33	ocr														42	OK	interp																				91013	https://babynyar.example/archive/case/91013	0				babynyar,ocr						
 1	14		Метричні книги с. Осокорівка	catalog		1851	1860	catalog																							Осокорівка	Мала Осокорівка; Хутір Дальній	Ольгопільський	православна	Крижопільський	3	Н,Ш,С															catalog						
 1	15		Метрична книга с. Забуте	legacy		1861	1865	legacy	55	legacy																																										legacy						

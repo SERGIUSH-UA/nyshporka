@@ -186,6 +186,33 @@ def _fuse_fields(r: Row, row: dict[str, str], name: str) -> None:
             if v:
                 r[fld] = v
 
+    if name == "manual":
+        _fuse_manual(r, row)
+
+
+def _fuse_manual(r: Row, row: dict[str, str]) -> None:
+    """Око на сам опис (`manual.tsv`) — роки, аркуші й старий номер ПЕРЕКРИВАЮТЬ.
+
+    🔴 Решта полів іде правилом «перше непорожнє» в порядку слабкі → сильні,
+    тобто роки бере найслабше джерело. ЦДІАК ф.2 (19.11.2026): Duck дав п'яти
+    справам діапазон усього фонду (1640–1800), справі 4 — роки справи 1
+    (1581–1737), справі 73 — 1634–1636 замість 1773; роки, прочитані з
+    машинопису опису, програвали. Ручне джерело — той самий документ без
+    посередника (ранг 70) і пишеться лише там, де інших немає, тож перекриває
+    воно лише те, що людина справді звірила.
+    """
+    yf = (row.get("year_from") or "").strip()
+    yt = (row.get("year_to") or "").strip()
+    if yf or yt:
+        r["year_from"], r["year_to"] = yf or yt, yt or yf
+        r["years_src"] = "manual"
+    fol = (row.get("folios") or "").strip()
+    if fol:
+        r["folios"], r["folios_src"] = fol, "manual"
+    dv = (row.get("dv_no") or "").strip()
+    if dv:
+        r["dv_no"] = dv
+
 
 def _name_years_src(r: Row, name: str, got: list[str]) -> None:
     """Дописати джерело років так, щоб воно називало обидва, коли їх два.
