@@ -452,6 +452,20 @@ def stats(base: str = "") -> dict[str, Any]:
     return _get(f"{base_url(base)}/stats")
 
 
+def norma_vydachi(base: str = "") -> dict[str, Any] | None:
+    """Скільки книг пул ще видасть цьому ключу (чи цій адресі без ключа).
+
+    `None` — пул норми не знає (старіший за 20.11.2026, 404) або не відповів:
+    тоді серія йде як раніше, а відмову, якщо буде, скаже сама видача. Норма —
+    підказка наперед, а не умова: через неї серію не можна не почати.
+    """
+    try:
+        got = _get(f"{base_url(base)}/d-norma", attempts=1)
+    except PoolError:
+        return None
+    return got if "rezhym" in got else None
+
+
 def lookup(shifra: str, *, frames: int = 0, base: str = "") -> dict[str, Any]:
     """Чи є вже текст цієї книги — питання ПЕРЕД прогоном.
 

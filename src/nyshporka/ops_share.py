@@ -2340,16 +2340,21 @@ def _take_many(env: Envelope, items: list[tuple[str, Any]], *, replace: bool
     (аудит 29.09.2026). Прийняти пакет, який ворота відхилили, — рішення про
     ОДИН пакет: окремий виклик `share import <адреса> --force`.
     """
-    from nyshporka.share.accept import AcceptError, GatesRefused, accept
+    from nyshporka.share.accept import AcceptError, GatesRefused, NormaVycherpana, accept
 
     taken: list[dict[str, Any]] = []
     notes = 0
-    for label, r in _missing_locally(env, items, replace=replace):
+    todo = list(_missing_locally(env, items, replace=replace))
+    for i, (label, r) in enumerate(todo):
         if not r.url:
             env.warn("no_url", f"{label}: у рядку каталогу немає адреси пакета")
             continue
         try:
             got = accept(r.url, sha256=r.sha256, replace=replace)
+        except NormaVycherpana as exc:
+            # 🔴 Далі не йдемо: кожна наступна справа дістала б ту саму відмову.
+            _norma_zupynyla(env, exc, taken=len(taken), lyshylos=len(todo) - i)
+            break
         except GatesRefused as exc:
             env.warn("gate_refusal",
                      f"{label}: ворота не пропустили пакет:\n{exc.detail}\n"
@@ -2372,6 +2377,24 @@ def _take_many(env: Envelope, items: list[tuple[str, Any]], *, replace: bool
     _index_taken(env, [n for t in taken for n in (t.get("runs") or [])])
     _library_knows(env, [str(t.get("case_key") or "") for t in taken])
     return taken
+
+
+def _norma_zupynyla(env: Envelope, exc: Any, *, taken: int, lyshylos: int) -> None:
+    """Норма видачі пулу вичерпана посеред прийому: сказати, скільки взято й коли далі."""
+    import time
+
+    info: dict[str, Any] = {**exc.norma, "vziato_zaraz": taken, "ne_vziato": lyshylos}
+    koly = ""
+    if exc.retry_after:
+        info["retry_after"] = round(exc.retry_after)
+        info["next_attempt_at"] = time.strftime(
+            "%Y-%m-%dT%H:%M:%S%z", time.localtime(time.time() + exc.retry_after))
+        koly = f" Нові книги — після {time.strftime('%d.%m %H:%M', time.localtime(time.time() + exc.retry_after))}."
+    if isinstance(env.data, dict):
+        env.data["norma_zupynka"] = info
+    env.warn("norma_vydachi",
+             f"пул зупинив видачу: {exc} Цим заходом узято {taken}, не взято {lyshylos}.{koly} "
+             f"Повторіть ту саму команду пізніше: узяте вдруге не качається.")
 
 
 def _geometry(env: Envelope, got: dict[str, Any], row: Any) -> None:
@@ -2464,8 +2487,19 @@ def _pull_series(a: SharePullArgs) -> Envelope:
     # На справу — пакет із найновішими бойовими моделями, без них — з
     # попередніми; серед рівних — найсвіжіший. Доти брався просто найсвіжіший,
     # і пізніше викладене прочитання старими вагами витісняло нове.
-    data["imported"] = _take_many(env, [(r.shifra, r) for r in C.best_per_case(rows)],
-                                  replace=a.force)
+    best = C.best_per_case(rows)
+    norma = C.norma_vydachi(a.base)
+    if norma and norma.get("rezhym") != "vymk":
+        data["norma_vydachi"] = norma
+        zalyshok = norma.get("zalyshok")
+        if isinstance(zalyshok, int) and zalyshok < len(best):
+            # Наперед, а не посередині: людина знає, що серія ляже частинами.
+            env.warn("norma_vydachi",
+                     f"у серії {len(best)} справ, а норма пулу зараз дає ще {zalyshok} нових "
+                     f"книг (рівень «{norma.get('riven')}», за {norma.get('vikno')}). Беру, "
+                     f"скільки вміститься; решту — тією самою командою пізніше. Справи, які "
+                     f"тут уже є, норми не їдять.")
+    data["imported"] = _take_many(env, [(r.shifra, r) for r in best], replace=a.force)
     return env
 
 

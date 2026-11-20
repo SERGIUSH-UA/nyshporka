@@ -340,8 +340,10 @@ def test_zavantazhene_ne_zbihaietsia_z_katalohom(space: Path, tmp_path: Path,
     ("https://api.nyshporka.online/v1/d/b/dahmo/315-1-8433/1/text.nyshtext", "tok", True),
     # Без ключа — анонімно, як і досі: пул віддає пакет і так.
     ("https://api.nyshporka.online/v1/d/b/dahmo/315-1-8433/1/text.nyshtext", "", False),
-    # Старий рядок каталогу — прямо на байтове сховище: туди ключ не їде.
-    ("https://cdn.nyshporka.online/b/dahmo/315-1-8433/1/text.nyshtext", "tok", False),
+    # Старий рядок каталогу — прямо на байтове сховище. З 20.11.2026 клієнт іде
+    # з такою адресою на видачу `/v1/d/` (`adresa_vydachi`), тож ключ їде туди, а
+    # не на `cdn.`: інакше людина з ключем потрапляла б у норму аноніма.
+    ("https://cdn.nyshporka.online/b/dahmo/315-1-8433/1/text.nyshtext", "tok", True),
     # Чужий сервер з тим самим шляхом — теж ні.
     ("https://x.example/v1/d/b/dahmo/315-1-8433/1/text.nyshtext", "tok", False),
 ])

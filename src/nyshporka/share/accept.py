@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import time
 from dataclasses import dataclass, field
@@ -33,6 +34,22 @@ from nyshporka.share.bundle import Manifest
 
 class AcceptError(RuntimeError):
     """Пакет не прийняти — з названою причиною."""
+
+
+class NormaVycherpana(AcceptError):
+    """Пул відмовив за нормою видачі (429 на `/v1/d`, з 20.11.2026).
+
+    Окремий клас, бо й дія окрема: це не збій пакета, а «досить на сьогодні».
+    Серія мусить зупинитись на першій такій відмові, а не битись у неї
+    кожною наступною справою. `norma` — що сказав пул (рівень, вікно, межа,
+    скільки взято, що відкриє більше), `retry_after` — коли нові книги знову.
+    """
+
+    def __init__(self, message: str, *, retry_after: float | None = None,
+                 norma: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+        self.norma = norma or {}
 
 
 class GatesRefused(AcceptError):
@@ -144,6 +161,7 @@ def fetch(src: str, dest_dir: Path, *, sha256: str = "") -> Path:
 
     if offline():
         raise AcceptError("мережу вимкнено (NYSHPORKA_NO_NETWORK) — пакет не качається")
+    src = adresa_vydachi(src)
     dest = Path(dest_dir) / _name_for(src)
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + ".dl")
@@ -153,7 +171,13 @@ def fetch(src: str, dest_dir: Path, *, sha256: str = "") -> Path:
         # — у `share/upload.py`.
         Fetcher(headers={"User-Agent": app_ua(), **_kliuch_vydachi(src)}).download(
             src, tmp, max_bytes=bundle.MAX_DOWNLOAD_BYTES)
-    except (HttpError, OSError) as exc:
+    except HttpError as exc:
+        tmp.unlink(missing_ok=True)
+        norma = _norma(exc) if exc.status == 429 and "/v1/d/" in src else None
+        if norma is not None:
+            raise norma from exc
+        raise AcceptError(f"не завантажити {src}: {exc}") from exc
+    except OSError as exc:
         tmp.unlink(missing_ok=True)
         raise AcceptError(f"не завантажити {src}: {exc}") from exc
     if sha256 and bundle.sha256_of(tmp) != sha256.strip().lower():
@@ -164,6 +188,76 @@ def fetch(src: str, dest_dir: Path, *, sha256: str = "") -> Path:
     return dest
 
 
+def _norma(exc: Any) -> NormaVycherpana | None:
+    """Відмова норми з тіла 429: текст для людини й машинна частина `detail.norma`.
+
+    🔴 `None`, якщо в тілі немає `detail.norma`: 429 дає й сховище чи ліміт
+    запитів після переадресації, і він — «зачекати секунди», а не «норму вичерпано».
+    Зупинити через нього серію означало б кинути роботу на рівному місці.
+
+    Час — з JSON (`norma.retry_after`), а не з заголовка: заголовок пул
+    навмисно тримає не коротшим за 15 хв, щоб клієнт не чекав мовчки.
+    """
+    import json
+
+    from nyshporka.share.catalog import reason
+
+    try:
+        detail = json.loads(str(getattr(exc, "body", "") or "")).get("detail")
+    except (ValueError, AttributeError):
+        return None
+    norma = detail.get("norma") if isinstance(detail, dict) else None
+    if not isinstance(norma, dict):
+        return None
+    koly = norma.get("retry_after")
+    retry_after = float(koly) if isinstance(koly, int | float) and koly > 0         else getattr(exc, "retry_after", None)
+    tekst = reason(exc).removeprefix("HTTP 429: ")
+    return NormaVycherpana(tekst, retry_after=retry_after, norma=norma)
+
+
+#: Хост порталу й байтового сховища пулу: їхні адреси пакета ведуть на ту саму
+#: видачу `/v1/d/`, тільки повз ключ.
+_PORTAL = ("nyshporka.online", "www.nyshporka.online")
+_CDN = "cdn.nyshporka.online"
+_PEREPYSANYI = re.compile(r"^p/[0-9a-f]+/")
+
+
+def adresa_vydachi(src: str) -> str:
+    """Адреса пакета пулу → адреса видачі `/v1/d/` (з 20.11.2026).
+
+    Кнопка на сторінці книги (`nyshporka.online/paket/…`) і старі рядки
+    каталогу й дописів (`cdn.nyshporka.online/…`) ведуть до того самого пакета.
+    Але кнопку портал закриває перевіркою Cloudflare для браузера, якої клієнт
+    не пройде, а `cdn.` під замком відсилає на `/v1/d/` — уже без ключа, тож
+    людина з ключем потрапила б у норму аноніма. Тому клієнт іде на `/v1/d/`
+    одразу: з ключем і повз обидві петлі. Ім'я файлу (`_name_for`) не
+    змінюється: чотири останні ланки шляху ті самі.
+
+    Підписана адреса `cdn.` (`?t=…`) теж іде через видачу: підпис живе пів
+    години, а видача дасть свіжий і запише завантаження за людиною з ключем.
+    Інші адреси (свій сервер, файл) — як є.
+    """
+    from urllib.parse import urlsplit
+
+    from nyshporka.share.catalog import DEFAULT_BASE
+
+    if not _is_url(src):
+        return src
+    parts = urlsplit(src)
+    host = (parts.hostname or "").lower()
+    if parts.scheme != "https":
+        return src
+    if host in _PORTAL and parts.path.startswith("/paket/"):
+        kliuch = parts.path.removeprefix("/paket/")
+    elif host == _CDN:
+        kliuch = _PEREPYSANYI.sub("", parts.path.lstrip("/"))
+    else:
+        return src
+    if not kliuch or kliuch.startswith("zvid/"):
+        return src
+    return f"{DEFAULT_BASE}/d/{kliuch}"
+
+
 def _kliuch_vydachi(src: str) -> dict[str, str]:
     """Ключ Супряги на завантаження — лише адресі видачі пулу (`/v1/d/`).
 
@@ -172,10 +266,12 @@ def _kliuch_vydachi(src: str) -> dict[str, str]:
     обліку. Качати можна й без нього: ключа нема — заголовка нема, і пул
     віддає пакет так само.
 
-    🔴 Лише `/v1/d/`, а не будь-яка довірена адреса: старі рядки каталогу
-    ведуть прямо на `cdn.` — це байтове сховище, ключ йому ні до чого, а
-    чужий `Authorization` сховище може прочитати як спробу підпису. Далі 302
-    на `cdn.` ключ теж не їде: httpx знімає його при переході на інший хост.
+    🔴 Лише `/v1/d/`, а не будь-яка довірена адреса: `cdn.` — байтове
+    сховище, ключ йому ні до чого, а чужий `Authorization` сховище може
+    прочитати як спробу підпису. Старі рядки каталогу з прямою адресою `cdn.`
+    до сюди вже переписані на `/v1/d/` (`adresa_vydachi`). Далі 302 на
+    підписану адресу `cdn.` ключ не їде: httpx знімає його при переході на
+    інший хост (`test_kliuch_ne_yide_v_skhovyshche`).
     """
     from urllib.parse import urlsplit
 
