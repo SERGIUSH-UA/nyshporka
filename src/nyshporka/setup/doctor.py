@@ -237,6 +237,8 @@ def _torch() -> Check:
                      "nysh htr install — читання працюватиме й на процесорі, "
                      "просто ~20 с – 1 хв на сторінку замість ~10–15 с", op="htr.install")
 
+    if not rep.cuda and rep.mps:
+        return _apple_card(rep.torch)
     if not rep.cuda:
         # 🔴 Карту питає драйвер, а не цей torch. На CPU-збірці він про CUDA не
         # знає за побудовою, тож «карти немає» від нього — не відповідь, а тиша.
@@ -265,6 +267,34 @@ ENV_DOCKER_IMAGE = "NYSH_DOCKER_IMAGE"
 #: Підпис відмови CUDA, коли Docker Desktop старший за 4.31 не прокидає
 #: `libnvdxgdmal.so.1`, без якої драйвер NVIDIA від 555 у WSL2 не працює.
 _WSL_OLD_TOOLKIT = ("named symbol not found", "Error 500")
+
+
+def _apple_card(torch_v: str) -> Check:
+    """Mac на Apple Silicon: карта є в самому чипі, питання — чи нею читає прогін.
+
+    🔴 «Читає» вирішує не доступність, а доведена тотожність сегментації для
+    цієї версії torch (`gpu.SEG_DEVICE_PROVEN_ON`, дзеркало раннера): лише тоді `auto` бере
+    MPS. Інакше карта є, а читання йде процесором, і рядок мусить сказати саме
+    це — разом із тим, як обрати карту свідомо.
+    """
+    from nyshporka.htr.gpu import DEVICE_ENV, proven_devices
+
+    chosen = os.environ.get(DEVICE_ENV, "").strip().lower()
+    if chosen == "cpu":
+        return Check("Прискорення (GPU)", "warn",
+                     f"карта Apple (MPS) є, але {DEVICE_ENV}=cpu — читає процесор",
+                     f"прибрати змінну {DEVICE_ENV}, щоб читала карта")
+    if "mps" in proven_devices(torch_v):
+        return Check("Прискорення (GPU)", "ok", f"карта Apple (MPS) · torch {torch_v}")
+    if chosen == "mps":
+        return Check("Прискорення (GPU)", "ok",
+                     f"карта Apple (MPS) · torch {torch_v} · обрано {DEVICE_ENV}=mps; "
+                     f"для цієї версії torch тотожність не звірено — сегментація "
+                     f"ляже в кеш окремо")
+    return Check("Прискорення (GPU)", "warn",
+                 f"карта Apple (MPS) є, але для torch {torch_v} тотожність читання "
+                 f"не звірено — читає процесор",
+                 f"{DEVICE_ENV}=mps — читати картою свідомо (сегментація ляже в кеш окремо)")
 
 
 def _cuda_init_error(python: Path | None) -> str:
@@ -412,7 +442,7 @@ def _engines() -> Check:
         return Check(ENGINES, "warn", why, hint, op="htr.install")
     bits = [f"kraken {rep.kraken}" if rep.kraken else "",
             f"torch {rep.torch}" if rep.torch else "",
-            "CUDA" if rep.cuda else "CPU"]
+            "CUDA" if rep.cuda else ("MPS" if rep.mps else "CPU")]
     return Check(ENGINES, "ok", " · ".join(b for b in bits if b))
 
 

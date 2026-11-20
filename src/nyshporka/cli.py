@@ -1662,13 +1662,14 @@ def read(
                       "--workers сам розкладає справу на шарди")
         raise typer.Exit(code=2)
     # 🔴 Шарди мають сенс лише на карті: на процесорі вони б'ються за ті самі
-    # ядра (`Plan.shards` тоді згортає їх до одного й каже чому). Карту питаємо
-    # драйвер, як скрізь, — torch у цьому процесі може й не стояти.
+    # ядра (`Plan.shards` тоді згортає їх до одного й каже чому). Карту NVIDIA
+    # питаємо драйвер, як скрізь, — torch у цьому процесі може й не стояти;
+    # карту Apple — огляд середовища рушіїв (`gpu.shard_device`).
     device = ""
     if workers > 1:
         from nyshporka.htr import gpu as G
 
-        device = "cuda" if G.detect_card() is not None else ""
+        device = G.shard_device()
     opts: dict[str, Any] = {
         "case_key": case_key, "limit": limit, "pages": pages, "shard": shard,
         "gpu_lock": gpu_lock, "gpu_sato": gpu_sato, "seg_height": seg_height,
@@ -4065,7 +4066,8 @@ def htr_install(
     console.print(f"\npython : {rep.python or '—'}")
     console.print(f"kraken : {rep.kraken or '—'}")
     console.print(f"torch  : {rep.torch or '—'}  cuda={rep.cuda} "
-                  f"capability={rep.capability or '—'}")
+                  f"capability={rep.capability or '—'}"
+                  + ("  mps=True" if rep.mps else ""))
     for p in rep.problems:
         console.print(f"[warn]⚠ {p}[/warn]")
     if rep.missing:

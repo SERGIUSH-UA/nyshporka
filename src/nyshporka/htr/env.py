@@ -59,6 +59,8 @@ class EnvReport:
     torch: str = ""
     cuda: bool = False
     capability: str = ""
+    #: Карта Apple (MPS) у torch рушіїв справді рахує — питається лише на macOS.
+    mps: bool = False
     missing: tuple[str, ...] = ()
     problems: tuple[str, ...] = ()
     #: Стоїть, але не тієї версії, що закріплена в маніфесті (`==`). Не
@@ -174,6 +176,11 @@ def _torch_load_error(py: Path) -> str:
 #: read` — rc=1 при GPU 0%).
 CUDA_WORKS = ("import torch; print(torch.cuda.is_available() and "
               "float((torch.ones(4, device='cuda') * 2).sum()) == 8.0)")
+#: Те саме для карти Apple: «доступний» і «рахує» — різні відповіді, і питається
+#: друга. На не-macOS проба не запускається зовсім — там MPS немає за побудовою.
+MPS_WORKS = ("import torch; m = getattr(torch.backends, 'mps', None); "
+             "print(bool(m and m.is_available()) and "
+             "float((torch.ones(4, device='mps') * 2).sum()) == 8.0)")
 
 
 def inspect(venv: Path, man: M.Manifest | None = None) -> EnvReport:
@@ -220,6 +227,8 @@ def _inspect(venv: Path, man: M.Manifest | None = None) -> EnvReport:
     cuda = _probe(py, CUDA_WORKS) == "True"
     cap = _probe(py, "import torch; print('%d.%d' % torch.cuda.get_device_capability(0))") \
         if cuda else ""
+    mps = (sys.platform == "darwin" and bool(torch_v) and not cuda
+           and _probe(py, MPS_WORKS) == "True")
 
     problems: list[str] = []
     stale: list[str] = []
@@ -248,7 +257,7 @@ def _inspect(venv: Path, man: M.Manifest | None = None) -> EnvReport:
         problems.append(torch_broken)
 
     rep = EnvReport(ok=not missing and not problems, python=py, kraken=kraken,
-                    torch=torch_v, cuda=cuda, capability=cap or "",
+                    torch=torch_v, cuda=cuda, capability=cap or "", mps=mps,
                     missing=tuple(missing), problems=tuple(problems),
                     stale=tuple(stale), torch_broken=torch_broken)
     # Свіжий вдалий огляд — найкраща відповідь і для плану читання: діагностика
@@ -753,7 +762,15 @@ def _ensure_cuda(venv: Path, man: M.Manifest, uv: str = "uv", force_tag: str = "
     if sys.platform == "darwin":
         # CUDA на macOS немає за побудовою — ні колеса, ні драйвера; питати
         # `nvidia-smi` тут означало б друкувати «карти не видно» на кожному Mac.
-        print(f"✓ macOS: {gpu.CPU_NOTE}")
+        # Колесо torch для Apple Silicon уже несе MPS — доставляти нічого, і
+        # пробувати torch тут теж нічого: чи читає карта, скаже `nysh doctor`.
+        import platform
+
+        if platform.machine() == "arm64":
+            print("✓ macOS (Apple Silicon): колесо torch уже несе MPS — читання піде "
+                  "картою чипа, окремого кроку не треба")
+        else:
+            print(f"✓ macOS: {gpu.CPU_NOTE}")
         return
     if _probe(py, CUDA_WORKS) == "True":
         print("✓ torch уже бачить карту")

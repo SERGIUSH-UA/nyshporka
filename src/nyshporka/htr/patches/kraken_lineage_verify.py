@@ -25,6 +25,16 @@
         --frames <тека кадрів> --model <модель> [--models <голоси через кому>] \\
         --out <тека звірки> [-- <додаткові аргументи раннера>]
 
+Друге призначення — **два пристрої одного середовища**: `--py-a` і `--py-b` той
+самий інтерпретатор, `--device cpu --device-b mps`. Так доводиться, що сегментація
+на карті Apple (чи будь-якому новому пристрої) та сама, що на процесорі, — і лише
+після «✓» пристрій потрапляє в `runner.SEG_DEVICE_PROVEN`: тоді `auto` його обирає,
+а його сегментація ділить кеш з усіма іншими.
+
+    python -m nyshporka.htr.patches.kraken_lineage_verify \
+        --py-a <python рушіїв> --py-b <python рушіїв> --device cpu --device-b mps \
+        --frames <тека кадрів> --model <модель> [--models <голоси>] --out <тека звірки>
+
 Код виходу 0 — усе тотожне; 1 — є розбіжності (перелік у `report.json`).
 Повторний запуск з тією ж `--out` не переганяє сторону, яка вже має прогін
 (`--rerun` — переганяти).
@@ -93,6 +103,11 @@ def _versions(py: str) -> dict[str, str]:
         return {"error": (r.stderr or r.stdout)[-400:]}
 
 
+def side_device(side: str, args: argparse.Namespace) -> str:
+    """Пристрій сторони: B бере `--device-b`, коли його задано, інакше спільний."""
+    return (args.device_b or args.device) if side == "b" else args.device
+
+
 def _run_side(side: str, py: str, args: argparse.Namespace, extra: list[str]) -> dict:
     root = args.out / side
     run_dir = root / "run"
@@ -105,7 +120,7 @@ def _run_side(side: str, py: str, args: argparse.Namespace, extra: list[str]) ->
     root.mkdir(parents=True, exist_ok=True)
     cmd = [py, str(RUNNER), "--case-dir", str(args.frames), "--out-dir", str(run_dir),
            "--model", args.model, "--seg-cache-dir", str(seg_dir),
-           "--device", args.device, "--script", args.script,
+           "--device", side_device(side, args), "--script", args.script,
            # раннер на непідтримуваній версії kraken не стартує — а звірка
            # якраз і порівнює стару версію з новою
            "--allow-any-kraken"]
@@ -117,7 +132,7 @@ def _run_side(side: str, py: str, args: argparse.Namespace, extra: list[str]) ->
     with log.open("w", encoding="utf-8") as fh:
         rc = subprocess.run(cmd, stdout=fh, stderr=subprocess.STDOUT, env=_clean_env()).returncode
     info = {"side": side, "python": py, "rc": rc, "wall_s": round(time.time() - t0, 1),
-            "versions": _versions(py), "cmd": cmd}
+            "device": side_device(side, args), "versions": _versions(py), "cmd": cmd}
     (root / "side.json").write_text(json.dumps(info, ensure_ascii=False, indent=1),
                                     encoding="utf-8")
     print(f"[{side}] rc={rc} за {info['wall_s']} с · лог {log}", flush=True)
@@ -266,7 +281,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--model", required=True, help="основна модель (шлях)")
     ap.add_argument("--models", default="", help="голоси через кому (шляхи)")
     ap.add_argument("--out", required=True, type=Path, help="тека звірки")
-    ap.add_argument("--device", default="cuda:0")
+    ap.add_argument("--device", default="cuda:0", help="пристрій обох сторін (або лише A)")
+    ap.add_argument("--device-b", default="",
+                    help="пристрій сторони B, коли звіряються пристрої, а не середовища")
     ap.add_argument("--script", default="auto")
     ap.add_argument("--rerun", action="store_true", help="переганяти обидві сторони")
     ap.add_argument("--compare-only", action="store_true")
@@ -292,7 +309,8 @@ def main(argv: list[str] | None = None) -> int:
     for side, info in sides.items():
         if info:
             v = info.get("versions", {})
-            print(f"  {side}: rc={info.get('rc')} {info.get('wall_s')} с · kraken {v.get('kraken')} "
+            print(f"  {side}: rc={info.get('rc')} {info.get('wall_s')} с · "
+                  f"{info.get('device', '?')} · kraken {v.get('kraken')} "
                   f"torch {v.get('torch')} pillow {v.get('pillow')} numpy {v.get('numpy')}")
     print("✓ ТОТОЖНО" if ok else f"✗ Є РОЗБІЖНОСТІ — {args.out / 'report.json'}")
     if any(info and info.get("rc") for info in sides.values()):

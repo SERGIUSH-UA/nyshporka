@@ -24,15 +24,28 @@ from kraken.lib.ppocr import necks as NK
 from torch import nn
 
 
+def _f64(t: torch.Tensor) -> torch.Tensor:
+    """Тензор у float64 — там, де float64 є.
+
+    🔴 На MPS float64 немає зовсім: перетворення там кидає TypeError, і злиття
+    мовчки не ставилось (17.11.2026, M5 Pro: «Cannot convert a MPS Tensor to
+    float64»). Тоді алгебра над вагами йде на процесорі, а `_new_conv` повертає
+    результат на пристрій моделі. Для CUDA і процесора шлях не змінюється ні на
+    біт — там рахунок і доти йшов на місці."""
+    if t.device.type == "mps":
+        t = t.detach().to("cpu")
+    return t.double()
+
+
 @torch.no_grad()
 def _fold(conv: nn.Conv2d, bn: nn.BatchNorm2d) -> tuple[torch.Tensor, torch.Tensor]:
     """(W, b) у float64 для згортки, за якою йде BN у режимі eval."""
-    w = conv.weight.double()
-    b = (conv.bias.double() if conv.bias is not None
+    w = _f64(conv.weight)
+    b = (_f64(conv.bias) if conv.bias is not None
          else torch.zeros(w.shape[0], dtype=torch.float64, device=w.device))
-    s = bn.weight.double() / torch.sqrt(bn.running_var.double() + bn.eps)
+    s = _f64(bn.weight) / torch.sqrt(_f64(bn.running_var) + bn.eps)
     w = w * s.reshape(-1, 1, 1, 1)
-    b = (b - bn.running_mean.double()) * s + bn.bias.double()
+    b = (b - _f64(bn.running_mean)) * s + _f64(bn.bias)
     return w, b
 
 
@@ -55,14 +68,14 @@ def _fuse_repdw(m: BB.RepDWConv) -> nn.Conv2d:
     """k×k depthwise Conv-BN + 1×1 depthwise + тотожність, далі BN → одна згортка."""
     k = m.kernel_size
     wk, bk = _fold(m.conv.conv, m.conv.bn)                      # (C,1,k,k)
-    w1 = m.conv1.weight.double()                                # (C,1,1,1)
+    w1 = _f64(m.conv1.weight)                                   # (C,1,1,1)
     w = wk.clone()
     c = k // 2
     w[:, :, c, c] += w1[:, :, 0, 0]
     w[:, :, c, c] += 1.0                                        # гілка тотожності
-    s = m.bn.weight.double() / torch.sqrt(m.bn.running_var.double() + m.bn.eps)
+    s = _f64(m.bn.weight) / torch.sqrt(_f64(m.bn.running_var) + m.bn.eps)
     w = w * s.reshape(-1, 1, 1, 1)
-    b = (bk - m.bn.running_mean.double()) * s + m.bn.bias.double()
+    b = (bk - _f64(m.bn.running_mean)) * s + _f64(m.bn.bias)
     return _new_conv(m.conv.conv, w, b)
 
 
