@@ -2492,7 +2492,10 @@ def _pull_series(a: SharePullArgs) -> Envelope:
     if norma and norma.get("rezhym") != "vymk":
         data["norma_vydachi"] = norma
         zalyshok = norma.get("zalyshok")
-        if isinstance(zalyshok, int) and zalyshok < len(best):
+        # Лише коли пул справді відмовляє: у тіні (`tin`) він рахує, але видає все,
+        # і «ляже частинами» було б неправдою.
+        if (norma.get("rezhym") == "vidmova" and isinstance(zalyshok, int)
+                and zalyshok < len(best)):
             # Наперед, а не посередині: людина знає, що серія ляже частинами.
             env.warn("norma_vydachi",
                      f"у серії {len(best)} справ, а норма пулу зараз дає ще {zalyshok} нових "

@@ -116,6 +116,14 @@ def test_seriia_poperedzhaie_napered(seriia: Any) -> None:
     assert env.data["norma_vydachi"]["zalyshok"] == 2
 
 
+def test_seriia_v_tini_ne_strashyt(seriia: Any) -> None:
+    """У тіні пул рахує, але видає все — попереджати про частини нема чого."""
+    env, _ = seriia({"rezhym": "tin", "riven": "anonim", "vikno": "doba",
+                     "mezha": 10, "vziato": 10, "zalyshok": 0})
+    assert not [w for w in env.warnings if "нових" in str(w)]
+    assert env.data["norma_vydachi"]["rezhym"] == "tin"
+
+
 def test_seriia_bez_normy_yak_ranishe(seriia: Any) -> None:
     env, _ = seriia({"rezhym": "vymk", "zalyshok": 0})
     assert "norma_vydachi" not in env.data
