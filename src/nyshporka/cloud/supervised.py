@@ -1205,7 +1205,10 @@ def _patch_plan(plan_path: Path, convoy: Convoy,
     from nyshporka.cloud import printed as PR
 
     printing = PR.is_print(convoy.legs[0].plan.script)
-    if printing:
+    # 🖨 Друк поза виданнями (`--not-an-edition`) обліку видань не має: ні
+    # перепризначення тек номерів, ні збирання років після забору.
+    plain = printing and all(PR.is_plain(leg.plan.case_key) for leg in convoy.legs)
+    if printing and not plain:
         # Видання знає номери за іменем прогону, а теку виходу дає лише план:
         # наглядач кладе текст за власним slug-ім'ям справи.
         from nyshporka import print_edition as PE
@@ -1213,7 +1216,7 @@ def _patch_plan(plan_path: Path, convoy: Convoy,
         PE.repoint({leg.name: str(case.get("out_dir") or "")
                     for leg, case in zip(convoy.legs, data.get("cases") or [], strict=False)
                     if case.get("out_dir")})
-    hooks = (print_fetch_hooks() if printing
+    hooks = ([] if plain else print_fetch_hooks() if printing
              else post_fetch_hooks([leg.name for leg in convoy.legs]))
     if hooks:
         data["post_fetch"] = hooks

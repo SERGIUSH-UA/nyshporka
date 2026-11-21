@@ -1124,6 +1124,14 @@ def cmd_go(
     title: str = typer.Option("", "--title", help="назва видання (з --print); "
                                                   "порожньо — з імені теки"),
     city: str = typer.Option("", "--city", help="місто видання (з --print)"),
+    not_an_edition: bool = typer.Option(
+        False, "--not-an-edition",
+        help="з `--print`: друк, що НЕ є виданням (машинописний опис фонду, робоча "
+             "збірка, проба рушія) — без коду видання й без реєстру видань; кожна тека "
+             "— окремий прогін, текст у `<--out-root>/<ім'я теки>`"),
+    out_root: str = typer.Option(
+        "", "--out-root",
+        help="з `--not-an-edition`: куди класти текст (типово `derived/print/plain`)"),
 ) -> None:
     """Прочитати справу на орендованій машині — від кадрів до погашеної оренди.
 
@@ -1194,6 +1202,7 @@ def cmd_go(
                 min_pph=min_pph, machine=machine,
                 accept_slow_delivery=accept_slow_delivery, on_event=on_event,
                 seg_height=seg_height, book=book, form_cells=form_cells,
+                not_an_edition=not_an_edition, out_root=out_root,
                 tick_sec=max(1.0, tick))
     if as_json:
         # `print`, а не rich: один рядок без переносів і розфарбування — його

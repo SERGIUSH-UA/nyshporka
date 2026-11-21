@@ -13,6 +13,7 @@ PaddleOCR-VL через vLLM. 🔴 Рушій друку живе ЛИШЕ на 
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 #: Рушій друку в плані наглядача (`-p engine=…`).
@@ -36,6 +37,37 @@ def out_root() -> Path:
     from nyshporka.core.workspace import workspace
 
     return workspace().derived / "print" / "issues"
+
+
+@dataclass(frozen=True)
+class PlainRun:
+    """Друкований матеріал, що НЕ є виданням (`nysh cloud go --print --not-an-edition`).
+
+    Машинописний опис фонду, довідник у робочій збірці, проба рушія — те, що
+    читається рушієм друку, але в реєстр видань не йде: ключ `VYD/<код>/<рік>`
+    дається назавжди, і архівний опис під ним став би «газетою» в пошуку.
+    Тут лише ім'я прогону (тека результату) і корінь, куди людина сказала
+    класти текст; ключа немає, у бібліотеку й текстовий стор нічого не йде.
+    Поля ті самі, що читає `_prepare` у `print_edition.IssueRun`.
+    """
+
+    name: str
+    out_dir: Path
+    key: str = ""
+    stage: Path | None = None
+    reuse_key: str = ""
+
+
+def plain_root() -> Path:
+    """Типовий корінь виходу «не видання»: поруч із номерами, але окремо від них."""
+    from nyshporka.core.workspace import workspace
+
+    return workspace().derived / "print" / "plain"
+
+
+def is_plain(case_key: str) -> bool:
+    """Справа заходу друку без ключа видання — «не видання» (облік видань її не бачить)."""
+    return not str(case_key or "").startswith("VYD/")
 
 
 def plan_params() -> list[str]:

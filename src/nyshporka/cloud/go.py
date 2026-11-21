@@ -567,6 +567,7 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
        min_pph: float = 0.0, machine: int = 0, accept_slow_delivery: bool = False,
        vydannia: str = "", title: str = "", city: str = "",
        seg_height: int = 0, book: int = 0, form_cells: bool | None = None,
+       not_an_edition: bool = False, out_root: str = "",
        on_event: EventFn | None = None, tick_sec: float = 60.0) -> GoResult:
     """Прочитати справу (або кілька) на орендованій машині від початку до кінця.
 
@@ -598,7 +599,21 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
         res.verdict, res.why = "refused", ("`--book` — для друкованої книги, разом із "
                                            "`--print`")
         return res
-    if script == "print":
+    if not_an_edition and script != "print":
+        res.verdict, res.why = "refused", "`--not-an-edition` — лише разом із `--print`"
+        return res
+    if out_root and not not_an_edition:
+        res.verdict, res.why = "refused", ("`--out-root` — лише для друку поза виданнями "
+                                           "(`--print --not-an-edition`)")
+        return res
+    if script == "print" and not_an_edition:
+        try:
+            cases, edition = _plain_cases(cases, vydannia=vydannia, book=book,
+                                          case_key=case_key, out_root=out_root)
+        except GoRefused as exc:
+            res.verdict, res.why = exc.verdict, str(exc)
+            return res
+    elif script == "print":
         try:
             if case_key:
                 raise GoRefused("ключ номера газети — ключ видання `VYD/<код>/<рік>`, "
@@ -893,10 +908,43 @@ def _book_case(cases: tuple[str, ...], *, vydannia: str, title: str, city: str,
                             "runs": PE.issue_runs(code, [iss]), "book": int(year)}
 
 
+def _plain_cases(cases: tuple[str, ...], *, vydannia: str, book: int, case_key: str,
+                 out_root: str) -> tuple[tuple[str, ...], dict[str, Any]]:
+    """🖨 Друк поза реєстром видань: кожна тека — окремий прогін із власним іменем.
+
+    Ключа немає й не вигадується: такий матеріал (опис фонду, робоча збірка,
+    проба рушія) у пошук під `VYD/…` не йде. Текст лягає в `<out_root>/<ім'я теки>`,
+    а що з ним робити далі, вирішує той, хто пустив захід.
+    """
+    from nyshporka.cloud import printed as PR
+    from nyshporka.cloud.verify import frames_in
+
+    if vydannia or book or case_key:
+        raise GoRefused("`--not-an-edition` — без коду видання: приберіть `--vydannia`, "
+                        "`--book` і `--case-key`")
+    root = Path(out_root).expanduser().resolve() if out_root else PR.plain_root()
+    runs: dict[str, Any] = {}
+    seen: dict[str, str] = {}
+    for arg in cases:
+        folder = Path(arg).expanduser().resolve()
+        if not folder.is_dir() or not frames_in(folder):
+            raise GoRefused(f"у «{arg}» немає кадрів (jpg/png у самій теці)")
+        name = folder.name
+        if name in seen:
+            # Ім'я теки — це і тека результату, і ключ архіву кадрів у сховищі:
+            # дві однойменні теки писали б одна поверх одної.
+            raise GoRefused(f"дві теки з однаковим іменем «{name}»: {seen[name]} і {folder}")
+        seen[name] = str(folder)
+        runs[arg] = PR.PlainRun(name=name, out_dir=root / name)
+    return cases, {"plain": True, "out_root": str(root), "runs": runs}
+
+
 def _issue_run(edition: dict[str, Any] | None, case: str) -> Any:
     """`print_edition.IssueRun` номера заходу друку; None — це не друк."""
     if not edition:
         return None
+    if edition.get("plain"):
+        return (edition.get("runs") or {}).get(case)
     from nyshporka import print_edition as PE
 
     return PE.run_for(edition.get("runs") or {}, case)
@@ -941,6 +989,10 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
     def build(frames_dir: Path, **kw: Any) -> PL.CloudPlan:
         kw.setdefault("script", script)
         try:
+            if printed is not None and getattr(printed, "out_dir", None):
+                # 🖨 друк поза виданнями: тека результату названа людиною
+                kw.setdefault("out_dir", printed.out_dir)
+                kw.setdefault("plain", True)
             return PL.build(
                 frames_dir, backend=backend, case_key=key,
                 second_voice=second_voice, also=list(with_voices), model=model,
@@ -1205,7 +1257,10 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
     from nyshporka.cloud.verify import frames_in
     from nyshporka.htr_store import lasting_case_dir, under_raw
 
-    if under_raw(ref.frames_dir) is None and lasting_case_dir(
+    from nyshporka.cloud.printed import PlainRun
+
+    # 🖨 Друк поза виданнями свідомо живе поза сховищем справ: тека — робоча збірка.
+    if not isinstance(printed, PlainRun) and under_raw(ref.frames_dir) is None and lasting_case_dir(
             ref.frames_dir, plan.case_key or ref.key,
             [f.name for f in frames_in(ref.frames_dir)]) == str(ref.frames_dir):
         note = (f"кадри лежать поза сховищем справ ({ref.frames_dir}), і в "
@@ -1436,7 +1491,7 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
         raise GoRefused(
             f"тонкий шлях веде одну справу, а названо {len(convoy.legs)}. "
             f"Черга справ їде наглядацьким шляхом — просто без `--thin`.")
-    if edition and not dry_run:
+    if edition and not edition.get("plain") and not dry_run:
         # Видання записується ДО старту: гачок наглядача після забору
         # (`nysh print assemble`) знаходить номери саме за цим записом.
         from nyshporka import print_edition as PE

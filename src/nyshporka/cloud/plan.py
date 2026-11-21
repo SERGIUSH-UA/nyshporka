@@ -217,7 +217,7 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
           lines_per_page: float | None = None,
           source_dir: str | Path = "",
           pages_left: int | None = None,
-          printed: bool = False) -> CloudPlan:
+          printed: bool = False, plain: bool = False) -> CloudPlan:
     """Скласти план без жодної мережевої дії.
 
     Кидає `PlanError` рівно там, де захід не має сенсу починати: немає кадрів,
@@ -292,7 +292,8 @@ def build(case_dir: str | Path, *, backend: str = "ssh", target: str = "",
                             budget_usd=budget_usd, max_hours=max_hours,
                             max_price_usd_h=max_price_usd_h, source_dir=source_dir,
                             pages_left=pages_left, warnings=[bokom] if bokom else [],
-                            model_name=PR.MODEL, script=PR.SCRIPT, root=PR.out_root())
+                            model_name=PR.MODEL, script=PR.SCRIPT,
+                            root=PR.plain_root() if plain else PR.out_root(), plain=plain)
     guess = guess_script_full(case, script)
     scr = guess.script
     if scr == "unknown":
@@ -460,7 +461,7 @@ def _build_print(case: Path, frames: list[Path], *, backend: str, target: str,
                  budget_usd: float | None, max_hours: float | None,
                  max_price_usd_h: float | None, source_dir: str | Path,
                  pages_left: int | None, warnings: list[str], model_name: str,
-                 script: str, root: Path) -> CloudPlan:
+                 script: str, root: Path, plain: bool = False) -> CloudPlan:
     """План заходу друку: номер видання під ключем і іменем видання.
 
     🔴 Ключ (`VYD/<код>/<рік>`) і ім'я (`<код>_<дата>_<номер>`) дає
@@ -471,10 +472,15 @@ def _build_print(case: Path, frames: list[Path], *, backend: str, target: str,
     """
     from nyshporka.cloud.state import run_id_for
 
-    if not (case_key and out_name):
+    if plain:
+        # Друк поза виданнями (`--not-an-edition`): ключа немає свідомо, ім'я — тека.
+        key, why, stem = "", "не видання — без ключа", out_name or case.name
+    elif not (case_key and out_name):
         raise PlanError("номер газети їде лише з кодом видання (`nysh cloud go --print "
-                        "--vydannia <код>`): ключ і ім'я номера дає видання")
-    key, why, stem = case_key, "ключ видання", out_name
+                        "--vydannia <код>`): ключ і ім'я номера дає видання. Друк, що не "
+                        "є виданням, — `--not-an-edition`")
+    else:
+        key, why, stem = case_key, "ключ видання", out_name
     return CloudPlan(
         run_id=run_id_for(case, model=model_name, script=script, backend=backend),
         case_dir=case, out_dir=Path(out_dir) if out_dir else root / stem,
