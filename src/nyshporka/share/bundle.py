@@ -758,10 +758,16 @@ def _expand_compact(path: Path) -> tarfile.TarFile:
 
 
 def _member_bytes(tar: tarfile.TarFile, name: str, cap: int) -> bytes | None:
-    """Вміст члена за іменем, зі стелею. Немає члена — `None`."""
-    try:
-        info = tar.getmember(name)
-    except KeyError:
+    """Вміст члена за іменем, зі стелею. Немає члена — `None`.
+
+    ⚡ Член шукається проходом до першого збігу, а не `getmember`: той
+    розбирає заголовки ВСЬОГО архіву, хоча маніфест і кадри пакувальник
+    кладе першими. Бібліотека читає маніфест кожного прийнятого пакета заради
+    назви, і на 2 172 пакетах це було ~130 с на кожен прийом (замір
+    21.11.2026). Дубль імені — вада, яку ловить `inventory` перед прийомом.
+    """
+    info = next((m for m in tar if m.name == name), None)
+    if info is None:
         return None
     if not info.isfile():
         return None
