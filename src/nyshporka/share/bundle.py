@@ -941,8 +941,8 @@ def read_texts(path: Path, inv: Inventory,
                 # сторінку, і `BufferedReader` під кожне таке читання виділяв
                 # буфер на всю стелю: 1236 сторінок — 2–5 с і пікові гігабайти
                 # пам'яті на пакеті 0,9 МБ (замір 21.11.2026).
-                want = min(member.size, cap - held) + 1
-                blob = src.read(want) if src is not None else b""
+                n_read = min(member.size, cap - held) + 1
+                blob = src.read(n_read) if src is not None else b""
                 held += len(blob)
                 if held > cap:
                     raise BundleError(_text_cap_why(cap))

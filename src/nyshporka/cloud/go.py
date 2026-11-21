@@ -907,7 +907,8 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
              second_voice: bool, with_voices: tuple[str, ...],
              max_price: float | None, rerun: bool, allow_partial: bool,
              rotate_landscape: bool, dry_run: bool, thin: bool,
-             batch: bool, density: _Density | None = None, printed: Any = None,
+             batch: bool, density: _Density | _Fixed | _WholeLine | None = None,
+             printed: Any = None,
              seg_height: int = 0
              ) -> tuple[CV.Leg | None, ST.RunState | None]:
     """Підготувати ОДНУ справу заходу: від теки кадрів до готового до відправки.
