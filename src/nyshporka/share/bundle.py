@@ -772,7 +772,7 @@ def _member_bytes(tar: tarfile.TarFile, name: str, cap: int) -> bytes | None:
     if src is None:
         return None
     try:
-        return src.read(cap + 1)
+        return src.read(info.size + 1)  # не стелю: буфер виділяється під запит
     except (tarfile.TarError, EOFError, OSError, zlib_error()) as exc:
         raise BundleError(f"{name} не прочитався: {exc}") from exc
 
@@ -930,7 +930,13 @@ def read_texts(path: Path, inv: Inventory,
                 if held + member.size > cap:
                     raise BundleError(_text_cap_why(cap))
                 src = tar.extractfile(member)
-                blob = src.read(cap - held + 1) if src is not None else b""
+                # ⚡ Читати не більше за член (+1 — побачити, що заголовок збрехав
+                # про розмір). `read(cap - held + 1)` просив до 256 МБ на кожну
+                # сторінку, і `BufferedReader` під кожне таке читання виділяв
+                # буфер на всю стелю: 1236 сторінок — 2–5 с і пікові гігабайти
+                # пам'яті на пакеті 0,9 МБ (замір 21.11.2026).
+                want = min(member.size, cap - held) + 1
+                blob = src.read(want) if src is not None else b""
                 held += len(blob)
                 if held > cap:
                     raise BundleError(_text_cap_why(cap))

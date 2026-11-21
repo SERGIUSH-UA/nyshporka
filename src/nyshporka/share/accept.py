@@ -490,7 +490,11 @@ def _clashes(htr_root: Path, incoming: list[str]) -> tuple[list[str], list[str]]
     """
     if not htr_root.is_dir():
         return [], []
-    dirs = [d for d in htr_root.iterdir() if d.is_dir()]
+    # ⚡ `scandir`, а не `iterdir()` + `is_dir()`: на Windows тип теки приходить
+    # разом із переліком, без окремого `stat` на кожен із ~16 тис. прогонів —
+    # доти це було ~1 с на КОЖНУ прийняту справу (замір 21.11.2026).
+    with os.scandir(htr_root) as it:
+        dirs = [htr_root / e.name for e in it if e.is_dir()]
     existing = {d.name.casefold(): d for d in dirs}
     own: list[str] = []
     theirs: list[str] = []
