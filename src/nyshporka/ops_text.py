@@ -12,6 +12,8 @@ index`), а сам пошук прізвища йде через `search.run`, �
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
+from contextvars import ContextVar
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -382,13 +384,35 @@ def _peek_elsewhere(env: Envelope, pattern: str, layers: list[str],
                  f"Відкрити лише на прохання людини: nysh --project {f['project']} …")
 
 
+#: Стеля видачі в конверті. Більше — лише потоком у файл: тисячі збігів у
+#: відповіді агент однаково не читає, а файл читається порціями.
+GREP_LIMIT = 2000
+#: Стеля з потоковим записом (`GREP_SINK`).
+GREP_LIMIT_SINK = 1_000_000
+#: Куди `text.grep` віддає кожен збіг одразу, а не в конверт — ставить лише
+#: процес CLI (`nysh text grep --do`). Не аргумент операції: шлях до файлу в
+#: аргументах відкрив би запис куди завгодно кожному клієнтові демона.
+GREP_SINK: ContextVar[Callable[[dict[str, Any]], None] | None] = ContextVar(
+    "text_grep_sink", default=None)
+
+
 class TextGrepArgs(BaseModel):
     pattern: str = Field(description="регекс Python; кирилиця як у тексті")
     case: CaseScope = Field(default="",
                             description="лише в цій справі (серії, переліку) або прогоні; "
                                         "порожньо — усе прочитане")
     context: int = Field(default=1, ge=0, le=6, description="рядків сусідства")
-    limit: int = Field(default=100, ge=1, le=2000)
+    limit: int = Field(default=100, ge=1, le=GREP_LIMIT_SINK,
+                       description=f"скільки збігів видати; понад {GREP_LIMIT} — лише з "
+                                   "потоковим записом у файл (`nysh text grep --do`)")
+    offset: int = Field(default=0, ge=0,
+                        description="пропустити стільки збігів (гортання: `next_offset` відповіді)")
+    cursor: str = Field(default="",
+                        description="продовжити з `next_cursor` попередньої відповіді — без "
+                                    "переобходу початку; `offset` тоді рахується від курсора")
+    count_all: bool = Field(default=False,
+                            description="дорахувати всі збіги області (точний `total`); "
+                                        "без цього обхід спиняється, щойно видачу набрано")
     ignore_case: bool = Field(default=True)
     where: str = Field(default="decode",
                        description="decode | canon | opys | notes | pages | all — або кілька через кому")
@@ -410,6 +434,13 @@ def text_grep(a: TextGrepArgs) -> Envelope:
 
     Регекс без літерала в три літери сканує кожен рядок області; це
     повідомляється, бо по корпусу такий запит триває секунди, а не мілісекунди.
+
+    Видача впорядкована (сторінка стору, рядок) і гортається: `offset`/`cursor`.
+    Обхід спиняється, щойно знайдено `offset + limit + 1` збігів: тоді `total`
+    — None (повного числа ніхто не рахував), `total_at_least` — нижня межа,
+    `more`, `next_offset`, `next_cursor`, `coverage.stopped_early`. Точне
+    число — `count_all`. Ctrl+C посеред обходу — відповідь зі знайденим до
+    обриву й `interrupted`.
     """
     from nyshporka import htr_store as S
     from nyshporka.search import store as ST
@@ -423,7 +454,19 @@ def text_grep(a: TextGrepArgs) -> Envelope:
         return fail(f"невідомий шар {bad}: є decode, {', '.join(T.LAYERS)}, all")
     layers = [w for w in wanted if w != "decode"]
     extra = [x.strip() for x in a.extra.split(";") if x.strip()]
+    sink = GREP_SINK.get()
+    if a.limit > GREP_LIMIT and sink is None:
+        return fail(f"limit понад {GREP_LIMIT} — лише з потоковим записом у файл: "
+                    f"`nysh text grep … --do <файл.jsonl>`; або гортайте --offset")
+    paging = bool(a.offset or a.cursor.strip())
+    if (paging or sink is not None) and "decode" not in wanted:
+        return fail("--offset, --cursor і --do — для декоду (шар decode), не для шарів файлів")
     layered: dict[str, Any] | None = None
+    # Шари файлів гортання не мають: показуються на першій сторінці видачі, а не
+    # повторюються на кожній.
+    skipped_layers = paging and bool(layers or extra)
+    if paging:
+        layers, extra = [], []
     if layers or extra:
         layered = T.grep_layers(a.pattern, layers, ignore_case=a.ignore_case,
                                 limit=a.limit, context=a.context, extra=extra)
@@ -449,25 +492,44 @@ def text_grep(a: TextGrepArgs) -> Envelope:
     except ValueError as exc:
         return fail(str(exc))
     runs = [r["name"] for r in scope["rows"]]
-    res = ST.grep(a.pattern, runs, ignore_case=a.ignore_case, limit=a.limit,
-                  context=a.context, fold=a.fold)
-    if res.get("error"):
-        return fail(str(res["error"]))
     by_run = {r["name"]: r for r in scope["rows"]}
-    for h in res["hits"]:
+
+    def mark(h: dict[str, Any]) -> dict[str, Any]:
         row = by_run.get(h["name"]) or {}
         h["case_key"] = (row.get("case_key") or "").strip()
         h["shifra"] = row.get("shifra") or ""
+        return h
+
+    on_hit = (lambda h: sink(mark(h))) if sink is not None else None
+    res = ST.grep(a.pattern, runs, ignore_case=a.ignore_case, limit=a.limit,
+                  context=a.context, fold=a.fold, offset=a.offset, cursor=a.cursor.strip(),
+                  count_all=a.count_all, on_hit=on_hit)
+    if res.get("error"):
+        return fail(str(res["error"]))
+    for h in res["hits"]:
+        mark(h)
     data: dict[str, Any] = {
         "hits": res["hits"], "total": res["total"],
+        # Гортання (21.11.2026): `total` — лише коли обхід пройшов усю область
+        # від її початку; інакше None, а нижня межа — `total_at_least`.
+        "total_at_least": res["total_at_least"], "returned": res["returned"],
+        "offset": a.offset, "more": res["more"],
+        "next_offset": res["next_offset"], "next_cursor": res["next_cursor"],
+        "interrupted": res["interrupted"],
         "coverage": {"runs": res["runs"], "runs_asked": res["runs_asked"],
                      "unindexed": res["unindexed"], "pages": res["pages"],
                      "pages_scanned": res["pages_scanned"],
                      "prefiltered": res["prefiltered"], "literals": res["literals"],
                      "fold": a.fold,
                      "scope": scope["kind"], "case": scope["key"],
-                     "shifra": scope["shifra"]}}
-    if scope["kind"] == "all" or not res["hits"]:
+                     "shifra": scope["shifra"],
+                     "stopped_early": res["stopped_early"],
+                     "runs_scanned": res["runs_scanned"],
+                     "stopped_at": res["stopped_at"]}}
+    if sink is not None:
+        data["streamed"] = res["returned"]
+    zero = res["total"] == 0
+    if scope["kind"] == "all" or zero:
         from nyshporka import htr_store as _S
         from nyshporka.search import reach as _R
 
@@ -480,7 +542,20 @@ def text_grep(a: TextGrepArgs) -> Envelope:
         _warn_cuts(env, layered)
         _peek_elsewhere(env, a.pattern, layers, a.ignore_case)
     partial_store_alert(env, int(res["unindexed"] or 0), int(res.get("runs_asked") or 0),
-                        a.case, zero=not res["hits"])
+                        a.case, zero=zero)
+    if skipped_layers:
+        env.warn("layers_first_page", "шари файлів (канон, описи, нотатки) показано лише на "
+                                      "першій сторінці видачі — тут гортається декод")
+    if res["interrupted"]:
+        env.warn("interrupted",
+                 f"пошук перервано: прочесано сторінок {res['pages_scanned']}, знайдено "
+                 f"{res['total_at_least']} — видача неповна. Продовжити: "
+                 f"--offset {res['next_offset']} (або --cursor {res['next_cursor']})")
+    elif res["stopped_early"]:
+        env.warn("stopped_early",
+                 f"обхід спинено, щойно набрано видачу: збігів щонайменше "
+                 f"{res['total_at_least']}, повного числа не рахували (--count-all). "
+                 f"Далі: --offset {res['next_offset']} (або --cursor {res['next_cursor']})")
     if not res["prefiltered"]:
         env.warn("full_scan", "у регексі немає літерала з трьох літер — прочесано "
                               "кожен рядок області, а не звужений корпус")
@@ -489,7 +564,7 @@ def text_grep(a: TextGrepArgs) -> Envelope:
                  "--fold: збіг шукали в нормалізованому рядку (ѳ=ф, ѣ=е, і=и, ъ/ь відкинуто, "
                  "Kraken-плутанини зведено), регістр не розрізнявся; показано сирий рядок. "
                  "Збіг нечіткіший, ніж по сирому тексту: звіряти кропом.")
-    if not res["hits"]:
+    if zero:
         env.warn("zero_with_denominator",
                  f"не знайшлось — прочесано прогонів: {res['runs']}, "
                  f"сторінок: {res['pages_scanned']}")
