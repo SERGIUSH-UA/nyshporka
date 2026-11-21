@@ -275,3 +275,19 @@ def test_models_check_ignores_superseded_packs(space: Path, tmp_path: Path,
     old = {p.id for p in packs.catalog() if p.superseded or p.specialist}
     assert current and all(i in got.detail for i in current)
     assert not any(i in got.detail for i in old)
+
+
+def test_cloud_registry_slim_reads_user_version(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Реєстр плагіна оренди: стара схема — todo; стиснутий і малий — ok; без реєстру — n/a."""
+    import sqlite3
+
+    manifest = pytest.importorskip("gpurunner.core.manifest")
+    db = tmp_path / "runs.sqlite3"
+    monkeypatch.setattr(manifest, "db_path", lambda: db)
+    assert M.CHECKS["cloud_registry_slim"](tmp_path).state == "n/a"
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE runs (id TEXT)")
+    assert M.CHECKS["cloud_registry_slim"](tmp_path).state == "todo"
+    with sqlite3.connect(db) as conn:
+        conn.execute("PRAGMA user_version=1")
+    assert M.CHECKS["cloud_registry_slim"](tmp_path).state == "ok"
