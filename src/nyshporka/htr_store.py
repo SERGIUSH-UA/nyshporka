@@ -1153,8 +1153,59 @@ def local_reads() -> dict[str, dict[str, list[str]]]:
     🔴 Звірка з пулом іде за КЛЮЧЕМ справи, а не за іменем прогону. Своя справа
     лежить тут як `spr-8734`, у пулі — як `DAHMO_315-1-8734`; захист прийому від
     зіткнення імен їх не бачить, і серія з пулу клала дубль поверх прочитаного.
+
+    ⚡ Результат кешується на диску за штампом обходу кореня прогонів (кількість
+    тек, найновіші mtime тек і мет, штамп бібліотеки) і прив'язками людини.
+    Без кешу кожен `share pull` нового процесу перебудовував мапу з переліку
+    прогонів: ~2,7 с поверх самого обходу (замір 21.11.2026). Будь-яка зміна
+    прогону, мети, бібліотеки чи прив'язки міняє штамп — і кеш перебудовується.
     """
     bound = _bound_runs()
+    stamp = _local_reads_stamp(bound)
+    if (hit := _local_reads_cache_read(stamp)) is not None:
+        return hit
+    out = _local_reads_now(bound)
+    _local_reads_cache_write(stamp, out)
+    return out
+
+
+def _local_reads_stamp(bound: dict[str, str | None]) -> str:
+    import hashlib
+
+    scan_stamp, _metas = _scan()
+    b = hashlib.sha1(json.dumps(bound, sort_keys=True, ensure_ascii=False)
+                     .encode("utf-8")).hexdigest()[:16]
+    return f"{ROW_SCHEMA}|{scan_stamp[0]}|{scan_stamp[1]}|{scan_stamp[2]}|{scan_stamp[3]}|{b}"
+
+
+def _local_reads_cache_path() -> Path:
+    return workspace().derived / "local_reads_cache.json"
+
+
+def _local_reads_cache_read(stamp: str) -> dict[str, dict[str, list[str]]] | None:
+    try:
+        data = json.loads(_local_reads_cache_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("stamp") != stamp:
+        return None
+    reads = data.get("reads")
+    return reads if isinstance(reads, dict) else None
+
+
+def _local_reads_cache_write(stamp: str, reads: dict[str, dict[str, list[str]]]) -> None:
+    p = _local_reads_cache_path()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps({"stamp": stamp, "reads": reads}, ensure_ascii=False),
+                       encoding="utf-8")
+        tmp.replace(p)
+    except OSError:
+        pass  # кеш — зручність, не умова роботи
+
+
+def _local_reads_now(bound: dict[str, str | None]) -> dict[str, dict[str, list[str]]]:
     out: dict[str, dict[str, list[str]]] = {}
     for r in list_cases():
         name = str(r.get("name") or "")

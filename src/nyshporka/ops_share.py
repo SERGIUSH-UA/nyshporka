@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -2217,10 +2218,16 @@ class SharePullArgs(BaseModel):
                          description="справа сегментами (картотека): узяти лише "
                                      "сегмент, що покриває ці літери («Дал»); "
                                      "порожньо — усі сегменти")
+    shyfry: list[str] = Field(default_factory=list,
+                              description="список шифр справ (з різних фондів): "
+                                          "знайти кожну й прийняти одним процесом")
 
 
 #: Рядків каталогу на запит: стеля сервера.
 _PAGE = 100
+
+#: Скільки запитів до каталогу одночасно, коли шифр — список.
+_LIST_WORKERS = 6
 
 
 def _all_rows(query: str, base: str) -> list[Any]:
@@ -2420,6 +2427,51 @@ def _geometry(env: Envelope, got: dict[str, Any], row: Any) -> None:
             env.warn("geometry", f"геометрія не доїхала: {exc}")
 
 
+def _series_rows(code: str, fond: str, opys: str, base: str) -> list[Any]:
+    """Усі рядки каталогу серії (архів, фонд, опис) — точним порівнянням полів.
+
+    Пошук сервера — підрядок, і «592» зачепив би будь-яку справу з такими
+    цифрами, тож відбір іде за ключем четвірки, а не за збігом тексту.
+    Кидає `RuntimeError`, якщо каталог не відповів.
+    """
+    from nyshporka.archives import active
+    from nyshporka.share.pool import quad_key
+
+    pk = active()
+    want = quad_key(code or "X", fond, opys, "1").split("/") if fond else []
+
+    def ours(r: Any) -> bool:
+        if code and not pk.same_archive(r.repo.upper(), code):
+            return False
+        if not want:
+            return True
+        got = quad_key(r.repo, r.fond, r.opys, r.spr).split("/")
+        return (len(got) == 4 and got[1] == want[1]
+                and (not opys.strip() or got[2] == want[2]))
+
+    return [r for r in _all_rows(f"{code} {fond}".strip(), base) if ours(r)]
+
+
+#: Рядок списку, що називає серію, а не справу: «ЦДІАК 57» або «ЦДІАК 57-2».
+_SERIES_LINE = re.compile(r"^\s*(?P<repo>[^\s\d][^\s]*)\s+(?P<fond>[^\s-]+)"
+                          r"(?:-(?P<opys>[^\s-]+))?\s*$")
+
+
+def _list_series(line: str) -> tuple[str, str, str] | None:
+    """Рядок списку → `(код архіву, фонд, опис)`, якщо це серія, а не справа."""
+    from nyshporka.archives import active
+
+    if _list_key(line):
+        return None
+    m = _SERIES_LINE.match(line)
+    if not m:
+        return None
+    code = active().resolve_code(m.group("repo"))
+    if not code:
+        return None
+    return code, m.group("fond"), m.group("opys") or ""
+
+
 def _pull_series(a: SharePullArgs) -> Envelope:
     """Серія пулу: архів, фонд, опис — огляд або прийом усіх справ одним викликом.
 
@@ -2433,25 +2485,12 @@ def _pull_series(a: SharePullArgs) -> Envelope:
     """
     from nyshporka.archives import active
     from nyshporka.share import catalog as C
-    from nyshporka.share.pool import quad_key
 
-    pk = active()
-    code = (pk.resolve_code(a.repo) or a.repo.strip().upper()) if a.repo.strip() else ""
+    code = (active().resolve_code(a.repo) or a.repo.strip().upper()) if a.repo.strip() else ""
     if a.repo.strip() and not code:
         return fail(f"невідомий архів «{a.repo}»")
-    want = quad_key(code or "X", a.fond, a.opys, "1").split("/") if a.fond else []
-
-    def ours(r: Any) -> bool:
-        if code and not pk.same_archive(r.repo.upper(), code):
-            return False
-        if not want:
-            return True
-        got = quad_key(r.repo, r.fond, r.opys, r.spr).split("/")
-        return (len(got) == 4 and got[1] == want[1]
-                and (not a.opys.strip() or got[2] == want[2]))
-
     try:
-        rows = [r for r in _all_rows(f"{code} {a.fond}".strip(), a.base) if ours(r)]
+        rows = _series_rows(code, a.fond, a.opys, a.base)
     except RuntimeError as exc:
         return fail(str(exc))
     named = " ".join(x for x in (a.repo.strip(), a.fond.strip(), a.opys.strip()) if x)
@@ -2642,6 +2681,10 @@ def share_pull(a: SharePullArgs) -> Envelope:
 
     if a.vydannia:
         return _pull_vydannia(a)
+    if a.shyfry:
+        if a.query.strip() or a.repo.strip() or a.fond.strip():
+            return fail("або список шифр, або запит чи серія — не разом")
+        return _pull_list(a)
     if a.repo.strip() or a.fond.strip():
         if a.query.strip():
             return fail("або запит, або серія (--repo/--fond/--opys) — не разом")
@@ -2719,6 +2762,116 @@ def share_pull(a: SharePullArgs) -> Envelope:
                      f"— рамки лягли б не на ті рядки")
         _index_taken(env, list(data["imported"].get("runs") or []))
         _library_knows(env, [str(data["imported"].get("case_key") or "")])
+    return env
+
+
+def _list_key(query: str) -> str:
+    """Канонічний ключ шифри зі списку; не розібрана — порожньо."""
+    from nyshporka.cases.register import parse_shifra
+    from nyshporka.share.pool import quad_key
+
+    try:
+        s = parse_shifra(query)
+    except Exception:
+        return ""
+    return quad_key(s.repo, s.fond, s.opys, s.spr)
+
+
+def _list_row(query: str, base: str) -> tuple[str, Any, str]:
+    """Один рядок списку → `(шифра, найкращий пакет або None, причина)`.
+
+    🔴 Пошук каталогу — повнотекстовий: «127-1012-8» зачіпає й 127-1012-80…89.
+    Тому з видачі лишаються лише пакети ТІЄЇ САМОЇ справи (ключ четвірки,
+    з синонімами архіву), а не «перший збіг».
+    """
+    from nyshporka.share import catalog as C
+    from nyshporka.share.pool import synonyms
+
+    try:
+        found, _count, _of = C.search(query, base, limit=_PAGE)
+    except RuntimeError as exc:
+        return query, None, f"каталог не відповів: {exc}"
+    key = _list_key(query)
+    if key:
+        head, _, tail = key.partition("/")
+        keys = {f"{kod}/{tail}" for kod in synonyms(head)}
+        found = [r for r in found if _row_key(r) in keys]
+    if not found:
+        return query, None, "у пулі немає"
+    if any(r.segment for r in found):
+        return query, None, ("справа сегментами — брати окремо: "
+                             f"nysh share pull \"{query}\" --take")
+    best = C.best_per_case(found)
+    if len(best) != 1:
+        return query, None, f"збіглося {len(best)} різних справ — уточніть шифру"
+    return query, best[0], ""
+
+
+def _pull_list(a: SharePullArgs) -> Envelope:
+    """Список шифр (з різних фондів) — знайти кожну й прийняти одним процесом.
+
+    ⚡ Доти список брався циклом `share pull "<шифра>" --take`, і кожна справа
+    платила за новий процес ~11 с: імпорти (~3 с), обхід прочитаного
+    (`local_reads`, ~6,5 с) і запит до каталогу (~3 с) — замір 21.11.2026,
+    208 книг ≈ 40 хв лише накладних. Тут обхід — один на весь список, запити
+    до каталогу — паралельно, прийом — той самий `_take_many`, що й у серії:
+    своє й узяте раніше пропускаються, а не зривають решту.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from nyshporka.share import catalog as C
+
+    qs = list(dict.fromkeys(q.strip() for q in a.shyfry if q and q.strip()))
+    if not qs:
+        return fail("список шифр порожній")
+    # Рядок-серія («ЦДІАК 57-2») розгортається в усі справи серії — той самий
+    # відбір, що й `--repo --fond --opys`; рядок-справа шукається сам.
+    series = {q: s for q in qs if (s := _list_series(q))}
+    cases = [q for q in qs if q not in series]
+
+    def series_rows(q: str) -> tuple[str, list[Any], str]:
+        code, fond, opys = series[q]
+        try:
+            got = C.best_per_case(_series_rows(code, fond, opys, a.base))
+        except RuntimeError as exc:
+            return q, [], f"каталог не відповів: {exc}"
+        return q, got, "" if got else "у пулі немає справ цієї серії"
+
+    with ThreadPoolExecutor(max_workers=_LIST_WORKERS) as pool:
+        rows = list(pool.map(lambda q: _list_row(q, a.base), cases))
+        srows = list(pool.map(series_rows, list(series)))
+    items = [(q, r) for q, r, _why in rows if r is not None]
+    missing = [{"shifra": q, "why": why} for q, r, why in rows if r is None]
+    seen = {_row_key(r) for _q, r in items}
+    per_series: dict[str, int] = {}
+    for q, got, why in srows:
+        if why:
+            missing.append({"shifra": q, "why": why})
+            continue
+        per_series[q] = len(got)
+        for r in got:
+            key = _row_key(r)
+            if key and key in seen and not r.segment:
+                continue  # та сама справа вже названа окремим рядком чи іншою серією
+            items.append((r.shifra or key, r))
+            seen.add(key)
+    data: dict[str, Any] = {"list": len(qs), "found": len(items),
+                            "series_cases": per_series,
+                            "missing": missing,
+                            "rows": [{"shifra": q, "case_key": _row_key(r),
+                                      "pages": r.pages, "models": r.models}
+                                     for q, r in items]}
+    env = ok(data)
+    if missing:
+        env.warn("list_missing",
+                 f"{len(missing)} із {len(qs)} шифр не взято зі списку: "
+                 + "; ".join(f"{m['shifra']} — {m['why']}" for m in missing[:10])
+                 + (" …" if len(missing) > 10 else ""))
+    if not a.take:
+        if items:
+            env.suggest("share.pull", "прийняти знайдене: --take")
+        return env
+    data["imported"] = _take_many(env, items, replace=a.force)
     return env
 
 
