@@ -1017,25 +1017,59 @@ def pull_cmd(
     segment: str = typer.Option("", "--segment",
                                 help="справа сегментами (картотека): лише сегмент, "
                                      "що покриває ці літери, напр. «Дал»"),
+    z_fayla: str = typer.Option("", "--z-fayla",
+                                help="файл зі списком (по рядку: шифра справи "
+                                     "«ЦДІАК 127-1012-8» або серія «ЦДІАК 57-2» / "
+                                     "«ЦДІАК 57»; # — коментар): знайти й з "
+                                     "--take прийняти все одним процесом"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Знайти справу в каталозі пулу — і за потреби одразу прийняти.
 
     Без запиту — огляд пулу за серіями (архів · фонд · опис). Серія:
     `nysh share pull --repo RGIA --fond 592 --opys 25 --take` бере всі її
-    справи одним викликом. Друковане видання: `--vydannia PEV --take`.
-    Прийняте одразу йде в текстовий стор.
+    справи одним викликом. Список шифр з різних фондів — `--z-fayla <файл>
+    --take`: один процес на весь список, а не процес на кожну справу.
+    Друковане видання: `--vydannia PEV --take`. Прийняте одразу йде в
+    текстовий стор.
     """
+    from pathlib import Path
+
     from nyshporka import ops as O
 
     _kliuch_abo_vkhid(as_json)
+    shyfry: list[str] = []
+    if z_fayla:
+        p = Path(z_fayla)
+        if not p.is_file():
+            console.print(f"[red]немає файла зі списком: {_e(z_fayla)}[/red]")
+            raise typer.Exit(2)
+        shyfry = [s.strip() for s in p.read_text(encoding="utf-8-sig").splitlines()
+                  if s.strip() and not s.lstrip().startswith("#")]
     env = O.call("share.pull", {"query": query, "base": base, "take": take,
                                 "vydannia": vydannia, "years": years, "force": force,
                                 "repo": repo, "fond": fond, "opys": opys,
-                                "segment": segment})
+                                "segment": segment, "shyfry": shyfry})
     if _answer(env, as_json):
         return
     d = env.data or {}
+    if "list" in d:
+        console.print(f"у списку шифр [bold]{d['list']}[/bold] · у пулі знайдено "
+                      f"{d.get('found', 0)} · не взято зі списку {len(d.get('missing') or [])}")
+        for q, n in (d.get("series_cases") or {}).items():
+            console.print(f"  серія {_e(q)}: справ у пулі {n}")
+        for m in d.get("missing") or []:
+            console.print(f"  [dim]{_e(m.get('shifra'))} — {_e(m.get('why'))}[/dim]")
+        imp = d.get("imported")
+        if imp is not None:
+            runs = sum(len(i.get("runs") or []) for i in imp)
+            console.print(f"прийнято справ [bold]{len(imp)}[/bold] · прогонів {runs}"
+                          + (f" · у сторі {d['indexed']}" if "indexed" in d else ""))
+            skipped = d.get("skipped_local") or []
+            if skipped:
+                console.print(f"[dim]уже прочитано тут — не брав: {len(skipped)}[/dim]")
+        _notes(env)
+        return
     if "series" in d:
         console.print(f"каталог: {_e(d.get('catalog'))} · пакетів [bold]"
                       f"{_e(d.get('count'))}[/bold]")
