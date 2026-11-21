@@ -538,10 +538,15 @@ def read_run(item: dict[str, Any], ctx: Ctx) -> Outcome:
 
     workers = int(opts.get("workers") or 1)
     from nyshporka.core import projects as P
+    from nyshporka.htr import gpu as G
+
+    # Карта Apple — свій пристрій шардів (sato лишається на ній). Решта — як
+    # було: черга й доти планувала шарди «під карту», не питаючи драйвер.
+    device = (G.shard_device() or "cuda") if workers > 1 else ""
 
     # Прогін підписаний тим, хто замовив справу в черзі, а не тим, хто веде чергу.
     got = S.read_case(plan, case_key=case_key(item, w), workers=workers,
-                      device="cuda" if workers > 1 else "",
+                      device=device,
                       on_event=_event, should_stop=ctx.should_stop,
                       project=P.tag_of(item.get("project")))
     if got.stopped:

@@ -5,8 +5,8 @@
 Тому перевіряємо не «схожість картинок», а максимальну абсолютну похибку
 відносно динамічного діапазону і збіг ненульової маски.
 
-Запуск під інтерпретатором рушіїв:
-    <інтерпретатор рушіїв> -m nyshporka.htr.patches.gpu_sato_verify
+Запуск під інтерпретатором рушіїв (пристрій — необов'язковий аргумент):
+    <інтерпретатор рушіїв> -m nyshporka.htr.patches.gpu_sato_verify [cpu|mps|cuda:0]
 """
 from __future__ import annotations
 
@@ -73,9 +73,27 @@ def compare(name: str, img: np.ndarray, device: str = "cuda:0",
     return ok
 
 
-def main() -> int:
+def default_device() -> str:
+    """Пристрій звірки, коли його не названо: карта, якщо є, інакше процесор.
+
+    🔴 Звіряти треба той пристрій, на якому патч піде в прогоні, а не «будь-який»:
+    згортки torch на CUDA, MPS і процесорі — різні реалізації, і доведена рівність
+    на одній не доводить її на іншій. Тому пристрій можна назвати першим
+    аргументом: `… gpu_sato_verify cpu`, `… gpu_sato_verify mps`.
+    """
     import torch
-    dev = "cuda:0" if torch.cuda.is_available() else "cpu"
+
+    if torch.cuda.is_available():
+        return "cuda:0"
+    mps = getattr(torch.backends, "mps", None)
+    if mps is not None and mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    dev = args[0] if args else default_device()
     print(f"пристрій: {dev}")
 
     all_ok = compare("синтетична, mode=constant (як у Kraken)", synthetic(), dev)

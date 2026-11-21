@@ -41,7 +41,7 @@ def test_runner_writes_the_lineage_not_the_raw_version() -> None:
     """Запис нової версії влучає і в раннер старої (бокс зі старим наглядачем)."""
     assert 'key={"sato": args.sato_sigmas, "kraken": SEG_KRAKEN,' in RUNNER_SRC
     # справжня версія — поза ключем, для слідства
-    assert '"made_by": _made_by()' in RUNNER_SRC
+    assert '"made_by": _made_by(self._device)' in RUNNER_SRC
 
 
 def test_planner_judges_the_cache_like_the_runner() -> None:
