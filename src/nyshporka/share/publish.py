@@ -1078,12 +1078,35 @@ def _rozkladena(run_dirs: list[Path]) -> str:
     """
     from nyshporka import htr_store as S
 
-    teky = sorted({S.frames_dir_key(_meta_of(d).get("case_dir")) for d in run_dirs} - {""})
+    po_tekakh: dict[str, list[str]] = {}
+    for d in run_dirs:
+        t = S.frames_dir_key(_meta_of(d).get("case_dir"))
+        if t:
+            po_tekakh.setdefault(t, []).append(d.name)
+    teky = sorted(po_tekakh)
     if len(teky) < 2:
         return ""
     names = ", ".join(Path(t).name for t in teky[:4]) + (" …" if len(teky) > 4 else "")
+    # 🔴 Назвати прогони КОЖНОЇ теки. Друга тека часто — не частина справи, а
+    # проба чи трен-набір (кадр-два з індексом FS) з кількома голосами; без
+    # переліку людина пропускала один голос, а другий лишав теку в пакеті
+    # (21.11.2026: `--skip-run 127-1015-38` без `127-1015-38-diak_v10`).
+    runs = "; ".join(f"{Path(t).name}: {', '.join(sorted(po_tekakh[t]))}" for t in teky[:4])
+    def kadriv(t: str) -> int:
+        try:
+            return sum(1 for f in Path(t).iterdir()
+                       if f.suffix.lower() in (".jpg", ".jpeg", ".png", ".tif", ".tiff"))
+        except OSError:
+            return 0
+
+    # Підозріла тека — з меншою кількістю КАДРІВ на диску (проба має кадр-два),
+    # а не з меншою кількістю прогонів: голосів у проби буває стільки ж.
+    mensha = min(teky, key=lambda t: (kadriv(t), len(po_tekakh[t])))
+    skip = " ".join(f"--skip-run {r}" for r in sorted(po_tekakh[mensha]))
     return (f"справу розкладено на {len(teky)} тек кадрів ({names}), а пакет бере "
-            f"кадри з однієї — у пул поїхав би текст без своїх кадрів. Якщо теки — "
+            f"кадри з однієї — у пул поїхав би текст без своїх кадрів. Прогони за "
+            f"теками — {runs}. Якщо тека {Path(mensha).name} — проба чи трен-набір, "
+            f"а не частина справи, пропустіть УСІ її прогони: {skip}. Якщо теки — "
             f"вирізки з плівки (село за селом), назвіть місце кожної на плівці "
             f"(`nysh share part <тека> --film N --frames-on-film A-B --folios …`) і "
             f"пакуйте `--segments --by-part`; частини картотеки — `--segments`; "
