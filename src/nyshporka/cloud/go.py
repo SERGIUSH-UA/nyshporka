@@ -655,6 +655,59 @@ def go(case: str | Sequence[str], *, backend: str = "vast",
     return res
 
 
+def _whole_line(params: Sequence[str]) -> bool:
+    """`-p whole_line=1` — режим «готові рядки» (кадр — це вже рядок)."""
+    for item in params:
+        k, _, v = item.partition("=")
+        if k.strip() == "whole_line":
+            return v.strip().lower() in ("1", "true", "yes", "on")
+    return False
+
+
+def _param_float(params: Sequence[str], key: str) -> float | None:
+    for item in params:
+        k, _, v = item.partition("=")
+        if k.strip() == key:
+            try:
+                return float(v)
+            except ValueError:
+                return None
+    return None
+
+
+class _Fixed:
+    """`-p lines_per_page=N` — щільність названа людиною, вибірки сегментацією немає.
+
+    Вибірка ганяє kraken на ЛОКАЛЬНІЙ карті (20–40 кадрів на справу); коли машина
+    зайнята чи карту віддано іншому, щільність відома наперед (смуги колонок описів
+    ф.442: 10–30 рядк/смугу, 21.11.2026)."""
+
+    def __init__(self, lines: float) -> None:
+        self.lines = lines
+
+    def of(self, out_dir: Path, pack: Path, key: str, say: EventFn) -> float | None:
+        say("density", f"щільність {self.lines:g} рядк/стор — задано `-p lines_per_page`, без вибірки")
+        return self.lines
+
+    def close(self) -> None:
+        return None
+
+
+class _WholeLine:
+    """Щільність «готових рядків»: рівно рядок на кадр, без вибірки.
+
+    🔴 Вибірка сегментацією тут не просто зайва: вона ганяла б kraken на ЛОКАЛЬНІЙ
+    карті по кропах, де рядків вона не знаходить (0.5 рядк/стор на кропах номерів
+    ф.442, 21.11.2026), і кошторис рахувався б від нуля рядків."""
+
+    def of(self, out_dir: Path, pack: Path, key: str, say: EventFn) -> float | None:
+        say("density", "щільність 1 рядк/стор — готові рядки (`whole_line`), вибірки не треба")
+        return 1.0
+
+    def close(self) -> None:
+        return None
+
+
 class _Density:
     """Щільність справ ОДНОГО заходу: власне читання → сусіди → вибірка.
 
@@ -1284,7 +1337,9 @@ def _go(res: GoResult, cases: tuple[str, ...], say: EventFn,
     legs: list[CV.Leg] = []
     dropped: list[tuple[str, str]] = []
     busy: list[str] = []
-    density = _Density(batch=len(cases) > 1)
+    fixed = _param_float(params, "lines_per_page")
+    density = (_WholeLine() if _whole_line(params)
+               else _Fixed(fixed) if fixed else _Density(batch=len(cases) > 1))
     owner.callback(density.close)
     for arg in cases:
         try:

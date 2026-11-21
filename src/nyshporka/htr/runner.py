@@ -1569,6 +1569,43 @@ def _lift_lines(seg, lift: float):
     return dataclasses.replace(seg, lines=out)
 
 
+#: Мітка сегментації «кадр — це рядок» (`WholeLineSegmenter`), за нею `_line_crops`
+#: віддає кадр як є.
+WHOLE_LINE_TAG = "nysh-whole-line"
+
+
+class WholeLineSegmenter:
+    """`--whole-line`: сегментації немає — кадр і є рядок.
+
+    Навіщо. Кроп номера справи чи короткої клітинки опису (кілька символів, 60–200 px)
+    kraken не сегментує: `blla` на ньому рядків не знаходить, і текст порожній
+    (опис 558 ф.442, 20.11.2026). Локально такі кропи читає `pysar_lines_infer.py`
+    одним рядком; цей режим робить те саме в хмарному конвеєрі, тобто з чергою,
+    шардами, чекпоінтами й наглядачем.
+
+    Інтерфейс — той, яким раннер користується в `Segmenter`: без кешу (`dir` —
+    None), без моделі, рамка рядка — увесь кадр.
+    """
+
+    dir = None
+    page_cap = None
+    _model = None
+
+    def __init__(self) -> None:
+        self.hits = self.misses = self.written = 0
+        self.merged_lines = self.merged_pages = 0
+
+    def _file(self, stem: str, orient: int):
+        return None
+
+    def segment(self, im: Image.Image, stem: str = "", orient: int = 0, enhanced: str = ""):
+        from kraken.containers import BBoxLine, Segmentation
+
+        w, h = im.size
+        return Segmentation(type="bbox", imagename=WHOLE_LINE_TAG, text_direction="horizontal-lr",
+                            script_detection=False, lines=[BBoxLine(id="l0", bbox=(0, 0, w, h))])
+
+
 def _line_crops(im: Image.Image, seg, lift: float = 0.0) -> list:
     """Кропи рядків із сегментації.
 
@@ -1587,6 +1624,17 @@ def _line_crops(im: Image.Image, seg, lift: float = 0.0) -> list:
     ⚠ При фолбеку кропи збираються З нуля, а не доливаються до частково зібраних:
     інакше рядки, зібрані до винятку, продублювались би.
     """
+    if getattr(seg, "imagename", "") == WHOLE_LINE_TAG:
+        # 🧩 кадр — рядок: у модель іде сам кадр, без `extract_polygons` (той
+        # вирізає за рамкою й пересемплює — на кропі в кілька символів це зайвий шум)
+        w, h = im.size
+        _line_crops.boxes = [[0, 0, int(w), int(h)]]
+        _line_crops.polys = [[[0, 0], [int(w), 0], [int(w), int(h)], [0, int(h)]]]
+        if w < PARSEQ_MIN_CROP_W:
+            _line_crops.boxes, _line_crops.polys = [], []
+            return []
+        return [im]
+
     import dataclasses
 
     from kraken.lib.segmentation import extract_polygons
@@ -4195,6 +4243,10 @@ def main() -> int:
                          "кожна клітинка (чи рядок руки у високій клітинці) читається "
                          "основною моделлю; голос <out>-cells. Уже прочитані сторінки "
                          "дістають лише клітинки")
+    ap.add_argument("--whole-line", action="store_true",
+                    help="🧩 кадр — це вже рядок: без сегментації, без пошуку орієнтації "
+                         "й без посилення; модель читає кадр цілим (кропи номерів і "
+                         "коротких клітинок описів фонду)")
     ap.add_argument("--rescue", default="",
                     help="🛟 рятувальний прохід: шлях до .mlmodel другого рушія "
                          "(Дяк). Відібрані рядки (сіра смуга або якір по "
@@ -4646,6 +4698,16 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
             and cache is None and not getattr(args, "segment_only", False)):
         return supervise(args, case_dir, out_dir)
 
+    if getattr(args, "whole_line", False):
+        # 🧩 Кадр — рядок. Поворот і посилення тут лише шкодять: детектор
+        # орієнтації на кропі «21» бачить шум і пропонує 180°, а гард тоді
+        # читає ще й перевернутий кроп; CLAHE на маленькому кропі роздуває папір.
+        args.force_orient, args.enhance, args.orient_check = 0, "none", False
+        if getattr(args, "segment_only", False):
+            print("[htr-run] ✖ --whole-line без сегментації — сегментатору тут нічого різати",
+                  flush=True)
+            emit(prog, "done", pages=0, skipped=0, failed=0, error="whole-line + segment-only")
+            return 2
     if KRAKEN_PIN_VERSION not in SUPPORTED_KRAKEN and not args.allow_any_kraken:
         print(f"[htr-run] ✖ kraken {KRAKEN_PIN_VERSION}: раннер і його патчі звірено "
               f"лише на {', '.join(SUPPORTED_KRAKEN)} — на іншій версії рядки "
@@ -5095,7 +5157,10 @@ def _main_case(args: argparse.Namespace, cache: dict | None = None) -> int:
         key={"sato": args.sato_sigmas, "kraken": SEG_KRAKEN,
              "max_endpoints": args.max_endpoints},
         merge=merge_cfg, autocast=args.seg_autocast, max_mpx=args.seg_max_mpx)
-    if cache is not None and cache.get("seg_model") is not None:
+    if getattr(args, "whole_line", False):
+        segmenter = WholeLineSegmenter()
+        print("[htr-run] 🧩 готові рядки: кадр читається цілим, без сегментації", flush=True)
+    elif cache is not None and cache.get("seg_model") is not None:
         # модель сегментації — та сама на всю чергу; тека кешу — своя в справи
         segmenter._model = cache["seg_model"]
     if merge_cfg:
