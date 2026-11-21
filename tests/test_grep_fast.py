@@ -138,6 +138,13 @@ def _reference(pattern: str, runs: list[str], *, ignore_case: bool = True,
 
 
 _NARROWS = ("pages_scanned", "literal_pages")
+#: Поля відповіді до гортання (21.11.2026) — еталон знає лише їх.
+_OLD = ("hits", "total", "runs", "runs_asked", "unindexed", "pages", "pages_scanned",
+        "prefiltered", "literals", "literal_pages")
+
+
+def _old(d: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in d.items() if k in _OLD and k not in _NARROWS}
 
 
 @pytest.mark.parametrize("bulk", [False, True])
@@ -150,8 +157,7 @@ def test_grep_answers_like_before(space: Path, pattern: str, bulk: bool,
     for limit, context in ((200, 1), (2, 0)):
         want = _reference(pattern, runs, limit=limit, context=context)
         got = ST.grep(pattern, runs, limit=limit, context=context)
-        assert {k: v for k, v in got.items() if k not in _NARROWS} == \
-            {k: v for k, v in want.items() if k not in _NARROWS}, pattern
+        assert _old(got) == _old(want), pattern
         if want["prefiltered"]:
             assert got["pages_scanned"] <= want["pages_scanned"]
             if want["total"]:
@@ -168,7 +174,7 @@ def test_grep_answers_like_before(space: Path, pattern: str, bulk: bool,
 
 def test_grep_one_run_without_literal_scans_its_pages_only(space: Path) -> None:
     got = ST.grep(r"\d{2,4}", ["проба-б"])
-    assert got == _reference(r"\d{2,4}", ["проба-б"])
+    assert {k: v for k, v in got.items() if k in _OLD} == _reference(r"\d{2,4}", ["проба-б"])
     assert got["pages_scanned"] == 4 and got["total"] == 2
 
 
@@ -315,8 +321,7 @@ def test_chunked_grep_answers_like_before(space: Path, pattern: str,
     for limit, context in ((200, 1), (2, 0)):
         want = _reference(pattern, runs, limit=limit, context=context)
         got = ST.grep(pattern, runs, limit=limit, context=context)
-        assert {k: v for k, v in got.items() if k not in _NARROWS} == \
-            {k: v for k, v in want.items() if k not in _NARROWS}, pattern
+        assert _old(got) == _old(want), pattern
 
 
 def test_grep_in_processes_answers_like_before(space: Path,
@@ -330,8 +335,7 @@ def test_grep_in_processes_answers_like_before(space: Path,
         for limit in (200, 2):
             want = _reference(pattern, runs, limit=limit, context=1)
             got = ST.grep(pattern, runs, limit=limit, context=1)
-            assert {k: v for k, v in got.items() if k not in _NARROWS} == \
-                {k: v for k, v in want.items() if k not in _NARROWS}, (pattern, limit)
+            assert _old(got) == _old(want), (pattern, limit)
 
 
 def test_gate_still_on_for_escaped_plus() -> None:

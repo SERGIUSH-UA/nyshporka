@@ -6,6 +6,9 @@ r"""`nysh text` — текстовий стор: стан, збірка, рег�
 """
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import typer
@@ -109,7 +112,15 @@ def grep_cmd(
     case: list[str] = typer.Option([], "--case",
                                    help="лише ця справа або прогін; можна кілька разів або серію («RGIA 592-25»)"),
     context: int = typer.Option(1, "--context", help="рядків сусідства"),
-    limit: int = typer.Option(100, "--limit", help="скільки показати"),
+    limit: int = typer.Option(100, "--limit", help="скільки показати (понад 2000 — лише з --do)"),
+    offset: int = typer.Option(0, "--offset", help="пропустити стільки збігів — наступна сторінка видачі"),
+    cursor: str = typer.Option("", "--cursor",
+                               help="продовжити з курсора попередньої видачі — без переобходу початку"),
+    count_all: bool = typer.Option(False, "--count-all",
+                                   help="дорахувати всі збіги (точне число; повний обхід, повільніше)"),
+    do: str = typer.Option("", "--do",
+                           help="файл JSONL: шапка, по рядку на збіг одразу (flush), "
+                                "підсумок останнім рядком — знайдене переживає обрив"),
     case_sensitive: bool = typer.Option(False, "--case-sensitive",
                                         help="розрізняти великі й малі літери"),
     where: str = typer.Option("decode", "--where",
@@ -130,13 +141,27 @@ def grep_cmd(
     За замовчуванням регекс іде по СИРОМУ тексту: «Тимофей Петров» не знайде
     «Тимоѳей Петровъ». `--fold` ганяє той самий регекс по нормалізованому рядку
     (літерали й класи нормалізуються, метасимволи лишаються), а показує сирий.
+
+    Видача впорядкована й гортається: обхід спиняється, щойно набрано
+    `--limit`, і каже, як узяти далі (`--offset N` або `--cursor C`). Ctrl+C
+    посеред довгого обходу віддає знайдене до обриву. `--do` пише кожен збіг у
+    файл одразу: без підсумкового рядка файл неповний.
     """
     from nyshporka import ops as O
 
-    env = O.call("text.grep", {"pattern": pattern, "case": _scope(case), "context": context,
-                               "limit": limit, "ignore_case": not case_sensitive,
-                               "where": where, "extra": ";".join(extra), "fold": fold})
+    payload = {"pattern": pattern, "case": _scope(case), "context": context,
+               "limit": limit, "offset": offset, "cursor": cursor, "count_all": count_all,
+               "ignore_case": not case_sensitive,
+               "where": where, "extra": ";".join(extra), "fold": fold}
+    with _soft_signals():
+        env = _grep_to_file(payload, do) if do else O.call("text.grep", payload)
     if _answer(env, as_json):
+        return
+    if do:
+        d = env.data or {}
+        console.print(f"у файлі {d.get('do')}: збігів {d.get('streamed')}")
+        _grep_tail(d)
+        _notes(env)
         return
     layered = env.data.get("layers")
     if env.data.get("coverage", {}).get("scope") == "layers":
@@ -168,14 +193,120 @@ def grep_cmd(
     cov = env.data.get("coverage") or {}
     _notes(env)
     if cov.get("scope") != "layers":
-        # Із літералом FTS звужує до сторінок-кандидатів, і регекс іде лише по
-        # них; без нього регекс проходить усі сторінки області.
-        how = ("сторінок-кандидатів за літералом (решта відсіяна індексом)"
-               if cov.get("literals") else "сторінок прочесано регексом")
-        console.print(f"[muted]декод: показано {len(hits)} із {env.data.get('total', len(hits))} · "
-                      f"прогонів {cov.get('runs')} · {how} "
-                      f"{cov.get('pages_scanned')} із {cov.get('pages')}[/muted]")
+        _grep_tail(env.data)
     _reach_line(cov)
+
+
+def _grep_tail(d: dict[str, Any]) -> None:
+    """Рядок «декод: …» і, коли видача неповна, — як узяти далі.
+
+    ⚠ Рядок починається з «декод:» — його розбирають зовнішні скрипти,
+    формат голови не міняти.
+    """
+    from rich.markup import escape
+
+    cov = d.get("coverage") or {}
+    # Із літералом FTS звужує до сторінок-кандидатів, і регекс іде лише по
+    # них; без нього регекс проходить усі сторінки області.
+    how = ("сторінок-кандидатів за літералом (решта відсіяна індексом)"
+           if cov.get("literals") else "сторінок прочесано регексом")
+    n = int(d.get("returned") or len(d.get("hits") or []))
+    off = int(d.get("offset") or 0)
+    total = d.get("total")
+    of = str(total) if total is not None else f"щонайменше {d.get('total_at_least')}"
+    shown = f"{off + 1}–{off + n}" if (off or d.get("more")) and n else str(n)
+    console.print(f"[muted]декод: показано {shown} із {of} · "
+                  f"прогонів {cov.get('runs')} · {how} "
+                  f"{cov.get('pages_scanned')} із {cov.get('pages')}[/muted]")
+    if not d.get("more"):
+        return
+    nxt = f"--offset {d.get('next_offset')}"
+    fast = f"--cursor {d.get('next_cursor')}"
+    if d.get("interrupted"):
+        at = cov.get("stopped_at") or {}
+        where = " · ".join(str(x) for x in (at.get("name"), at.get("page")) if x) or "початку"
+        console.print(f"[warn]перервано на {escape(where)} — продовжити: {nxt} "
+                      f"(або {fast} — без переобходу початку)[/warn]")
+        return
+    console.print(f"[muted]є ще: {nxt}  (або {fast} — без переобходу початку)[/muted]")
+
+
+@contextlib.contextmanager
+def _soft_signals() -> Iterator[None]:
+    """SIGTERM і SIGBREAK (Ctrl+Break на Windows) — як Ctrl+C: пошук віддає знайдене.
+
+    Лише в головному потоці процесу CLI: у потоках демона `signal.signal` не діє.
+    """
+    import signal
+    import threading
+
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def soft(_sig: int, _frame: Any) -> None:
+        raise KeyboardInterrupt
+
+    old: dict[int, Any] = {}
+    for name in ("SIGTERM", "SIGBREAK"):
+        sig = getattr(signal, name, None)
+        if sig is None:
+            continue
+        with contextlib.suppress(ValueError, OSError):
+            old[sig] = signal.signal(sig, soft)
+    try:
+        yield
+    finally:
+        for sig, h in old.items():
+            with contextlib.suppress(ValueError, OSError):
+                signal.signal(sig, h)
+
+
+def _grep_to_file(payload: dict[str, Any], do: str) -> Any:
+    """`text.grep` з потоковим записом у JSONL — формат `share vyklyk-rezultat --do`.
+
+    Перший рядок — `{"header": …}` (запит), далі по рядку на збіг, останній —
+    `{"summary": …}` (знаменник, `more`, `next_offset`, `next_cursor`). На
+    відміну від `vyklyk-rezultat` файл пишеться наживо, без `.part`: збіг
+    скидається на диск одразу, тож після kill чи браку пам'яті знайдене лишається,
+    а відсутність підсумку сама каже, що файл неповний.
+    """
+    import json
+    from datetime import datetime
+
+    from nyshporka import ops as O
+    from nyshporka import ops_text as OT
+    from nyshporka.core.envelope import fail
+
+    path = Path(do).expanduser()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        f = path.open("w", encoding="utf-8", newline="\n")
+    except OSError as exc:
+        return fail(f"--do: файл не відкривається: {exc}")
+    with f:
+        head = {k: payload[k] for k in ("pattern", "case", "fold", "offset", "cursor",
+                                        "limit", "count_all", "ignore_case")}
+        f.write(json.dumps({"header": {"op": "text.grep", **head,
+                                       "started": datetime.now().isoformat(timespec="seconds")}},
+                           ensure_ascii=False) + "\n")
+        f.flush()
+
+        def sink(h: dict[str, Any]) -> None:
+            f.write(json.dumps(h, ensure_ascii=False) + "\n")
+            f.flush()
+
+        tok = OT.GREP_SINK.set(sink)
+        try:
+            env = O.call("text.grep", payload)
+        finally:
+            OT.GREP_SINK.reset(tok)
+        if env.ok and isinstance(env.data, dict):
+            env.data["do"] = str(path)
+            summary = {k: v for k, v in env.data.items() if k not in ("hits", "layers")}
+            f.write(json.dumps({"summary": summary}, ensure_ascii=False, default=str) + "\n")
+            f.flush()
+    return env
 
 
 def _reach_line(block: dict[str, Any]) -> None:

@@ -91,7 +91,7 @@ import time
 import tokenize
 import zlib
 from bisect import bisect_right
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
@@ -1000,7 +1000,8 @@ def _index(conn: sqlite3.Connection, run: str, *, only_stale: bool, wait: float,
 
 
 def restamp_meta_only(runs: list[str], *, conn: sqlite3.Connection | None = None,
-                      cancel: Callable[[], bool] | None = None) -> int:
+                      cancel: Callable[[], bool] | None = None,
+                      stamps: dict[str, str] | None = None) -> int:
     """Прогони, у яких змінилась ЛИШЕ мета, — новий штамп без перечитування. Скільки поновлено.
 
     🔴 04.11.2026: перенесення кадрів переписало `case_dir` у меті прогонів одного опису, і
@@ -1025,7 +1026,7 @@ def restamp_meta_only(runs: list[str], *, conn: sqlite3.Connection | None = None
         rows = {str(r[0]): (str(r[1]), str(r[2] or ""), int(r[3] or 0), str(r[4] or ""))
                 for r in c.execute("select run, stamp, coalesce(indexed_at,''), "
                                    "coalesce(pages,0), coalesce(rules,'') from runs")}
-        st = stamps_for(runs)
+        st = stamps if stamps is not None else stamps_for(runs)
         for r in runs:
             if cancel and cancel():
                 break
@@ -1700,8 +1701,8 @@ def match_expr(stems: list[str], *, wide: bool = False) -> str:
     return " OR ".join(sorted(terms))
 
 
-def _run_ids(conn: sqlite3.Connection, runs: list[str], *, fresh_only: bool = False
-             ) -> dict[str, int]:
+def _run_ids(conn: sqlite3.Connection, runs: list[str], *, fresh_only: bool = False,
+             stamps: dict[str, str] | None = None) -> dict[str, int]:
     """run → id. `fresh_only` бере лише прогони зі свіжим штампом: дочитана
     справа зі старим текстом у сторі — це прочесане «вчорашнє», і воно не
     може зараховуватись як покрите (рецензія 08.09)."""
@@ -1713,7 +1714,7 @@ def _run_ids(conn: sqlite3.Connection, runs: list[str], *, fresh_only: bool = Fa
 
         rows = {str(r): (int(i), str(s)) for r, i, s in
                 conn.execute("select run, id, stamp from runs")}
-        fresh = D.stamps_of(runs) if fresh_only else {}
+        fresh = (stamps if stamps is not None else D.stamps_of(runs)) if fresh_only else {}
         for run in runs:
             got = rows.get(run)
             if got is None or (fresh_only and got[1] != fresh.get(run, "")):
@@ -1724,7 +1725,8 @@ def _run_ids(conn: sqlite3.Connection, runs: list[str], *, fresh_only: bool = Fa
         row = conn.execute("select id, stamp from runs where run=?", (run,)).fetchone()
         if not row:
             continue
-        if fresh_only and row[1] != stamp_of(run):
+        if fresh_only and row[1] != (stamps[run] if stamps is not None and run in stamps
+                                     else stamp_of(run)):
             continue
         out[run] = int(row[0])
     return out
@@ -1781,15 +1783,22 @@ def _page_texts(conn: sqlite3.Connection, pids: list[int], run_ids: set[int]
     таблиці на 3,4 млн рядків, і на широкому літералі саме вони, а не регекс,
     коштували дві третини часу (замір 21.10.2026).
     """
+    for _pid, rid, page, raw in _page_rows(conn, pids, run_ids):
+        yield rid, page, raw
+
+
+def _page_rows(conn: sqlite3.Connection, pids: list[int], run_ids: set[int]
+               ) -> Iterator[tuple[int, int, str, bytes | None]]:
+    """(pid, run_id, page, стиснений текст) — те саме, що `_page_texts`, з номером сторінки."""
     for i in range(0, len(pids), 500):
         chunk = pids[i:i + 500]
         marks = ",".join("?" * len(chunk))
         rows = conn.execute(
             f"select id, run_id, page, raw from pages where id in ({marks})", chunk).fetchall()
         rows.sort(key=lambda r: int(r[0]))
-        for _pid, rid, page, raw in rows:
+        for pid, rid, page, raw in rows:
             if int(rid) in run_ids:
-                yield int(rid), str(page), raw
+                yield int(pid), int(rid), str(page), raw
 
 
 def _run_texts(conn: sqlite3.Connection, run_ids: list[int]
@@ -1842,7 +1851,7 @@ def _flat_expr(expr: str) -> str:
     return _FTS_TERM.sub(one, expr)
 
 
-def _fts_rows(conn: sqlite3.Connection, expr: str, run_ids: list[int]
+def _fts_rows(conn: sqlite3.Connection, expr: str, run_ids: list[int], *, start: int = 0
               ) -> Iterator[tuple[int]]:
     """Rowid рядків, що відповідають виразу, — у межах прогонів області.
 
@@ -1857,18 +1866,27 @@ def _fts_rows(conn: sqlite3.Connection, expr: str, run_ids: list[int]
     сторінки всередині нього відсіює викликач по `pages`.
     """
     expr = _flat_expr(expr)
-    total = conn.execute("select count(*) from runs").fetchone()[0]
-    blocks = _scope_blocks(conn, run_ids) if run_ids and len(run_ids) < int(total) else []
-    if not run_ids or len(run_ids) >= int(total) or len(blocks) > SCOPE_RANGES_MAX:
-        yield from conn.execute("select rowid from fts where fts match ?", (expr,))
+    total = int(conn.execute("select count(*) from runs").fetchone()[0])
+    # 🔴 Майже весь стор — без блоків: їх рахунок (два запити на прогін) на
+    # корпусі коштував 2 с, а далі все одно йшов запит по всьому корпусу, бо
+    # блоків виходило більше за `SCOPE_RANGES_MAX` (замір 21.11.2026).
+    wide = not run_ids or len(run_ids) * 10 >= total * 9
+    blocks = _scope_blocks(conn, run_ids) if not wide else []
+    if wide or len(blocks) > SCOPE_RANGES_MAX:
+        # Порядок rowid явний: на ньому стоїть потік `_grep_fts_pids`.
+        yield from conn.execute(
+            "select rowid from fts where fts match ? and rowid >= ? order by rowid",
+            (expr, start))
         return
     # 🔴 Блоки, а не один спільний відрізок. Голос, доіндексований пізніше,
     # лежить у кінці файлу, і відрізок від першого до останнього накривав
     # третину корпусу: 6.6 с проти 2.2 с сумою блоків (рецензія 08.09).
     for lo, hi in blocks:
+        if hi < start:
+            continue
         yield from conn.execute(
-            "select rowid from fts where fts match ? and rowid between ? and ?",
-            (expr, lo, hi))
+            "select rowid from fts where fts match ? and rowid between ? and ? order by rowid",
+            (expr, max(lo, start), hi))
 
 
 def _scope_blocks(conn: sqlite3.Connection, run_ids: list[int]) -> list[tuple[int, int]]:
@@ -3305,136 +3323,200 @@ def fold_pattern(pattern: str) -> str:
     return "".join(out)
 
 
-def grep(pattern: str, runs: list[str], *, ignore_case: bool = True,
-         limit: int = 200, context: int = 0, fold: bool = False) -> dict[str, Any]:
-    """Регекс по сирому тексту прогонів — те, що робив `rg --no-ignore`, але
-    без обходу дерева й без сліпоти `.gitignore`.
+#: Позиція у видачі `grep`: (номер сторінки в сторі, індекс рядка з нуля).
+#: Збіги йдуть за зростанням позиції — той самий запит на тому самому сторі дає
+#: той самий порядок, і на цьому стоять гортання (`offset`) і курсор.
+GrepPos = tuple[int, int]
+#: Індекс рядка «сторінку пройдено до кінця» — більший за будь-який справжній.
+PAGE_END = MAX_LINES + 1
 
-    Літерали регексу звужують корпус через FTS (нормалізовані, як фрази), далі
-    сам регекс іде по сирих рядках лише тих сторінок. Регекс без літерала ≥ 3
-    літер сканує всі рядки області, і відповідь про це каже.
+_CURSOR = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 
-    `fold=True`: регекс (`fold_pattern`) іде по НОРМАЛІЗОВАНОМУ рядку, тією самою
-    нормою, що й індекс («Тимофей Петров» знаходить «Тимоѳей Петровъ»); у хітах
-    лишається сирий рядок. Норма знімає регістр, тож `fold` завжди нечутливий до
-    регістру.
+
+def encode_cursor(pos: GrepPos, skip: int = 0) -> str:
+    """Курсор видачі: продовжити ПІСЛЯ `pos`, пропустивши ще `skip` збігів.
+
+    Для споживача непрозорий: береться з `next_cursor` і віддається назад як є.
+    Прив'язаний до стану стору — після `text index` позиції ті самі для старих
+    прогонів, але нові сторінки можуть стати й до, і після курсора.
     """
-    flags = re.IGNORECASE if (ignore_case or fold) else 0
-    try:
-        rx = re.compile(pattern, flags)
-        if fold:
-            pattern_run = fold_pattern(pattern)
-            rx = re.compile(pattern_run, flags)
-    except re.error as exc:
-        return {"hits": [], "error": f"регекс не розбирається: {exc}"}
-    except ValueError as exc:
-        return {"hits": [], "error": f"--fold: {exc}"}
-    # Відсів сторінки одним пошуком по її тексту — див. `_line_gate_safe`. У
-    # нормі сирий текст сторінки для відсіву не годиться.
-    gate = (re.compile(pattern, flags | re.MULTILINE)
-            if not fold and _line_gate_safe(pattern) else None)
-    # Прогони з переписаною лише метою — свіжими, перш ніж рахувати область.
-    with contextlib.suppress(sqlite3.Error, OSError):
-        restamp_meta_only(runs)
-    conn = connect(readonly=True)
-    try:
-        ids = _run_ids(conn, runs, fresh_only=True)
-        by_id = {v: k for k, v in ids.items()}
-        lits = literals_of(pattern)
-        # 🔴 Кожна гілка (і кожен варіант розгорнутої групи) мусить дати фразу.
-        # «ськ» після нормалізації — «sk», дві літери; доти така гілка мовчки
-        # випадала з OR, а порожній вираз давав нуль сторінок із позначкою
-        # «звужено» (рецензія 08.09).
-        chosen = _prefilter(conn, pattern) if lits else None
-        phrases = chosen[1] if chosen else None
-        run_set = set(ids.values())
-        pids: list[int] | None = None
-        if chosen:
-            expr = " OR ".join(f'"{n}"' for n in chosen[0])
-            pids = sorted({rid >> LINE_BITS
-                           for (rid,) in _fts_rows(conn, expr, list(ids.values()))})
-            prefiltered = True
-            n_pages = _pages_of_runs(conn, list(ids.values()))
-        else:
-            prefiltered = False
-            n_pages = 0
-            if _pages_of_runs(conn, list(ids.values())) >= GREP_PARALLEL_PAGES:
-                pids = _scope_pids(conn, list(ids.values()))
-        if pids is not None and len(pids) >= GREP_PARALLEL_PAGES:
-            found, total, scanned_pages = _grep_parallel(pattern_run if fold else pattern,
-                                                         flags, pids, run_set,
-                                                         limit, context, fold)
-        else:
-            source = (_page_texts(conn, pids, run_set) if pids is not None
-                      else _run_texts(conn, list(ids.values())))
-            found, total, scanned_pages = _grep_scan(source, rx, gate, limit, context, fold)
-        hits = [{"name": by_id[h.pop("run_id")], **h} for h in found]
-        literal_pages: int | None = None
-        if not prefiltered:
-            n_pages = scanned_pages
-        elif not total:
-            # Нуль регексу: скільки сторінок мають ЦІЛИЙ літерал у нормі (а не
-            # лише вікно передфільтра) — це й каже «орфографія, а не слово».
-            full = " OR ".join(f'"{n}"' for n in phrases or [])
-            literal_pages = len(_pages_for(
-                conn, {rid >> LINE_BITS for (rid,) in _fts_rows(conn, full, list(ids.values()))},
-                run_set))
-        return {"hits": hits, "total": total, "runs": len(ids),
-                "runs_asked": len(runs), "unindexed": len(runs) - len(ids),
-                "pages": n_pages, "pages_scanned": scanned_pages,
-                "prefiltered": prefiltered, "literals": lits or [],
-                # Скільки сторінок мали літерал У НОРМІ: нуль регексу при
-                # непорожньому передфільтрі означає орфографію («ь»/«ъ»), а
-                # не відсутність слова — і про це треба сказати.
-                # ⚠ Рахується лише на нулі: з хітами його ніхто не читає, а
-                # повна фраза в FTS — найдорожча частина `grep`.
-                "literal_pages": literal_pages}
-    finally:
-        conn.close()
+    return f"{pos[0]}.{pos[1]}.{skip}"
 
 
-#: Від скількох сторінок `grep` іде процесами (старт процесу — секунди).
-GREP_PARALLEL_PAGES = 30_000
-#: Сторінок на одну пачку процесу.
-GREP_CHUNK_PAGES = 20_000
-#: Пам'ять процесу `grep`, ГБ: сторінки йдуть потоком, у пам'яті — лише хіти пачки.
-GREP_WORKER_GB = 0.3
+def decode_cursor(text: str) -> tuple[GrepPos, int]:
+    m = _CURSOR.match(text.strip())
+    if not m:
+        raise ValueError(f"курсор «{text}» не розбирається — беріть його з `next_cursor` відповіді")
+    return (int(m.group(1)), int(m.group(2))), int(m.group(3))
 
 
-def _grep_scan(source: Iterable[tuple[int, str, bytes | None]], rx: re.Pattern[str],
-               gate: re.Pattern[str] | None, limit: int, context: int, fold: bool = False,
-               ) -> tuple[list[dict[str, Any]], int, int]:
-    """(перші `limit` хітів із `run_id`, усього збігів, прочесано сторінок).
+@dataclass
+class _GrepPart:
+    """Що дала одна пачка сторінок — у порядку видачі."""
 
-    `fold`: `rx` уже складено для норми — шукається в нормалізованому рядку, а в
-    хіт іде сирий.
+    #: перші `keep` збігів пачки (з `pid` і `run_id`, ще без імені прогону)
+    hits: list[dict[str, Any]]
+    #: збігів пачки до точки зупинки
+    count: int
+    #: прочесані сторінки області за зростанням
+    pages: list[int]
+    #: прогін → перша його прочесана сторінка
+    runs: dict[int, int]
+    #: усе до цієї позиції включно прочесано
+    passed: GrepPos | None
+    #: стала на `stop_at` збігів
+    capped: bool = False
+    #: обрив: Ctrl+C у процесі або сигнал зупинки воркерові
+    interrupted: bool = False
+
+
+def _empty_part() -> _GrepPart:
+    return _GrepPart([], 0, [], {}, None)
+
+
+#: Як часто пачка дивиться на сигнал зупинки (сторінок).
+GREP_HALT_EVERY = 200
+
+
+def _grep_part(conn: sqlite3.Connection, rx: re.Pattern[str], gate: re.Pattern[str] | None,
+               pids: list[int], run_set: set[int], after: GrepPos | None, keep: int,
+               stop_at: int | None, context: int, fold: bool,
+               halt: Callable[[], bool] | None = None) -> _GrepPart:
+    """Регекс по сторінках `pids` (за зростанням) — до `stop_at` збігів або до кінця.
+
+    `after`: на сторінці курсора рядки до нього включно пропускаються (сторінки
+    перед ним до пачки не потрапляють). Ctrl+C посеред пачки не губить
+    знайденого: пачка повертається з `interrupted`, а все, що в ній є, — чесний
+    префікс видачі.
     """
     from nyshporka.utils.translit import normalize_archival
 
-    hits: list[dict[str, Any]] = []
-    total = 0
-    scanned = 0
-    for rid_, page, blob in source:
-        scanned += 1
-        if blob is None:
-            continue
-        text = zlib.decompress(blob).decode("utf-8")
-        if gate is not None and not gate.search(text):
-            continue
-        raw = text.split("\n")
-        for i, ln in enumerate(raw, 1):
-            if not rx.search(normalize_archival(ln) if fold else ln):
-                continue
-            total += 1
-            if len(hits) >= limit:
-                continue
-            h: dict[str, Any] = {"run_id": rid_, "page": page, "line_no": i,
-                                 "line_index": i - 1, "line": ln}
-            if context:
-                h["before"] = raw[max(0, i - 1 - context):i - 1]
-                h["after"] = raw[i:i + context]
-            hits.append(h)
-    return hits, total, scanned
+    part = _empty_part()
+    try:
+        for k, (pid, rid_, page, blob) in enumerate(_page_rows(conn, pids, run_set)):
+            if halt is not None and k % GREP_HALT_EVERY == 0 and halt():
+                part.interrupted = True
+                return part
+            part.pages.append(pid)
+            part.runs.setdefault(rid_, pid)
+            if blob is not None:
+                text = zlib.decompress(blob).decode("utf-8")
+                if gate is None or gate.search(text):
+                    raw = text.split("\n")
+                    lo = after[1] if after is not None and pid == after[0] else -1
+                    for i, ln in enumerate(raw):
+                        if i <= lo or not rx.search(normalize_archival(ln) if fold else ln):
+                            continue
+                        part.count += 1
+                        if len(part.hits) < keep:
+                            h: dict[str, Any] = {"run_id": rid_, "pid": pid, "page": page,
+                                                 "line_no": i + 1, "line_index": i, "line": ln}
+                            if context:
+                                h["before"] = raw[max(0, i - context):i]
+                                h["after"] = raw[i + 1:i + 1 + context]
+                            part.hits.append(h)
+                        if stop_at is not None and part.count >= stop_at:
+                            part.passed = (pid, i)
+                            part.capped = True
+                            return part
+            part.passed = (pid, PAGE_END)
+    except KeyboardInterrupt:
+        part.interrupted = True
+        return part
+    if pids:
+        # Сторінки поза областю (`run_set`) теж пройдено — до останньої пачки.
+        part.passed = (pids[-1], PAGE_END)
+    return part
+
+
+class _GrepAcc:
+    """Складання пачок у видачу — строго в порядку позицій.
+
+    `skip` збігів пропускається, далі `limit` іде у видачу, а ще один — проба:
+    знайдено його — `more` правдиве без повного обходу. `stop_total` None —
+    рахувати до кінця області (`count_all`).
+    """
+
+    def __init__(self, skip: int, limit: int, count_all: bool,
+                 emit: Callable[[dict[str, Any]], None]) -> None:
+        self.skip, self.limit = skip, limit
+        self.keep_total = skip + limit + 1
+        self.stop_total: int | None = None if count_all else self.keep_total
+        self.emit = emit
+        self.seen = 0
+        self.out = 0
+        self.pages = 0
+        self.runs: dict[int, int] = {}
+        self.passed: GrepPos | None = None
+        self.last_seen: GrepPos | None = None
+        self.last_out: GrepPos | None = None
+        self.capped = False
+        self.interrupted = False
+
+    @property
+    def done(self) -> bool:
+        return self.capped or self.interrupted
+
+    def keep_left(self) -> int:
+        return max(0, self.keep_total - self.seen)
+
+    def stop_left(self) -> int | None:
+        return None if self.stop_total is None else max(1, self.stop_total - self.seen)
+
+    def absorb(self, part: _GrepPart) -> None:
+        base = self.seen
+        count, pages, runs, passed = part.count, part.pages, part.runs, part.passed
+        capped = part.capped
+        if self.stop_total is not None and base + count >= self.stop_total:
+            # Пачка воркера могла піти далі за точку зупинки видачі (свій
+            # `stop_at` вона брала на момент подачі) — зрізається до неї.
+            n_in = self.stop_total - base
+            h = part.hits[n_in - 1]
+            pos = (int(h["pid"]), int(h["line_index"]))
+            count, passed, capped = n_in, pos, True
+            pages = pages[:bisect_right(pages, pos[0])]
+            runs = {r: p for r, p in runs.items() if p <= pos[0]}
+        for j, h in enumerate(part.hits[:count]):
+            idx = base + j
+            at = (int(h["pid"]), int(h["line_index"]))
+            self.last_seen = at
+            if self.skip <= idx < self.skip + self.limit:
+                self.last_out = at
+                self.out += 1
+                self.emit(h)
+        self.seen += count
+        self.pages += len(pages)
+        for r, p in runs.items():
+            self.runs.setdefault(r, p)
+        if passed is not None and (self.passed is None or passed > self.passed):
+            self.passed = passed
+        self.capped = self.capped or capped
+        self.interrupted = self.interrupted or part.interrupted
+
+    def resume(self, after: GrepPos | None) -> str:
+        """Курсор продовження: після останнього виданого, а коли видачу не
+        дозаповнено (обрив) — після прочесаного, з рештою пропуску."""
+        if self.out >= self.limit and self.last_out is not None:
+            return encode_cursor(self.last_out)
+        marks = [p for p in (self.passed, self.last_seen, after) if p is not None]
+        pos = max(marks) if marks else (0, PAGE_END)
+        return encode_cursor(pos, max(0, self.skip - self.seen))
+
+
+def _grep_fts_pids(conn: sqlite3.Connection, expr: str, run_ids: list[int],
+                   start_pid: int) -> Generator[int, None, None]:
+    """Сторінки-кандидати передфільтра за зростанням — потоком, а не переліком.
+
+    🔴 Потік, бо FTS віддає рядки в порядку rowid: широкий літерал («ivan» — 7,9
+    млн рядків) матеріалізувався 18 с, а перша тисяча рядків приходить за 17 мс
+    (замір 21.11.2026). Видача з ліміту бере лише стільки, скільки треба.
+    """
+    last = -1
+    for (rid,) in _fts_rows(conn, expr, run_ids, start=start_pid << LINE_BITS):
+        p = int(rid) >> LINE_BITS
+        if p != last:
+            last = p
+            yield p
 
 
 def _scope_pids(conn: sqlite3.Connection, run_ids: list[int]) -> list[int]:
@@ -3447,57 +3529,333 @@ def _scope_pids(conn: sqlite3.Connection, run_ids: list[int]) -> list[int]:
     return sorted(set(out))
 
 
-def _grep_job(pattern: str, flags: int, pids: list[int], run_set: set[int], limit: int,
-              context: int, fold: bool = False) -> tuple[list[dict[str, Any]], int, int]:
+def _grep_scope_pids(conn: sqlite3.Connection, run_ids: list[int],
+                     start_pid: int) -> Generator[int, None, None]:
+    """Усі сторінки області від `start_pid` за зростанням — для регексу без літерала."""
+    if not run_ids:
+        return
+    if len(set(run_ids)) >= _runs_total(conn):
+        for (p,) in conn.execute("select id from pages where id >= ? order by id", (start_pid,)):
+            yield int(p)
+        return
+    for p in _scope_pids(conn, run_ids):
+        if p >= start_pid:
+            yield p
+
+
+def grep(pattern: str, runs: list[str], *, ignore_case: bool = True,
+         limit: int = 200, context: int = 0, fold: bool = False,
+         offset: int = 0, cursor: str = "", count_all: bool = True,
+         on_hit: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
+    """Регекс по сирому тексту прогонів — те, що робив `rg --no-ignore`, але
+    без обходу дерева й без сліпоти `.gitignore`.
+
+    Літерали регексу звужують корпус через FTS (нормалізовані, як фрази), далі
+    сам регекс іде по сирих рядках лише тих сторінок. Регекс без літерала ≥ 3
+    літер сканує всі рядки області, і відповідь про це каже.
+
+    `fold=True`: регекс (`fold_pattern`) іде по НОРМАЛІЗОВАНОМУ рядку, тією самою
+    нормою, що й індекс («Тимофей Петров» знаходить «Тимоѳей Петровъ»); у хітах
+    лишається сирий рядок. Норма знімає регістр, тож `fold` завжди нечутливий до
+    регістру.
+
+    Гортання. Збіги впорядковані за (сторінка в сторі, рядок). `offset` —
+    пропустити стільки збігів від початку (або від `cursor`); `cursor` — з
+    `next_cursor` попередньої відповіді: обхід починається одразу з його
+    позиції (діапазон rowid у FTS, `id >=` у повному обході), тож далека
+    сторінка не коштує переобходу початку.
+
+    `count_all=False` — рання зупинка: обхід спиняється, щойно знайдено
+    `offset + limit + 1` збігів (останній — проба для `more`). Тоді `total`
+    None (повного числа ніхто не рахував), `total_at_least` — нижня межа,
+    `stopped_early`, `next_offset`, `next_cursor`. `count_all=True` (типово, для
+    внутрішніх викликачів) — обхід до кінця й точний `total`, як доти.
+
+    Ctrl+C посеред обходу — не виняток, а відповідь: знайдене до обриву,
+    `interrupted`, курсор продовження. `on_hit` — кожен виданий збіг одразу
+    (потоковий запис у файл); тоді `hits` у відповіді порожній.
+    """
+    flags = re.IGNORECASE if (ignore_case or fold) else 0
+    pattern_run = pattern
+    try:
+        rx = re.compile(pattern, flags)
+        if fold:
+            pattern_run = fold_pattern(pattern)
+            rx = re.compile(pattern_run, flags)
+    except re.error as exc:
+        return {"hits": [], "error": f"регекс не розбирається: {exc}"}
+    except ValueError as exc:
+        return {"hits": [], "error": f"--fold: {exc}"}
+    try:
+        after, skip0 = decode_cursor(cursor) if cursor else (None, 0)
+    except ValueError as exc:
+        return {"hits": [], "error": str(exc)}
+    # Відсів сторінки одним пошуком по її тексту — див. `_line_gate_safe`. У
+    # нормі сирий текст сторінки для відсіву не годиться.
+    gate = (re.compile(pattern, flags | re.MULTILINE)
+            if not fold and _line_gate_safe(pattern) else None)
+    # 🔴 Штампи прогонів — один раз на запит. Доти їх брали двічі (свіжість
+    # мети й відбір свіжих прогонів): на корпусі 41 тис. прогонів це 2×4,5 с
+    # `stat` перед кожним `text grep` (замір 21.11.2026). Між двома читаннями
+    # тексти не змінюються: `restamp_meta_only` пише лише в стор.
+    fresh = stamps_for(runs)
+    # Прогони з переписаною лише метою — свіжими, перш ніж рахувати область.
+    with contextlib.suppress(sqlite3.Error, OSError):
+        restamp_meta_only(runs, stamps=fresh)
+    collected: list[dict[str, Any]] = []
+    conn = connect(readonly=True)
+    try:
+        ids = _run_ids(conn, runs, fresh_only=True, stamps=fresh)
+        by_id = {v: k for k, v in ids.items()}
+        run_list = list(ids.values())
+        run_set = set(run_list)
+
+        def emit(h: dict[str, Any]) -> None:
+            h = dict(h)
+            h.pop("pid", None)
+            got = {"name": by_id[h.pop("run_id")], **h}
+            if on_hit is not None:
+                on_hit(got)
+            else:
+                collected.append(got)
+
+        lits = literals_of(pattern)
+        # 🔴 Кожна гілка (і кожен варіант розгорнутої групи) мусить дати фразу.
+        # «ськ» після нормалізації — «sk», дві літери; доти така гілка мовчки
+        # випадала з OR, а порожній вираз давав нуль сторінок із позначкою
+        # «звужено» (рецензія 08.09).
+        chosen = _prefilter(conn, pattern) if lits else None
+        phrases = chosen[1] if chosen else None
+        start_pid = after[0] if after is not None else 0
+        source: Generator[int, None, None]
+        if chosen:
+            expr = " OR ".join(f'"{n}"' for n in chosen[0])
+            source = _grep_fts_pids(conn, expr, run_list, start_pid)
+        else:
+            source = _grep_scope_pids(conn, run_list, start_pid)
+        prefiltered = bool(chosen)
+        acc = _GrepAcc(offset + skip0, limit, count_all, emit)
+        try:
+            _grep_drive(conn, source, pattern_run, flags, fold, rx, gate, run_set, after,
+                        context, acc)
+        finally:
+            # Рання зупинка лишає потік кандидатів недочитаним — закрити його
+            # ДО з'єднання, а не віддати збирачеві сміття з мертвим курсором.
+            source.close()
+        complete = not acc.done
+        whole = complete and after is None
+        total = acc.seen if whole else None
+        # Без передфільтра знаменник повного обходу — прочесане, як доти.
+        n_pages = _pages_of_runs(conn, run_list) if prefiltered or not whole else acc.pages
+        literal_pages: int | None = None
+        if prefiltered and whole and not total:
+            # Нуль регексу: скільки сторінок мають ЦІЛИЙ літерал у нормі (а не
+            # лише вікно передфільтра) — це й каже «орфографія, а не слово».
+            full = " OR ".join(f'"{n}"' for n in phrases or [])
+            literal_pages = len(_pages_for(
+                conn, {rid >> LINE_BITS for (rid,) in _fts_rows(conn, full, run_list)},
+                run_set))
+        more = acc.done or acc.seen > acc.skip + acc.limit
+        stopped_at: dict[str, Any] | None = None
+        if acc.done and acc.passed is not None:
+            row = conn.execute("select run_id, page from pages where id=?",
+                               (acc.passed[0],)).fetchone()
+            if row is not None:
+                stopped_at = {"name": by_id.get(int(row[0]), ""), "page": str(row[1]),
+                              "line_no": (acc.passed[1] + 1
+                                          if acc.passed[1] < PAGE_END else None)}
+        return {"hits": collected, "total": total, "runs": len(ids),
+                "runs_asked": len(runs), "unindexed": len(runs) - len(ids),
+                "pages": n_pages, "pages_scanned": acc.pages,
+                "prefiltered": prefiltered, "literals": lits or [],
+                # Скільки сторінок мали літерал У НОРМІ: нуль регексу при
+                # непорожньому передфільтрі означає орфографію («ь»/«ъ»), а
+                # не відсутність слова — і про це треба сказати.
+                # ⚠ Рахується лише на нулі: з хітами його ніхто не читає, а
+                # повна фраза в FTS — найдорожча частина `grep`.
+                "literal_pages": literal_pages,
+                # ── гортання й чесність неповної відповіді ──
+                "offset": offset, "cursor": cursor, "returned": acc.out,
+                "total_at_least": acc.seen,
+                "more": more,
+                "next_offset": offset + acc.out if more else None,
+                "next_cursor": acc.resume(after) if more else None,
+                "stopped_early": acc.done, "interrupted": acc.interrupted,
+                "runs_scanned": len(acc.runs), "stopped_at": stopped_at}
+    finally:
+        conn.close()
+
+
+#: Від скількох сторінок-кандидатів `grep` іде процесами (старт процесу — секунди).
+GREP_PARALLEL_PAGES = 30_000
+#: Скільки перших сторінок великої області прочісується в самому процесі,
+#: перш ніж піднімати воркери: видача з ліміту майже завжди набирається тут.
+GREP_SEQ_PAGES = 2_000
+#: Сторінок на одну пачку процесу.
+GREP_CHUNK_PAGES = 20_000
+#: Пам'ять процесу `grep`, ГБ: сторінки йдуть потоком, у пам'яті — лише хіти пачки.
+GREP_WORKER_GB = 0.3
+
+
+def _grep_drive(conn: sqlite3.Connection, source: Iterator[int], pattern: str, flags: int,
+                fold: bool, rx: re.Pattern[str], gate: re.Pattern[str] | None,
+                run_set: set[int], after: GrepPos | None, context: int,
+                acc: _GrepAcc) -> None:
+    """Обхід: мала область — у процесі; велика — спершу її початок у процесі,
+    далі процесами, якщо видачу ще не набрано."""
+    it = iter(source)
+    try:
+        head = list(itertools.islice(it, GREP_PARALLEL_PAGES))
+        peek = next(it, None)
+    except KeyboardInterrupt:
+        acc.interrupted = True
+        return
+    if peek is None:
+        acc.absorb(_grep_part(conn, rx, gate, head, run_set, after, acc.keep_left(),
+                              acc.stop_left(), context, fold))
+        return
+    first, head = head[:GREP_SEQ_PAGES], head[GREP_SEQ_PAGES:]
+    acc.absorb(_grep_part(conn, rx, gate, first, run_set, after, acc.keep_left(),
+                          acc.stop_left(), context, fold))
+    if acc.done:
+        return
+    _grep_parallel(conn, pattern, flags, fold, rx, gate, itertools.chain(head, [peek], it),
+                   run_set, after, context, acc)
+
+
+def _chunked(it: Iterator[int], n: int) -> Iterator[list[int]]:
+    while True:
+        ch = list(itertools.islice(it, n))
+        if not ch:
+            return
+        yield ch
+
+
+#: Сигнал зупинки у воркері `grep` (з `_grep_init`).
+_GREP_HALT: Any = None
+
+
+def _grep_init(ws: Any, halt: Any) -> None:
+    """Воркер `grep`: простір того, хто кликав, і сигнал зупинки.
+
+    Ctrl+C на Windows отримує вся консоль, воркери теж; тут він ігнорується —
+    зупиняє їх головний процес (`halt`), і знайдене складає він же.
+    """
+    import signal
+
+    global _GREP_HALT
+    _block_init(ws)
+    _GREP_HALT = halt
+    for name in ("SIGINT", "SIGBREAK"):
+        sig = getattr(signal, name, None)
+        if sig is not None:
+            with contextlib.suppress(ValueError, OSError):
+                signal.signal(sig, signal.SIG_IGN)
+
+
+def _grep_job(pattern: str, flags: int, pids: list[int], run_set: set[int],
+              after: GrepPos | None, keep: int, stop_at: int | None, context: int,
+              fold: bool = False) -> _GrepPart:
     """`pattern` при `fold` — уже складений `fold_pattern`."""
+    halt = _GREP_HALT
+    if halt is not None and halt.is_set():
+        part = _empty_part()
+        part.interrupted = True
+        return part
     rx = re.compile(pattern, flags)
     gate = (re.compile(pattern, flags | re.MULTILINE)
             if not fold and _line_gate_safe(pattern) else None)
     conn = connect(readonly=True)
     try:
-        return _grep_scan(_page_texts(conn, pids, run_set), rx, gate, limit, context, fold)
+        return _grep_part(conn, rx, gate, pids, run_set, after, keep, stop_at, context, fold,
+                          halt=halt.is_set if halt is not None else None)
     finally:
         conn.close()
 
 
-def _grep_parallel(pattern: str, flags: int, pids: list[int], run_set: set[int],
-                   limit: int, context: int, fold: bool = False) -> tuple[list[dict[str, Any]], int, int]:
+def _grep_parallel(conn: sqlite3.Connection, pattern: str, flags: int, fold: bool,
+                   rx: re.Pattern[str], gate: re.Pattern[str] | None, pids: Iterator[int],
+                   run_set: set[int], after: GrepPos | None, context: int,
+                   acc: _GrepAcc) -> None:
     """Той самий прохід пачками в процесах — від заліза (`sweep_workers`).
 
     🔴 Пачки — відрізки сторінок за зростанням номера, і складаються вони в
-    тому ж порядку, тож перші `limit` хітів ті самі, що в одному процесі: пачці
-    досить віддати свої перші `limit`. Регекс без літерала — це кожна сторінка
-    області, і в одному процесі такий прохід по корпусу йшов хвилини.
+    тому ж порядку, тож видача та сама, що в одному процесі. У польоті —
+    вікно на кілька пачок більше за воркерів, а не вся область: набралась
+    видача — решта не подається, воркери отримують сигнал зупинки й виходять
+    за ≤ `GREP_HALT_EVERY` сторінок; пул закривається до повернення.
     """
-    chunks = [pids[i:i + GREP_CHUNK_PAGES] for i in range(0, len(pids), GREP_CHUNK_PAGES)]
-    workers = sweep_workers(len(chunks), worker_gb=GREP_WORKER_GB)
-    hits: list[dict[str, Any]] = []
-    total = scanned = 0
-    ex: Any = None
-    if workers <= 1:
-        parts: Iterable[tuple[list[dict[str, Any]], int, int]] = (
-            _grep_job(pattern, flags, ch, run_set, limit, context, fold) for ch in chunks)
-    else:
-        import multiprocessing as mp
-        from concurrent.futures import ProcessPoolExecutor
+    from concurrent.futures import TimeoutError as FutureTimeout
 
-        from nyshporka.core.workspace import workspace
-
-        ex = ProcessPoolExecutor(max_workers=workers, mp_context=mp.get_context("spawn"),
-                                 initializer=_block_init, initargs=(workspace(),))
-        n = len(chunks)
-        parts = ex.map(_grep_job, [pattern] * n, [flags] * n, chunks, [run_set] * n,
-                       [limit] * n, [context] * n, [fold] * n)
+    chunks = _chunked(pids, GREP_CHUNK_PAGES)
+    hw = sweep_workers(1 << 20, worker_gb=GREP_WORKER_GB)
+    window = hw + 2
+    ready: collections.deque[list[int]] = collections.deque()
     try:
-        for got, t, sc in parts:
-            total += t
-            scanned += sc
-            hits.extend(got[:max(0, limit - len(hits))])
-    finally:
-        if ex is not None:
-            ex.shutdown(wait=True, cancel_futures=True)
-    return hits, total, scanned
+        for first in chunks:
+            ready.append(first)
+            if len(ready) >= window:
+                break
+    except KeyboardInterrupt:
+        acc.interrupted = True
+        return
+    workers = min(hw, len(ready))
 
+    def pull() -> list[int] | None:
+        if ready:
+            return ready.popleft()
+        return next(chunks, None)
+
+    if workers <= 1:
+        try:
+            while not acc.done:
+                ch = pull()
+                if ch is None:
+                    return
+                acc.absorb(_grep_part(conn, rx, gate, ch, run_set, after, acc.keep_left(),
+                                      acc.stop_left(), context, fold))
+        except KeyboardInterrupt:
+            acc.interrupted = True
+        return
+    import multiprocessing as mp
+    from concurrent.futures import ProcessPoolExecutor
+
+    from nyshporka.core.workspace import workspace
+
+    ctx = mp.get_context("spawn")
+    halt = ctx.Event()
+    ex = ProcessPoolExecutor(max_workers=workers, mp_context=ctx,
+                             initializer=_grep_init, initargs=(workspace(), halt))
+    futs: collections.deque[Any] = collections.deque()
+    try:
+        while True:
+            while len(futs) < window:
+                ch = pull()
+                if ch is None:
+                    break
+                futs.append(ex.submit(_grep_job, pattern, flags, ch, run_set, after,
+                                      acc.keep_left(), acc.stop_left(), context, fold))
+            if not futs:
+                return
+            fut = futs.popleft()
+            # Очікування з тайм-аутом: на Windows безстрокове чекання не
+            # пропускає Ctrl+C до кінця пачки.
+            while True:
+                try:
+                    part = fut.result(timeout=0.5)
+                    break
+                except FutureTimeout:
+                    continue
+            acc.absorb(part)
+            if acc.done:
+                return
+    except KeyboardInterrupt:
+        acc.interrupted = True
+    finally:
+        halt.set()
+        for f in futs:
+            f.cancel()
+        ex.shutdown(wait=True, cancel_futures=True)
 
 
 def runs_named(conn: sqlite3.Connection) -> list[str]:
