@@ -3711,16 +3711,35 @@ def _grep_drive(conn: sqlite3.Connection, source: Iterator[int], pattern: str, f
         acc.interrupted = True
         return
     if peek is None:
-        acc.absorb(_grep_part(conn, rx, gate, head, run_set, after, acc.keep_left(),
-                              acc.stop_left(), context, fold))
+        _grep_local(conn, rx, gate, head, run_set, after, context, fold, acc)
         return
-    first, head = head[:GREP_SEQ_PAGES], head[GREP_SEQ_PAGES:]
-    acc.absorb(_grep_part(conn, rx, gate, first, run_set, after, acc.keep_left(),
-                          acc.stop_left(), context, fold))
-    if acc.done:
-        return
+    if acc.stop_total is not None:
+        # Видача з ліміту майже завжди набирається на початку — без старту пулу.
+        # Повний лік (`count_all`) пройде все однаково: воркери одразу, як доти,
+        # бо послідовний початок лише відклав би їх (Коваль по корпусу: +6 с).
+        first, head = head[:GREP_SEQ_PAGES], head[GREP_SEQ_PAGES:]
+        _grep_local(conn, rx, gate, first, run_set, after, context, fold, acc)
+        if acc.done:
+            return
     _grep_parallel(conn, pattern, flags, fold, rx, gate, itertools.chain(head, [peek], it),
                    run_set, after, context, acc)
+
+
+def _grep_local(conn: sqlite3.Connection, rx: re.Pattern[str], gate: re.Pattern[str] | None,
+                pids: list[int], run_set: set[int], after: GrepPos | None, context: int,
+                fold: bool, acc: _GrepAcc) -> None:
+    """Сторінки в самому процесі — відрізками по `GREP_SEQ_PAGES`.
+
+    🔴 Відрізками, а не однією пачкою: збіг іде у видачу (і в файл `--do`) лише
+    тоді, коли пачку складено, а пачка в 30 тис. сторінок під `--fold` — це
+    хвилина. Убитий за цю хвилину процес не лишив би у файлі нічого.
+    """
+    step = max(1, GREP_SEQ_PAGES)
+    for i in range(0, len(pids), step):
+        acc.absorb(_grep_part(conn, rx, gate, pids[i:i + step], run_set, after,
+                              acc.keep_left(), acc.stop_left(), context, fold))
+        if acc.done:
+            return
 
 
 def _chunked(it: Iterator[int], n: int) -> Iterator[list[int]]:
@@ -3812,8 +3831,7 @@ def _grep_parallel(conn: sqlite3.Connection, pattern: str, flags: int, fold: boo
                 ch = pull()
                 if ch is None:
                     return
-                acc.absorb(_grep_part(conn, rx, gate, ch, run_set, after, acc.keep_left(),
-                                      acc.stop_left(), context, fold))
+                _grep_local(conn, rx, gate, ch, run_set, after, context, fold, acc)
         except KeyboardInterrupt:
             acc.interrupted = True
         return

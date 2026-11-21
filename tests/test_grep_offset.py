@@ -364,3 +364,36 @@ def test_cli_do_keeps_hits_when_interrupted(space: Path, monkeypatch: pytest.Mon
     rows = [json.loads(x) for x in out.read_text(encoding="utf-8").splitlines()]
     assert rows[-1]["summary"]["interrupted"] is True
     assert rows[-1]["summary"]["streamed"] == len(rows) - 2 > 0
+
+
+def test_cli_do_hits_on_disk_before_hard_failure(space: Path,  # noqa: F811
+                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    """Жорсткий обрив (тут — MemoryError посеред обходу): збіги складених відрізків
+    уже у файлі, а підсумку немає — файл сам каже, що неповний."""
+    from typer.testing import CliRunner
+
+    from nyshporka.cli import app
+
+    monkeypatch.setattr(ST, "GREP_SEQ_PAGES", 2)
+    real = ST._page_rows
+    state = {"n": 0}
+
+    def dying(conn: Any, pids: list[int], run_set: set[int]) -> Any:
+        for row in real(conn, pids, run_set):
+            state["n"] += 1
+            if state["n"] == 7:
+                raise MemoryError
+            yield row
+
+    monkeypatch.setattr(ST, "_page_rows", dying)
+    out = space / "kill.jsonl"
+    CliRunner().invoke(app, ["text", "grep", r"\d{2,4}|Ковальчинск|Тих", "--limit", "100",
+                             "--do", str(out)])
+    rows = [json.loads(x) for x in out.read_text(encoding="utf-8").splitlines()]
+    assert "header" in rows[0]
+    assert not any("summary" in r for r in rows)
+    hits = rows[1:]
+    assert hits, "збіги перших відрізків мали лягти на диск до обриву"
+    monkeypatch.setattr(ST, "_page_rows", real)
+    want = ST.grep(r"\d{2,4}|Ковальчинск|Тих", list(PAGES), limit=100, context=1)["hits"]
+    assert [h["line"] for h in hits] == [h["line"] for h in want[:len(hits)]]
