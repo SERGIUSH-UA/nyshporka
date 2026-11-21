@@ -59,6 +59,11 @@ jobs:
           # тож вона перевіряється хоча б на одній версії.
           - python: "3.12"
             os: windows-latest
+          # macOS — друга платформа без регістру в іменах тек (APFS) і з довгими
+          # тимчасовими шляхами. Без неї 14 тестів main падали лише на Mac
+          # розробника, а CI був зелений.
+          - python: "3.12"
+            os: macos-latest
     steps:
       - uses: actions/checkout@v7
       # 🔴 Python ПЕРЕД setup-uv. Ключ кешу uv містить версію Python, яку

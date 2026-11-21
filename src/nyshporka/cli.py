@@ -2863,7 +2863,10 @@ def roots_list_cmd() -> None:
     rows = [(ws.raw, "простір"), *((p, "оголошено") for p in ws.extra_case_roots)]
     for path, origin in rows:
         gone = "" if path.is_dir() else "  [warn]← теки немає[/warn]"
-        console.print(f"  [muted]{origin}[/muted]  {path}{gone}")
+        # `soft_wrap`: шлях не ріжеться переносом за шириною консолі — інакше
+        # його не скопіювати, а «теки немає» розпадається на два рядки (довгі
+        # тимчасові теки macOS, 80 колонок без термінала).
+        console.print(f"  [muted]{origin}[/muted]  {path}{gone}", soft_wrap=True)
     console.print(f"[muted]усього {len(rows)} · "
                   f"додати — nysh roots add <тека>[/muted]")
 

@@ -98,6 +98,24 @@ def test_list_names_a_root_whose_disk_is_gone(space: Path, scans: Path) -> None:
     assert "теки немає" in res.stdout
 
 
+def test_list_keeps_a_long_path_on_one_line(space: Path, tmp_path: Path) -> None:
+    """Довгий шлях не переноситься: його копіюють, а позначка лишається цілою.
+
+    Регресія з macOS: тимчасові теки там довгі, і rich у 80 колонках різав рядок
+    посеред «теки⏎немає» — тест вище падав лише на Mac.
+    """
+    deep = tmp_path / ("дуже-довга-тека-зовнішнього-диска-" * 4) / "Метрики"
+    deep.mkdir(parents=True)
+    runner.invoke(app, ["roots", "add", str(deep)])
+    deep.rmdir()
+    W.reset()
+
+    res = runner.invoke(app, ["roots", "list"])
+    assert res.exit_code == 0, res.stdout
+    line = next(ln for ln in res.stdout.splitlines() if "оголошено" in ln)
+    assert str(deep) in line and line.endswith("← теки немає"), res.stdout
+
+
 def test_remove_leaves_the_marker_as_if_untouched(space: Path, scans: Path) -> None:
     """🔴 Знятий останній корінь не лишає по собі `case_roots = []`.
 
