@@ -130,11 +130,14 @@ def stamps_of(runs: list[str]) -> dict[str, str]:
         it = os.scandir(root)
     except OSError:
         return out
+    seen: set[str] = set()
     with it:
         for e in it:
-            names = want.get(os.path.normcase(e.name))
+            key = os.path.normcase(e.name)
+            names = want.get(key)
             if not names:
                 continue
+            seen.add(key)
             try:
                 if not e.is_dir():
                     continue
@@ -146,6 +149,15 @@ def stamps_of(runs: list[str]) -> dict[str, str]:
                         out[r] = st
             except OSError:
                 continue
+    # 🔴 Чого перелік не знайшов — питається поштучно, як у `stamp_of`, тобто
+    # самою файловою системою. `normcase` знімає регістр лише на Windows, а APFS
+    # на macOS теж без регістру (і без різниці NFC/NFD): «проба-верх» поштучно
+    # знаходив теку «Проба-Верх», а гуртом (від `BULK_RUNS`) — ні, і штампи
+    # розходились. Чого немає зовсім — один невдалий `stat`.
+    for key, names in want.items():
+        if key not in seen:
+            for r in names:
+                out[r] = stamp_of(r)
     return out
 
 

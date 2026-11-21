@@ -52,6 +52,11 @@ class Fake:
             self.asked_driver += 1
             return card
 
+        # 🔴 Платформа — не та, на якій біжить тест: на macOS `_ensure_cuda`
+        # виходить одразу (CUDA там немає за побудовою), і всі тести цього файла
+        # на Mac бачили порожній крок замість Windows/Linux, про які вони.
+        # Гілку macOS доводить `test_htr_intel_mac.py`.
+        monkeypatch.setattr(env.sys, "platform", "linux")
         monkeypatch.setattr(env, "_probe", probe)
         monkeypatch.setattr(env, "_run", run)
         monkeypatch.setattr(env.gpu, "detect_card", detect)

@@ -134,3 +134,34 @@ def test_bulk_stamp_ignores_case_of_the_run_folder(space: Path,
         assert want, "без регістру (Windows) `stamp_of` знаходить теку"
     monkeypatch.setattr(ST, "BULK_RUNS", 1)
     assert ST.stamps_for(["проба-верх"]) == {"проба-верх": want}
+
+
+def test_bulk_stamp_asks_the_file_system_for_what_the_listing_missed(
+        space: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Гуртом — той самий штамп, що й поштучно, на БУДЬ-ЯКІЙ файловій системі.
+
+    Перелік кореня порівнює імена через `normcase`, а той знімає регістр лише
+    на Windows. APFS на macOS теж без регістру: поштучний `stamp_of` знаходив
+    «Проба-Верх» на запит «проба-верх», гуртовий — ні. Тут така система
+    імітується (`_case_dir` без регістру), щоб вада ловилась і на Linux.
+    """
+    from nyshporka import htr_store as S
+
+    d = space / "reports" / "htr" / "Проба-Верх"
+    d.mkdir()
+    (d / "_htr_meta.json").write_text("{}", encoding="utf-8")
+    real = S._case_dir
+
+    def case_blind(name: str) -> Path | None:
+        found = real(name)
+        if found is not None:
+            return found
+        return next((p for p in d.parent.iterdir()
+                     if p.name.casefold() == name.casefold()), None)
+
+    monkeypatch.setattr(S, "_case_dir", case_blind)
+    monkeypatch.setattr(ST, "BULK_RUNS", 1)
+    runs = ["проба-верх", "проба-а", "немає-такого"]
+    want = {r: ST.stamp_of(r) for r in runs}
+    assert want["проба-верх"] and want["проба-а"] and not want["немає-такого"]
+    assert ST.stamps_for(runs) == want
