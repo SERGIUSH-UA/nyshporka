@@ -1254,10 +1254,9 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
     # 🔴 Тека поза сховищем справ (стейджинг агента) помре після прибирання, а з
     # нею — шлях у меті. Тоді мета бере теку справи з бібліотеки; якщо й там
     # таких кадрів немає, кажемо про це ДО оренди, а не після.
+    from nyshporka.cloud.printed import PlainRun
     from nyshporka.cloud.verify import frames_in
     from nyshporka.htr_store import lasting_case_dir, under_raw
-
-    from nyshporka.cloud.printed import PlainRun
 
     # 🖨 Друк поза виданнями свідомо живе поза сховищем справ: тека — робоча збірка.
     if not isinstance(printed, PlainRun) and under_raw(ref.frames_dir) is None and lasting_case_dir(
