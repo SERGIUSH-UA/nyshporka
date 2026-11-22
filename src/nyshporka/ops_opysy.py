@@ -27,6 +27,19 @@ class PackArgs(BaseModel):
     out: str = Field(description="куди покласти .nyshopys (файл або тека)")
 
 
+class PushArgs(BaseModel):
+    file: str = Field(description="пакет .nyshopys (`nysh opys pack`)")
+    base: str = Field(default="", description="адреса пулу; порожньо — типова")
+
+
+class SearchArgs(BaseModel):
+    q: str = Field(description="що шукати: село, прізвище, установа — своїми словами")
+    repo: str = Field(default="", description="лише в цьому архіві")
+    fond: str = Field(default="", description="лише в цьому фонді")
+    limit: int = Field(default=50, description="скільки збігів показати")
+    base: str = Field(default="", description="адреса пулу; порожньо — типова")
+
+
 class PolicyArgs(BaseModel):
     repo: str = Field(description="архів: ЦДІАК, ДАОО…")
     fond: str = Field(description="фонд")
@@ -99,3 +112,36 @@ def opysy_policy(a: PolicyArgs) -> Envelope:
     why = G.excluded(a.repo, a.fond)
     return ok({"repo": G.repo_code(a.repo), "fond": a.fond.strip(), "open": not why,
                "why": why})
+
+
+@op("opysy.push", summary="Залити пакет опису в Супрягу",
+    args=PushArgs, mutates=True, long=True, section=SECTION, tier="rare",
+    when="віддати спакований опис фонду (.nyshopys) у Супрягу")
+def opysy_push(a: PushArgs) -> Envelope:
+    from nyshporka.opysy import remote as R
+    from nyshporka.share.upload import UploadError
+
+    try:
+        got = R.push(Path(a.file), base=a.base)
+    except (UploadError, OSError) as exc:
+        env = fail(str(exc))
+        for d in getattr(exc, "details", None) or []:
+            env.warn(str(d.get("rule") or "refusal"), str(d.get("text") or ""), level=ALERT)
+        return env
+    env = ok(got)
+    for w in got.get("warnings") or []:
+        env.warn(str(w.get("code") or ""), str(w.get("text") or ""))
+    return env
+
+
+@op("opysy.search", summary="Нечіткий пошук по описах фондів у Супрязі",
+    args=SearchArgs, section=SECTION, tier="rare",
+    when="знайти справу за назвою в описах, яких немає в людських довідниках")
+def opysy_search(a: SearchArgs) -> Envelope:
+    from nyshporka.opysy import remote as R
+    from nyshporka.share.upload import UploadError
+
+    try:
+        return ok(R.search(a.q, repo=a.repo, fond=a.fond, limit=a.limit, base=a.base))
+    except UploadError as exc:
+        return fail(str(exc))

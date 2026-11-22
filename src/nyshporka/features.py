@@ -32,7 +32,8 @@ _TRUE = frozenset({"1", "true", "yes", "on", "так"})
 #: рівно ці імена — відсутні навмисно, а не через описку. Поіменно, а не
 #: префіксом, щоб описка в імені операції функції за флагом теж ловилась.
 HIDDEN: dict[str, dict[str, tuple[str, ...]]] = {
-    OPYSY: {"cli": ("opys",), "ops": ("opysy.check", "opysy.pack", "opysy.policy")},
+    OPYSY: {"cli": ("opys",), "ops": ("opysy.check", "opysy.pack", "opysy.policy",
+                                      "opysy.push", "opysy.search")},
 }
 
 
