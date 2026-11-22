@@ -36,6 +36,7 @@ from nyshporka.share import gates as _share_gates
 
 #: Номер правил воріт описів. Піднімається, коли змінюється те, що ворота
 #: ПУСКАЮТЬ: нова відмова, інший поріг, інший словник чи межа схожості в `names`.
+#: (Нова позначка `no_span` пускає те саме — номер той самий.)
 POLICY = 1
 
 #: Частка нормалізованих рядків із власною назвою без відповідника в сирому,
@@ -416,6 +417,10 @@ def _warn_numbers(rows: list[Row], v: Verdict) -> None:
         if prev is not None and r.no < prev:
             back.append(f"№{prev}→{r.no}")
         prev = r.no
+    spans = [r for r in rows if r.no_span]
+    if spans:
+        v.warn("no_span", f"{len(spans)} рядків охоплюють кілька номерів справ: у видачі "
+                          "вони з позначкою «звірте номер» — назва може належати будь-якій із них")
     if dups:
         v.warn("no_dup", f"номер справи повторюється {len(dups)} разів: {_few(dups)}")
     if back:

@@ -292,6 +292,25 @@ def test_manifest_requires_language() -> None:
         Manifest.model_validate(raw)
 
 
+def test_no_span_validated_and_marked() -> None:
+    with pytest.raises(ValidationError):
+        _row(1, no_span="будь-що")
+    r = _row(14, no_span="14–19")
+    assert r.no_span == "14–19"
+    assert _row(2, y=0.3, no_span="2а-5").no_span == "2а-5"
+    v = G.check(_manifest(), _pages(), [r, _row(20, y=0.4)])
+    assert v.passed and any(c == "no_span" for c, _ in v.warnings)
+
+
+def test_schema_1_pack_still_accepted() -> None:
+    """Старий клієнт (схема 1, без no_span) приймається новим боком."""
+    raw = _manifest().model_dump(by_alias=True)
+    raw["schema"] = 1
+    m, _, rows, v = G.parse(raw, [], [{"title_raw": "x", "regions": [
+        {"page": 1, "y0": 0.1, "y1": 0.2}]}])
+    assert m is not None and v.passed and rows[0].no_span == ""
+
+
 def test_number_warnings_not_refusals() -> None:
     rows = [_row(5, y=0.1), _row(5, y=0.2, no_status="unconfirmed"), _row(3, y=0.3)]
     v = G.check(_manifest(), _pages(), rows)

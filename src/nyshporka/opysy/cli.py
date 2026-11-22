@@ -158,6 +158,8 @@ def search_cmd(
         if z.get("riadok"):
             no = f"№ {_e(z.get('no'))}{_e(z.get('letter'))}" if z.get("no") is not None else "№ ?"
             zvir = " (звірити №)" if z.get("no_status") == "unconfirmed" else ""
+            if z.get("no_span"):
+                zvir = f" (рядок охоплює №{_e(z.get('no_span'))} — звірте номер)"
             nazva = z.get("title_norm") or z.get("title_raw")
             console.print(f"[bold]{_e(z.get('shyfra'))}[/bold] {no}{zvir} — {_e(nazva)}")
         else:

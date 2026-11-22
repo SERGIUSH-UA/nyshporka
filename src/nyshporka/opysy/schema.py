@@ -27,7 +27,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 #: Номер схеми пакета. Піднімається з кожним новим полем.
-SCHEMA = 1
+#: 2 (22.11.2026) — `Row.no_span`: рядок таблиці охоплює кілька номерів справ.
+SCHEMA = 2
 
 SourceKind = Literal["commons", "archive_site", "fs", "private", "public_other"]
 NoStatus = Literal["chain", "neighbors", "between", "unconfirmed", "eye"]
@@ -41,6 +42,7 @@ Language = Literal["ru", "uk", "pl", "ro", "la", "de", "other"]
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _LINK_KEYS = ("{page}", "{i}", "{frame}")
+_SPAN = re.compile(r"^\d+[^\d\s–-]{0,3}\s*[–-]\s*\d+[^\d\s]{0,3}$")
 
 
 class _Strict(BaseModel):
@@ -185,6 +187,18 @@ class Row(_Strict):
     folios: str = ""
     #: Колонка «кінчилось»/«кінцева дата», якщо опис її має.
     end: str = ""
+    #: Рядок охоплює кілька номерів справ («14–19»): між цим номером і наступним у таблиці
+    #: розрив, а окремих рядків під пропущені номери розбір не знайшов. Назва тоді може
+    #: належати будь-якій із них — людині сказати «звірте номер», а не дати замовити наосліп.
+    no_span: str = ""
+
+    @field_validator("no_span")
+    @classmethod
+    def _span(cls, v: str) -> str:
+        v = v.strip()
+        if v and not _SPAN.match(v):
+            raise ValueError(f"no_span — «N–M» (номери справ), маємо «{v[:40]}»")
+        return v
 
 
 class Quality(_Strict):
