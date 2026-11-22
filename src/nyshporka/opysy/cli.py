@@ -165,3 +165,117 @@ def search_cmd(
         else:
             console.print(f"[bold]{_e(z.get('shyfra'))}[/bold] — збіг у тексті сторінки")
         console.print(f"   {mistse} · {_e(z.get('posylannia'))}")
+        for p in z.get("pravyla") or []:
+            console.print(f"   [dim]за правилом: {_e(p)}[/dim]")
+
+
+@app.command("names")
+def names_cmd(
+    repo: str = typer.Argument(..., help="архів: ЦДІАК, ДАОО…"),
+    fond: str = typer.Argument(..., help="фонд"),
+    opys: str = typer.Option("", "--opys", help="лише цей опис"),
+    q: str = typer.Option("", "--q", help="лише назви, що містять це"),
+    page: int = typer.Option(1, "--page", help="сторінка словника"),
+    base: str = typer.Option("", "--base", help="адреса пулу; порожньо — типова"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Словник власних назв фонду: написання, сусіди-підказки, правило, rk для доказу."""
+    from nyshporka import ops as O
+
+    env = O.call("opysy.names", {"repo": repo, "fond": fond, "opys": opys, "q": q,
+                                 "page": page, "base": base})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    console.print(f"назв {_e(d.get('usioho'))} · сторінка {_e(d.get('storinka'))} з "
+                  f"{_e(d.get('storinok'))}")
+    for k in d.get("klastery") or []:
+        napys = ", ".join(f"{_e(s)} ×{_e(n)}" for s, n in k.get("napysannia") or [])
+        console.print(f"[bold]{_e(k.get('kliuch'))}[/bold] ({_e(k.get('usioho'))}): {napys}")
+        if k.get("susidy"):
+            console.print(f"   поруч: {_e(', '.join(k['susidy']))}")
+        p = k.get("pravylo")
+        if p:
+            console.print(f"   правило №{_e(p.get('id'))} ({_e(p.get('stan'))}): "
+                          f"{_e(', '.join(p.get('z') or []))} → {_e(p.get('na'))}")
+        for x in k.get("pryklady") or []:
+            console.print(f"   [dim]{_e(x.get('shyfra'))} № {_e(x.get('no'))} · кадр "
+                          f"{_e(x.get('page'))} · rk {_e(x.get('rk'))}[/dim] "
+                          f"{_e(x.get('title_norm'))}")
+
+
+rule_app = typer.Typer(help="Правила підстановки власних назв в описах фонду.",
+                       no_args_is_help=True)
+app.add_typer(rule_app, name="rule")
+
+
+def _print_rule(p: dict[str, Any]) -> None:
+    mezha = f"{_e(p.get('repo'))} {_e(p.get('fond') or '*')}" + (
+        f"-{_e(p.get('opys'))}" if p.get("opys") else "")
+    console.print(f"№{_e(p.get('id'))} [{_e(p.get('stan'))}] {mezha}: "
+                  f"{_e(', '.join(p.get('z') or []))} → [bold]{_e(p.get('na'))}[/bold]")
+
+
+@rule_app.command("add")
+def rule_add_cmd(
+    repo: str = typer.Argument(..., help="архів"),
+    fond: str = typer.Argument(..., help="фонд"),
+    variants: list[str] = typer.Option(..., "--from", help="спотворене написання (можна кілька)"),
+    to: str = typer.Option(..., "--to", help="певне написання"),
+    evidence: str = typer.Option(..., "--evidence", help="rk рядка з певним написанням"),
+    opys: str = typer.Option("", "--opys", help="лише в цьому описі"),
+    kind: str = typer.Option("prizvyshche", "--kind",
+                             help="prizvyshche / mistse / posadovets / inshe"),
+    reason: str = typer.Option("", "--reason", help="чому певно"),
+    base: str = typer.Option("", "--base", help="адреса пулу; порожньо — типова"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Звести варіанти до певного написання. Сирий текст не змінюється — лише пошук."""
+    from nyshporka import ops as O
+
+    env = O.call("opysy.rule_add", {"repo": repo, "fond": fond, "variants": variants, "to": to,
+                                    "evidence": evidence, "opys": opys, "kind": kind,
+                                    "reason": reason, "base": base})
+    if _answer(env, as_json):
+        return
+    p = env.data or {}
+    _print_rule(p)
+    if p.get("stan") == "zapyt":
+        console.print("[yellow]•[/yellow] у межі є чужі внески — правило чекає рішення")
+
+
+@rule_app.command("list")
+def rule_list_cmd(
+    repo: str = typer.Argument(..., help="архів"),
+    fond: str = typer.Argument("", help="фонд; порожньо — усі правила архіву"),
+    state: str = typer.Option("", "--state", help="diie / zapyt / vidkhyleno / vidkocheno"),
+    base: str = typer.Option("", "--base", help="адреса пулу; порожньо — типова"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Правила підстановки фонду: що зведено, що чекає рішення."""
+    from nyshporka import ops as O
+
+    env = O.call("opysy.rules", {"repo": repo, "fond": fond, "state": state, "base": base})
+    if _answer(env, as_json):
+        return
+    ps = (env.data or {}).get("pravyla") or []
+    if not ps:
+        console.print("правил немає")
+    for p in ps:
+        _print_rule(p)
+
+
+@rule_app.command("undo")
+def rule_undo_cmd(
+    rule_id: int = typer.Argument(..., help="номер правила"),
+    reason: str = typer.Option("", "--reason", help="чому скасовано"),
+    base: str = typer.Option("", "--base", help="адреса пулу; порожньо — типова"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Скасувати правило: пошук знову без нього (сирий текст і не змінювався)."""
+    from nyshporka import ops as O
+
+    env = O.call("opysy.rule_undo", {"id": rule_id, "reason": reason, "base": base})
+    if _answer(env, as_json):
+        return
+    _print_rule(env.data or {})

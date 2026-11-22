@@ -59,3 +59,43 @@ def policy(repo: str, fond: str, *, base: str = "") -> dict[str, Any]:
     tok = U.token() if catalog.may_send_key(home, explicit=False) else ""
     return U._request("GET", f"{home}/opysy/polityka?{urlencode({'repo': repo, 'fond': fond})}",
                       auth=tok)
+
+
+def _z_kliuchem(base: str) -> tuple[str, str]:
+    """Словник і правила — лише людині з ключем: без нього пул відповідає 401/404."""
+    tok, home = U._tok_i_dim(base)
+    return tok, home
+
+
+def names(repo: str, fond: str, *, opys: str = "", q: str = "", page: int = 1,
+          base: str = "") -> dict[str, Any]:
+    """Кластери власних назв фонду: написання з частотами, сусіди, правило, приклади (rk)."""
+    tok, home = _z_kliuchem(base)
+    params: dict[str, Any] = {"repo": repo, "fond": fond, "storinka": page}
+    if opys:
+        params["opys"] = opys
+    if q:
+        params["q"] = q
+    return U._request("GET", f"{home}/opysy/nazvy?{urlencode(params)}", auth=tok)
+
+
+def rules(repo: str, *, fond: str = "", state: str = "", base: str = "") -> dict[str, Any]:
+    tok, home = _z_kliuchem(base)
+    params = {"repo": repo, "fond": fond, "stan": state}
+    return U._request("GET", f"{home}/opysy/pravyla?{urlencode(params)}", auth=tok)
+
+
+def rule_add(repo: str, fond: str, variants: list[str], to: str, *, evidence: str,
+             opys: str = "", kind: str = "prizvyshche", reason: str = "",
+             base: str = "") -> dict[str, Any]:
+    """Правило «варіанти → форма». Без права на всі внески межі пул ставить його в чергу."""
+    tok, home = _z_kliuchem(base)
+    body = {"repo": repo, "fond": fond, "opys": opys, "z": variants, "na": to, "vyd": kind,
+            "dokaz": evidence, "prychyna": reason}
+    return U._request("POST", f"{home}/opysy/pravyla", body=body, auth=tok)
+
+
+def rule_undo(rule_id: int, *, reason: str = "", base: str = "") -> dict[str, Any]:
+    tok, home = _z_kliuchem(base)
+    return U._request("POST", f"{home}/opysy/pravyla/{int(rule_id)}/vidkotyty",
+                      body={"prychyna": reason}, auth=tok)

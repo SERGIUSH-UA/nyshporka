@@ -40,6 +40,41 @@ class SearchArgs(BaseModel):
     base: str = Field(default="", description="адреса пулу; порожньо — типова")
 
 
+class NamesArgs(BaseModel):
+    repo: str = Field(description="архів: ЦДІАК, ДАОО…")
+    fond: str = Field(description="фонд")
+    opys: str = Field(default="", description="лише цей опис фонду")
+    q: str = Field(default="", description="лише назви, що містять це")
+    page: int = Field(default=1, description="сторінка словника")
+    base: str = Field(default="", description="адреса пулу; порожньо — типова")
+
+
+class RulesArgs(BaseModel):
+    repo: str = Field(description="архів")
+    fond: str = Field(default="", description="фонд; порожньо — усі правила архіву")
+    state: str = Field(default="", description="diie / zapyt / vidkhyleno / vidkocheno")
+    base: str = Field(default="", description="адреса пулу; порожньо — типова")
+
+
+class RuleAddArgs(BaseModel):
+    repo: str = Field(description="архів")
+    fond: str = Field(description="фонд; порожньо — правило на весь архів")
+    variants: list[str] = Field(description="як назву спотворено в описах (слова)")
+    to: str = Field(description="певне написання, до якого звести варіанти")
+    evidence: str = Field(description="rk рядка, де певне написання видно (`nysh opys names`)")
+    opys: str = Field(default="", description="лише в цьому описі")
+    kind: str = Field(default="prizvyshche",
+                      description="prizvyshche / mistse / posadovets / inshe")
+    reason: str = Field(default="", description="чому певно: кадр, джерело")
+    base: str = Field(default="", description="адреса пулу; порожньо — типова")
+
+
+class RuleUndoArgs(BaseModel):
+    id: int = Field(description="номер правила")
+    reason: str = Field(default="", description="чому скасовано")
+    base: str = Field(default="", description="адреса пулу; порожньо — типова")
+
+
 class PolicyArgs(BaseModel):
     repo: str = Field(description="архів: ЦДІАК, ДАОО…")
     fond: str = Field(description="фонд")
@@ -145,3 +180,54 @@ def opysy_search(a: SearchArgs) -> Envelope:
         return ok(R.search(a.q, repo=a.repo, fond=a.fond, limit=a.limit, base=a.base))
     except UploadError as exc:
         return fail(str(exc))
+
+
+def _remote(fn: Any, *args: Any, **kw: Any) -> Envelope:
+    from nyshporka.share.upload import UploadError
+
+    try:
+        return ok(fn(*args, **kw))
+    except UploadError as exc:
+        env = fail(str(exc))
+        for d in getattr(exc, "details", None) or []:
+            env.warn(str(d.get("rule") or d.get("kod") or "refusal"), str(d.get("text") or ""),
+                     level=ALERT)
+        return env
+
+
+@op("opysy.names", summary="Словник власних назв фонду в описах Супряги: варіанти й сусіди",
+    args=NamesArgs, section=SECTION, tier="rare",
+    when="побачити, як прізвище чи село спотворено в описах фонду, перед правилом підстановки")
+def opysy_names(a: NamesArgs) -> Envelope:
+    from nyshporka.opysy import remote as R
+
+    return _remote(R.names, a.repo, a.fond, opys=a.opys, q=a.q, page=a.page, base=a.base)
+
+
+@op("opysy.rules", summary="Правила підстановки назв в описах фонду",
+    args=RulesArgs, section=SECTION, tier="rare",
+    when="які варіанти назв уже зведено і що чекає рішення")
+def opysy_rules(a: RulesArgs) -> Envelope:
+    from nyshporka.opysy import remote as R
+
+    return _remote(R.rules, a.repo, fond=a.fond, state=a.state, base=a.base)
+
+
+@op("opysy.rule_add", summary="Звести варіанти власної назви до певного написання",
+    args=RuleAddArgs, mutates=True, section=SECTION, tier="rare",
+    when="у словнику фонду видно спотворені варіанти прізвища чи місця, а певне написання "
+         "є в рядку-доказі")
+def opysy_rule_add(a: RuleAddArgs) -> Envelope:
+    from nyshporka.opysy import remote as R
+
+    return _remote(R.rule_add, a.repo, a.fond, a.variants, a.to, evidence=a.evidence,
+                   opys=a.opys, kind=a.kind, reason=a.reason, base=a.base)
+
+
+@op("opysy.rule_undo", summary="Скасувати правило підстановки назв",
+    args=RuleUndoArgs, mutates=True, section=SECTION, tier="rare",
+    when="правило звело не те — повернути пошук до стану без нього")
+def opysy_rule_undo(a: RuleUndoArgs) -> Envelope:
+    from nyshporka.opysy import remote as R
+
+    return _remote(R.rule_undo, a.id, reason=a.reason, base=a.base)
