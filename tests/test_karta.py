@@ -404,6 +404,15 @@ def test_dva_holovni_mistsia_cherez_krapku_z_komoiu(dov: heo.Dovidnyk) -> None:
     assert heo._perelik_mists(opys) == [opys]
 
 
+def test_dovhyi_perelik_iz_seliv_iz_povitom_dilytsia() -> None:
+    # 22.11.2026: одне «с. Мала Киріївка, Ольгопільський пов., Подільська губ.» (7 слів)
+    # робило з переліку збірної книги один рядок — і села випадали з мапи.
+    perelik = "с. Кам’янка; Кидрасівка; Киріївка Мала; с. Мала Киріївка, Ольгопільський пов., Подільська губ."
+    assert len(heo._perelik_mists(perelik)) == 4
+    dovhe = "Гайсинський і Ольгопільський повіти Подільської губернії разом із Балтським і Брацлавським; Липовець"
+    assert heo._perelik_mists(dovhe) == [dovhe]
+
+
 def test_prykmetnyk_formy_vypadne_i_an() -> None:
     # «Саксаганська сільрада» — Саксагань; «Верховенська волость» — Верховня.
     assert "Саксагань" in heo.z_prykmetnyka("Саксаганська сільрада: народження")[0][1]
