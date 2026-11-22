@@ -235,7 +235,9 @@ def _case_block(scope_info: dict[str, Any], case_dir: Path | None) -> dict[str, 
         out["years"] = [min(years), max(years)]
     places = side.get("villages_from_index") or side.get("covers")
     if isinstance(places, list) and places:
-        out["places"] = [str(p) for p in places][:20]
+        from nyshporka.share import card as K
+
+        out["places"] = [str(p) for p in places][:K.MAX_PLACES]
     elif side.get("place"):
         out["places"] = [str(side["place"])]
     return out

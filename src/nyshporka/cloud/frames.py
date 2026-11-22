@@ -44,6 +44,14 @@ STILL_WRITING_SEC = 300
 #: самого диска, тож на недокачаній теці воно збігається саме з собою.
 DONE_GAP_SEC = 30
 
+#: Найдовша основа імені кадру в байтах UTF-8. Рушій на машині пише поруч із
+#: кадром файли з довшим хвостом — кеш сегментації `<основа>.o270.c1600.seg.json.gz`
+#: і його тимчасовий `<основа>.o270.c1600.seg.json.<pid>.tmp` (~32 байти), а Linux
+#: не дає імені понад 255 байт. 21–22.11.2026 пачка з кирилицею в іменах кадрів
+#: (назви тек Уманських переписів) дала на машині `Errno 36: File name too long`
+#: на 414 кадрах, і захід переорендовував машини колом, бо збій ішов за справою.
+MAX_FRAME_STEM_BYTES = 215
+
 #: Медіана кадру понад стільки МБ — стискати перед дорогою.
 SHRINK_MEDIAN_MB = 3.0
 
@@ -177,6 +185,12 @@ def check_frames(case_dir: Path | str, *, now: float | None = None) -> FramesRep
     over_height = 0
     newest = 0.0
     for f in frames:
+        stem_bytes = len(f.stem.encode("utf-8"))
+        if stem_bytes > MAX_FRAME_STEM_BYTES:
+            bad.append(f"{f.name}: ім'я задовге для машини ({stem_bytes} байт без "
+                       f"розширення, межа {MAX_FRAME_STEM_BYTES}) — перейменувати кадри "
+                       f"коротше")
+            continue
         stat = f.stat()
         size = stat.st_size
         newest = max(newest, stat.st_mtime)

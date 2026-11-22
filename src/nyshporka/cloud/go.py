@@ -1111,7 +1111,8 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
     if rep.bad and not remote:
         raise GoRefused(
             f"битих кадрів {len(rep.bad)}: " + "; ".join(rep.bad[:5])
-            + (" …" if len(rep.bad) > 5 else "") + ". Докачайте їх і повторіть.")
+            + (" …" if len(rep.bad) > 5 else "")
+            + ". Докачайте чи виправте їх (причина — біля кожного кадру) і повторіть.")
     if rep.still_writing_min is not None and not allow_partial:
         raise GoRefused(
             f"останній кадр записано {rep.still_writing_min} хв тому — тека ще "

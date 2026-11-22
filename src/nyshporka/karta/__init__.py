@@ -52,7 +52,7 @@ log = logging.getLogger("nyshporka.karta")
 
 #: Номер правил прив'язки. Сервер додає його до відбитка книги (`app.heo.vidbytok`):
 #: зміна правил тут перераховує весь пул без окремого кроку на сервері.
-PRAVYLA = 15
+PRAVYLA = 16
 
 POD = ["вінниц", "хмельниц", "одес"]
 VOL = ["волин", "рівнен", "житомир", "тернопіл", "хмельниц"]
@@ -957,13 +957,20 @@ def _odne(rows: list[dict[str, Any]]) -> bool:
             and max(_km(rows[0], d) for d in rows) <= DUBL_KM)
 
 
+#: Найдовша частина переліку місць, слів. «с. Мала Киріївка, Ольгопільський пов.,
+#: Подільська губ.» — сім. Була межа 4, і одне таке село робило з переліку збірної
+#: книги один рядок: 27 сіл давали на мапі 3 точки, ДАХмО 315-1-7357а — 5 замість 7
+#: (22.11.2026). Опис із «;» у дужках однаково лишається цілим.
+MAX_SLIV_MISTSIA = 8
+
+
 def _perelik_mists(s: str) -> list[str]:
     """«Березне; Казимирка» → два місця. Лише простий перелік: крапка з комою в
     дужках чи довгому описі («с. Озерна (… до 1793 — …; нині …)») — частина опису."""
     if ";" not in s or "(" in s:
         return [s] if s.strip() else []
     chastyny = [p.strip() for p in s.split(";") if p.strip()]
-    return chastyny if all(len(p.split()) <= 4 for p in chastyny) else [s]
+    return chastyny if all(len(p.split()) <= MAX_SLIV_MISTSIA for p in chastyny) else [s]
 
 
 def _povit_korin(povit: str) -> str:
