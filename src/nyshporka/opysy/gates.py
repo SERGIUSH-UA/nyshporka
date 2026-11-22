@@ -81,14 +81,22 @@ def repo_fond(repo: str, fond: str) -> tuple[str, str]:
 
     Розбір — той самий, що в реєстрі фонду (`fonds.registry.parse_key`): власна
     копія таблиці кодів архівів уже раз розійшлася з паком.
+
+    ⚠ `parse_key` зводить до коду лише частину кириличних назв («ЦДІАК», «ДАХмО»),
+    а «ДАОО» лишає як є — і той самий фонд розходився на два ключі (`ДАОО` і `DAOO`).
+    Тому назву ще раз зводимо зворотною таблицею підписів того самого реєстру
+    (`REPO_LABEL`), а не новою копією.
     """
-    from nyshporka.fonds.registry import parse_key
+    from nyshporka.fonds.registry import REPO_LABEL, parse_key
 
     try:
-        got = parse_key(f"{repo.strip()}/{fond.strip()}/1/1")
-        return got[0], got[1]
+        repo_k, fond_k = parse_key(f"{repo.strip()}/{fond.strip()}/1/1")[:2]
     except ValueError:
-        return repo.strip().upper(), fond.strip().lower()
+        repo_k, fond_k = repo.strip().upper(), fond.strip().lower()
+    za_pidpysom = {label.upper(): code for code, label in REPO_LABEL.items()}
+    # Канонічний код, коли кілька кодів мають той самий підпис (DAVO/DAVIO).
+    za_pidpysom["ДАВІО"] = "DAVIO"
+    return za_pidpysom.get(repo_k.upper(), repo_k), fond_k
 
 
 def repo_code(repo: str) -> str:

@@ -158,6 +158,13 @@ def test_excluded_fond_refused_any_spelling() -> None:
     assert "excluded_fond" in _rules(v)
 
 
+def test_repo_key_one_code_for_any_spelling() -> None:
+    """Той самий фонд не розходиться на два ключі через кирилицю в назві архіву."""
+    for repo in ("ДАОО", "DAOO", "daoo"):
+        assert G.repo_fond(repo, "0445") == ("DAOO", "445")
+    assert G.repo_fond("ДАВО", "904") == G.repo_fond("ДАВіО", "904") == ("DAVIO", "904")
+
+
 def test_row_without_binding_refused() -> None:
     v = G.check(_manifest(), _pages(), [Row(title_raw="без місця")])
     assert "row_unbound" in _rules(v)
