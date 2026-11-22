@@ -12,7 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from nyshporka.core.envelope import Envelope, fail, ok
+from nyshporka.core.envelope import ALERT, Envelope, fail, ok
 from nyshporka.core.ops import op
 
 SECTION = "htr"
@@ -33,10 +33,19 @@ class PolicyArgs(BaseModel):
 
 
 def _verdict_env(data: dict[str, Any], verdict: Any) -> Envelope:
-    env = ok(data) if verdict.passed else fail(
-        "опис не пройшов ворота: " + "; ".join(verdict.refusals[:3])
-        + (f" … ще {len(verdict.refusals) - 3}" if len(verdict.refusals) > 3 else ""))
-    env.data = data
+    """Вердикт воріт → конверт.
+
+    🔴 Відмова несе ВСІ причини поштучно, кожну — тривогою з кодом правила.
+    Конверт помилки за контрактом не має `data`, а людина при помилці бачить
+    лише `error` і примітки (`cli_emit.answer`): обрізаний перелік ховав би
+    рівно те, що треба виправити, а агент не мав би кодів правил.
+    """
+    if verdict.passed:
+        env = ok(data)
+    else:
+        env = fail(f"опис не пройшов ворота ({len(verdict.refusals)}) — причини нижче")
+        for d in verdict.refusal_details:
+            env.warn(d["rule"], d["text"], level=ALERT)
     for code, text in verdict.warnings:
         env.warn(code, text)
     return env

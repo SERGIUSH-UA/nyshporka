@@ -316,7 +316,7 @@ def _gate_coverage(m: Manifest, pages: list[Page], v: Verdict) -> None:
                               f"{len(cov.missing)} з {cov.total} сторінок джерела")
         else:
             v.refuse(f"рушій не пройшов {len(cov.missing)} з {cov.total} сторінок джерела: "
-                     f"{_few(cov.missing)}. Неповний опис — лише з --partial і причиною",
+                     f"{_few(cov.missing)}. Неповний опис — лише з полем partial у manifest.json (причина й перелік сторінок)",
                      rule="coverage", field="pages")
     if cov.read and len(cov.blank) / len(cov.read) > MAX_BLANK_PAGES:
         v.refuse(f"порожніх сторінок {len(cov.blank)} з {len(cov.read)}: радше рушій не взяв "
