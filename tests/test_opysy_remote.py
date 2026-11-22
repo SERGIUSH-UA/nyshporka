@@ -118,3 +118,19 @@ def test_names_and_rules_go_with_key_and_exact_fields(monkeypatch: pytest.Monkey
     assert (m3, u3, b3) == ("POST", "https://api.example/v1/opysy/pravyla/5/vidkotyty",
                             {"prychyna": "не те"})
     assert parse_qs(urlsplit(u4).query)["stan"] == ["zapyt"]
+
+
+def test_rule_list_prints_the_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Стан правила видно в друку: квадратні дужки Rich ковтав як розмітку (живий прогін)."""
+    from typer.testing import CliRunner
+
+    from nyshporka import ops as O
+    from nyshporka.core.envelope import ok
+    from nyshporka.opysy import cli as C
+
+    rule = {"id": 1, "stan": "vidkocheno", "repo": "ДАОО", "fond": "445", "z": ["Феодора"],
+            "na": "Федор"}
+    monkeypatch.setattr(O, "call", lambda name, args: ok({"pravyla": [rule]}))
+    got = CliRunner().invoke(C.app, ["rule", "list", "ДАОО", "445"])
+    assert got.exit_code == 0, got.output
+    assert "(vidkocheno)" in got.output and "Феодора → Федор" in got.output

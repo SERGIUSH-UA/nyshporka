@@ -212,7 +212,9 @@ app.add_typer(rule_app, name="rule")
 def _print_rule(p: dict[str, Any]) -> None:
     mezha = f"{_e(p.get('repo'))} {_e(p.get('fond') or '*')}" + (
         f"-{_e(p.get('opys'))}" if p.get("opys") else "")
-    console.print(f"№{_e(p.get('id'))} [{_e(p.get('stan'))}] {mezha}: "
+    # Стан — у круглих дужках: квадратні Rich читає як тег розмітки й мовчки ковтає
+    # («[diie]» зникав із друку — живий прогін 23.11.2026).
+    console.print(f"№{_e(p.get('id'))} ({_e(p.get('stan'))}) {mezha}: "
                   f"{_e(', '.join(p.get('z') or []))} → [bold]{_e(p.get('na'))}[/bold]")
 
 
