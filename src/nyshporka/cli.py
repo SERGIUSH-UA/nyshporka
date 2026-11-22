@@ -2379,6 +2379,16 @@ from nyshporka.share.cli import app as share_app  # noqa: E402
 app.add_typer(share_app, name="share")
 app.add_typer(queue_app, name="queue")
 
+# 📑 Описи фондів — друга сутність Супряги. 🔴 Лише з флагом `NYSH_OPYSY`
+# (`nyshporka.features`): функція їде в реліз вимкненою, і без флагу команди
+# `nysh opys` немає взагалі — ні в довідці, ні викликом.
+from nyshporka import features as _features  # noqa: E402
+
+if _features.opysy():
+    from nyshporka.opysy.cli import app as opysy_app
+
+    app.add_typer(opysy_app, name="opys")
+
 # 💽 Місце на диску: що лишити, що прибрати, з яких справ зняти кадри.
 from nyshporka.disk.cli import app as disk_app  # noqa: E402
 

@@ -134,8 +134,14 @@ def test_advised_commands_exist(where: str) -> None:
     текст помилки лишився. Людина копіює пораду, отримує «немає такої
     команди» — і читає це як поламаний застосунок, а не як застарілий рядок.
     """
+    from nyshporka import features
+
     cmds = _cli_commands()
+    # Група за вимкненим флагом існує, лише схована (`features.HIDDEN`). Лише в
+    # коді: README і документація агента не радять схованого до запуску.
     heads = {c.split()[0] for c in cmds}
+    if where == "src":
+        heads |= features.hidden_now("cli")
     files = {"src": [*SRC.rglob("*.py"), *SRC.rglob("*.js")],
              "readme": [README], "docs": DOCS}[where]
     bad: list[str] = []
@@ -269,7 +275,10 @@ def test_every_screen_is_reachable_and_belongs_to_a_section() -> None:
 # ── 4. екран кличе те, що існує ──────────────────────────────────────────────
 def test_screens_and_cli_call_existing_ops() -> None:
     """Друкарська помилка в імені операції дає 404 вже в руках користувача."""
-    ops = set(_ops())
+    from nyshporka import features
+
+    # Операції за вимкненим флагом не зареєстровані навмисно — поіменно, не префіксом.
+    ops = set(_ops()) | features.hidden_now("ops")
     assert not (_called_from_js() - ops), \
         f"екран кличе неіснуючу операцію: {sorted(_called_from_js() - ops)}"
     assert not (_called_from_cli() - ops), \

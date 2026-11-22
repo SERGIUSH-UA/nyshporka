@@ -37,6 +37,12 @@ from nyshporka import ops_zvid as _zvid  # noqa: F401  (те саме: реєс�
 from nyshporka.cloud import ops as _cloud  # noqa: F401  (те саме: реєстрація)
 from nyshporka.core.envelope import Envelope
 from nyshporka.core.ops import REGISTRY, Op, Registry
+from nyshporka.features import opysy as _opysy_on
+
+# 📑 Описи фондів — лише з флагом `NYSH_OPYSY`: без нього операцій `opysy.*`
+# немає ні в `nysh ops`, ні в MCP, ні в браузері (функція їде в реліз вимкненою).
+if _opysy_on():
+    from nyshporka import ops_opysy as _opysy  # noqa: F401  (реєстрація)
 
 __all__ = ["REGISTRY", "Op", "Registry", "all_ops", "call", "for_agent",
            "for_sections", "get", "sections_in_use"]
