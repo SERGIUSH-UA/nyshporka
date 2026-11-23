@@ -76,8 +76,15 @@ def test_stara_adresa_bez_vidpovidi_porada(monkeypatch: pytest.MonkeyPatch) -> N
 
     from nyshporka.share.gates import _no_refs_text
 
-    monkeypatch.setattr(polona, "_fetch_new_id", lambda old: None)
+    vyklyky: list[str] = []
+
+    def merezha(old: str) -> str | None:
+        vyklyky.append(old)
+        return None
+
+    monkeypatch.setattr(polona, "_fetch_new_id", merezha)
     m = SimpleNamespace(links=[{"url": f"https://polona.pl/item/{OLD}/0"}])
     text = _no_refs_text(m)  # type: ignore[arg-type]
     assert "polona.pl/preview/<uuid>" in text
+    assert vyklyky == []  # сервер кличе ворота на кожен внесок — без мережі
     assert publish._ref_z_adresy(PREVIEW) is not None

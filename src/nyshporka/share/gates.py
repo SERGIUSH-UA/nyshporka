@@ -229,19 +229,21 @@ def _no_refs_text(m: Manifest) -> str:
             "знахідку з зображенням отримувачу буде нікуди піти")
     if not urls:
         return f"{lead} — варто додати: --link \"звідки скани=<адреса>\""
-    known = [u for u in urls if _ref_z_adresy(u)]
+    from nyshporka.core import polona
+
+    # 🔴 Ворота без мережі: сервер кличе їх на кожен внесок, а стара адреса
+    # Polona перекладається лише запитом до сайту. Тут вона лише впізнається.
+    known = [u for u in urls if not polona.old_id(u) and _ref_z_adresy(u)]
     if known:
         return (f"{lead}: посилання {known[0]} у пакеті є, але як джерело сканів "
                 "не записане (посилання з реєстру опису кажуть лише «справа там "
                 "є»). Якщо скани саме звідти — перепакуйте: nysh share pack "
                 f"<справа> --link \"{known[0]}\", і воно стане джерелом")
-    from nyshporka.core import polona
-
     stara = next((u for u in urls if polona.old_id(u)), None)
     if stara:
-        return (f"{lead}: стару адресу Polona {stara} не вдалося перекласти в нову "
-                "(сайт не відповів або не знає цього ID). Відкрийте її в браузері й "
-                "перепакуйте з адресою, на яку вона перейде: "
+        return (f"{lead}: стара адреса Polona {stara} у пакеті є, але джерелом "
+                "сканів не записана (при пакуванні сайт не переклав її в нову). "
+                "Відкрийте її в браузері й перепакуйте з адресою, на яку вона перейде: "
                 "--link \"https://polona.pl/preview/<uuid>\"")
     return (f"{lead}: посилання {urls[0]} у пакеті є, але цей хост не входить до "
             "відомих джерел сканів (FamilySearch, Wikimedia Commons, ARCHIUM, Skanoteka ПТГ, "
