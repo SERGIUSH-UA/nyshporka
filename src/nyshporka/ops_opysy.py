@@ -250,6 +250,8 @@ class InitArgs(BaseModel):
     title: str = Field(default="", description="установа фонду — для шаблону нормалізації")
     years: str = Field(default="", description="роки фонду — для шаблону нормалізації")
     language: str = Field(default="", description="мова опису (ru, uk…); порожньо — з тексту")
+    published: str = Field(default="", description="оригінал, опублікований за адресою (напр. "
+                                                   "djvu сайту архіву), якщо PDF — перетворення")
 
 
 class DirArgs(BaseModel):
@@ -289,7 +291,7 @@ def opysy_init(a: InitArgs) -> Envelope:
     try:
         pas = W.init(Path(a.dir), Path(a.pdf), repo=a.repo, fond=a.fond, opys=a.opys, url=a.url,
                      kind=a.kind, page_link=a.page_link, title=a.title, years=a.years,
-                     language=a.language)
+                     language=a.language, published=Path(a.published) if a.published else None)
     except (W.WorkdirError, ValueError, OSError) as exc:
         return _workdir_fail(exc)
     return ok({"dir": str(Path(a.dir).resolve()), "pages": pas["pages"], "source": pas["source"],
@@ -355,9 +357,16 @@ def opysy_norm(a: NormArgs) -> Envelope:
         return env
     if not W.table_path(d).exists():
         return fail("немає таблиці справ — `nysh opys table`")
-    mova = a.language or pas.get("language") or "ru"
+    mova = a.language or pas.get("language") or ""
+    if not mova:
+        # як у `build`: з прочитаного тексту (українська назва під `ru_modern` русифікувалась би)
+        from nyshporka.opysy import pack_dir as PD
+
+        voices = PD.run_voices(W.run_dir(d))
+        mova = PD.language(PD.pages_from_voices(voices, int(pas["pages"])), "")
     if mova not in NB.MOVY:
-        return fail(f"мова «{mova}»: шаблон нормалізації є для {', '.join(NB.MOVY)}")
+        return fail(f"мова опису «{mova or 'не визначено з тексту'}»: шаблон нормалізації є для "
+                    f"{', '.join(NB.MOVY)} — назви її (`--language`)")
     src = NB.describe_source(pas["repo"], pas["fond"], pas.get("title", ""), pas.get("years", ""), mova)
     got = NB.export(W.table_path(d), W.norm_dir(d), source=src, mova=mova,
                     have=NB.known(W.norm_path(d)))

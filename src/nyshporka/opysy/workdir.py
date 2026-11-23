@@ -19,6 +19,7 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 PASSPORT = "opys.json"
 #: Форми, які вміє цей шлях: рукопис на розграфленому від руки аркуші, читаний цілими сторінками.
@@ -77,9 +78,13 @@ def _source(url: str, kind: str, page_link: str, label: str) -> dict[str, Any]:
 
 def init(d: Path, pdf: Path, *, repo: str, fond: str, opys: str, url: str, kind: str = "",
          page_link: str = "", form: str = "hand_ruled", title: str = "", years: str = "",
-         language: str = "") -> dict[str, Any]:
-    """Завести робочу теку: паспорт джерела з локального PDF (sha256, сторінки) і адреси, де
-    цей самий файл опубліковано. Закритий для заливки фонд — відмова до будь-якого прогону."""
+         language: str = "", published: Path | None = None) -> dict[str, Any]:
+    """Завести робочу теку: паспорт джерела з локального PDF (сторінки) і адреси, де опис
+    опубліковано. Закритий для заливки фонд — відмова до будь-якого прогону.
+
+    sha256 джерела — того файлу, що лежить за адресою: `published` (оригінал, напр. djvu сайту
+    архіву, з якого зроблено PDF), інакше сам PDF. Адреса веде на файл іншого виду, ніж PDF, а
+    оригіналу не дали — відмова: інакше паспорт ніс би хеш чужого файлу."""
     import pypdfium2 as pdfium
 
     from nyshporka.opysy import gates as G
@@ -96,12 +101,19 @@ def init(d: Path, pdf: Path, *, repo: str, fond: str, opys: str, url: str, kind:
     if not url.strip():
         raise WorkdirError("потрібна адреса, де цей файл опубліковано (сайт архіву, Commons): "
                            "посилання справи в Супрязі веде туди")
+    orig = Path(published).resolve() if published else pdf
+    if not orig.is_file():
+        raise WorkdirError(f"немає файлу {orig}")
+    vyd = Path(unquote(urlparse(url.strip()).path)).suffix.lower()
+    if vyd and vyd != orig.suffix.lower():
+        raise WorkdirError(f"адреса веде на файл «{vyd}», а хеш рахувався б із «{orig.name}»: "
+                           f"дай оригінал, опублікований за адресою (`--published <файл{vyd}>`)")
     doc = pdfium.PdfDocument(str(pdf))
     try:
         n = len(doc)
     finally:
         doc.close()
-    src = {**_source(url, kind, page_link, ""), "sha256": _sha256(pdf)}
+    src = {**_source(url, kind, page_link, orig.name if published else ""), "sha256": _sha256(orig)}
     Source(**src, pages=n)  # перевірка схемою: вид, адреса, шаблон посилання
     repo_c, fond_c = G.repo_fond(repo, fond)
     pas = {"repo": repo_c, "fond": fond_c, "opys": str(opys).strip(), "form": form, "pdf": str(pdf),

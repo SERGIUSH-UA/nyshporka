@@ -348,6 +348,8 @@ def init_cmd(
     title: str = typer.Option("", "--title", help="установа фонду (для нормалізації)"),
     years: str = typer.Option("", "--years", help="роки фонду (для нормалізації)"),
     language: str = typer.Option("", "--language", help="мова опису; порожньо — з тексту"),
+    published: str = typer.Option("", "--published", help="оригінал за адресою (напр. djvu), "
+                                                          "якщо PDF — перетворення"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Завести робочу теку опису: паспорт джерела (sha256 PDF, сторінки, адреса публікації)."""
@@ -355,7 +357,8 @@ def init_cmd(
 
     env = O.call("opysy.init", {"dir": folder, "pdf": pdf, "repo": repo, "fond": fond,
                                 "opys": opys, "url": url, "kind": kind, "page_link": page_link,
-                                "title": title, "years": years, "language": language})
+                                "title": title, "years": years, "language": language,
+                                "published": published})
     if _answer(env, as_json):
         return
     d = env.data or {}

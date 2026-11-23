@@ -194,6 +194,13 @@ out["init_closed"] = run("init", tmp / "x", "--pdf", pdf, "--repo", "ЦДІАК"
                          "--opys", "1", "--url", "https://commons.wikimedia.org/wiki/File:X.pdf")
 out["init"] = run("init", d, "--pdf", pdf, "--repo", "ДАОО", "--fond", "445", "--opys", "9",
                   "--url", "https://upload.wikimedia.org/wikipedia/commons/a/ab/Opys_9.pdf")
+djvu = tmp / "0445_01.djvu"
+djvu.write_bytes(b"AT&TFORM djvu")
+out["init_djvu"] = run("init", tmp / "y", "--pdf", pdf, "--repo", "ДАОО", "--fond", "445", "--opys", "1",
+                       "--url", "https://archive.example/files/0445_01.djvu")
+out["init_published"] = run("init", tmp / "z", "--pdf", pdf, "--repo", "ДАОО", "--fond", "445",
+                            "--opys", "1", "--url", "https://archive.example/files/0445_01.djvu",
+                            "--published", djvu)
 out["pages"] = run("pages", d)
 # що дав би `nysh read <тека>/pages --out <тека>/run`: текст і рамки рядків
 run_d = d / "run"
@@ -209,7 +216,8 @@ for stem, lines in pages.items():
         json.dump({"boxes": [list(b[:4]) for b in lines], "size": [W, H]}, fh)
 out["table"] = run("table", d)
 out["build_unnorm"] = run("build", d)
-out["norm"] = run("norm", d)
+out["norm_nolang"] = run("norm", d)
+out["norm"] = run("norm", d, "--language", "ru")
 for b in out["norm"]["data"]["batches"]:
     titles = json.loads(Path(b).read_text(encoding="utf-8"))["titles"]
     Path(b).with_name(Path(b).stem + ".out.txt").write_text(json.dumps(titles, ensure_ascii=False),
@@ -244,9 +252,16 @@ def test_participant_flow_pdf_to_bundle(tmp_path: Path) -> None:
     src = o["init"]["data"]["source"]
     assert src["kind"] == "commons" and src["url"].startswith("https://commons.wikimedia.org/wiki/File:")
     assert src["page_link"].endswith("?page={page}") and len(src["sha256"]) == 64
+    assert not o["init_djvu"]["ok"] and "--published" in o["init_djvu"]["error"]
+    import hashlib
+
+    pub = o["init_published"]["data"]["source"]
+    assert pub["sha256"] == hashlib.sha256(b"AT&TFORM djvu").hexdigest() and pub["label"] == "0445_01.djvu"
+    assert pub["kind"] == "archive_site" and not pub["page_link"]
     assert o["pages"]["data"]["pages"] == 2 and "nysh read" in o["pages"]["data"]["next"]
     assert o["table"]["data"]["cases"] == 3, o["table"]
     assert o["build_unnorm"]["ok"]  # без нормалізації тека складається; ворота відмовлять у pack
+    assert not o["norm_nolang"]["ok"] and "--language" in o["norm_nolang"]["error"]
     assert len(o["norm"]["data"]["batches"]) == 1
     assert o["collect"]["data"]["rows"] == 3
     assert not o["build_no_model"]["ok"]
