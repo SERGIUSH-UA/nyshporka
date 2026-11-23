@@ -385,6 +385,13 @@ def _ref_z_adresy(url: str) -> dict[str, str] | None:
     vol = hungaricana.from_url(url)
     if vol is not None:
         return {"source": hungaricana.SOURCE, "ref": vol.ref, "url": vol.url}
+    # Polona (Biblioteka Narodowa): зйомка — об'єкт за UUID; стара адреса
+    # `item/…` перекладається API сайту, без відповіді зйомки не називає.
+    from nyshporka.core import polona
+
+    item = polona.resolve(url)
+    if item is not None:
+        return {"source": polona.SOURCE, "ref": item.ref, "url": item.url}
     return None
 
 

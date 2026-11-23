@@ -136,6 +136,17 @@ repositories:
     sites:
       web:
         url: https://www.bnrm.md
+  # Національна бібліотека Польщі: друковані джерельні видання й рукописи з
+  # Polona (джерело зйомки `polona:object:<uuid>`). Книги в Супрязі вже є
+  # («Źródła dziejowe», 23.11.2026) і стояли під голим кодом.
+  BN:
+    label: BN
+    name: Biblioteka Narodowa
+    country: PL
+    sites:
+      web:
+        url: https://polona.pl
+    aliases: [Biblioteka Narodowa, Національна бібліотека Польщі]
   AGAD:
     label: AGAD
     # Шифра Метрики Коронної: zespół 4, seria 1 (Księgi Wpisów), справа — номер
