@@ -136,8 +136,9 @@ def search_cmd(
     d = env.data or {}
     zbihy = d.get("zbihy")
     if zbihy is None:
-        console.print(f"збігів {_e(d.get('zbihiv'))}: "
+        console.print(f"збігів {_skilky(d)}: "
                       + ", ".join(f"{_e(k)} — {_e(v)}" for k, v in (d.get("za_opysamy") or {}).items()))
+        _nepovno(d)
         console.print(_e(d.get("uviity") or ""))
         return
     if not zbihy:
@@ -152,6 +153,8 @@ def search_cmd(
         else:
             console.print("у описах Супряги не знайшлось")
         return
+    console.print(f"збігів {_skilky(d)} · сторінка {_e(d.get('storinka'))} з {_e(d.get('storinok'))}")
+    _nepovno(d)
     for z in zbihy:
         mistse = f"кадр {_e(z.get('page'))}" + (
             "" if z.get("half") is None else (", ліва" if z.get("half") == 0 else ", права"))
@@ -167,6 +170,36 @@ def search_cmd(
         console.print(f"   {mistse} · {_e(z.get('posylannia'))}")
         for p in z.get("pravyla") or []:
             console.print(f"   [dim]за правилом: {_e(p)}[/dim]")
+    inshi = d.get("inshi_chytannia") or {}
+    if inshi:
+        # Опис у видачі — одним читанням (найсвіжішим зі збігом); інші читання того самого
+        # опису теж мають збіг, і людина має знати, що їх можна відкрити на картці опису.
+        console.print("ще в інших читаннях того самого опису: "
+                      + ", ".join(f"{_e(k)} — {_e(v)}" for k, v in inshi.items()))
+
+
+def _skilky(d: dict[str, Any]) -> str:
+    """Скільки збігів. Понад стелю сервер рахує лише перші знайдені, тож число — «понад N»,
+    а не точне (1000 на частому слові читалось як «рівно тисяча»)."""
+    if d.get("nepovno"):
+        return f"понад {_e(d.get('stelia'))}"
+    return _e(d.get("zbihiv"))
+
+
+def _nepovno(d: dict[str, Any]) -> None:
+    """Видача неповна: що саме неповне і що з цим робити."""
+    if not d.get("nepovno"):
+        return
+    if d.get("nepovno_de") == "riadky":
+        console.print("[yellow]•[/yellow] справ-збігів понад стелю: показано перші знайдені, а не "
+                      "найближчі; видача не гортається, текст сторінок не шукався")
+    else:
+        console.print("[yellow]•[/yellow] сторінок-збігів понад стелю: справи — усі, сторінки "
+                      "не перелічено")
+    chasti = d.get("chasti") or []
+    if chasti:
+        console.print(f"[yellow]•[/yellow] надто часті слова: {_e(', '.join(chasti))} — "
+                      "уточніть запит (прізвище, село) або обмежте --repo / --fond")
 
 
 @app.command("names")

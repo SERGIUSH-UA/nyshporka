@@ -134,3 +134,46 @@ def test_rule_list_prints_the_state(monkeypatch: pytest.MonkeyPatch) -> None:
     got = CliRunner().invoke(C.app, ["rule", "list", "ДАОО", "445"])
     assert got.exit_code == 0, got.output
     assert "(vidkocheno)" in got.output and "Феодора → Федор" in got.output
+
+
+def _search_out(monkeypatch: pytest.MonkeyPatch, data: dict) -> str:
+    from typer.testing import CliRunner
+
+    from nyshporka import ops as O
+    from nyshporka.core.envelope import ok
+    from nyshporka.opysy import cli as C
+
+    monkeypatch.setattr(O, "call", lambda name, args: ok(data))
+    got = CliRunner().invoke(C.app, ["search", "Дело"])
+    assert got.exit_code == 0, got.output
+    return " ".join(got.output.split())
+
+
+_ZBIH = {"shyfra": "ДАОО 445-1", "riadok": True, "no": 7, "letter": "", "title_raw": "Дело о краже",
+         "page": 3, "half": None, "posylannia": "https://example/3", "pravyla": []}
+
+
+def test_search_over_ceiling_is_not_an_exact_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Понад стелю число — «понад N», не «1000»; часті слова названо з порадою уточнити."""
+    out = _search_out(monkeypatch, {
+        "zbihy": [_ZBIH], "zbihiv": 1000, "nepovno": True, "nepovno_de": "riadky",
+        "stelia": 1000, "chasti": ["Дело"], "storinka": 1, "storinok": 1})
+    assert "збігів понад 1000" in out and "збігів 1000" not in out
+    assert "видача не гортається" in out
+    assert "надто часті слова: Дело" in out
+
+
+def test_search_pages_over_ceiling_and_other_readings(monkeypatch: pytest.MonkeyPatch) -> None:
+    out = _search_out(monkeypatch, {
+        "zbihy": [_ZBIH], "zbihiv": 1040, "nepovno": True, "nepovno_de": "storinky",
+        "stelia": 1000, "chasti": [], "storinka": 1, "storinok": 21,
+        "inshi_chytannia": {"ДАОО 445-1": 1}})
+    assert "сторінок-збігів понад стелю" in out and "надто часті" not in out
+    assert "ще в інших читаннях того самого опису: ДАОО 445-1 — 1" in out
+
+
+def test_search_complete_prints_exact_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    out = _search_out(monkeypatch, {
+        "zbihy": [_ZBIH], "zbihiv": 12, "nepovno": False, "stelia": 1000, "chasti": [],
+        "storinka": 1, "storinok": 1})
+    assert "збігів 12 · сторінка 1 з 1" in out and "понад" not in out
