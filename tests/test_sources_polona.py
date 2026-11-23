@@ -30,7 +30,7 @@ def _bez_merezhi(monkeypatch: pytest.MonkeyPatch) -> None:
     f"https://polona.pl/item-view/{UUID}?page=3",
     f"polona.pl/preview/{UUID.upper()}",
     f"https://www.polona.pl/item-view/{UUID}/",
-    f"https://polona.pl/item/proza-polska-wieku-xvi,MTM0ODA1Mzc4/0/#info:metadata",
+    "https://polona.pl/item/proza-polska-wieku-xvi,MTM0ODA1Mzc4/0/#info:metadata",
     f"https://polona.pl/item/{OLD}/5",
 ])
 def test_odyn_obiekt_z_usikh_form(url: str) -> None:
