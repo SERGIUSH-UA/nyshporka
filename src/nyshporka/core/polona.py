@@ -20,7 +20,7 @@ import binascii
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from urllib.parse import unquote, urlparse
+from urllib.parse import ParseResult, unquote, urlparse
 
 NAME = "Polona"
 SOURCE = "polona"
@@ -52,7 +52,7 @@ class Item:
         return f"{BASE}/preview/{self.uuid}"
 
 
-def _parse(url: str):
+def _parse(url: str) -> ParseResult | None:
     raw = str(url or "").strip()
     if not raw:
         return None
