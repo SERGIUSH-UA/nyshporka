@@ -177,3 +177,16 @@ def test_search_complete_prints_exact_count(monkeypatch: pytest.MonkeyPatch) -> 
         "zbihy": [_ZBIH], "zbihiv": 12, "nepovno": False, "stelia": 1000, "chasti": [],
         "storinka": 1, "storinok": 1})
     assert "збігів 12 · сторінка 1 з 1" in out and "понад" not in out
+
+
+def test_search_shortened_expansion_and_indexing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Індекс слів: «неповно» через обрізане розгортання — своє пояснення, не «сторінок понад
+    стелю»; «ще індексується» видно й тоді, коли збігів немає."""
+    out = _search_out(monkeypatch, {
+        "zbihy": [_ZBIH], "zbihiv": 40, "nepovno": True, "nepovno_de": "rozghortannia",
+        "stelia": 1000, "chasti": ["Дело"], "storinka": 1, "storinok": 1, "indeksuietsia": 2})
+    assert "узято лише найближчі написання" in out and "сторінок-збігів" not in out
+    assert "ще індексується описів: 2" in out
+    out = _search_out(monkeypatch, {"zbihy": [], "zbihiv": 0, "nepovno": False, "stelia": 1000,
+                                    "chasti": [], "indeksuietsia": 1, "bez_zbihu": []})
+    assert "ще індексується описів: 1" in out

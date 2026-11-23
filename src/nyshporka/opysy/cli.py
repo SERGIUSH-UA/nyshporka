@@ -142,6 +142,7 @@ def search_cmd(
         console.print(_e(d.get("uviity") or ""))
         return
     if not zbihy:
+        _nepovno(d)
         bez = d.get("bez_zbihu") or []
         if bez:
             console.print(f"у описах Супряги не знайшлось (немає ніде: {_e(', '.join(bez))})")
@@ -187,12 +188,21 @@ def _skilky(d: dict[str, Any]) -> str:
 
 
 def _nepovno(d: dict[str, Any]) -> None:
-    """Видача неповна: що саме неповне і що з цим робити."""
+    """Видача неповна: що саме неповне і що з цим робити. Плюс «ще індексується» — описи,
+    яких пошук ще не бачить (індексація на сервері — у фоні після заливки)."""
+    n = int(d.get("indeksuietsia") or 0)
+    if n:
+        console.print(f"[yellow]•[/yellow] ще індексується описів: {n} — їх у видачі немає, "
+                      "повторіть пошук за хвилину")
     if not d.get("nepovno"):
         return
-    if d.get("nepovno_de") == "riadky":
+    de = d.get("nepovno_de")
+    if de == "riadky":
         console.print("[yellow]•[/yellow] справ-збігів понад стелю: показано перші знайдені, а не "
                       "найближчі; видача не гортається, текст сторінок не шукався")
+    elif de == "rozghortannia":
+        console.print("[yellow]•[/yellow] коротке часте слово: узято лише найближчі написання, "
+                      "далекі в видачу не ввійшли — обмежте --fond (у фонді пошук повний)")
     else:
         console.print("[yellow]•[/yellow] сторінок-збігів понад стелю: справи — усі, сторінки "
                       "не перелічено")
