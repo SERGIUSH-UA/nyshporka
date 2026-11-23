@@ -235,9 +235,18 @@ def _no_refs_text(m: Manifest) -> str:
                 "не записане (посилання з реєстру опису кажуть лише «справа там "
                 "є»). Якщо скани саме звідти — перепакуйте: nysh share pack "
                 f"<справа> --link \"{known[0]}\", і воно стане джерелом")
+    from nyshporka.core import polona
+
+    stara = next((u for u in urls if polona.old_id(u)), None)
+    if stara:
+        return (f"{lead}: стару адресу Polona {stara} не вдалося перекласти в нову "
+                "(сайт не відповів або не знає цього ID). Відкрийте її в браузері й "
+                "перепакуйте з адресою, на яку вона перейде: "
+                "--link \"https://polona.pl/preview/<uuid>\"")
     return (f"{lead}: посилання {urls[0]} у пакеті є, але цей хост не входить до "
             "відомих джерел сканів (FamilySearch, Wikimedia Commons, ARCHIUM, Skanoteka ПТГ, "
-            "Szukaj w Archiwach, AGAD Metryka Koronna і метричні зеспіли, Hungaricana). "
+            "Szukaj w Archiwach, AGAD Metryka Koronna і метричні зеспіли, Hungaricana, "
+            "Polona). "
             "Адреса лишиться в пакеті, а в каталозі пулу скани не покажуться; "
             "інше посилання на той самий хост цього не змінить")
 
