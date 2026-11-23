@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import functools
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -89,7 +90,10 @@ def old_id(url: str) -> str | None:
     return dec if dec.isdigit() else None
 
 
+@functools.lru_cache(maxsize=256)
 def _fetch_new_id(old: str) -> str | None:
+    """Один запит на ID за процес. Пряме `httpx`, а не `sources.http`: це не
+    качання з архіву, а одиничний запит при пакуванні — темп і проксі тут ні до чого."""
     import httpx
 
     r = httpx.get(NEW_ID_API.format(old=old), timeout=15.0,
