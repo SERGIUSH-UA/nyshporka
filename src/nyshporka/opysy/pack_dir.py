@@ -90,9 +90,9 @@ def language(pages: list[dict[str, Any]], default: str) -> str:
     tekst = " ".join(v for p in pages for v in p["voices"].values()).lower()
     uk = sum(tekst.count(c) for c in "іїєґ")
     ru = sum(tekst.count(c) for c in "ыэъё")
-    if uk > 2 * ru and uk >= 20:
+    if uk > 2 * ru and uk >= 5:
         return "uk"
-    if ru > 2 * uk and ru >= 20:
+    if ru > 2 * uk and ru >= 5:
         return "ru"
     return default
 
