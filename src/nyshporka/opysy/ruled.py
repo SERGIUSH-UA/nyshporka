@@ -22,8 +22,6 @@
 from __future__ import annotations
 
 import csv
-import gzip
-import json
 import re
 from pathlib import Path
 from typing import Any
@@ -46,17 +44,17 @@ TITLE_START = re.compile(r"^\s*(Д[ѣеъ]л[оа]\b(?!\s*-)|То\s?[жтш]е|�
 
 def page_lines(run: Path, stem: str) -> tuple[list[tuple[int, int, int, int, str]], tuple[int, int]] | None:
     """Рядки сторінки прогону: [(x0, y0, x1, y1, текст)] і розмір кадру; None — немає чи битий."""
-    tx, lj = run / f"{stem}.txt", run / f"{stem}.lines.json.gz"
-    if not (tx.exists() and lj.exists()):
+    from nyshporka.htr.layout import load_geometry
+
+    tx = run / f"{stem}.txt"
+    if not tx.exists():
+        return None
+    # немає рамок чи обірваний запис (бокс пішов в offline посеред заходу) — сторінка
+    # пропускається й рахується в `bad_pages`, а не валить увесь опис
+    d = load_geometry(run, stem)
+    if d is None:
         return None
     texts = tx.read_text(encoding="utf-8").split("\n")
-    try:
-        with gzip.open(lj, "rt", encoding="utf-8") as fh:
-            d = json.load(fh)
-    except (OSError, EOFError, ValueError):
-        # обірваний запис рамок (бокс пішов в offline посеред заходу) — сторінка
-        # пропускається й рахується в `bad_pages`, а не валить увесь опис
-        return None
     out = []
     for i, b in enumerate(d.get("boxes") or []):
         if b and i < len(texts) and texts[i].strip():

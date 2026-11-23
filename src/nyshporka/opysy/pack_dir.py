@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import csv
-import gzip
 import json
 import re
 from pathlib import Path
@@ -49,11 +48,11 @@ def run_voices(main: Path) -> list[tuple[str, Path]]:
 
 def page_size(run: Path, stem: str) -> tuple[int, int] | None:
     """[ширина, висота] кадру, як його бачив рушій (`ruled.page_lines` бере те саме)."""
-    p = Path(run) / f"{stem}.lines.json.gz"
-    if not p.exists():
+    from nyshporka.htr.layout import load_geometry
+
+    d = load_geometry(Path(run), stem)
+    if d is None:
         return None
-    with gzip.open(p, "rt", encoding="utf-8") as fh:
-        d = json.load(fh)
     w, h = d.get("size") or (d.get("width"), d.get("height"))
     return (int(w), int(h)) if w and h else None
 

@@ -164,3 +164,92 @@ def test_number_start_letter_only_lowercase_attached() -> None:
     assert m and (m.group(1), m.group(2), m.group(3)) == ("136", "а", "Тоже")
     m = RU.NUM_START.match("12аренды")  # слово, а не літера номера
     assert m and m.group(2) is None and m.group(3) == "аренды"
+
+
+_FLOW = r"""
+import gzip, json, sys
+from pathlib import Path
+from PIL import Image
+from typer.testing import CliRunner
+from nyshporka.cli import app
+
+tmp = Path(sys.argv[1])
+pdf = tmp / "opys.pdf"
+Image.new("RGB", (1000, 1400), "white").save(pdf, save_all=True,
+                                             append_images=[Image.new("RGB", (1000, 1400), "white")])
+d = tmp / "opys"
+r = CliRunner()
+out = {}
+
+
+def run(*args):
+    res = r.invoke(app, ["opys", *map(str, args), "--json"])
+    try:
+        return json.loads(res.output)
+    except ValueError:
+        return {"ok": False, "raw": res.output[-3000:]}
+
+
+out["init_closed"] = run("init", tmp / "x", "--pdf", pdf, "--repo", "ЦДІАК", "--fond", "442",
+                         "--opys", "1", "--url", "https://commons.wikimedia.org/wiki/File:X.pdf")
+out["init"] = run("init", d, "--pdf", pdf, "--repo", "ДАОО", "--fond", "445", "--opys", "9",
+                  "--url", "https://upload.wikimedia.org/wikipedia/commons/a/ab/Opys_9.pdf")
+out["pages"] = run("pages", d)
+# що дав би `nysh read <тека>/pages --out <тека>/run`: текст і рамки рядків
+run_d = d / "run"
+run_d.mkdir()
+(run_d / "_htr_meta.json").write_text(json.dumps({"model": "pysar_cyr_v31.pt"}), encoding="utf-8")
+W, H = Image.open(d / "pages" / "0001.jpg").size
+pages = {"0001": [(200, 300, 1500, 360, "1. Дело о помещике Иванове"), (300, 380, 1500, 440, "и его крестьянах"),
+                  (200, 900, 1500, 960, "2. Дело о наследстве")],
+         "0002": [(200, 300, 1500, 360, "3. Дело об откупе")]}
+for stem, lines in pages.items():
+    (run_d / f"{stem}.txt").write_text("\n".join(t for *_, t in lines), encoding="utf-8")
+    with gzip.open(run_d / f"{stem}.lines.json.gz", "wt", encoding="utf-8") as fh:
+        json.dump({"boxes": [list(b[:4]) for b in lines], "size": [W, H]}, fh)
+out["table"] = run("table", d)
+out["build_unnorm"] = run("build", d)
+out["norm"] = run("norm", d)
+for b in out["norm"]["data"]["batches"]:
+    titles = json.loads(Path(b).read_text(encoding="utf-8"))["titles"]
+    Path(b).with_name(Path(b).stem + ".out.txt").write_text(json.dumps(titles, ensure_ascii=False),
+                                                           encoding="utf-8")
+out["collect"] = run("norm", d, "--collect")
+out["build_no_model"] = run("build", d)
+out["build"] = run("build", d, "--norm-model", "agent-model")
+out["pack"] = run("pack", d / "paket", "--out", d)
+print("FLOW" + json.dumps(out, ensure_ascii=False))
+"""
+
+
+def test_participant_flow_pdf_to_bundle(tmp_path: Path) -> None:
+    """Учасник з увімкненим флагом: PDF → паспорт → сторінки → (прочитане) → таблиця →
+    нормалізація агентом → робоча тека → пакет, що пройшов ворота. Закритий фонд — відмова
+    на першому кроці."""
+    import os
+    import subprocess
+    import sys
+
+    from nyshporka import features
+
+    env = {**os.environ, features.OPYSY: "1", "PYTHONIOENCODING": "utf-8",
+           "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)}
+    got = subprocess.run([sys.executable, "-c", _FLOW, str(tmp_path)], env=env, capture_output=True,
+                         text=True, encoding="utf-8", timeout=180)
+    line = next((x for x in got.stdout.splitlines() if x.startswith("FLOW")), "")
+    assert line, got.stderr[-3000:]
+    o = json.loads(line[len("FLOW"):])
+    assert not o["init_closed"]["ok"]
+    assert o["init"]["ok"], o["init"]
+    src = o["init"]["data"]["source"]
+    assert src["kind"] == "commons" and src["url"].startswith("https://commons.wikimedia.org/wiki/File:")
+    assert src["page_link"].endswith("?page={page}") and len(src["sha256"]) == 64
+    assert o["pages"]["data"]["pages"] == 2 and "nysh read" in o["pages"]["data"]["next"]
+    assert o["table"]["data"]["cases"] == 3, o["table"]
+    assert o["build_unnorm"]["ok"]  # без нормалізації тека складається; ворота відмовлять у pack
+    assert len(o["norm"]["data"]["batches"]) == 1
+    assert o["collect"]["data"]["rows"] == 3
+    assert not o["build_no_model"]["ok"]
+    assert o["build"]["data"]["normalized"] == 3
+    assert o["pack"]["ok"], o["pack"]
+    assert o["pack"]["data"]["file"].endswith(".nyshopys")

@@ -324,3 +324,120 @@ def rule_undo_cmd(
     if _answer(env, as_json):
         return
     _print_rule(env.data or {})
+
+
+# ── Читання опису: init → pages → (nysh read) → table → norm → build → pack → push ─────────
+
+
+def _next(d: dict[str, Any]) -> None:
+    if d.get("next"):
+        console.print(f"далі: [bold]{_e(d['next'])}[/bold]")
+
+
+@app.command("init")
+def init_cmd(
+    folder: str = typer.Argument(..., help="робоча тека опису (буде створена)"),
+    pdf: str = typer.Option(..., "--pdf", help="PDF опису — той самий файл, що опубліковано"),
+    repo: str = typer.Option(..., "--repo", help="архів: ЦДІАК, ДАОО…"),
+    fond: str = typer.Option(..., "--fond", help="фонд"),
+    opys: str = typer.Option(..., "--opys", help="номер опису"),
+    url: str = typer.Option(..., "--url", help="де файл опубліковано: сайт архіву чи Commons"),
+    kind: str = typer.Option("", "--kind", help="commons / archive_site / public_other; "
+                                                "порожньо — з адреси"),
+    page_link: str = typer.Option("", "--page-link", help="шаблон посилання на сторінку з {page}"),
+    title: str = typer.Option("", "--title", help="установа фонду (для нормалізації)"),
+    years: str = typer.Option("", "--years", help="роки фонду (для нормалізації)"),
+    language: str = typer.Option("", "--language", help="мова опису; порожньо — з тексту"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Завести робочу теку опису: паспорт джерела (sha256 PDF, сторінки, адреса публікації)."""
+    from nyshporka import ops as O
+
+    env = O.call("opysy.init", {"dir": folder, "pdf": pdf, "repo": repo, "fond": fond,
+                                "opys": opys, "url": url, "kind": kind, "page_link": page_link,
+                                "title": title, "years": years, "language": language})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    console.print(f"тека {_e(d.get('dir'))} · сторінок {_e(d.get('pages'))} · "
+                  f"джерело {_e((d.get('source') or {}).get('url'))}")
+    _next(d)
+
+
+@app.command("pages")
+def pages_cmd(
+    folder: str = typer.Argument(..., help="робоча тека опису"),
+    force: bool = typer.Option(False, "--force", help="перерендерити готові сторінки"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Сторінки опису з PDF у JPEG під читання цілими сторінками."""
+    from nyshporka import ops as O
+
+    env = O.call("opysy.pages", {"dir": folder, "force": force})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    console.print(f"сторінок {_e(d.get('pages'))} → {_e(d.get('dir'))}"
+                  + (f" ({_e(d['skip'])})" if d.get("skip") else ""))
+    _next(d)
+
+
+@app.command("table")
+def table_cmd(
+    folder: str = typer.Argument(..., help="робоча тека опису"),
+    title_starts: bool = typer.Option(True, "--title-starts/--no-title-starts",
+                                      help="початок справи ще й за словом «Дело», «Тоже»"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Таблиця справ опису з прочитаних цілих сторінок."""
+    from nyshporka import ops as O
+
+    env = O.call("opysy.table", {"dir": folder, "title_starts": title_starts})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    console.print(f"сторінок {_e(d.get('pages'))} (битих {_e(d.get('bad_pages'))}) · справ "
+                  f"{_e(d.get('cases'))} · № прочитано {_e(d.get('read'))}, підтверджено "
+                  f"{_e(d.get('confirmed'))} → {_e(d.get('file'))}")
+    _next(d)
+
+
+@app.command("norm")
+def norm_cmd(
+    folder: str = typer.Argument(..., help="робоча тека опису"),
+    collect: bool = typer.Option(False, "--collect", help="прийняти відповіді batch_NNN.out.txt"),
+    language: str = typer.Option("", "--language", help="ru чи uk; порожньо — з паспорта"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Нормалізація назв: пачки запитів для агента або прийом його відповідей."""
+    from nyshporka import ops as O
+
+    env = O.call("opysy.norm", {"dir": folder, "collect": collect, "language": language})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    if collect:
+        console.print(f"нормалізовано {_e(d.get('rows'))} назв → {_e(d.get('file'))}")
+    else:
+        console.print(f"пачок {_e(len(d.get('batches') or []))} у {_e(d.get('dir'))}")
+        console.print(_e(d.get("how")))
+    _next(d)
+
+
+@app.command("build")
+def build_cmd(
+    folder: str = typer.Argument(..., help="робоча тека опису"),
+    norm_model: str = typer.Option("", "--norm-model", help="модель, що нормалізувала назви"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Робоча тека пакета з прочитаного, таблиці й нормалізації — під `nysh opys pack`."""
+    from nyshporka import ops as O
+
+    env = O.call("opysy.build", {"dir": folder, "norm_model": norm_model})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    console.print(f"сторінок {_e(d.get('pages'))} · справ {_e(d.get('rows'))}, нормалізовано "
+                  f"{_e(d.get('normalized'))} · голоси {_e(', '.join(d.get('engines') or []))} → "
+                  f"{_e(d.get('dir'))}")
+    _next(d)

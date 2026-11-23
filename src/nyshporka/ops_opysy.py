@@ -231,3 +231,152 @@ def opysy_rule_undo(a: RuleUndoArgs) -> Envelope:
     from nyshporka.opysy import remote as R
 
     return _remote(R.rule_undo, a.id, reason=a.reason, base=a.base)
+
+
+# ── Читання опису учасником: скан → сторінки → прочитане → таблиця → нормалізація → пакет ────
+
+
+class InitArgs(BaseModel):
+    dir: str = Field(description="робоча тека опису (буде створена)")
+    pdf: str = Field(description="PDF опису на диску — той самий файл, що опубліковано")
+    repo: str = Field(description="архів: ЦДІАК, ДАОО…")
+    fond: str = Field(description="фонд")
+    opys: str = Field(description="номер опису")
+    url: str = Field(description="де цей файл опубліковано: сайт архіву чи Commons")
+    kind: str = Field(default="", description="commons / archive_site / public_other; "
+                                              "порожньо — з адреси")
+    page_link: str = Field(default="", description="шаблон посилання на сторінку з {page}; "
+                                                   "Commons — сам")
+    title: str = Field(default="", description="установа фонду — для шаблону нормалізації")
+    years: str = Field(default="", description="роки фонду — для шаблону нормалізації")
+    language: str = Field(default="", description="мова опису (ru, uk…); порожньо — з тексту")
+
+
+class DirArgs(BaseModel):
+    dir: str = Field(description="робоча тека опису (`nysh opys init`)")
+
+
+class PagesArgs(DirArgs):
+    force: bool = Field(default=False, description="перерендерити готові сторінки")
+
+
+class TableArgs(DirArgs):
+    title_starts: bool = Field(default=True, description="початок справи ще й за словом «Дело», "
+                                                         "«Тоже», коли № не прочитано числом")
+
+
+class NormArgs(DirArgs):
+    collect: bool = Field(default=False, description="прийняти відповіді batch_NNN.out.txt")
+    language: str = Field(default="", description="мова назв: ru (вихід — сучасний правопис) чи "
+                                                  "uk (як в оригіналі); порожньо — з паспорта")
+
+
+class BuildArgs(DirArgs):
+    norm_model: str = Field(default="", description="модель, що нормалізувала назви (назва моделі "
+                                                    "агента); потрібна, якщо нормалізовано")
+
+
+def _workdir_fail(exc: Exception) -> Envelope:
+    return fail(str(exc))
+
+
+@op("opysy.init", summary="Завести робочу теку опису: паспорт джерела з PDF і адреси публікації",
+    args=InitArgs, mutates=True, section=SECTION, tier="rare",
+    when="почати читати опис фонду, скачаний із сайту архіву чи Commons")
+def opysy_init(a: InitArgs) -> Envelope:
+    from nyshporka.opysy import workdir as W
+
+    try:
+        pas = W.init(Path(a.dir), Path(a.pdf), repo=a.repo, fond=a.fond, opys=a.opys, url=a.url,
+                     kind=a.kind, page_link=a.page_link, title=a.title, years=a.years,
+                     language=a.language)
+    except (W.WorkdirError, ValueError, OSError) as exc:
+        return _workdir_fail(exc)
+    return ok({"dir": str(Path(a.dir).resolve()), "pages": pas["pages"], "source": pas["source"],
+               "next": f"nysh opys pages {a.dir}"})
+
+
+@op("opysy.pages", summary="Сторінки опису з PDF у JPEG під читання цілими сторінками",
+    args=PagesArgs, mutates=True, long=True, section=SECTION, tier="rare",
+    when="після `nysh opys init`, перед `nysh read`")
+def opysy_pages(a: PagesArgs) -> Envelope:
+    from nyshporka.opysy import pages as PG
+    from nyshporka.opysy import workdir as W
+
+    try:
+        pas = W.load(Path(a.dir))
+        res = PG.render(Path(pas["pdf"]), W.pages_dir(Path(a.dir)), force=a.force)
+    except (W.WorkdirError, OSError) as exc:
+        return _workdir_fail(exc)
+    d = Path(a.dir)
+    return ok({**res, "dir": str(W.pages_dir(d)),
+               "next": f"nysh read {W.pages_dir(d)} --out {W.run_dir(d)}"})
+
+
+@op("opysy.table", summary="Таблиця справ опису з прочитаних цілих сторінок",
+    args=TableArgs, mutates=True, section=SECTION, tier="rare",
+    when="сторінки опису прочитано (`nysh read … --out <тека>/run`)")
+def opysy_table(a: TableArgs) -> Envelope:
+    from nyshporka.opysy import ruled as RU
+    from nyshporka.opysy import workdir as W
+
+    d = Path(a.dir)
+    try:
+        W.load(d)
+    except W.WorkdirError as exc:
+        return _workdir_fail(exc)
+    if not any(W.run_dir(d).glob("*.txt")):
+        return fail(f"немає прочитаних сторінок — `nysh read {W.pages_dir(d)} --out {W.run_dir(d)}`")
+    res = RU.build(W.run_dir(d), W.table_path(d), title_starts=a.title_starts)
+    return ok({**res, "file": str(W.table_path(d)), "next": f"nysh opys norm {a.dir}"})
+
+
+@op("opysy.norm", summary="Нормалізація назв справ опису: пачки запитів агентові або прийом "
+                          "відповідей",
+    args=NormArgs, mutates=True, section=SECTION, tier="rare",
+    when="таблицю справ складено; рукопис без нормалізації ворота не пропускають")
+def opysy_norm(a: NormArgs) -> Envelope:
+    from nyshporka.opysy import norm_batches as NB
+    from nyshporka.opysy import workdir as W
+
+    d = Path(a.dir)
+    try:
+        pas = W.load(d)
+    except W.WorkdirError as exc:
+        return _workdir_fail(exc)
+    if a.collect:
+        res = NB.collect(W.norm_dir(d), W.norm_path(d))
+        env = ok({**res, "next": f"nysh opys build {a.dir} --norm-model <модель>"})
+        if res["missing"]:
+            env.warn("norm_missing", f"без відповіді {len(res['missing'])} пачок: "
+                                     f"{', '.join(res['missing'][:5])}")
+        for b in res["bad"]:
+            env.warn("norm_bad", b, level=ALERT)
+        return env
+    if not W.table_path(d).exists():
+        return fail("немає таблиці справ — `nysh opys table`")
+    mova = a.language or pas.get("language") or "ru"
+    if mova not in NB.MOVY:
+        return fail(f"мова «{mova}»: шаблон нормалізації є для {', '.join(NB.MOVY)}")
+    src = NB.describe_source(pas["repo"], pas["fond"], pas.get("title", ""), pas.get("years", ""), mova)
+    got = NB.export(W.table_path(d), W.norm_dir(d), source=src, mova=mova,
+                    have=NB.known(W.norm_path(d)))
+    return ok({"batches": [str(p) for p in got], "dir": str(W.norm_dir(d)),
+               "how": "кожну пачку batch_NNN.json віддати моделі (поле `request` — увесь запит); "
+                      "відповідь — лише JSON-масив тієї самої довжини — у batch_NNN.out.txt поруч",
+               "next": f"nysh opys norm {a.dir} --collect"})
+
+
+@op("opysy.build", summary="Робоча тека пакета опису з прочитаного, таблиці й нормалізації",
+    args=BuildArgs, mutates=True, section=SECTION, tier="rare",
+    when="таблицю складено й назви нормалізовано — перед `nysh opys pack`")
+def opysy_build(a: BuildArgs) -> Envelope:
+    from nyshporka import __version__
+    from nyshporka.opysy import workdir as W
+
+    d = Path(a.dir)
+    try:
+        res = W.build(d, norm_model=a.norm_model, tool=f"nyshporka {__version__}")
+    except (W.WorkdirError, ValueError) as exc:
+        return _workdir_fail(exc)
+    return ok({**res, "next": f"nysh opys pack {W.paket_dir(d)} --out {d}"})
