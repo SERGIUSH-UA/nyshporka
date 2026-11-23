@@ -154,3 +154,13 @@ def test_render_pages_from_pdf(tmp_path: Path) -> None:
     im = Image.open(tmp_path / "pages" / "0001.jpg")
     assert im.size[1] == 300 and im.mode == "L"
     assert PG.render(pdf, tmp_path / "pages")["skip"]
+
+
+def test_number_start_letter_only_lowercase_attached() -> None:
+    """Літера номера — мала одразу за цифрами; велика літера після пробілу — початок назви."""
+    m = RU.NUM_START.match("13 Дело о наследстве")
+    assert m and (m.group(1), m.group(2), m.group(3)) == ("13", None, "Дело о наследстве")
+    m = RU.NUM_START.match("136а. Тоже")
+    assert m and (m.group(1), m.group(2), m.group(3)) == ("136", "а", "Тоже")
+    m = RU.NUM_START.match("12аренды")  # слово, а не літера номера
+    assert m and m.group(2) is None and m.group(3) == "аренды"
