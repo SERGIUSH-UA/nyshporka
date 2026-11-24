@@ -204,3 +204,20 @@ def test_vorota_obmin_pryvatne_dzherelo_vidmova() -> None:
     verdict = G.check(mm, pp, rr)
     assert not verdict.passed
     assert any(d["rule"] == "norm_exchange_private" for d in verdict.refusal_details)
+
+
+def test_manifest_bez_obminu_bez_polia(tmp_path: Path, server: dict[str, Any],
+                                       chytannia: list[Path]) -> None:
+    """Пакет без `--na-obmin` не несе `normalization_exchange` (сервер зі старим піном пакета
+    відкидав би кожен такий маніфест); з прапорцем — несе."""
+    from nyshporka.opysy import bundle as B
+
+    d = tmp_path / "opys"
+    _read(d, pdf=str(_pdf(tmp_path)), repo="ДАОО", fond="445", opys="9", url=URL, language="ru")
+    for b in Path(d / "norm").glob("batch_*.json"):
+        titles = json.loads(b.read_text(encoding="utf-8"))["titles"]
+        b.with_name(b.stem + ".out.txt").write_text(json.dumps(titles, ensure_ascii=False),
+                                                    encoding="utf-8")
+    assert OO.opysy_push(OO.PushArgs(file=str(d), norm_model="m")).ok
+    contents, _ = B.verify(server["pushed"][-1].read_bytes())
+    assert "normalization_exchange" not in contents.manifest

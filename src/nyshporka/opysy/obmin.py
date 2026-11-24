@@ -46,7 +46,9 @@ def zapysaty(d: Path, zavdannia: dict[str, Any]) -> list[Path]:
         keys = [{"rk": r["rk"], "page": r.get("page"), "posylannia": r.get("posylannia", "")}
                 for r in riadky[off:off + len(batch)]]
         p.write_text(json.dumps({"request": NZ.request(source, batch, styl), "titles": batch,
-                                 "keys": keys, "n": len(batch)}, ensure_ascii=False, indent=1),
+                                 "keys": keys, "n": len(batch),
+                                 "dzherelo": zavdannia.get("dzherelo", "")},
+                                ensure_ascii=False, indent=1),
                      encoding="utf-8", newline="\n")
         out.append(p)
     return out

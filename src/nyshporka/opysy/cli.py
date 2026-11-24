@@ -119,6 +119,9 @@ def push_cmd(
     console.print(f"[green]прийнято[/green] {_e(d.get('shyfra'))} · внесок {_e(d.get('vnesok'))} · "
                   f"сторінок {_e(s.get('pages_read'))}/{_e(s.get('pages_total'))} · "
                   f"справ {_e(s.get('rows'))}")
+    if d.get("obmin"):
+        console.print("  нормалізацію назв віддано на обмін — її візьме інший учасник "
+                      "(`nysh opys obmin`)")
     for w in d.get("warnings") or []:
         console.print(f"[yellow]•[/yellow] {_e(w.get('text'))}")
 
@@ -522,6 +525,8 @@ def vziaty_cmd(folder: str = typer.Argument(..., help="тека, куди пок
     d = env.data or {}
     console.print(f"узято {_e(d.get('shyfra'))} до {_e(d.get('do'))} · назв {_e(d.get('nazv'))} · "
                   f"пачок {_e(d.get('pachok'))}")
+    if d.get("dzherelo"):
+        console.print(f"  цифровий опис: {_e(d.get('dzherelo'))}")
     console.print(f"  [muted]{_e(d.get('how'))}[/muted]")
     _next(d)
 
