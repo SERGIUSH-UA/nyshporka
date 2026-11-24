@@ -34,7 +34,7 @@ _TRUE = frozenset({"1", "true", "yes", "on", "так"})
 HIDDEN: dict[str, dict[str, tuple[str, ...]]] = {
     OPYSY: {"cli": ("opys",), "ops": ("opysy.build", "opysy.check", "opysy.init", "opysy.names",
                                       "opysy.norm", "opysy.pack", "opysy.pages", "opysy.policy",
-                                      "opysy.push", "opysy.rule_add", "opysy.rule_undo",
+                                      "opysy.push", "opysy.read", "opysy.rule_add", "opysy.rule_undo",
                                       "opysy.rules", "opysy.search", "opysy.table")},
 }
 

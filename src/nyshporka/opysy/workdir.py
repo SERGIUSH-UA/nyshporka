@@ -94,7 +94,7 @@ def init(d: Path, pdf: Path, *, repo: str, fond: str, opys: str, url: str, kind:
         raise WorkdirError(f"форма «{form}» поки не підтримується; уміємо: {', '.join(FORMS)}")
     why = G.excluded(repo, fond)
     if why:
-        raise WorkdirError(f"{repo} ф.{fond}: {why}")
+        raise WorkdirError(f"{repo} ф.{fond}: {why} (подробиці: nysh opys policy {repo} {fond})")
     pdf = Path(pdf).resolve()
     if not pdf.is_file():
         raise WorkdirError(f"немає файлу {pdf}")

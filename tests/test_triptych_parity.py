@@ -89,7 +89,13 @@ def test_the_numbers_in_the_agent_docs_are_the_real_ones():
 
     text = (Path(__file__).resolve().parents[1]
             / "docs" / "agents" / "surface.md").read_text(encoding="utf-8")
-    total, agent = len(O.all_ops()), len(O.for_agent())
+    # Сховане флагом (`features.HIDDEN`) у документації не рахується: вона описує застосунок із
+    # вимкненим флагом, а тест сусіднього модуля міг імпортувати операції в цей самий процес.
+    from nyshporka import features
+
+    skhovani = features.hidden_now("ops")
+    total = len([o for o in O.all_ops() if o.name not in skhovani])
+    agent = len([o for o in O.for_agent() if o.name not in skhovani])
     want = {
         r"Операцій у реєстрі \*\*(\d+)\*\*": total,
         r"Стартовий перелік \(`nysh ops --agent`\) — \*\*(\d+)\*\*": agent,

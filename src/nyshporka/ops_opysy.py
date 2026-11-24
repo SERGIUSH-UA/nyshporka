@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -28,7 +28,10 @@ class PackArgs(BaseModel):
 
 
 class PushArgs(BaseModel):
-    file: str = Field(description="пакет .nyshopys (`nysh opys pack`)")
+    file: str = Field(description="робоча тека опису (`nysh opys read`) або готовий пакет "
+                                  ".nyshopys")
+    norm_model: str = Field(default="", description="модель, що нормалізувала назви (для теки; "
+                                                    "один раз — далі пам'ятається)")
     base: str = Field(default="", description="адреса пулу; порожньо — типова")
 
 
@@ -138,26 +141,45 @@ def opysy_pack(a: PackArgs) -> Envelope:
     return _verdict_env(data, rep.verdict)
 
 
-@op("opysy.policy", summary="Чи приймає Супряга описи цього фонду (без мережі)",
+@op("opysy.policy", summary="Чи приймає Супряга описи цього фонду (сервер; без мережі — "
+                            "вбудований перелік)",
     args=PolicyArgs, section=SECTION, tier="rare",
     when="до прогону опису — щоб не читати фонд, закритий для заливки")
 def opysy_policy(a: PolicyArgs) -> Envelope:
+    """Спершу сервер: його перелік ширший за вбудований і каже, куди вести людину (`link`);
+    сервер недоступний чи описи там ще закриті — вбудований перелік пакета."""
     from nyshporka.opysy import gates as G
+    from nyshporka.opysy import remote as R
 
+    base = {"repo": G.repo_code(a.repo), "fond": a.fond.strip()}
+    try:
+        d = R.policy(a.repo, a.fond)
+    except Exception:
+        d = None
+    if isinstance(d, dict) and "open" in d:
+        return ok({**base, "open": bool(d["open"]), "why": str(d.get("why") or ""),
+                   "link": str(d.get("link") or ""), "dzherelo": "server"})
     why = G.excluded(a.repo, a.fond)
-    return ok({"repo": G.repo_code(a.repo), "fond": a.fond.strip(), "open": not why,
-               "why": why})
+    return ok({**base, "open": not why, "why": why, "dzherelo": "paket"})
 
 
 @op("opysy.push", summary="Залити пакет опису в Супрягу",
     args=PushArgs, mutates=True, long=True, section=SECTION, tier="rare",
     when="віддати спакований опис фонду (.nyshopys) у Супрягу")
 def opysy_push(a: PushArgs) -> Envelope:
+    """Тека опису — усе за раз, як `nysh share push`: прийняти відповіді нормалізації, скласти
+    робочу теку пакета, ворота, `.nyshopys`, заливка. Файл пакета — лише заливка."""
     from nyshporka.opysy import remote as R
     from nyshporka.share.upload import UploadError
 
+    path = Path(a.file)
+    if path.is_dir():
+        zibrano = _zibraty_paket(path, a.norm_model)
+        if not zibrano.ok:
+            return zibrano
+        path = Path(zibrano.data["file"])
     try:
-        got = R.push(Path(a.file), base=a.base)
+        got = R.push(path, base=a.base)
     except (UploadError, OSError) as exc:
         env = fail(str(exc))
         for d in getattr(exc, "details", None) or []:
@@ -265,6 +287,8 @@ class PagesArgs(DirArgs):
 class TableArgs(DirArgs):
     title_starts: bool = Field(default=True, description="початок справи ще й за словом «Дело», "
                                                          "«Тоже», коли № не прочитано числом")
+    dobudova: bool = Field(default=True, description="добудувати номер, у якого рушій загубив "
+                                                     "першу цифру чи прочитав пляму виправлення")
 
 
 class NormArgs(DirArgs):
@@ -329,7 +353,7 @@ def opysy_table(a: TableArgs) -> Envelope:
         return _workdir_fail(exc)
     if not any(W.run_dir(d).glob("*.txt")):
         return fail(f"немає прочитаних сторінок — `nysh read {W.pages_dir(d)} --out {W.run_dir(d)}`")
-    res = RU.build(W.run_dir(d), W.table_path(d), title_starts=a.title_starts)
+    res = RU.build(W.run_dir(d), W.table_path(d), title_starts=a.title_starts, dobudova=a.dobudova)
     return ok({**res, "file": str(W.table_path(d)), "next": f"nysh opys norm {a.dir}"})
 
 
@@ -374,6 +398,156 @@ def opysy_norm(a: NormArgs) -> Envelope:
                "how": "кожну пачку batch_NNN.json віддати моделі (поле `request` — увесь запит); "
                       "відповідь — лише JSON-масив тієї самої довжини — у batch_NNN.out.txt поруч",
                "next": f"nysh opys norm {a.dir} --collect"})
+
+
+class ReadOpysArgs(BaseModel):
+    dir: str = Field(description="робоча тека опису (буде створена; повтор — продовжує з місця)")
+    pdf: str = Field(default="", description="PDF опису — для нової теки: той самий файл, що "
+                                             "опубліковано")
+    repo: str = Field(default="", description="архів: ЦДІАК, ДАОО… (для нової теки)")
+    fond: str = Field(default="", description="фонд (для нової теки)")
+    opys: str = Field(default="", description="номер опису (для нової теки)")
+    url: str = Field(default="", description="де файл опубліковано: сайт архіву чи Commons")
+    published: str = Field(default="", description="оригінал за адресою (djvu сайту архіву), якщо "
+                                                   "PDF — перетворення")
+    title: str = Field(default="", description="установа фонду — для шаблону нормалізації")
+    years: str = Field(default="", description="роки фонду — для шаблону нормалізації")
+    language: str = Field(default="", description="мова опису (ru, uk); порожньо — з тексту")
+    script: Literal["", "latin", "cyrillic"] = Field(default="", description="письмо; порожньо — "
+                                                                           "як вирішить `nysh read`")
+    form: Literal["hand_ruled", "typed"] = Field(default="hand_ruled",
+                                                 description="вигляд опису: рукопис на розграфлених "
+                                                             "аркушах чи машинопис")
+
+
+def _chytaty(pages: Path, run: Path, script: str) -> int:
+    """`nysh read <тека>/pages --out <тека>/run` тим самим інтерпретатором: прогрес — на екран,
+    як у звичайному прогоні; продовжує з місця, де читання обірвалось."""
+    import subprocess
+    import sys
+
+    cmd = [sys.executable, "-m", "nyshporka", "read", str(pages), "--out", str(run)]
+    if script:
+        cmd += ["--script", script]
+    return subprocess.run(cmd, check=False).returncode
+
+
+def _prochytano(d: Path) -> tuple[int, int]:
+    from nyshporka.opysy import workdir as W
+
+    run = W.run_dir(d)
+    return (len(list(W.pages_dir(d).glob("*.jpg"))) if W.pages_dir(d).exists() else 0,
+            len(list(run.glob("*.txt"))) if run.exists() else 0)
+
+
+@op("opysy.read", summary="Прочитати опис фонду: паспорт, сторінки, читання, таблиця справ і "
+                          "пачки нормалізації — одним кроком",
+    args=ReadOpysArgs, mutates=True, long=True, section=SECTION, tier="rare",
+    when="є PDF опису фонду й адреса публікації; далі — нормалізація й `nysh opys push`")
+def opysy_read(a: ReadOpysArgs) -> Envelope:
+    """Увесь шлях до нормалізації, як `nysh read` для справи. Кожен крок, зроблений раніше,
+    пропускається: перерваний прогін — та сама команда ще раз."""
+    from nyshporka.opysy import workdir as W
+
+    if a.form != "hand_ruled":
+        return fail("машинописні описи учасник поки не читає: розбір таблиці рушія друку ще "
+                    "звіряється на других описах. Зараз — лише рукопис на розграфлених аркушах")
+    d = Path(a.dir)
+    kroky: list[str] = []
+    try:
+        W.load(d)
+    except W.WorkdirError:
+        brak = [k for k, v in (("--pdf", a.pdf), ("--repo", a.repo), ("--fond", a.fond),
+                               ("--opys", a.opys), ("--url", a.url)) if not v]
+        if brak:
+            return fail(f"нова тека опису — потрібні {', '.join(brak)}")
+        pol = opysy_policy(PolicyArgs(repo=a.repo, fond=a.fond))
+        if pol.ok and not pol.data.get("open"):
+            why = pol.data.get("why") or "описи цього фонду Супряга не приймає"
+            return fail(f"{a.repo} ф.{a.fond}: {why}")
+        env = opysy_init(InitArgs(dir=a.dir, pdf=a.pdf, repo=a.repo, fond=a.fond, opys=a.opys,
+                                  url=a.url, title=a.title, years=a.years, language=a.language,
+                                  published=a.published))
+        if not env.ok:
+            return env
+        kroky.append("паспорт")
+    vsi, gotovi = _prochytano(d)
+    if not vsi:
+        env = opysy_pages(PagesArgs(dir=a.dir))
+        if not env.ok:
+            return env
+        kroky.append("сторінки")
+        vsi, gotovi = _prochytano(d)
+    if gotovi < vsi:
+        rc = _chytaty(W.pages_dir(d), W.run_dir(d), a.script)
+        vsi, gotovi = _prochytano(d)
+        if gotovi < vsi:
+            return fail(f"прочитано {gotovi} з {vsi} сторінок (код {rc}) — та сама команда "
+                        f"продовжить з місця")
+        kroky.append("читання")
+    env = opysy_table(TableArgs(dir=a.dir))
+    if not env.ok:
+        return env
+    tablytsia = env.data
+    kroky.append("таблиця")
+    env = opysy_norm(NormArgs(dir=a.dir, language=a.language))
+    if not env.ok:
+        return env
+    pachky = env.data.get("batches") or []
+    nastupne = (f"агент нормалізує пачки в {env.data.get('dir')}, тоді "
+                f"`nysh opys push {a.dir} --norm-model <модель>`") if pachky \
+        else f"nysh opys push {a.dir}"
+    return ok({"dir": str(d.resolve()), "zrobleno": kroky, "storinok": vsi,
+               "sprav": tablytsia.get("cases"), "pidtverdzheno_nomeriv": tablytsia.get("confirmed"),
+               "pachok_normalizatsii": len(pachky), "norm_dir": env.data.get("dir"),
+               "how": env.data.get("how"), "next": nastupne})
+
+
+def _zibraty_paket(d: Path, norm_model: str) -> Envelope:
+    """Тека опису → `.nyshopys` поруч: відповіді нормалізації, робоча тека пакета, ворота.
+    Модель нормалізації називається один раз і пам'ятається в теці."""
+    from nyshporka import __version__
+    from nyshporka.opysy import bundle as B
+    from nyshporka.opysy import norm_batches as NB
+    from nyshporka.opysy import workdir as W
+
+    try:
+        W.load(d)
+    except W.WorkdirError as exc:
+        return _workdir_fail(exc)
+    zapys = W.norm_dir(d) / "model.txt"
+    if norm_model.strip():
+        zapys.parent.mkdir(parents=True, exist_ok=True)
+        zapys.write_text(norm_model.strip(), encoding="utf-8")
+    model = norm_model.strip() or (zapys.read_text(encoding="utf-8").strip()
+                                   if zapys.exists() else "")
+    poperedzhennia: list[tuple[str, str]] = []
+    if W.norm_dir(d).exists() and any(W.norm_dir(d).glob("batch_*.out.txt")):
+        res = NB.collect(W.norm_dir(d), W.norm_path(d))
+        if res["missing"]:
+            poperedzhennia.append(("norm_missing", f"без відповіді {len(res['missing'])} пачок: "
+                                                   f"{', '.join(res['missing'][:5])}"))
+        poperedzhennia += [("norm_bad", b) for b in res["bad"]]
+        if not model:
+            return fail("назви нормалізовано — назвіть модель, що нормалізувала: "
+                        f"`nysh opys push {d} --norm-model <модель>` (один раз)")
+    try:
+        W.build(d, norm_model=model, tool=f"nyshporka {__version__}")
+    except (W.WorkdirError, ValueError) as exc:
+        return _workdir_fail(exc)
+    out = d / (d.resolve().name + B.SUFFIX)
+    try:
+        rep = B.pack(W.paket_dir(d), out, tool=f"nyshporka {__version__}")
+    except B.BundleError as exc:
+        return fail(str(exc))
+    env = _verdict_env({"file": str(rep.file) if rep.file else "", "summary": rep.summary},
+                       rep.verdict)
+    for code, text in poperedzhennia:
+        if code == "norm_bad":
+            env.warn(code, text, level=ALERT)
+        else:
+            env.warn(code, text)
+    return env
 
 
 @op("opysy.build", summary="Робоча тека пакета опису з прочитаного, таблиці й нормалізації",

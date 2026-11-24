@@ -68,7 +68,57 @@ def chain(reads: list[tuple[int, int]], look: int = 80) -> list[tuple[int, int]]
     return out[::-1]
 
 
-def number(recs: list[dict[str, Any]], *, page_aware: bool = False) -> list[dict[str, Any]]:
+def dobuduvaty(reads: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Прочитані номери, що не лягли в ланцюжок, — добудовані до найближчого очікуваного.
+
+    Рушій губить першу цифру номера на краю колонки («313» там, де в описі 1313) і плутає
+    цифру, затерту виправленням («1920» замість 1120). Сирий ланцюжок такий номер відкидає, а
+    рахунок справ від попереднього якоря зсувається (ДАОО ф.445 оп.1, кадр 77: 1309 замість
+    1313). Очікуване — від найближчого якоря ланцюжка (Δрядок); добудова:
+    - **старші розряди** до 2–3-цифрового номера, у вікні ±10 (тризначний) чи ±5 (двозначний);
+    - **одна хибна цифра не в кінці** 4–5-цифрового номера, у вікні ±10, якщо кандидат один.
+    Результат лишається між сусідніми якорями; однозначні номери не чіпаються. Підтвердження
+    дає вже `number()`: добудований номер — якір, лише коли сусід іде з тим самим кроком.
+    Замір 24.11.2026 на ф.445: підтверджених 45 % → 59 %.
+    """
+    from bisect import bisect_left
+
+    ch = chain(reads)
+    idx = [i for i, _ in ch]
+    anch = dict(ch)
+    out: list[tuple[int, int]] = []
+    for i, n in reads:
+        if i in anch or n < 10:
+            out.append((i, n))
+            continue
+        k = bisect_left(idx, i)
+        prev = ch[k - 1] if k > 0 else None
+        nxt = ch[k] if k < len(ch) else None
+        if prev is None and nxt is None:
+            out.append((i, n))
+            continue
+        e = prev[1] + (i - prev[0]) if prev else nxt[1] - (nxt[0] - i)  # type: ignore[index]
+        if n >= 1000:
+            s = str(n)
+            cands = [c for c in range(e - 10, e + 11) if c > 0 and len(str(c)) == len(s)
+                     and sum(x != y for x, y in zip(str(c), s, strict=True)) == 1
+                     and str(c)[-1] == s[-1]]
+            c, ok = (cands[0], True) if len(cands) == 1 else (n, False)
+        else:
+            base = 10 ** len(str(n))
+            m = round((e - n) / base)
+            c = n + m * base
+            ok = m >= 1 and abs(c - e) <= (10 if base >= 1000 else 5)
+        if ok and prev and c <= prev[1]:
+            ok = False
+        if ok and nxt and c >= nxt[1]:
+            ok = False
+        out.append((i, c) if ok else (i, n))
+    return out
+
+
+def number(recs: list[dict[str, Any]], *, page_aware: bool = False,
+           dobudova: bool = False) -> list[dict[str, Any]]:
     """Номери за якорями. Повертає записи (частину зайвих злито з попередніми).
 
     `page_aware` — коли рядків між якорями МЕНШЕ, ніж бракує номерів, рядки на сторінці
@@ -76,8 +126,13 @@ def number(recs: list[dict[str, Any]], *, page_aware: bool = False) -> list[dict
     нього; пропущені номери лягають діапазоном (`no_span`) на межу сторінок. Без цього
     недорахунок унизу попередньої сторінки зсував усю верхівку наступної (ДАОО ф.445 оп.1,
     кадр 47: 839–853 замість 846–859 за паспортом, 22.11.2026).
+
+    `dobudova` — прочитані номери, що рвуть ланцюжок, спершу добудовуються (`dobuduvaty`);
+    поле `no_read` лишається як прочитано.
     """
     reads = [(i, n) for i, r in enumerate(recs) for n in [num(r["no_read"])] if n and 0 < n < 20000]
+    if dobudova:
+        reads = dobuduvaty(reads)
     ch = chain(reads)
     for r in recs:
         r.update(no="", no_src="", confirmed="", no_span="")

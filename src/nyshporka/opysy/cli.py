@@ -94,14 +94,16 @@ def policy_cmd(
 
 @app.command("push")
 def push_cmd(
-    file: str = typer.Argument(..., help="пакет .nyshopys"),
+    file: str = typer.Argument(..., help="робоча тека опису (`nysh opys read`) або пакет .nyshopys"),
+    norm_model: str = typer.Option("", "--norm-model",
+                                   help="модель, що нормалізувала назви (один раз; далі пам'ятається)"),
     base: str = typer.Option("", "--base", help="адреса пулу; порожньо — типова"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
-    """Залити спакований опис у Супрягу: ворота тут, потім — на сервері наново."""
+    """Віддати опис у Супрягу. Тека — усе за раз: відповіді нормалізації, пакет, ворота, заливка."""
     from nyshporka import ops as O
 
-    env = O.call("opysy.push", {"file": file, "base": base})
+    env = O.call("opysy.push", {"file": file, "norm_model": norm_model, "base": base})
     if _answer(env, as_json):
         return
     d = env.data or {}
@@ -332,6 +334,43 @@ def rule_undo_cmd(
 def _next(d: dict[str, Any]) -> None:
     if d.get("next"):
         console.print(f"далі: [bold]{_e(d['next'])}[/bold]")
+
+
+@app.command("read")
+def read_cmd(
+    folder: str = typer.Argument(..., help="робоча тека опису (повтор — продовжує з місця)"),
+    pdf: str = typer.Option("", "--pdf", help="PDF опису — той самий файл, що опубліковано"),
+    repo: str = typer.Option("", "--repo", help="архів: ЦДІАК, ДАОО…"),
+    fond: str = typer.Option("", "--fond", help="фонд"),
+    opys: str = typer.Option("", "--opys", help="номер опису"),
+    url: str = typer.Option("", "--url", help="де файл опубліковано: сайт архіву чи Commons"),
+    published: str = typer.Option("", "--published", help="оригінал за адресою (напр. djvu), "
+                                                          "якщо PDF — перетворення"),
+    title: str = typer.Option("", "--title", help="установа фонду (для нормалізації)"),
+    years: str = typer.Option("", "--years", help="роки фонду (для нормалізації)"),
+    language: str = typer.Option("", "--language", help="мова опису; порожньо — з тексту"),
+    script: str = typer.Option("", "--script", help="latin / cyrillic; порожньо — як вирішить читання"),
+    form: str = typer.Option("hand_ruled", "--form", help="hand_ruled (рукопис) · typed (машинопис)"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Прочитати опис фонду одним кроком: паспорт, сторінки, читання, таблиця справ, пачки
+    нормалізації. Перервалось — та сама команда продовжить."""
+    from nyshporka import ops as O
+
+    env = O.call("opysy.read", {"dir": folder, "pdf": pdf, "repo": repo, "fond": fond,
+                                "opys": opys, "url": url, "published": published, "title": title,
+                                "years": years, "language": language, "script": script,
+                                "form": form})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    console.print(f"[green]прочитано[/green] {_e(d.get('dir'))} · сторінок {_e(d.get('storinok'))} · "
+                  f"справ {_e(d.get('sprav'))} · номерів підтверджено "
+                  f"{_e(d.get('pidtverdzheno_nomeriv'))} · пачок нормалізації "
+                  f"{_e(d.get('pachok_normalizatsii'))}")
+    if d.get("pachok_normalizatsii"):
+        console.print(f"  [muted]{_e(d.get('how'))}[/muted]")
+    _next(d)
 
 
 @app.command("init")
