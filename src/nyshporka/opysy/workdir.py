@@ -133,7 +133,8 @@ def load(d: Path) -> dict[str, Any]:
     return pas
 
 
-def build(d: Path, *, norm_model: str = "", tool: str = "nysh opys build") -> dict[str, Any]:
+def build(d: Path, *, norm_model: str = "", tool: str = "nysh opys build",
+          na_obmin: bool = False) -> dict[str, Any]:
     """Робоча тека пакета `<тека>/paket` з прочитаного, таблиці й нормалізації."""
     from nyshporka.opysy import norm_batches as NB
     from nyshporka.opysy import pack_dir as PD
@@ -160,7 +161,7 @@ def build(d: Path, *, norm_model: str = "", tool: str = "nysh opys build") -> di
                     engines=[n for n, _ in voices],
                     # рукопис — `low`: нормалізація тоді обов'язкова воротами
                     quality={"klass": "low", "form": pas["form"]}, tool=tool,
-                    norm_model=norm_model, normalized=normalized)
+                    norm_model=norm_model, normalized=normalized, na_obmin=na_obmin)
     work = PD.write(paket_dir(d), m, pages, rows)
     return {"dir": str(work), "pages": len(pages), "rows": len(rows),
             "normalized": sum(1 for r in rows if r["title_norm"]), "engines": m["engines"]}

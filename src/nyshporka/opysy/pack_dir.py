@@ -158,7 +158,8 @@ def rows_from_table(tsv: Path, sizes: dict[str, tuple[int, int]], spread: bool,
 
 def manifest(*, repo: str, fond: str, opys: str, language: str, source: dict[str, Any], pages: int,
              spread: bool, engines: list[str], quality: dict[str, Any], tool: str,
-             norm_model: str = "", normalized: bool = False) -> dict[str, Any]:
+             norm_model: str = "", normalized: bool = False,
+             na_obmin: bool = False) -> dict[str, Any]:
     """Маніфест пакета. `norm_model` — модель, що нормалізувала назви (її називає агент учасника);
     з нормалізованими рядками без моделі маніфест не складається."""
     from nyshporka.opysy.schema import SCHEMA
@@ -174,6 +175,8 @@ def manifest(*, repo: str, fond: str, opys: str, language: str, source: dict[str
         from nyshporka.opysy import normalize as NZ
 
         m["normalization"] = {"prompt": NZ.PROMPT_ID, "version": NZ.VERSION, "model": norm_model}
+    if na_obmin:
+        m["normalization_exchange"] = True
     return m
 
 

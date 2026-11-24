@@ -166,3 +166,41 @@ def test_porozhnia_storinka_bez_tekstu_ne_blokuie(tmp_path: Path, server: dict[s
                 language="ru")
     assert env.ok, env
     assert "читання" in env.data["zrobleno"] and env.data["sprav"] == 2
+
+
+def test_push_na_obmin_bez_normalizatsii(tmp_path: Path, server: dict[str, Any],
+                                         chytannia: list[Path]) -> None:
+    """Автор без ресурсів: рукопис без нормалізації не проходить ворота, з `--na-obmin` —
+    проходить із позначкою, і маніфест несе прапорець обміну; підказка `read` називає обидва шляхи."""
+    from nyshporka.opysy import bundle as B
+
+    d = tmp_path / "opys"
+    env = _read(d, pdf=str(_pdf(tmp_path)), repo="ДАОО", fond="445", opys="9", url=URL,
+                language="ru")
+    assert env.ok and "--na-obmin" in env.data["next"] and "--norm-model" in env.data["next"]
+    bez = OO.opysy_push(OO.PushArgs(file=str(d)))
+    assert not bez.ok
+    assert any(w.code == "norm_missing" and "--na-obmin" in w.text for w in bez.warnings)
+    got = OO.opysy_push(OO.PushArgs(file=str(d), na_obmin=True))
+    assert got.ok, got
+    contents, verdict = B.verify(server["pushed"][-1].read_bytes())
+    assert verdict.passed and contents.manifest["normalization_exchange"] is True
+    assert any(code == "norm_exchange" for code, _ in verdict.warnings)
+
+
+def test_vorota_obmin_pryvatne_dzherelo_vidmova() -> None:
+    from nyshporka.opysy import gates as G
+
+    rows = [{"regions": [{"page": 1, "y0": 0.1, "y1": 0.2}], "no_raw": "1", "no": 1,
+             "no_status": "chain", "title_raw": "Дело о помещике Иванове"}]
+    pages = [{"page": 1, "voices": {"pysar": "Дело о помещике Иванове"}}]
+    m = {"schema": 2, "repo": "ДАОО", "fond": "445", "opys": "9", "language": "ru",
+         "sources": [{"kind": "private", "url": "", "sha256": "0" * 64, "pages": 1,
+                      "spread": False, "label": "фото"}],
+         "engines": ["pysar_v31"], "license": "CC-BY-NC-SA-4.0",
+         "quality": {"klass": "low", "form": "hand_ruled"}, "normalization_exchange": True}
+    mm, pp, rr, parsed = G.parse(m, pages, rows)
+    assert mm is not None, parsed.refusals
+    verdict = G.check(mm, pp, rr)
+    assert not verdict.passed
+    assert any(d["rule"] == "norm_exchange_private" for d in verdict.refusal_details)

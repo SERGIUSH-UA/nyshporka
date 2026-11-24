@@ -34,6 +34,8 @@ class PushArgs(BaseModel):
                                                     "один раз — далі пам'ятається)")
     znovu: bool = Field(default=False, description="залити, навіть якщо цей самий пакет із теки вже "
                                                    "залито")
+    na_obmin: bool = Field(default=False, description="віддати нормалізацію назв на обмін: опис "
+                                                      "приймається без неї, нормалізує будь-хто")
     base: str = Field(default="", description="адреса пулу; порожньо — типова")
 
 
@@ -181,7 +183,7 @@ def opysy_push(a: PushArgs) -> Envelope:
     slid: Path | None = None
     sha = ""
     if path.is_dir():
-        zibrano = _zibraty_paket(path, a.norm_model)
+        zibrano = _zibraty_paket(path, a.norm_model, na_obmin=a.na_obmin)
         if not zibrano.ok:
             return zibrano
         slid = path / "zalyto.json"
@@ -529,7 +531,8 @@ def opysy_read(a: ReadOpysArgs) -> Envelope:
     # чекають відповіді — і нарізані щойно, і ті, що лишились з попереднього запуску
     pachky = NB.bez_vidpovidi(W.norm_dir(d))
     nastupne = (f"агент нормалізує пачки в {env.data.get('dir')}, тоді "
-                f"`nysh opys push {a.dir} --norm-model <модель>`") if pachky \
+                f"`nysh opys push {a.dir} --norm-model <модель>`; немає агента чи ресурсів — "
+                f"`nysh opys push {a.dir} --na-obmin` (нормалізує обмін у Супрязі)") if pachky \
         else f"nysh opys push {a.dir}"
     return ok({"dir": str(d.resolve()), "zrobleno": kroky, "storinok": vsi,
                "sprav": tablytsia.get("cases"), "pidtverdzheno_nomeriv": tablytsia.get("confirmed"),
@@ -538,7 +541,7 @@ def opysy_read(a: ReadOpysArgs) -> Envelope:
                "norm_dir": env.data.get("dir"), "how": env.data.get("how"), "next": nastupne})
 
 
-def _zibraty_paket(d: Path, norm_model: str) -> Envelope:
+def _zibraty_paket(d: Path, norm_model: str, *, na_obmin: bool = False) -> Envelope:
     """Тека опису → `.nyshopys` поруч: відповіді нормалізації, робоча тека пакета, ворота.
     Модель нормалізації називається один раз і пам'ятається в теці."""
     from nyshporka import __version__
@@ -567,7 +570,7 @@ def _zibraty_paket(d: Path, norm_model: str) -> Envelope:
             return fail("назви нормалізовано — назвіть модель, що нормалізувала: "
                         f"`nysh opys push {d} --norm-model <модель>` (один раз)")
     try:
-        W.build(d, norm_model=model, tool=f"nyshporka {__version__}")
+        W.build(d, norm_model=model, tool=f"nyshporka {__version__}", na_obmin=na_obmin)
     except (W.WorkdirError, ValueError) as exc:
         return _workdir_fail(exc)
     out = d / (d.resolve().name + B.SUFFIX)

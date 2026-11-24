@@ -349,11 +349,19 @@ def _gate_quality(m: Manifest, rows: list[Row], v: Verdict) -> None:
     if normed and m.normalization is None:
         v.refuse("назви нормалізовано, але не сказано чим (normalization: prompt, version, "
                  "model)", rule="norm_unnamed", field="normalization")
+    if m.normalization_exchange and any(s.kind == "private" for s in m.sources):
+        v.refuse("опис зі сканом лише в автора не віддається на обмін нормалізацією: без "
+                 "посилання на цифровий опис нормалізатор не звірить назву — нормалізуйте самі",
+                 rule="norm_exchange_private", field="normalization_exchange")
     if q.klass == "low" and rows:
         share = normed / len(rows)
-        if share < NORM_MIN_SHARE_LOW:
+        if share < NORM_MIN_SHARE_LOW and m.normalization_exchange:
+            v.warn("norm_exchange", f"нормалізовано {share:.0%} рядків — решту назв нормалізує "
+                                    "обмін у Супрязі; до того вони шукаються сирими")
+        elif share < NORM_MIN_SHARE_LOW:
             v.refuse(f"опис низької якості нормалізований на {share:.0%} рядків (треба "
-                     f"≥ {NORM_MIN_SHARE_LOW:.0%}): без нормалізації назви не шукаються",
+                     f"≥ {NORM_MIN_SHARE_LOW:.0%}): нормалізуйте назви своїм агентом або віддайте "
+                     "нормалізацію на обмін (`nysh opys push <тека> --na-obmin`)",
                      rule="norm_missing", field="rows.title_norm")
 
 
