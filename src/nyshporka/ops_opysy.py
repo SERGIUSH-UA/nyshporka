@@ -645,6 +645,7 @@ def opysy_vziaty(a: VziatyArgs) -> Envelope:
     z = env.data
     nove = OB.zapysaty(Path(a.dir), z)
     return ok({"obmin": z.get("obmin"), "shyfra": z.get("shyfra"), "do": z.get("do"),
+               "dzherelo": z.get("dzherelo", ""),
                "nazv": len(z.get("riadky") or []), "pachok": OB.bez_vidpovidi(Path(a.dir)),
                "novykh_pachok": len(nove), "dir": str(Path(a.dir).resolve()),
                "how": "кожну пачку batch_NNN.json віддати моделі (поле `request` — увесь запит); "

@@ -167,10 +167,20 @@ def _dumps_jsonl(items: list[dict[str, Any]]) -> bytes:
                    for x in items).encode("utf-8")
 
 
+def manifest_json(m: Manifest) -> dict[str, Any]:
+    """Маніфест для пакета. 🔴 `normalization_exchange` — лише коли увімкнено: сервер зі старим
+    піном пакета (схема `extra="forbid"`) інакше відкидав би КОЖЕН пакет нового клієнта, а
+    маніфести без обміну лишаються байт у байт такими, як до поля (25.11.2026)."""
+    d = m.model_dump(by_alias=True, mode="json")
+    if not d.get("normalization_exchange"):
+        d.pop("normalization_exchange", None)
+    return d
+
+
 def encode(m: Manifest, pages: list[Page], rows: list[Row]) -> bytes:
     """Відтворювані байти пакета: сталий порядок, `mtime` нуль, gzip без часу."""
     members = {
-        MANIFEST: json.dumps(m.model_dump(by_alias=True, mode="json"), ensure_ascii=False,
+        MANIFEST: json.dumps(manifest_json(m), ensure_ascii=False,
                              sort_keys=True, indent=1).encode("utf-8"),
         PAGES: _dumps_jsonl([p.model_dump(mode="json") for p in pages]),
         ROWS: _dumps_jsonl([r.model_dump(mode="json") for r in rows]),

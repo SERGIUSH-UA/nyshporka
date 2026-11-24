@@ -37,7 +37,8 @@ def push(path: Path, *, base: str = "") -> dict[str, Any]:
     return {"vnesok": done.get("vnesok", reg["vnesok"]), "opys": reg.get("opys"),
             "shyfra": reg.get("shyfra") or done.get("shyfra"),
             "duplicate": bool(done.get("duplicate")), "summary": done.get("summary") or {},
-            "warnings": done.get("warnings") or [], "text": done.get("text", "")}
+            "warnings": done.get("warnings") or [], "text": done.get("text", ""),
+            "obmin": bool(done.get("obmin"))}
 
 
 def search(q: str, *, repo: str = "", fond: str = "", limit: int = 50,
