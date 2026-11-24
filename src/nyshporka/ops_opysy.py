@@ -443,8 +443,7 @@ def _prochytano(d: Path) -> tuple[int, int]:
 @op("opysy.read", summary="Прочитати опис фонду: паспорт, сторінки, читання, таблиця справ і "
                           "пачки нормалізації — одним кроком",
     args=ReadOpysArgs, mutates=True, long=True, section=SECTION, tier="rare",
-    when="є PDF опису фонду й адреса, де його опубліковано; далі — нормалізація агентом і "
-         "`nysh opys push <тека>`")
+    when="є PDF опису фонду й адреса публікації; далі — нормалізація й `nysh opys push`")
 def opysy_read(a: ReadOpysArgs) -> Envelope:
     """Увесь шлях до нормалізації, як `nysh read` для справи. Кожен крок, зроблений раніше,
     пропускається: перерваний прогін — та сама команда ще раз."""
