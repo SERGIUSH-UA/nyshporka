@@ -33,9 +33,10 @@ _TRUE = frozenset({"1", "true", "yes", "on", "так"})
 #: префіксом, щоб описка в імені операції функції за флагом теж ловилась.
 HIDDEN: dict[str, dict[str, tuple[str, ...]]] = {
     OPYSY: {"cli": ("opys",), "ops": ("opysy.build", "opysy.check", "opysy.init", "opysy.names",
-                                      "opysy.norm", "opysy.pack", "opysy.pages", "opysy.policy",
+                                      "opysy.norm", "opysy.obmin", "opysy.pack", "opysy.pages", "opysy.policy",
                                       "opysy.push", "opysy.read", "opysy.rule_add", "opysy.rule_undo",
-                                      "opysy.rules", "opysy.search", "opysy.table")},
+                                      "opysy.rules", "opysy.search", "opysy.table", "opysy.viddaty",
+                                      "opysy.vziaty")},
 }
 
 

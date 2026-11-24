@@ -99,3 +99,24 @@ def rule_undo(rule_id: int, *, reason: str = "", base: str = "") -> dict[str, An
     tok, home = _z_kliuchem(base)
     return U._request("POST", f"{home}/opysy/pravyla/{int(rule_id)}/vidkotyty",
                       body={"prychyna": reason}, auth=tok)
+
+
+# ── обмін нормалізацією (рішення дослідника 25.11.2026) ──────────────────────
+
+
+def obmin_cherha(*, base: str = "") -> dict[str, Any]:
+    tok, home = _z_kliuchem(base)
+    return U._request("GET", f"{home}/opysy/obmin", auth=tok)
+
+
+def obmin_vziaty(*, vnesok: int | None = None, base: str = "") -> dict[str, Any]:
+    tok, home = _z_kliuchem(base)
+    return U._request("POST", f"{home}/opysy/obmin/take",
+                      body={} if vnesok is None else {"vnesok": int(vnesok)}, auth=tok)
+
+
+def obmin_viddaty(obmin_id: int, *, model: str, vidpovidi: list[dict[str, str]],
+                  base: str = "") -> dict[str, Any]:
+    tok, home = _z_kliuchem(base)
+    return U._request("POST", f"{home}/opysy/obmin/{int(obmin_id)}/give",
+                      body={"model": model, "vidpovidi": vidpovidi}, auth=tok)

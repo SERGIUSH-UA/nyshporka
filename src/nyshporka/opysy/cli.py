@@ -487,3 +487,59 @@ def build_cmd(
                   f"{_e(d.get('normalized'))} · голоси {_e(', '.join(d.get('engines') or []))} → "
                   f"{_e(d.get('dir'))}")
     _next(d)
+
+
+# ── обмін нормалізацією ──────────────────────────────────────────────────────
+
+
+@app.command("obmin")
+def obmin_cmd(base: str = typer.Option("", "--base", help="адреса пулу; порожньо — типова"),
+              as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)")) -> None:
+    """Описи, нормалізацію яких автори віддали на обмін: що чекає й що в роботі."""
+    from nyshporka import ops as O
+
+    env = O.call("opysy.obmin", {"base": base})
+    if _answer(env, as_json):
+        return
+    for x in (env.data or {}).get("opysy") or []:
+        console.print(f"{_e(x.get('shyfra'))} · справ {_e(x.get('spravy'))} · "
+                      f"нормалізовано {_e(x.get('normalizovano'))} · {_e(x.get('stan'))} "
+                      f"[muted](внесок {_e(x.get('vnesok'))})[/muted]")
+    console.print("узяти: [bold]nysh opys vziaty <тека> [--vnesok N][/bold]")
+
+
+@app.command("vziaty")
+def vziaty_cmd(folder: str = typer.Argument(..., help="тека, куди покласти пачки запитів"),
+               vnesok: int = typer.Option(0, "--vnesok", help="який опис (внесок); 0 — найстаріший"),
+               base: str = typer.Option("", "--base", help="адреса пулу; порожньо — типова"),
+               as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)")) -> None:
+    """Узяти опис на нормалізацію (48 год, повтор — продовження): тека з пачками для агента."""
+    from nyshporka import ops as O
+
+    env = O.call("opysy.vziaty", {"dir": folder, "vnesok": vnesok or None, "base": base})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    console.print(f"узято {_e(d.get('shyfra'))} до {_e(d.get('do'))} · назв {_e(d.get('nazv'))} · "
+                  f"пачок {_e(d.get('pachok'))}")
+    console.print(f"  [muted]{_e(d.get('how'))}[/muted]")
+    _next(d)
+
+
+@app.command("viddaty")
+def viddaty_cmd(folder: str = typer.Argument(..., help="тека, взята `nysh opys vziaty`"),
+                model: str = typer.Option(..., "--model", help="модель, що нормалізувала"),
+                base: str = typer.Option("", "--base", help="адреса пулу; порожньо — типова"),
+                as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)")) -> None:
+    """Віддати нормалізацію взятого опису: пачки з відповіддю; можна по ходу, кілька разів."""
+    from nyshporka import ops as O
+
+    env = O.call("opysy.viddaty", {"dir": folder, "model": model, "base": base})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    console.print(f"[green]прийнято[/green] {_e(d.get('pryiniato'))} назв · {_e(d.get('shyfra'))} "
+                  f"нормалізовано {_e(d.get('normalizovano'))}/{_e(d.get('spravy'))} · "
+                  f"{_e(d.get('stan'))} · пачок без відповіді {_e(d.get('pachok_bez_vidpovidi'))}")
+    for p in d.get("poznachky") or []:
+        console.print(f"[yellow]•[/yellow] {_e(p)}")
