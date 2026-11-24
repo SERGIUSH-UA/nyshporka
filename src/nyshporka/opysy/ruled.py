@@ -14,7 +14,8 @@
   першим рядком назви, з неї зрізається;
 - рік і аркуші — короткі рядки правої зони тієї самої висоти: рік — `18xx/19xx` або дробові
   дати «24/III 1856»; аркуші — останнє коротке число;
-- номери — ланцюжком якорів (`numbering.number`).
+- номери — ланцюжком якорів (`numbering.number`) з добудовою прочитаних (`dobudova`, типово ввімкнено:
+  звірено оком на ДАОО ф.445, кадри 41, 47, 58, 77, 90 — 24.11.2026).
 
 Вхід — тека прогону: `NNNN.txt` (рядок на рядок) і `NNNN.lines.json.gz` (`boxes`, `size`).
 `y` справи — пікселі кадру, як його бачив рушій. Числа — машинне читання, НЕ звірене оком.
@@ -159,7 +160,7 @@ def half_cases(lines: list[tuple[int, int, int, int, str]], x0p: int, x1p: int, 
 
 
 def build(run: Path, out_tsv: Path, *, title_starts: bool = False,
-          dobudova: bool = False) -> dict[str, Any]:
+          dobudova: bool = True) -> dict[str, Any]:
     """Тека прогону цілих сторінок → таблиця справ TSV (`FIELDS`); підсумок — числа."""
     run = Path(run)
     stems = sorted({p.name.split(".")[0] for p in run.glob("*.txt")})
