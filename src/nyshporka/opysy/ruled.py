@@ -158,7 +158,8 @@ def half_cases(lines: list[tuple[int, int, int, int, str]], x0p: int, x1p: int, 
     return recs
 
 
-def build(run: Path, out_tsv: Path, *, title_starts: bool = False) -> dict[str, Any]:
+def build(run: Path, out_tsv: Path, *, title_starts: bool = False,
+          dobudova: bool = False) -> dict[str, Any]:
     """Тека прогону цілих сторінок → таблиця справ TSV (`FIELDS`); підсумок — числа."""
     run = Path(run)
     stems = sorted({p.name.split(".")[0] for p in run.glob("*.txt")})
@@ -183,7 +184,7 @@ def build(run: Path, out_tsv: Path, *, title_starts: bool = False) -> dict[str, 
     raw = len(recs)
     for r in recs:
         r.setdefault("cont", False)
-    recs = number(recs, page_aware=title_starts)
+    recs = number(recs, page_aware=title_starts, dobudova=dobudova)
     out_tsv = Path(out_tsv)
     out_tsv.parent.mkdir(parents=True, exist_ok=True)
     with out_tsv.open("w", encoding="utf-8", newline="") as fh:
