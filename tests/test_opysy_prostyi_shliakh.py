@@ -88,6 +88,9 @@ def test_read_i_push_dvoma_komandamy(tmp_path: Path, server: dict[str, Any],
     # повтор — зроблене не повторюється, читання не запускається вдруге
     env2 = _read(d, language="ru")
     assert env2.ok and "читання" not in env2.data["zrobleno"] and len(chytannia) == 1
+    # повтор не нарізає пачок удруге: та сама одна пачка й далі чекає відповіді
+    assert env2.data["novykh_pachok"] == 0 and env2.data["pachok_normalizatsii"] == 1
+    assert len(list(Path(env.data["norm_dir"]).glob("batch_*.json"))) == 1
     # агент відповідає на пачки
     for b in Path(env.data["norm_dir"]).glob("batch_*.json"):
         titles = json.loads(b.read_text(encoding="utf-8"))["titles"]
@@ -101,6 +104,9 @@ def test_read_i_push_dvoma_komandamy(tmp_path: Path, server: dict[str, Any],
     assert got.data["vnesok"] == 7 and server["pushed"][-1].suffix == ".nyshopys"
     # модель пам'ятається: повторна віддача без прапорця
     assert OO.opysy_push(OO.PushArgs(file=str(d))).ok
+    # після прийняття нормалізації повтор `read` нічого не нарізає й веде одразу до `push`
+    env3 = _read(d, language="ru")
+    assert env3.ok and env3.data["pachok_normalizatsii"] == 0 and "--norm-model" not in env3.data["next"]
 
 
 def test_zakrytyi_fond_odrazu_z_posylanniam(tmp_path: Path, server: dict[str, Any],

@@ -56,6 +56,22 @@ def describe_source(repo: str, fond: str, title: str = "", years: str = "", mova
     return ", ".join(bits)
 
 
+def narizani(out_dir: Path) -> set[tuple[str, str, str]]:
+    """Ключі назв, уже нарізаних у пачки теки (з відповіддю чи без)."""
+    out: set[tuple[str, str, str]] = set()
+    for p in sorted(Path(out_dir).glob("batch_*.json")):
+        b = json.loads(p.read_text(encoding="utf-8"))
+        for k, title in zip(b.get("keys") or [], b.get("titles") or [], strict=False):
+            out.add(key(k["page"], k["part"], title))
+    return out
+
+
+def bez_vidpovidi(out_dir: Path) -> list[Path]:
+    """Пачки, на які ще немає відповіді (`batch_NNN.out.txt`)."""
+    d = Path(out_dir)
+    return [p for p in sorted(d.glob("batch_*.json")) if not p.with_name(p.stem + ".out.txt").exists()]
+
+
 def export(table: Path, out_dir: Path, *, source: str, mova: str = "ru",
            have: dict[tuple[str, str, str], str] | None = None) -> list[Path]:
     """Пачки запитів для назв таблиці, яких ще не нормалізовано (`have`); нові пачки — з
@@ -68,7 +84,11 @@ def export(table: Path, out_dir: Path, *, source: str, mova: str = "ru",
     d = Path(out_dir)
     d.mkdir(parents=True, exist_ok=True)
     have = have or {}
-    recs = [r for r in recs if key(r["page"], r["part"], r["title"]) not in have]
+    # Уже нарізане, але ще не прийняте, теж не нарізається вдруге: повтор `nysh opys read` до
+    # `push` інакше клав би ще один повний набір пачок, і агент платив би двічі.
+    narizano = narizani(d)
+    recs = [r for r in recs if (kl := key(r["page"], r["part"], r["title"])) not in have
+            and kl not in narizano]
     start = len(list(d.glob("batch_*.json")))
     out = []
     titles = [r["title"].strip() for r in recs]

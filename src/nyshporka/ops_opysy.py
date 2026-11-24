@@ -493,14 +493,18 @@ def opysy_read(a: ReadOpysArgs) -> Envelope:
     env = opysy_norm(NormArgs(dir=a.dir, language=a.language))
     if not env.ok:
         return env
-    pachky = env.data.get("batches") or []
+    from nyshporka.opysy import norm_batches as NB
+
+    # чекають відповіді — і нарізані щойно, і ті, що лишились з попереднього запуску
+    pachky = NB.bez_vidpovidi(W.norm_dir(d))
     nastupne = (f"агент нормалізує пачки в {env.data.get('dir')}, тоді "
                 f"`nysh opys push {a.dir} --norm-model <модель>`") if pachky \
         else f"nysh opys push {a.dir}"
     return ok({"dir": str(d.resolve()), "zrobleno": kroky, "storinok": vsi,
                "sprav": tablytsia.get("cases"), "pidtverdzheno_nomeriv": tablytsia.get("confirmed"),
-               "pachok_normalizatsii": len(pachky), "norm_dir": env.data.get("dir"),
-               "how": env.data.get("how"), "next": nastupne})
+               "pachok_normalizatsii": len(pachky),
+               "novykh_pachok": len(env.data.get("batches") or []),
+               "norm_dir": env.data.get("dir"), "how": env.data.get("how"), "next": nastupne})
 
 
 def _zibraty_paket(d: Path, norm_model: str) -> Envelope:
