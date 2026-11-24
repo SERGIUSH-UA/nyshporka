@@ -673,13 +673,13 @@ def opysy_viddaty(a: ViddatyArgs) -> Envelope:
         for b in bad:
             env.warn("norm_bad", b, level=ALERT)
         return env
-    pidsumok: dict[str, Any] = {"pryiniato": 0, "porozhni": 0, "avtora": 0, "poznachky": []}
+    pidsumok: dict[str, Any] = {"pryiniato": 0, "ne_sprava": 0, "avtora": 0, "poznachky": []}
     for i in range(0, len(vidp), 500):
         env = _remote(R.obmin_viddaty, int(z["obmin"]), model=a.model,
                       vidpovidi=vidp[i:i + 500], base=a.base)
         if not env.ok:
             return env
-        for k in ("pryiniato", "porozhni", "avtora"):
+        for k in ("pryiniato", "ne_sprava", "avtora"):
             pidsumok[k] += int(env.data.get(k) or 0)
         pidsumok["poznachky"] += env.data.get("poznachky") or []
         pidsumok.update({k: env.data.get(k) for k in ("stan", "normalizovano", "spravy")})
