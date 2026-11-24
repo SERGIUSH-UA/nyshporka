@@ -27,7 +27,7 @@ def pul(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
     def _give(obmin_id: int, *, model: str, vidpovidi: list[dict[str, str]], **kw: Any) -> dict[str, Any]:
         st["give"].append((obmin_id, model, vidpovidi))
-        return {"pryiniato": len(vidpovidi), "porozhni": 0, "avtora": 0, "poznachky": [],
+        return {"pryiniato": len(vidpovidi), "ne_sprava": 0, "avtora": 0, "poznachky": [],
                 "stan": "v_roboti", "normalizovano": len(vidpovidi), "spravy": 25}
 
     monkeypatch.setattr(R, "obmin_viddaty", _give)
