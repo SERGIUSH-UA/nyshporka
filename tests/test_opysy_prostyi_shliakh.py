@@ -102,8 +102,11 @@ def test_read_i_push_dvoma_komandamy(tmp_path: Path, server: dict[str, Any],
     got = OO.opysy_push(OO.PushArgs(file=str(d), norm_model="agent-model"))
     assert got.ok, got
     assert got.data["vnesok"] == 7 and server["pushed"][-1].suffix == ".nyshopys"
-    # модель пам'ятається: повторна віддача без прапорця
-    assert OO.opysy_push(OO.PushArgs(file=str(d))).ok
+    # той самий пакет удруге не заливається (байти в сховищі лишились би сиротами)
+    znov = OO.opysy_push(OO.PushArgs(file=str(d)))
+    assert znov.ok and znov.data["duplicate"] and len(server["pushed"]) == 1
+    # модель пам'ятається, а `--znovu` заливає все одно
+    assert OO.opysy_push(OO.PushArgs(file=str(d), znovu=True)).ok and len(server["pushed"]) == 2
     # після прийняття нормалізації повтор `read` нічого не нарізає й веде одразу до `push`
     env3 = _read(d, language="ru")
     assert env3.ok and env3.data["pachok_normalizatsii"] == 0 and "--norm-model" not in env3.data["next"]

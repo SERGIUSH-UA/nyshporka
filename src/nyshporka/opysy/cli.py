@@ -97,20 +97,21 @@ def push_cmd(
     file: str = typer.Argument(..., help="робоча тека опису (`nysh opys read`) або пакет .nyshopys"),
     norm_model: str = typer.Option("", "--norm-model",
                                    help="модель, що нормалізувала назви (один раз; далі пам'ятається)"),
+    znovu: bool = typer.Option(False, "--znovu", help="залити, навіть якщо цей самий пакет уже залито"),
     base: str = typer.Option("", "--base", help="адреса пулу; порожньо — типова"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Віддати опис у Супрягу. Тека — усе за раз: відповіді нормалізації, пакет, ворота, заливка."""
     from nyshporka import ops as O
 
-    env = O.call("opysy.push", {"file": file, "norm_model": norm_model, "base": base})
+    env = O.call("opysy.push", {"file": file, "norm_model": norm_model, "znovu": znovu, "base": base})
     if _answer(env, as_json):
         return
     d = env.data or {}
     s = d.get("summary") or {}
     if d.get("duplicate"):
         console.print(f"{_e(d.get('shyfra'))}: той самий пакет уже в Супрязі "
-                      f"(внесок {_e(d.get('vnesok'))})")
+                      f"(внесок {_e(d.get('vnesok'))})" + (f" — {_e(d['text'])}" if d.get("text") else ""))
         return
     console.print(f"[green]прийнято[/green] {_e(d.get('shyfra'))} · внесок {_e(d.get('vnesok'))} · "
                   f"сторінок {_e(s.get('pages_read'))}/{_e(s.get('pages_total'))} · "
