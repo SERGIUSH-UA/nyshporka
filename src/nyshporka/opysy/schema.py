@@ -242,6 +242,9 @@ class Manifest(_Strict):
     engines: list[str] = Field(default_factory=list)
     quality: Quality
     normalization: Normalization | None = None
+    #: Автор віддає нормалізацію назв на обмін (рішення дослідника 25.11.2026): рукописний опис
+    #: без нормалізації приймається, а нормалізувати його може будь-хто з учасників у Супрязі.
+    normalization_exchange: bool = False
     license: str = ""
     partial: Partial | None = None
     #: Хто зібрав пакет: інструмент і версія.

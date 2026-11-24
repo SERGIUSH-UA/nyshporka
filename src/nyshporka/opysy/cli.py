@@ -98,13 +98,16 @@ def push_cmd(
     norm_model: str = typer.Option("", "--norm-model",
                                    help="модель, що нормалізувала назви (один раз; далі пам'ятається)"),
     znovu: bool = typer.Option(False, "--znovu", help="залити, навіть якщо цей самий пакет уже залито"),
+    na_obmin: bool = typer.Option(False, "--na-obmin",
+                                  help="віддати нормалізацію назв на обмін: опис приймається без неї"),
     base: str = typer.Option("", "--base", help="адреса пулу; порожньо — типова"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Віддати опис у Супрягу. Тека — усе за раз: відповіді нормалізації, пакет, ворота, заливка."""
     from nyshporka import ops as O
 
-    env = O.call("opysy.push", {"file": file, "norm_model": norm_model, "znovu": znovu, "base": base})
+    env = O.call("opysy.push", {"file": file, "norm_model": norm_model, "znovu": znovu,
+                                "na_obmin": na_obmin, "base": base})
     if _answer(env, as_json):
         return
     d = env.data or {}
