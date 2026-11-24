@@ -453,11 +453,22 @@ def _chytaty(pages: Path, run: Path, script: str) -> int:
 
 
 def _prochytano(d: Path) -> tuple[int, int]:
+    """(сторінок, прочитано). Прочитана — є текст АБО рушій записав її в мету прогону: порожня
+    чи титульна сторінка тексту може не мати, і без мети «прочитано 3 з 4» не минало б ніколи."""
+    import contextlib
+    import json
+
     from nyshporka.opysy import workdir as W
 
     run = W.run_dir(d)
-    return (len(list(W.pages_dir(d).glob("*.jpg"))) if W.pages_dir(d).exists() else 0,
-            len(list(run.glob("*.txt"))) if run.exists() else 0)
+    vsi = {p.stem for p in W.pages_dir(d).glob("*.jpg")} if W.pages_dir(d).exists() else set()
+    gotovi = {p.stem for p in run.glob("*.txt")} if run.exists() else set()
+    meta = run / "_htr_meta.json"
+    if meta.exists():
+        with contextlib.suppress(ValueError, OSError):
+            gotovi |= {Path(k).stem for k in (json.loads(meta.read_text(encoding="utf-8"))
+                                              .get("pages") or {})}
+    return len(vsi), len(gotovi & vsi)
 
 
 @op("opysy.read", summary="Прочитати опис фонду: паспорт, сторінки, читання, таблиця справ і "

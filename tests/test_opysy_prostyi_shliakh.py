@@ -134,3 +134,35 @@ def test_obirvane_chytannia_kazhe_prodovzhyty(tmp_path: Path, server: dict[str, 
                 url=URL)
     assert not env.ok and "0 з 2" in env.error and "продовжить" in env.error
     assert W.load(tmp_path / "o")  # паспорт і сторінки лишились — повтор продовжить
+
+
+def test_mova_z_tekstu_doreformena_i_ukrainska() -> None:
+    from nyshporka.opysy import pack_dir as PD
+
+    ru = [{"voices": {"p": "Дѣло по обвиненію офицера Григорія Мотеева въ изнасилованіи дѣвочки "
+                           "Тоже крестьянина Ивана Выбрановскаго въ избіеніи служителя"}}]
+    uk = [{"voices": {"p": "Костьол с. Білогородка. Метрична книга запису народження, шлюбу та "
+                           "смерті за 1895 рік; Її, єпархія, Ґорґани"}}]
+    assert PD.language(ru, "") == "ru" and PD.language(uk, "") == "uk"
+
+
+def test_porozhnia_storinka_bez_tekstu_ne_blokuie(tmp_path: Path, server: dict[str, Any],
+                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    """Сторінка, яку рушій пройшов, але тексту не дав (порожня, титул), — прочитана за метою."""
+    def _chytaty(pages: Path, run: Path, script: str) -> int:
+        run.mkdir(parents=True, exist_ok=True)
+        stem, lines = "0001", STOR["0001"]
+        w, h = Image.open(pages / f"{stem}.jpg").size
+        (run / f"{stem}.txt").write_text("\n".join(t for *_, t in lines), encoding="utf-8")
+        with gzip.open(run / f"{stem}.lines.json.gz", "wt", encoding="utf-8") as fh:
+            json.dump({"boxes": [list(b[:4]) for b in lines], "size": [w, h]}, fh)
+        (run / "_htr_meta.json").write_text(json.dumps(
+            {"model": "pysar_cyr_v31.pt", "pages": {"0001.jpg": {"lines": 3},
+                                                   "0002.jpg": {"lines": 0}}}), encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(OO, "_chytaty", _chytaty)
+    env = _read(tmp_path / "p", pdf=str(_pdf(tmp_path)), repo="ДАОО", fond="445", opys="9", url=URL,
+                language="ru")
+    assert env.ok, env
+    assert "читання" in env.data["zrobleno"] and env.data["sprav"] == 2
