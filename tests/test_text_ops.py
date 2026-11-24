@@ -1361,3 +1361,23 @@ def test_one_candidate_is_rejected_from_the_console(case_space: Path) -> None:
     assert env.data["by_verdict"] == {"noise": 1}
     page = PS.load_case(PS.resolve_case(env.data["case_key"])).pages["0004.jpg"]
     assert "не прізвище" in page.comment and page.status == "partial"
+
+
+def test_engine_frame_turns_an_upside_down_frame_like_the_cloud_copy(space: Path) -> None:
+    """Кадр із міткою EXIF «догори ногами»: рушій бачив його повернутим (стискач
+    хмари), тож і кроп ріже повернутий — інакше рамка лягає на протилежний кут."""
+    from PIL import Image, ImageDraw
+
+    from nyshporka.search import textops as T
+
+    frame = space / "data" / "raw" / "проба" / "spr-1" / "0004.jpg"
+    im = Image.new("RGB", (6000, 9000), "white")
+    ImageDraw.Draw(im).rectangle([0, 0, 600, 900], fill="black")    # лівий верх пікселів
+    tags = Image.Exif()
+    tags[0x0112] = 3
+    im.save(frame, "JPEG", quality=50, exif=tags)
+    got = T.engine_frame("проба", "0004.jpg")
+    g = got["image"].convert("L")
+    assert g.getpixel((5990, 8990)) < 80, "темний кут мав перейти в правий низ"
+    assert g.getpixel((10, 10)) > 200
+    assert got["k"] == 2.0

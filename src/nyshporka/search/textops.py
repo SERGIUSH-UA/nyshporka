@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from nyshporka.search import store as ST
+from nyshporka.utils.exif import is_upside_down, upright
 
 _DIGITS = re.compile(r"\d+")
 
@@ -325,7 +326,11 @@ def engine_frame(run: str, page: str) -> dict[str, Any]:
         src, orient, frame_source = got
         frame = str(src)
         with Image.open(src) as raw:
-            base = raw.convert("RGB")
+            # 🔴 Кадр із міткою «догори ногами» рушій бачив повернутим (так його
+            # готує стискач хмари, `utils.exif`), і рамки лежать у координатах
+            # повернутого. Сирий кадр давав кроп із протилежного кута аркуша.
+            flip = is_upside_down(raw)
+            base = upright(raw.convert("RGB"), flip)
     else:
         # 🔴 Справа-PDF: хмарний прогін розгортав PDF у кадри на орендованому
         # боксі, тож кадрів на диску немає, а `page.view` ту саму сторінку

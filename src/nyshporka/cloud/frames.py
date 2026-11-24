@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from nyshporka.cloud.base import CloudError
+from nyshporka.utils.exif import is_upside_down, upright
 
 #: Тека, у яку писали пізніше за стільки секунд тому, — ще качається.
 STILL_WRITING_SEC = 300
@@ -108,10 +109,14 @@ class FramesReport:
     #: Скільки кадрів вищі за робочу висоту (`FIT_HEIGHT`). `None` — висоти
     #: не міряно; тоді стискання вирішує сама медіана, як раніше.
     over_height: int | None = None
+    #: Кадри з міткою EXIF «догори ногами» (`utils.exif`). 🔴 Такій справі копія
+    #: потрібна за будь-якої ваги кадрів: без неї рушій читає пікселі як лежать
+    #: і дає сміття без жодної помилки (ЦДІАК 442-300-2, 24.11.2026).
+    upside_down: list[str] = field(default_factory=list)
 
     @property
     def heavy(self) -> bool:
-        if self.alien:
+        if self.alien or self.upside_down:
             return True
         if self.median_mb <= SHRINK_MEDIAN_MB:
             return False
@@ -125,6 +130,8 @@ class FramesReport:
                 "still_writing_min": self.still_writing_min,
                 "declared": self.declared,
                 "alien": self.alien[:50], "alien_count": len(self.alien),
+                "upside_down": self.upside_down[:50],
+                "upside_down_count": len(self.upside_down),
                 "over_height": self.over_height, "heavy": self.heavy}
 
 
@@ -183,6 +190,7 @@ def check_frames(case_dir: Path | str, *, now: float | None = None) -> FramesRep
                       for name in sorted(set(sidecar) - on_disk)]
     sizes: list[int] = []
     over_height = 0
+    upside: list[str] = []
     newest = 0.0
     for f in frames:
         stem_bytes = len(f.stem.encode("utf-8"))
@@ -218,6 +226,11 @@ def check_frames(case_dir: Path | str, *, now: float | None = None) -> FramesRep
                 if im.size[1] > FIT_HEIGHT:
                     over_height += 1
                 im.verify()
+            # Мітку — окремим відкриттям: на PNG `getexif()` дочитує файл, і
+            # `verify()` після нього бракує цілий кадр.
+            with image.open(f) as im:
+                if is_upside_down(im):
+                    upside.append(f.name)
         except Exception as exc:    # будь-яка відмова розбору = битий кадр
             bad.append(f"{f.name}: не розбирається ({type(exc).__name__})")
     alien = [f.name for f in frames if f.suffix.lower() not in CLOUD_READY_EXT]
@@ -232,7 +245,8 @@ def check_frames(case_dir: Path | str, *, now: float | None = None) -> FramesRep
     return FramesReport(n=len(frames), total_mb=round(total, 1),
                         median_mb=round(median, 2), bad=bad,
                         still_writing_min=writing, alien=alien,
-                        over_height=over_height, declared=declared)
+                        over_height=over_height, declared=declared,
+                        upside_down=upside)
 
 
 def _declared_frames(d: Path, sidecar: dict[str, dict[str, Any]]) -> int:
@@ -269,6 +283,8 @@ class ShrinkResult:
     src_bytes: int = 0
     dst_bytes: int = 0
     failed: list[str] = field(default_factory=list)
+    #: Скільки кадрів повернуто на 180° за міткою EXIF «догори ногами».
+    flipped: int = 0
 
     @property
     def ratio(self) -> float:
@@ -301,6 +317,9 @@ CLAIM_FILE = "_from.txt"
 #: файл, а не другий рядок `_from.txt`: `_from.txt` читають інші (друкарські
 #: видання беруть його цілком як шлях), і старі кеші мають лише його.
 FINGERPRINT_FILE = "_from.json"
+
+#: Позначка у відбитку: кадри з міткою «догори ногами» в цій копії повернуті.
+UPRIGHT_MARK = 1
 
 
 def source_fingerprint(files: list[Path]) -> dict[str, Any]:
@@ -370,7 +389,7 @@ def drop_cache(name: str) -> int:
 
 def _claim_dir(dst_dir: Path, src_dir: Path,
                files: list[Path] | None = None, *,
-               on_line: Any = None) -> None:
+               on_line: Any = None, flips: bool = False) -> None:
     """Записати, чию копію тут складено, — або відмовити, якщо вона чужа.
 
     🔴 Ім'я теки справи унікальним не буває: `pages`, `spr-1`, `probe` з різних
@@ -401,6 +420,11 @@ def _claim_dir(dst_dir: Path, src_dir: Path,
     Менше — недійсний; це перетинається з обірваним стисканням старого зразка,
     і воно просто починається наново (дорожче, зате без чужої книги). Збіг
     кількості приймається, відбиток дописується.
+
+    🔴 `flips` — в оригіналі є кадри догори ногами (`utils.exif`). Копія таких
+    кадрів має бути повернутою, і відбиток це засвідчує позначкою `upright`.
+    Кеш без позначки складено до повороту (або руками) — недійсний: ім'я й
+    розмір оригіналу ті самі, а пікселі в кеші лежать догори ногами.
     """
     claim = dst_dir / CLAIM_FILE
     mine = str(src_dir.resolve())
@@ -419,6 +443,8 @@ def _claim_dir(dst_dir: Path, src_dir: Path,
     if files is None:
         return
     now = source_fingerprint(files)
+    if flips:
+        now["upright"] = UPRIGHT_MARK
     have = _read_fingerprint(dst_dir)
     if theirs:      # копія з підписом-шляхом — наша; чию тека без підпису, невідомо
         from nyshporka.cloud.verify import frames_in
@@ -427,10 +453,14 @@ def _claim_dir(dst_dir: Path, src_dir: Path,
         if have is not None:
             same = have.get("sig") == now["sig"] and have.get("n") == now["n"]
             why = "вміст оригіналу змінився під тим самим шляхом"
+            if same and flips and have.get("upright") != UPRIGHT_MARK:
+                same = False
+                why = "кадри догори ногами лежать у кеші неповернутими"
         else:
-            same = cached == now["n"] or cached == 0
+            same = cached == 0 or (cached == now["n"] and not flips)
             why = (f"старий кеш без відбитка: у ньому {cached} кадрів, а в "
-                   f"оригіналі {now['n']}")
+                   f"оригіналі {now['n']}"
+                   + ("; кадри догори ногами в ньому не повернуті" if flips else ""))
         if not same:
             gone = _purge_cache(dst_dir)
             if on_line:
@@ -473,7 +503,10 @@ def shrink(src: Path | str, dst: Path | str, *, target_h: int = TARGET_HEIGHT,
     сегментації. На замовній телефонній зйомці це норма, а не виняток (706
     кадрів із 711 в одній партії). Правило повороту одне й перевірене оком:
     ширина більша за висоту → 90° за годинниковою. EXIF не питаємо — на тому ж
-    матеріалі він був виставлений на восьми кадрах із 711.
+    матеріалі він був виставлений на восьми кадрах із 711. Виняток — мітка
+    «догори ногами» (`Orientation = 3`): такий кадр повертається на 180°
+    завжди, бо його не виправить ні форма кадру, ні перебір кута в рушії
+    (`utils.exif`; ЦДІАК 442-300-2, 24.11.2026).
 
     🔴 Але безумовно крутити НЕ МОЖНА: є законно-ландшафтний матеріал —
     кадр-розворот, два аркуші в одному. Тихий поворот таких кадрів був би тією
@@ -498,8 +531,23 @@ def shrink(src: Path | str, dst: Path | str, *, target_h: int = TARGET_HEIGHT,
                 f"у теці два кадри з одним іменем: {stems[p.stem]} і {p.name}. "
                 f"Після стискання вони стали б одним файлом — перейменуйте один.")
         stems[p.stem] = p.name
+
+    # Передпрохід ДО захоплення теки: кадри догори ногами вирішують, чи
+    # придатний уже складений кеш (`_claim_dir(flips=…)`).
+    landscape = 0
+    upside: set[str] = set()
+    for p in files:
+        try:
+            with image.open(p) as probe:
+                if probe.width > probe.height:
+                    landscape += 1
+                if is_upside_down(probe):
+                    upside.add(p.name)
+        except Exception:
+            pass        # битий кадр назве основний прохід, не передпрохід
+
     dst_dir.mkdir(parents=True, exist_ok=True)
-    _claim_dir(dst_dir, src_dir, files, on_line=say)
+    _claim_dir(dst_dir, src_dir, files, on_line=say, flips=bool(upside))
     stale = sorted(q.name for q in frames_in(dst_dir) if q.stem not in stems)
     if stale:
         # Не видаляємо: тека з таким іменем могла лишитись від ІНШОЇ справи з
@@ -510,16 +558,7 @@ def shrink(src: Path | str, dst: Path | str, *, target_h: int = TARGET_HEIGHT,
             f"стиснута копія іншої теки з тим самим іменем. Приберіть її й "
             f"повторіть.")
 
-    landscape = 0
-    for p in files:
-        try:
-            with image.open(p) as probe:
-                if probe.width > probe.height:
-                    landscape += 1
-        except Exception:
-            pass        # битий кадр назве основний прохід, не передпрохід
-
-    done = skipped = rotated = 0
+    done = skipped = rotated = flipped = 0
     src_bytes = dst_bytes = 0
     failed: list[str] = []
     lock = threading.Lock()
@@ -528,7 +567,7 @@ def shrink(src: Path | str, dst: Path | str, *, target_h: int = TARGET_HEIGHT,
         """Один кадр. 🔴 Усе, що вирішує долю ПАКЕТА, лишилось у батька:
         захоплення теки, чужі кадри в цілі, збіг імен, приймач по числу кадрів
         і перевірка ландшафту. Тут — рівно робота над файлом."""
-        nonlocal done, skipped, rotated, src_bytes, dst_bytes
+        nonlocal done, skipped, rotated, flipped, src_bytes, dst_bytes
         out = dst_dir / (p.stem + ".jpg")
         if out.exists():
             with lock:
@@ -548,6 +587,13 @@ def shrink(src: Path | str, dst: Path | str, *, target_h: int = TARGET_HEIGHT,
             # винятку й без рядка в лозі (тека на 942 кадри падала на 700–870-му).
             with image.open(p) as opened:
                 im = opened
+                # 🔴 Мітка «догори ногами» при збереженні губиться (копія йде без
+                # EXIF), тож пікселі повертаються тут — інакше рушій прочитає
+                # кадр догори ногами й дасть сміття без помилки (`utils.exif`).
+                if p.name in upside:
+                    im = upright(im, True)
+                    with lock:
+                        flipped += 1
                 # 🔴 Поворот СТРОГО ПЕРЕД зменшенням: `target_h` міряє довгу
                 # сторону аркуша, а на кадрі, покладеному на бік, довга сторона
                 # — це ширина.
@@ -620,7 +666,7 @@ def shrink(src: Path | str, dst: Path | str, *, target_h: int = TARGET_HEIGHT,
                 f"{', '.join(left[:5])}{' …' if len(left) > 5 else ''}")
     return ShrinkResult(dst=dst_dir, total=len(files), done=done, skipped=skipped,
                         rotated=rotated, landscape=landscape,
-                        src_bytes=src_bytes, dst_bytes=dst_bytes)
+                        src_bytes=src_bytes, dst_bytes=dst_bytes, flipped=flipped)
 
 
 # ── щільність письма ─────────────────────────────────────────────────────────

@@ -423,3 +423,69 @@ def test_legacy_cache_with_other_frame_count_is_invalid(tmp_path: Path) -> None:
     _book(src, 5, w=150)
     got = F.shrink(src, dst, target_h=100)
     assert (got.done, got.skipped) == (5, 0)
+
+
+# ── кадри догори ногами (мітка EXIF Orientation = 3) ─────────────────────────
+def _upside_jpeg(path: Path, size: tuple[int, int] = (60, 90), *, exif: int = 3) -> Path:
+    """Кадр, де темна третина лежить ВГОРІ пікселів; мітка каже «поверни на 180°»."""
+    from PIL import ImageDraw
+
+    im = Image.new("RGB", size, "white")
+    ImageDraw.Draw(im).rectangle([0, 0, size[0], size[1] // 3], fill="black")
+    tags = Image.Exif()
+    tags[0x0112] = exif
+    im.save(path, "JPEG", quality=95, exif=tags)
+    _age(path, 3600)
+    return path
+
+
+def _dark_at_bottom(path: Path) -> bool:
+    with Image.open(path) as im:
+        g = im.convert("L")
+        top, bottom = g.getpixel((g.width // 2, 2)), g.getpixel((g.width // 2, g.height - 3))
+    return bottom < 80 < top
+
+
+def test_upside_down_frames_are_named_and_want_a_copy_even_when_light(tmp_path: Path) -> None:
+    _jpeg(tmp_path / "0001.jpg")
+    _upside_jpeg(tmp_path / "0002.jpg")
+    rep = F.check_frames(tmp_path)
+    assert rep.upside_down == ["0002.jpg"] and rep.bad == []
+    assert rep.heavy, "легка справа з кадром догори ногами мусить їхати копією"
+    assert rep.as_dict()["upside_down_count"] == 1
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    _upside_jpeg(plain / "0001.jpg", exif=6)          # 90° — справа рушія, не наша
+    assert F.check_frames(plain).upside_down == [] and not F.check_frames(plain).heavy
+
+
+def test_shrink_turns_upside_down_frames_by_their_exif(tmp_path: Path) -> None:
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    _upside_jpeg(src / "0001.jpg")
+    _jpeg(src / "0002.jpg")
+    got = F.shrink(src, dst, target_h=60)
+    assert got.flipped == 1 and got.done == 2
+    assert _dark_at_bottom(dst / "0001.jpg"), "темна третина мала опинитись унизу"
+    fp = json.loads((dst / F.FINGERPRINT_FILE).read_text(encoding="utf-8"))
+    assert fp.get("upright") == F.UPRIGHT_MARK
+
+
+def test_a_cache_shrunk_without_the_turn_is_rebuilt(tmp_path: Path) -> None:
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    _upside_jpeg(src / "0001.jpg")
+    F.shrink(src, dst, target_h=60)
+    # кеш, складений до виправлення: ті самі імена й відбиток, пікселі неповернуті
+    with Image.open(src / "0001.jpg") as raw:
+        raw.convert("L").save(dst / "0001.jpg", "JPEG")
+    fp = json.loads((dst / F.FINGERPRINT_FILE).read_text(encoding="utf-8"))
+    fp.pop("upright")
+    (dst / F.FINGERPRINT_FILE).write_text(json.dumps(fp), encoding="utf-8")
+    lines: list[str] = []
+    again = F.shrink(src, dst, target_h=60, on_line=lines.append)
+    assert (again.done, again.skipped, again.flipped) == (1, 0, 1)
+    assert _dark_at_bottom(dst / "0001.jpg")
+    assert any("догори ногами" in s for s in lines), lines
+    # повторний виклик кеш уже приймає
+    assert F.shrink(src, dst, target_h=60).skipped == 1

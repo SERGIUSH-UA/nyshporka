@@ -1136,9 +1136,12 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
             why = "поворот альбомних кадрів (`--rotate-landscape`)"
         elif rep.median_mb > F.SHRINK_MEDIAN_MB:
             why = f"кадри завеликі (медіана {rep.median_mb:.1f} МБ)"
-        else:
+        elif rep.alien:
             why = (f"{len(rep.alien)} кадрів у форматі, якого читач на машині не "
                    f"бере (напр. {rep.alien[0]})")
+        else:
+            why = (f"{len(rep.upside_down)} кадрів лежать догори ногами (мітка "
+                   f"EXIF, напр. {rep.upside_down[0]}) — копія з поворотом")
         say("shrink", f"{why} — переводимо в сірий JPEG висотою "
                       f"{F.TARGET_HEIGHT} у {dst}; оригінали не чіпаються")
         got = F.shrink(ref.frames_dir, dst, rotate_landscape=rotate_landscape,
@@ -1152,7 +1155,9 @@ def _prepare(res: GoResult, case: str, say: EventFn, owner: contextlib.ExitStack
             res.notes.append(note)
             say("warning", f"⚠ {note}")
         say("shrink", f"стиснуто {got.done}, уже було {got.skipped}"
-                      + (f", ×{got.ratio:g} за обсягом" if got.ratio else ""))
+                      + (f", ×{got.ratio:g} за обсягом" if got.ratio else "")
+                      + (f", повернуто догори {got.flipped} кадрів (EXIF)"
+                         if got.flipped else ""))
         pack = dst
 
     # 4. план і кошторис

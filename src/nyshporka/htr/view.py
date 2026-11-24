@@ -97,11 +97,17 @@ def _open_rotated(src: Path, orient: int) -> Any:
 
 
 def _open_run_scan(src: Path, orient: int) -> Any:
-    """Скан сторінки прогону, повернутий так, як його читав раннер."""
+    """Скан сторінки прогону, повернутий так, як його читав раннер.
+
+    Кадр із міткою «догори ногами» спершу повертається на 180° — так його
+    бачив рушій (`utils.exif`), і в тих координатах лежать рамки.
+    """
     from PIL import Image
 
+    from nyshporka.utils.exif import is_upside_down, upright
+
     with Image.open(src) as raw:
-        im = raw.convert("RGB")
+        im = upright(raw.convert("RGB"), is_upside_down(raw))
     return turn(im, orient)
 
 
