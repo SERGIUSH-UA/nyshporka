@@ -1379,7 +1379,8 @@ def _epoch(value: object) -> float:
         return 0.0
 
 
-def absorb(st: ST.RunState, data: dict[str, Any]) -> ST.RunState:
+def absorb(st: ST.RunState, data: dict[str, Any], *,
+           stamped: list[Path] | None = None) -> ST.RunState:
     """Перенести підсумок наглядача в наш запис заходу.
 
     🔴 Без цього завершений захід назавжди лишається в переліку як «читає з
@@ -1424,8 +1425,31 @@ def absorb(st: ST.RunState, data: dict[str, Any]) -> ST.RunState:
         from nyshporka.htr_store import stamp_project
 
         with contextlib.suppress(Exception):
-            stamp_project(Path(st.out_dir), P.tag_of(st.project))
+            if stamp_project(Path(st.out_dir), P.tag_of(st.project)) and stamped is not None:
+                # Мета змінилась — штамп свіжості в сторі тексту теж: хто
+                # закриває записи пачкою, той і доганяє стор (`settle_open`).
+                stamped.append(Path(st.out_dir))
     return ST.save(st)
+
+
+def _restore_freshness(out_dirs: list[Path]) -> int:
+    """Догнати стор тексту по прогонах, чию мету підписав `absorb`.
+
+    🔴 Підпис проєкту дописує поле в мету прогону, а штамп свіжості стору
+    рахується з її розміру й часу: прогін, щойно проіндексований обліком
+    наглядача (`post_fetch`), ставав «застарілим». 24.11.2026 закриття 852
+    записів дало 1224 застарілі прогони описів ф.442. Прогонів тут небагато й
+    вони щойно читані — догін точковий, без злиття сегментів.
+    """
+    if not out_dirs:
+        return 0
+    from nyshporka.cloud.verify import voice_dirs
+    from nyshporka.search import store as TS
+
+    if not TS.exists():
+        return 0
+    names = sorted({d.name for o in out_dirs for d in (o, *voice_dirs(o)) if d.is_dir()})
+    return sum(1 for _ in TS.ensure_all(names, optimize=False))
 
 
 #: Відчеплений захід, старший за це і без жодної відповіді наглядача, —
@@ -1462,9 +1486,10 @@ def settle_open(runs: Iterable[ST.RunState], *,
 
     Питається кожна сесія один раз, на всі її справи. Наглядач, що ВІДПОВІВ
     «ще працюю», лишає запис відкритим за будь-якого віку: черга на сотні справ
-    законно йде понад три доби. Наглядач, що мовчить (стану сесії немає,
-    таймаут, зіпсований вивід), лишає запис відкритим, поки той молодший за
-    `age_close_sec`; старший — закривається за віком (`closed_by_age`). Коли
+    законно йде понад три доби. Наглядач, що відповів порожньо (стану сесії в
+    нього немає), лишає запис відкритим, поки той молодший за `age_close_sec`;
+    старший — закривається за віком (`closed_by_age`). Таймаут і зіпсований
+    вивід — не відповідь: такий запис лишається відкритим за будь-якого віку. Коли
     наглядача спитати нічим (`unreachable`), за віком не закривається нічого:
     тоді мовчання — наша вада, а не його.
     """
@@ -1473,22 +1498,26 @@ def settle_open(runs: Iterable[ST.RunState], *,
     by_session: dict[str, list[ST.RunState]] = {}
     for s in open_:
         by_session.setdefault(s.supervisor, []).append(s)
-    asked = settled = running = silent = aged = 0
+    asked = settled = running = silent = aged = failed = 0
     unreachable = ""
+    stamped: list[Path] = []
     for session, recs in by_session.items():
-        data: dict[str, Any] = {}
         try:
             data = state_of_session(session, timeout=timeout)
         except SupervisorMissing as exc:
             unreachable = str(exc)
             break
-        except Exception:  # таймаут, зіпсований вивід — це мовчання
-            data = {}
-        else:
-            asked += 1
+        except Exception:
+            # 🔴 Таймаут чи зіпсований вивід — НЕ мовчання: на завантаженій
+            # машині живий наглядач відповідає повільно, а закритий за віком
+            # запис `find_live` уже не бачить — повторний `cloud go` узяв би
+            # другу машину під ту саму справу. Запис лишається відкритим.
+            failed += len(recs)
+            continue
+        asked += 1
         if data and finished(data):
             for st in recs:
-                absorb(st, data)
+                absorb(st, data, stamped=stamped)
                 settled += 1
             continue
         if data:
@@ -1502,9 +1531,15 @@ def settle_open(runs: Iterable[ST.RunState], *,
             if not st.needs_release and age > age_close_sec:
                 close_by_age(st, age_h=age / 3600)
                 aged += 1
+    reindexed, reindex_error = 0, ""
+    try:
+        reindexed = _restore_freshness(stamped)
+    except Exception as exc:  # стор зайнятий чи битий — записи однаково закрито
+        reindex_error = f"{type(exc).__name__}: {exc}"
     return {"open": len(open_), "sessions": len(by_session), "asked": asked,
             "settled": settled, "running": running, "silent": silent,
-            "aged": aged, "unreachable": unreachable}
+            "failed": failed, "aged": aged, "unreachable": unreachable,
+            "reindexed": reindexed, "reindex_error": reindex_error}
 
 
 def state_of(st: ST.RunState) -> dict[str, Any]:

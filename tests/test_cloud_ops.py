@@ -234,3 +234,33 @@ def test_console_state_settles_before_listing(space: Path, monkeypatch) -> None:
     assert {ST.load(r).phase for r in ("a", "b", "c")} == {"done"}
     assert "закрито заходів: 2" in got.output and "1 за віком" in got.output
     assert ST.load("a").verdict == "ok"
+
+
+def test_a_supervisor_that_times_out_is_not_silence(space: Path, monkeypatch) -> None:  # noqa: F811
+    """🔴 Таймаут — не «стану немає»: живий наглядач на завантаженій машині
+    відповідає повільно, а закритий запис `find_live` уже не бачить."""
+    import subprocess
+
+    _run("old", phase="running", supervisor="htr-slow", started=_OLD)
+    _ask(monkeypatch, subprocess.TimeoutExpired(["gpurunner"], 20))
+    O.call("cloud.state", {})
+    assert ST.load("old").phase == "running"
+
+
+def test_settling_keeps_the_text_store_fresh(space: Path, monkeypatch) -> None:  # noqa: F811
+    """🔴 24.11.2026: підпис проєкту в меті прогону міняв штамп свіжості, і 852
+    закриті записи дали 1224 «застарілі» прогони. Хто закриває — той і доганяє."""
+    import json
+
+    from nyshporka.cloud import supervised as SUP
+
+    out = space / "reports" / "htr" / "spr-1"
+    out.mkdir(parents=True)
+    (out / "_htr_meta.json").write_text(json.dumps({"pages": {}}), encoding="utf-8")
+    _run("a", phase="running", supervisor="htr-q-1", out_dir=str(out))
+    _ask(monkeypatch, _DONE)
+    got: list[list[Path]] = []
+    monkeypatch.setattr(SUP, "_restore_freshness", lambda dirs: got.append(list(dirs)) or 1)
+    O.call("cloud.state", {})
+    assert got == [[out]]
+    assert "project" in json.loads((out / "_htr_meta.json").read_text(encoding="utf-8"))

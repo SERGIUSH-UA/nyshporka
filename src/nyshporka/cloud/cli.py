@@ -525,6 +525,9 @@ def _settle_open_quietly(*, as_json: bool = False) -> None:
                       + (f", {res['aged']} за віком (наглядач мовчить, понад "
                          f"{SUP.AGE_CLOSE_SEC // 3600} год)" if res["aged"] else "")
                       + "[/muted]")
+    if res["reindex_error"]:
+        console.print(f"[warn]⚠ стор тексту не догнано після закриття: "
+                      f"{escape(res['reindex_error'])} — nysh text index[/warn]", highlight=False)
     still = res["open"] - res["settled"] - res["aged"]
     if res["unreachable"] and still:
         console.print(f"[warn]⚠ {still} відчеплених заходів записано як «читає», але "
@@ -1006,8 +1009,12 @@ def cmd_settle(
     res = (SUP.settle_session(session) if session
            else SUP.settle_open(ST.all_runs()))
     console.print(f"закрито: {res['settled']} за словом наглядача, {res['aged']} за віком; "
-                  f"ще працюють: {res['running']}; мовчать: "
-                  f"{res['silent'] - res['aged']}", highlight=False)
+                  f"ще працюють: {res['running']}; без стану в наглядача: "
+                  f"{res['silent'] - res['aged']}; не відповіли: {res['failed']}",
+                  highlight=False)
+    if res["reindex_error"]:
+        console.print(f"[warn]⚠ стор тексту не догнано: {escape(res['reindex_error'])} — "
+                      f"nysh text index[/warn]", highlight=False)
     if res["unreachable"]:
         console.print(f"[warn]⚠ наглядача спитати нічим: {escape(res['unreachable'])}[/warn]",
                       highlight=False)
