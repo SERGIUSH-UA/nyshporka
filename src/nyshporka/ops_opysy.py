@@ -138,15 +138,26 @@ def opysy_pack(a: PackArgs) -> Envelope:
     return _verdict_env(data, rep.verdict)
 
 
-@op("opysy.policy", summary="Чи приймає Супряга описи цього фонду (без мережі)",
+@op("opysy.policy", summary="Чи приймає Супряга описи цього фонду (сервер; без мережі — "
+                            "вбудований перелік)",
     args=PolicyArgs, section=SECTION, tier="rare",
     when="до прогону опису — щоб не читати фонд, закритий для заливки")
 def opysy_policy(a: PolicyArgs) -> Envelope:
+    """Спершу сервер: його перелік ширший за вбудований і каже, куди вести людину (`link`);
+    сервер недоступний чи описи там ще закриті — вбудований перелік пакета."""
     from nyshporka.opysy import gates as G
+    from nyshporka.opysy import remote as R
 
+    base = {"repo": G.repo_code(a.repo), "fond": a.fond.strip()}
+    try:
+        d = R.policy(a.repo, a.fond)
+    except Exception:
+        d = None
+    if isinstance(d, dict) and "open" in d:
+        return ok({**base, "open": bool(d["open"]), "why": str(d.get("why") or ""),
+                   "link": str(d.get("link") or ""), "dzherelo": "server"})
     why = G.excluded(a.repo, a.fond)
-    return ok({"repo": G.repo_code(a.repo), "fond": a.fond.strip(), "open": not why,
-               "why": why})
+    return ok({**base, "open": not why, "why": why, "dzherelo": "paket"})
 
 
 @op("opysy.push", summary="Залити пакет опису в Супрягу",
