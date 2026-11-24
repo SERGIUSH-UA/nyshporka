@@ -1220,8 +1220,51 @@ def _patch_plan(plan_path: Path, convoy: Convoy,
              else post_fetch_hooks([leg.name for leg in convoy.legs]))
     if hooks:
         data["post_fetch"] = hooks
+    if data.get("on_exit_hooks"):
+        exit_hooks = on_exit_hooks()
+        if exit_hooks:
+            data["on_exit"] = exit_hooks
     plan_path.write_text(json.dumps(data, ensure_ascii=False, indent=1),
                          encoding="utf-8")
+
+
+def on_exit_hooks() -> list[dict[str, Any]]:
+    """Закриття НАШИХ записів заходу самим наглядачем — на його виході.
+
+    🔴 Запис заходу — знімок хвилини відчеплення, і доти його закривав лише
+    той, хто питав наглядача (24.11.2026 — 2277 завершених заходів «читає»).
+    Наглядач, що вміє `on_exit` (позначка `on_exit_hooks` у плані), кличе цю
+    команду за будь-якого вердикту, після останнього запису свого стану;
+    `{session}` він підставляє сам. Одна команда на сесію, не на справу:
+    кожен старт `nysh` — секунди, а в черзі сотні справ.
+
+    `--gpurunner` — коли адресу наглядача нам дали ззовні (`NYSH_GPURUNNER`):
+    відчеплений процес її не успадковує, і без неї команда спитати не мала б
+    чим, тобто мовчки нічого б не закрила.
+    """
+    from nyshporka.core.workspace import WorkspaceError, workspace
+
+    exe = nysh_exe()
+    if not exe:
+        return []
+    try:
+        root = str(workspace().hub)
+    except WorkspaceError:
+        return []
+    cmd = [exe, "cloud", "settle", "--session", "{session}"]
+    named = os.environ.get("NYSH_GPURUNNER", "").strip()
+    if named:
+        cmd += ["--gpurunner", named]
+    return [{"cmd": cmd, "cwd": root, "timeout_sec": 300}]
+
+
+def settle_session(session: str) -> dict[str, Any]:
+    """Закрити записи заходу однієї сесії за словом її наглядача.
+
+    Без закриття за віком: кличе сам наглядач на виході, і відповідь у нього є.
+    """
+    runs = [s for s in ST.all_runs() if s.supervisor == session]
+    return settle_open(runs, age_close_sec=None)
 
 
 def _remember(convoy: Convoy, res: GoResult, *, session: str,

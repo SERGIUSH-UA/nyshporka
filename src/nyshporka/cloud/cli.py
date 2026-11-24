@@ -981,6 +981,39 @@ def cmd_drop_frames(
         console.print("[muted]стиснутих копій цих справ немає[/muted]")
 
 
+@app.command("settle")
+@route("cloud settle", skill="run-case-remote", mutates=True,
+       when="закрити записи завершеного відчепленого заходу за словом наглядача")
+def cmd_settle(
+    session: str = typer.Option("", "--session",
+                                help="сесія наглядача; порожньо — усі незавершені"),
+    gpurunner: str = typer.Option("", "--gpurunner",
+                                  help="програма наглядача (те саме, що NYSH_GPURUNNER)"),
+) -> None:
+    """Закрити записи заходу за словом наглядача.
+
+    Наглядач кличе це сам на виході (`on_exit` плану), тож завершений захід
+    не лишається «читає». Руками без `--session` — те саме, що робить перелік
+    `nysh cloud state`, разом із закриттям за віком мовчазних заходів.
+    """
+    import os
+
+    from nyshporka.cloud import state as ST
+    from nyshporka.cloud import supervised as SUP
+
+    if gpurunner:
+        os.environ["NYSH_GPURUNNER"] = gpurunner
+    res = (SUP.settle_session(session) if session
+           else SUP.settle_open(ST.all_runs()))
+    console.print(f"закрито: {res['settled']} за словом наглядача, {res['aged']} за віком; "
+                  f"ще працюють: {res['running']}; мовчать: "
+                  f"{res['silent'] - res['aged']}", highlight=False)
+    if res["unreachable"]:
+        console.print(f"[warn]⚠ наглядача спитати нічим: {escape(res['unreachable'])}[/warn]",
+                      highlight=False)
+        raise typer.Exit(code=3)
+
+
 def _print_batch(res: Any) -> None:
     """Партія поіменно: людина бачить, яка машина що везе й за скільки."""
     for q in res.queues:

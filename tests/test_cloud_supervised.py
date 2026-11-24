@@ -99,6 +99,8 @@ if args[:2] == ["htr", "plan"]:
         **({"print_engine": 1} if "engine=paddle_vl" in params else {}),
         # як наглядач, що везе рішення справи про клітинки (`form_cells` у її params)
         **({} if cfg.get("old_cells") else {"form_cells_case": 1}),
+        # як наглядач, що виконує `on_exit` плану на виході
+        **({} if cfg.get("old_exit") else {"on_exit_hooks": 1}),
     }, ensure_ascii=False), encoding="utf-8")
     sys.exit(0)
 
@@ -309,6 +311,56 @@ def test_plan_points_at_original_frames_and_carries_bookkeeping(
                                              ["cloud", "drop-frames", case.name]]
     assert all(Path(h["cmd"][0]).is_absolute() for h in hooks), \
         "відчеплений процес не має ні нашого PATH, ні нашої робочої теки"
+
+
+def test_plan_asks_the_supervisor_to_settle_our_record_on_exit(
+        space: Path, monkeypatch, fake_gpurunner) -> None:
+    """🔴 24.11.2026: 2277 завершених заходів стояли «читає» — запис закривав
+    лише той, хто питав. Наглядач, що вміє `on_exit`, закриває його сам, однією
+    командою на сесію; адресу наглядача везе прапорець, бо відчеплений процес
+    `NYSH_GPURUNNER` не успадковує."""
+    case, _ = _wire(space, monkeypatch)
+    monkeypatch.setattr(SUP, "nysh_exe", lambda: str(space / "nysh"))
+    monkeypatch.setenv("NYSH_GPURUNNER", "C:/gr/gpurunner.exe")
+    _go(case)
+
+    hooks = _plan_of(fake_gpurunner)["on_exit"]
+    assert len(hooks) == 1
+    assert hooks[0]["cmd"][1:] == ["cloud", "settle", "--session", "{session}",
+                                   "--gpurunner", "C:/gr/gpurunner.exe"]
+    assert Path(hooks[0]["cwd"]).is_absolute()
+
+
+def test_old_supervisor_gets_no_on_exit_key(space: Path, monkeypatch,
+                                            fake_gpurunner) -> None:
+    """Старий наглядач назвав би ключ «невідомий — НЕ ДІЄ»: без позначки не кладемо."""
+    case, _ = _wire(space, monkeypatch)
+    fake_gpurunner.set(estimate=ESTIMATE, old_exit=True)
+    monkeypatch.setattr(SUP, "nysh_exe", lambda: str(space / "nysh"))
+    _go(case)
+    assert "on_exit" not in _plan_of(fake_gpurunner)
+
+
+def test_settle_session_closes_only_its_own_runs(space: Path, monkeypatch) -> None:
+    """`cloud settle --session` — лише записи цієї сесії, і без закриття за віком."""
+    from typer.testing import CliRunner
+
+    from nyshporka.cloud import cli as C
+
+    for rid, sess in (("a", "htr-mine"), ("b", "htr-mine"), ("c", "htr-other")):
+        ST.save(ST.RunState(run_id=rid, case_dir="/x", backend="fake",
+                            supervisor=sess, phase="running", started=1.0))
+    asked: list[str] = []
+    done = {"phase": "finished", "verdict": "ok", "why": "прогнано повністю",
+            "budget": {"spent_usd": 0.03}}
+    monkeypatch.setattr(SUP, "state_of_session",
+                        lambda s, **kw: asked.append(s) or (done if s == "htr-mine" else {}))
+    got = CliRunner().invoke(C.app, ["settle", "--session", "htr-mine"])
+    assert got.exit_code == 0, got.output
+    assert asked == ["htr-mine"]
+    assert {ST.load(r).phase for r in ("a", "b")} == {"done"}
+    assert ST.load("a").box.get("spent_usd") == 0.03
+    assert ST.load("c").phase == "running", "чужа сесія і стара — не наша справа"
 
 
 def test_case_key_and_run_name_go_to_the_supervisor(
