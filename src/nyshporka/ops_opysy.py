@@ -601,3 +601,89 @@ def opysy_build(a: BuildArgs) -> Envelope:
     except (W.WorkdirError, ValueError) as exc:
         return _workdir_fail(exc)
     return ok({**res, "next": f"nysh opys pack {W.paket_dir(d)} --out {d}"})
+
+
+# ── обмін нормалізацією: узяти чужий опис і віддати нормалізацію ─────────────
+
+
+class ObminArgs(BaseModel):
+    base: str = Field(default="", description="адреса пулу; порожньо — типова")
+
+
+class VziatyArgs(BaseModel):
+    dir: str = Field(description="тека, куди покласти пачки запитів")
+    vnesok: int | None = Field(default=None, description="який опис (внесок); порожньо — "
+                                                         "найстаріший, що чекає")
+    base: str = Field(default="", description="адреса пулу; порожньо — типова")
+
+
+class ViddatyArgs(BaseModel):
+    dir: str = Field(description="тека, взята `nysh opys vziaty`")
+    model: str = Field(description="модель, що нормалізувала (назва моделі агента)")
+    base: str = Field(default="", description="адреса пулу; порожньо — типова")
+
+
+@op("opysy.obmin", summary="Описи, нормалізацію яких автори віддали на обмін",
+    args=ObminArgs, section=SECTION, tier="rare",
+    when="є агент і ресурси нормалізувати чужий цінний опис")
+def opysy_obmin(a: ObminArgs) -> Envelope:
+    from nyshporka.opysy import remote as R
+
+    return _remote(R.obmin_cherha, base=a.base)
+
+
+@op("opysy.vziaty", summary="Узяти опис на нормалізацію (48 год): тека з пачками для агента",
+    args=VziatyArgs, mutates=True, section=SECTION, tier="rare",
+    when="узяти з обміну опис, щоб нормалізувати назви своїм агентом")
+def opysy_vziaty(a: VziatyArgs) -> Envelope:
+    from nyshporka.opysy import obmin as OB
+    from nyshporka.opysy import remote as R
+
+    env = _remote(R.obmin_vziaty, vnesok=a.vnesok, base=a.base)
+    if not env.ok:
+        return env
+    z = env.data
+    nove = OB.zapysaty(Path(a.dir), z)
+    return ok({"obmin": z.get("obmin"), "shyfra": z.get("shyfra"), "do": z.get("do"),
+               "nazv": len(z.get("riadky") or []), "pachok": OB.bez_vidpovidi(Path(a.dir)),
+               "novykh_pachok": len(nove), "dir": str(Path(a.dir).resolve()),
+               "how": "кожну пачку batch_NNN.json віддати моделі (поле `request` — увесь запит); "
+                      "відповідь — лише JSON-масив тієї самої довжини — у batch_NNN.out.txt поруч",
+               "next": f"nysh opys viddaty {a.dir} --model <модель>"})
+
+
+@op("opysy.viddaty", summary="Віддати нормалізацію взятого опису (пачки з відповіддю)",
+    args=ViddatyArgs, mutates=True, long=True, section=SECTION, tier="rare",
+    when="агент відповів на пачки опису, взятого з обміну")
+def opysy_viddaty(a: ViddatyArgs) -> Envelope:
+    import json
+
+    from nyshporka.opysy import obmin as OB
+    from nyshporka.opysy import remote as R
+
+    d = Path(a.dir)
+    zfile = d / OB.ZAVDANNIA
+    if not zfile.exists():
+        return fail(f"у {d} немає взятого опису — `nysh opys vziaty {d}`")
+    z = json.loads(zfile.read_text(encoding="utf-8"))
+    vidp, gotovi, bad = OB.vidpovidi(d)
+    if not vidp:
+        env = fail("немає нових відповідей — агент кладе batch_NNN.out.txt поруч із пачкою")
+        for b in bad:
+            env.warn("norm_bad", b, level=ALERT)
+        return env
+    pidsumok: dict[str, Any] = {"pryiniato": 0, "porozhni": 0, "avtora": 0, "poznachky": []}
+    for i in range(0, len(vidp), 500):
+        env = _remote(R.obmin_viddaty, int(z["obmin"]), model=a.model,
+                      vidpovidi=vidp[i:i + 500], base=a.base)
+        if not env.ok:
+            return env
+        for k in ("pryiniato", "porozhni", "avtora"):
+            pidsumok[k] += int(env.data.get(k) or 0)
+        pidsumok["poznachky"] += env.data.get("poznachky") or []
+        pidsumok.update({k: env.data.get(k) for k in ("stan", "normalizovano", "spravy")})
+    OB.poznachyty(d, gotovi)
+    env = ok({**pidsumok, "shyfra": z.get("shyfra"), "pachok_bez_vidpovidi": OB.bez_vidpovidi(d)})
+    for b in bad:
+        env.warn("norm_bad", b, level=ALERT)
+    return env
