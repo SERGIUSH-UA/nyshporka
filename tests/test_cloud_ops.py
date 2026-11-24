@@ -165,3 +165,72 @@ def test_without_a_supervisor_program_the_list_says_so(space: Path,  # noqa: F81
     env = O.call("cloud.state", {})
     assert env.data["live"] == 1
     assert any(w["code"] == "supervisor_unreachable" for w in env.as_dict()["warnings"])
+
+
+# ── 24.11.2026: закриття за віком і консольний перелік ──────────────────────
+_OLD = time.time() - 80 * 3600
+
+
+def test_old_run_of_a_silent_supervisor_is_closed_by_age(space: Path,  # noqa: F811
+                                                         monkeypatch) -> None:
+    """Наглядач мовчить, а захід старший за 72 год — завершений (слово дослідника
+    03.11.2026). Вердикту не вигадуємо."""
+    _run("old", phase="running", supervisor="htr-gone-1", started=_OLD)
+    _run("young", phase="running", supervisor="htr-gone-2")
+    _ask(monkeypatch, {})
+    d = O.call("cloud.state", {}).data
+    old, young = ST.load("old"), ST.load("young")
+    assert old.phase == "done" and old.verdict == ""
+    assert any(i["kind"] == "closed_by_age" for i in old.incidents)
+    assert young.phase == "running"
+    assert d["aged"] == 1 and d["live"] == 1
+
+
+def test_supervisor_that_still_works_keeps_an_old_run_open(space: Path,  # noqa: F811
+                                                           monkeypatch) -> None:
+    """🔴 Черга на сотні справ законно йде понад три доби: відповідь «працюю»
+    сильніша за вік."""
+    _run("q236", phase="running", supervisor="htr-q236", started=_OLD)
+    _ask(monkeypatch, {"phase": "running", "verdict": ""})
+    O.call("cloud.state", {})
+    assert ST.load("q236").phase == "running"
+
+
+def test_nothing_is_closed_by_age_when_supervisor_cannot_be_asked(space: Path,  # noqa: F811
+                                                                  monkeypatch) -> None:
+    """Спитати нічим — мовчання наше, а не наглядача: за віком не закриваємо."""
+    from nyshporka.cloud import supervised as SUP
+
+    _run("old", phase="running", supervisor="htr-q-1", started=_OLD)
+    _ask(monkeypatch, SUP.SupervisorMissing("наглядача немає"))
+    O.call("cloud.state", {})
+    assert ST.load("old").phase == "running"
+
+
+def test_console_state_settles_before_listing(space: Path, monkeypatch) -> None:  # noqa: F811
+    """🔴 24.11.2026: консольний `nysh cloud state` (і `--all`) наглядачів не
+    питав, тож 2277 завершених заходів стояли «читає», а без аргументу команда
+    відмовляла переліком «незавершених кілька»."""
+    from typer.testing import CliRunner
+
+    from nyshporka.cloud import cli as C
+
+    for rid in ("a", "b"):
+        _run(rid, phase="running", supervisor="htr-q-1", siblings=["a", "b"])
+    _run("c", phase="running", supervisor="htr-q-2", started=_OLD)
+    sessions = {"htr-q-1": _DONE, "htr-q-2": {}}
+    asked: list[str] = []
+
+    def fake(session: str, *, timeout: float | None = None) -> dict[str, Any]:
+        asked.append(session)
+        return sessions[session]
+
+    from nyshporka.cloud import supervised as SUP
+
+    monkeypatch.setattr(SUP, "state_of_session", fake)
+    got = CliRunner().invoke(C.app, ["state", "--all"])
+    assert got.exit_code == 0, got.output
+    assert sorted(asked) == ["htr-q-1", "htr-q-2"]
+    assert {ST.load(r).phase for r in ("a", "b", "c")} == {"done"}
+    assert "закрито заходів: 2" in got.output and "1 за віком" in got.output
+    assert ST.load("a").verdict == "ok"

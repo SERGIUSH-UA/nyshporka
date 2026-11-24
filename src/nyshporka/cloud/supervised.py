@@ -1385,8 +1385,28 @@ def absorb(st: ST.RunState, data: dict[str, Any]) -> ST.RunState:
     return ST.save(st)
 
 
+#: Відчеплений захід, старший за це і без жодної відповіді наглядача, —
+#: завершений (рішення дослідника 03.11.2026: «все що більше 72 год це все
+#: закінчено»). Рахується від `started`: `updated` рухає кожен `save`.
+AGE_CLOSE_SEC = 72 * 3600
+
+
+def close_by_age(st: ST.RunState, *, age_h: float) -> ST.RunState:
+    """Закрити запис, про який наглядач уже нічого не каже.
+
+    Вердикт не вигадується: його немає, і «ok» тут було б неправдою.
+    """
+    st.note("closed_by_age", f"наглядач {st.supervisor} мовчить, захід старший "
+                             f"за {age_h:.0f} год — закрито за віком")
+    st.why = st.why or "закрито за віком: наглядач про захід нічого не каже"
+    st.phase = "done"
+    return ST.save(st)
+
+
 def settle_open(runs: Iterable[ST.RunState], *,
-                timeout: float = 20.0) -> dict[str, Any]:
+                timeout: float = 20.0,
+                age_close_sec: float | None = AGE_CLOSE_SEC,
+                now: float | None = None) -> dict[str, Any]:
     """Закрити записи відчеплених заходів, чиї наглядачі вже доповіли підсумок.
 
     🔴 Запис заходу — знімок хвилини відчеплення, і сам себе він не оновить.
@@ -1394,33 +1414,54 @@ def settle_open(runs: Iterable[ST.RunState], *,
     справи, а перелік (`cloud state`, екран «Хмара») наглядачів не питав. Тож
     кожен захід, результат якого забрали іншим шляхом, лишався «читає» назавжди:
     22.10.2026 таких було 4336 із 4685, найстаріші з 21.09, хоча всі 478
-    наглядачів давно доповіли «прогнано повністю».
+    наглядачів давно доповіли «прогнано повністю». 24.11.2026 — знову 2277:
+    консольний `cloud state` цієї функції не кликав.
 
-    Питається кожна сесія один раз, на всі її справи. Наглядач, що мовчить або
-    не відповів за `timeout`, лишає запис відкритим: мовчання — не «завершено»
-    (див. `find_live`). Записи в `runs` оновлюються на місці.
+    Питається кожна сесія один раз, на всі її справи. Наглядач, що ВІДПОВІВ
+    «ще працюю», лишає запис відкритим за будь-якого віку: черга на сотні справ
+    законно йде понад три доби. Наглядач, що мовчить (стану сесії немає,
+    таймаут, зіпсований вивід), лишає запис відкритим, поки той молодший за
+    `age_close_sec`; старший — закривається за віком (`closed_by_age`). Коли
+    наглядача спитати нічим (`unreachable`), за віком не закривається нічого:
+    тоді мовчання — наша вада, а не його.
     """
+    now = time.time() if now is None else now
     open_ = [s for s in runs if s.supervisor and s.phase not in ("done", "failed")]
     by_session: dict[str, list[ST.RunState]] = {}
     for s in open_:
         by_session.setdefault(s.supervisor, []).append(s)
-    asked = settled = 0
+    asked = settled = running = silent = aged = 0
     unreachable = ""
     for session, recs in by_session.items():
+        data: dict[str, Any] = {}
         try:
             data = state_of_session(session, timeout=timeout)
         except SupervisorMissing as exc:
             unreachable = str(exc)
             break
-        except Exception:  # таймаут, зіпсований вивід — запис лишається відкритим
-            continue
-        asked += 1
+        except Exception:  # таймаут, зіпсований вивід — це мовчання
+            data = {}
+        else:
+            asked += 1
         if data and finished(data):
             for st in recs:
                 absorb(st, data)
                 settled += 1
+            continue
+        if data:
+            running += len(recs)
+            continue
+        silent += len(recs)
+        if age_close_sec is None:
+            continue
+        for st in recs:
+            age = now - (st.started or st.updated or now)
+            if not st.needs_release and age > age_close_sec:
+                close_by_age(st, age_h=age / 3600)
+                aged += 1
     return {"open": len(open_), "sessions": len(by_session), "asked": asked,
-            "settled": settled, "unreachable": unreachable}
+            "settled": settled, "running": running, "silent": silent,
+            "aged": aged, "unreachable": unreachable}
 
 
 def state_of(st: ST.RunState) -> dict[str, Any]:

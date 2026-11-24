@@ -512,6 +512,26 @@ def cmd_start(
         console.print("[muted]забрати: nysh cloud fetch " + st.run_id + "[/muted]")
 
 
+def _settle_open_quietly(*, as_json: bool = False) -> None:
+    """Закрити записи завершених відчеплених заходів; людині — один рядок."""
+    from nyshporka.cloud import state as ST
+    from nyshporka.cloud import supervised as SUP
+
+    res = SUP.settle_open(ST.all_runs())
+    if as_json:
+        return
+    if res["settled"] or res["aged"]:
+        console.print(f"[muted]закрито заходів: {res['settled']} за словом наглядача"
+                      + (f", {res['aged']} за віком (наглядач мовчить, понад "
+                         f"{SUP.AGE_CLOSE_SEC // 3600} год)" if res["aged"] else "")
+                      + "[/muted]")
+    still = res["open"] - res["settled"] - res["aged"]
+    if res["unreachable"] and still:
+        console.print(f"[warn]⚠ {still} відчеплених заходів записано як «читає», але "
+                      f"наглядача спитати нічим: {escape(res['unreachable'])}[/warn]",
+                      highlight=False)
+
+
 @app.command("state")
 @route("cloud state", op="cloud.state", tier="core", skill="run-case-remote",
        when="що крутиться в хмарі, скільки витрачено, чи забрано результат")
@@ -529,6 +549,14 @@ def cmd_state(
     if batch:
         _state_batch(batch, as_json=as_json)
         return
+
+    if all_runs or not run_id:
+        # 🔴 Перелік спершу питає наглядачів: інакше завершені відчеплені
+        # заходи лишаються «читає» назавжди, а без аргументу `_need_run`
+        # відмовляє переліком «незавершених кілька» (24.11.2026 таких було
+        # 2277). Не в `_need_run`: `stop` і `fetch` його ділять, і тихо
+        # міняти, який захід для них «єдиний незавершений», не можна.
+        _settle_open_quietly(as_json=as_json)
 
     if all_runs:
         rows = ST.all_runs()

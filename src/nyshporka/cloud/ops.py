@@ -82,8 +82,9 @@ def cloud_state(a: StateArgs) -> Envelope:
     shown = [s for s in runs if s.run_id in alive]
     shown += [s for s in runs if s.run_id not in alive][:max(0, a.limit - len(shown))]
     env = ok({"runs": [_row(s, now) for s in shown], "live": len(alive),
-              "total": len(runs), "settled": settle["settled"]})
-    still = settle["open"] - settle["settled"]
+              "total": len(runs), "settled": settle["settled"],
+              "aged": settle["aged"]})
+    still = settle["open"] - settle["settled"] - settle["aged"]
     if settle["unreachable"] and still:
         env.warn("supervisor_unreachable",
                  f"{still} відчеплених заходів записано як «читає», але наглядача "
