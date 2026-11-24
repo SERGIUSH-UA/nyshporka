@@ -86,10 +86,13 @@ def no_of(rec: dict[str, Any]) -> tuple[int | None, str]:
 
 
 def language(pages: list[dict[str, Any]], default: str) -> str:
-    """Мова опису з тексту: українські (і ї є ґ) проти російських (ы э ъ ё) літер."""
+    """Мова опису з тексту: українські (ї є ґ) проти російських (ы э ъ ё ѣ) літер.
+
+    «і» не рахується: дореформена російська пише її постійно («Григорія», «изнасилованіи»), і
+    рукописний опис ДАОО ф.445 через неї не визначався ні так, ні так (25.11.2026)."""
     tekst = " ".join(v for p in pages for v in p["voices"].values()).lower()
-    uk = sum(tekst.count(c) for c in "іїєґ")
-    ru = sum(tekst.count(c) for c in "ыэъё")
+    uk = sum(tekst.count(c) for c in "їєґ")
+    ru = sum(tekst.count(c) for c in "ыэъёѣ")
     if uk > 2 * ru and uk >= 5:
         return "uk"
     if ru > 2 * uk and ru >= 5:

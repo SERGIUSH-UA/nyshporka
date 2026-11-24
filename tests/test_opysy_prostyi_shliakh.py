@@ -88,6 +88,9 @@ def test_read_i_push_dvoma_komandamy(tmp_path: Path, server: dict[str, Any],
     # повтор — зроблене не повторюється, читання не запускається вдруге
     env2 = _read(d, language="ru")
     assert env2.ok and "читання" not in env2.data["zrobleno"] and len(chytannia) == 1
+    # повтор не нарізає пачок удруге: та сама одна пачка й далі чекає відповіді
+    assert env2.data["novykh_pachok"] == 0 and env2.data["pachok_normalizatsii"] == 1
+    assert len(list(Path(env.data["norm_dir"]).glob("batch_*.json"))) == 1
     # агент відповідає на пачки
     for b in Path(env.data["norm_dir"]).glob("batch_*.json"):
         titles = json.loads(b.read_text(encoding="utf-8"))["titles"]
@@ -99,8 +102,14 @@ def test_read_i_push_dvoma_komandamy(tmp_path: Path, server: dict[str, Any],
     got = OO.opysy_push(OO.PushArgs(file=str(d), norm_model="agent-model"))
     assert got.ok, got
     assert got.data["vnesok"] == 7 and server["pushed"][-1].suffix == ".nyshopys"
-    # модель пам'ятається: повторна віддача без прапорця
-    assert OO.opysy_push(OO.PushArgs(file=str(d))).ok
+    # той самий пакет удруге не заливається (байти в сховищі лишились би сиротами)
+    znov = OO.opysy_push(OO.PushArgs(file=str(d)))
+    assert znov.ok and znov.data["duplicate"] and len(server["pushed"]) == 1
+    # модель пам'ятається, а `--znovu` заливає все одно
+    assert OO.opysy_push(OO.PushArgs(file=str(d), znovu=True)).ok and len(server["pushed"]) == 2
+    # після прийняття нормалізації повтор `read` нічого не нарізає й веде одразу до `push`
+    env3 = _read(d, language="ru")
+    assert env3.ok and env3.data["pachok_normalizatsii"] == 0 and "--norm-model" not in env3.data["next"]
 
 
 def test_zakrytyi_fond_odrazu_z_posylanniam(tmp_path: Path, server: dict[str, Any],
@@ -125,3 +134,35 @@ def test_obirvane_chytannia_kazhe_prodovzhyty(tmp_path: Path, server: dict[str, 
                 url=URL)
     assert not env.ok and "0 з 2" in env.error and "продовжить" in env.error
     assert W.load(tmp_path / "o")  # паспорт і сторінки лишились — повтор продовжить
+
+
+def test_mova_z_tekstu_doreformena_i_ukrainska() -> None:
+    from nyshporka.opysy import pack_dir as PD
+
+    ru = [{"voices": {"p": "Дѣло по обвиненію офицера Григорія Мотеева въ изнасилованіи дѣвочки "
+                           "Тоже крестьянина Ивана Выбрановскаго въ избіеніи служителя"}}]
+    uk = [{"voices": {"p": "Костьол с. Білогородка. Метрична книга запису народження, шлюбу та "
+                           "смерті за 1895 рік; Її, єпархія, Ґорґани"}}]
+    assert PD.language(ru, "") == "ru" and PD.language(uk, "") == "uk"
+
+
+def test_porozhnia_storinka_bez_tekstu_ne_blokuie(tmp_path: Path, server: dict[str, Any],
+                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    """Сторінка, яку рушій пройшов, але тексту не дав (порожня, титул), — прочитана за метою."""
+    def _chytaty(pages: Path, run: Path, script: str) -> int:
+        run.mkdir(parents=True, exist_ok=True)
+        stem, lines = "0001", STOR["0001"]
+        w, h = Image.open(pages / f"{stem}.jpg").size
+        (run / f"{stem}.txt").write_text("\n".join(t for *_, t in lines), encoding="utf-8")
+        with gzip.open(run / f"{stem}.lines.json.gz", "wt", encoding="utf-8") as fh:
+            json.dump({"boxes": [list(b[:4]) for b in lines], "size": [w, h]}, fh)
+        (run / "_htr_meta.json").write_text(json.dumps(
+            {"model": "pysar_cyr_v31.pt", "pages": {"0001.jpg": {"lines": 3},
+                                                   "0002.jpg": {"lines": 0}}}), encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(OO, "_chytaty", _chytaty)
+    env = _read(tmp_path / "p", pdf=str(_pdf(tmp_path)), repo="ДАОО", fond="445", opys="9", url=URL,
+                language="ru")
+    assert env.ok, env
+    assert "читання" in env.data["zrobleno"] and env.data["sprav"] == 2

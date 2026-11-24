@@ -32,6 +32,8 @@ class PushArgs(BaseModel):
                                   ".nyshopys")
     norm_model: str = Field(default="", description="модель, що нормалізувала назви (для теки; "
                                                     "один раз — далі пам'ятається)")
+    znovu: bool = Field(default=False, description="залити, навіть якщо цей самий пакет із теки вже "
+                                                   "залито")
     base: str = Field(default="", description="адреса пулу; порожньо — типова")
 
 
@@ -169,15 +171,29 @@ def opysy_policy(a: PolicyArgs) -> Envelope:
 def opysy_push(a: PushArgs) -> Envelope:
     """Тека опису — усе за раз, як `nysh share push`: прийняти відповіді нормалізації, скласти
     робочу теку пакета, ворота, `.nyshopys`, заливка. Файл пакета — лише заливка."""
+    import hashlib
+    import json
+
     from nyshporka.opysy import remote as R
     from nyshporka.share.upload import UploadError
 
     path = Path(a.file)
+    slid: Path | None = None
+    sha = ""
     if path.is_dir():
         zibrano = _zibraty_paket(path, a.norm_model)
         if not zibrano.ok:
             return zibrano
+        slid = path / "zalyto.json"
         path = Path(zibrano.data["file"])
+        sha = hashlib.sha256(path.read_bytes()).hexdigest()
+        bulo = json.loads(slid.read_text(encoding="utf-8")) if slid.exists() else {}
+        if bulo.get("sha256") == sha and not a.znovu:
+            # той самий пакет: сервер однаково відповів би «уже в Супрязі», але байти вже лягли б
+            # у сховище й лишились би там без внеску
+            return ok({"duplicate": True, "vnesok": bulo.get("vnesok"), "shyfra": bulo.get("shyfra"),
+                       "text": "цей самий пакет із теки вже залито — змін немає (`--znovu`, щоб "
+                               "залити все одно)"})
     try:
         got = R.push(path, base=a.base)
     except (UploadError, OSError) as exc:
@@ -185,6 +201,10 @@ def opysy_push(a: PushArgs) -> Envelope:
         for d in getattr(exc, "details", None) or []:
             env.warn(str(d.get("rule") or "refusal"), str(d.get("text") or ""), level=ALERT)
         return env
+    if slid is not None:
+        slid.write_text(json.dumps({"sha256": sha, "vnesok": got.get("vnesok"),
+                                    "shyfra": got.get("shyfra")}, ensure_ascii=False),
+                        encoding="utf-8")
     env = ok(got)
     for w in got.get("warnings") or []:
         env.warn(str(w.get("code") or ""), str(w.get("text") or ""))
@@ -433,11 +453,22 @@ def _chytaty(pages: Path, run: Path, script: str) -> int:
 
 
 def _prochytano(d: Path) -> tuple[int, int]:
+    """(сторінок, прочитано). Прочитана — є текст АБО рушій записав її в мету прогону: порожня
+    чи титульна сторінка тексту може не мати, і без мети «прочитано 3 з 4» не минало б ніколи."""
+    import contextlib
+    import json
+
     from nyshporka.opysy import workdir as W
 
     run = W.run_dir(d)
-    return (len(list(W.pages_dir(d).glob("*.jpg"))) if W.pages_dir(d).exists() else 0,
-            len(list(run.glob("*.txt"))) if run.exists() else 0)
+    vsi = {p.stem for p in W.pages_dir(d).glob("*.jpg")} if W.pages_dir(d).exists() else set()
+    gotovi = {p.stem for p in run.glob("*.txt")} if run.exists() else set()
+    meta = run / "_htr_meta.json"
+    if meta.exists():
+        with contextlib.suppress(ValueError, OSError):
+            gotovi |= {Path(k).stem for k in (json.loads(meta.read_text(encoding="utf-8"))
+                                              .get("pages") or {})}
+    return len(vsi), len(gotovi & vsi)
 
 
 @op("opysy.read", summary="Прочитати опис фонду: паспорт, сторінки, читання, таблиця справ і "
@@ -493,14 +524,18 @@ def opysy_read(a: ReadOpysArgs) -> Envelope:
     env = opysy_norm(NormArgs(dir=a.dir, language=a.language))
     if not env.ok:
         return env
-    pachky = env.data.get("batches") or []
+    from nyshporka.opysy import norm_batches as NB
+
+    # чекають відповіді — і нарізані щойно, і ті, що лишились з попереднього запуску
+    pachky = NB.bez_vidpovidi(W.norm_dir(d))
     nastupne = (f"агент нормалізує пачки в {env.data.get('dir')}, тоді "
                 f"`nysh opys push {a.dir} --norm-model <модель>`") if pachky \
         else f"nysh opys push {a.dir}"
     return ok({"dir": str(d.resolve()), "zrobleno": kroky, "storinok": vsi,
                "sprav": tablytsia.get("cases"), "pidtverdzheno_nomeriv": tablytsia.get("confirmed"),
-               "pachok_normalizatsii": len(pachky), "norm_dir": env.data.get("dir"),
-               "how": env.data.get("how"), "next": nastupne})
+               "pachok_normalizatsii": len(pachky),
+               "novykh_pachok": len(env.data.get("batches") or []),
+               "norm_dir": env.data.get("dir"), "how": env.data.get("how"), "next": nastupne})
 
 
 def _zibraty_paket(d: Path, norm_model: str) -> Envelope:
