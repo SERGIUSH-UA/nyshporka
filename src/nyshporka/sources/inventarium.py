@@ -63,7 +63,8 @@ PAGE = 1000
 
 _SUPA = re.compile(r"https://([a-z0-9]{8,})\.supabase\.co")
 _JWT = re.compile(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}")
-_CHUNK = re.compile(r"""["'](/_next/static/chunks/[^"']+?\.js)["']""")
+#: Скрипт сторінки; з 24.11.2026 сайт дописує мітку збірки (`….js?dpl=…`) — її відкидаємо.
+_CHUNK = re.compile(r"""["'](/_next/static/chunks/[^"'?]+?\.js)(?:\?[^"']*)?["']""")
 #: «ЦДІАК 2-1-171», «ЛННБ ім. Стефаника 5-1-4145/III», «ЦДІАК-2227-1-158».
 _SIG = re.compile(r"^(.*?)[\s-]+([^\s-]+-[^\s-]+-\S+)$")
 _TOTAL = re.compile(r"/(\d+)\s*$")

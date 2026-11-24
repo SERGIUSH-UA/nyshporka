@@ -76,13 +76,14 @@ class _Resp:
 class _Site:
     """Головна сторінка з посиланнями на скрипти; ключ — у другому скрипті."""
 
-    def __init__(self, scripts: dict[str, str]) -> None:
+    def __init__(self, scripts: dict[str, str], suffix: str = "") -> None:
         self.scripts = scripts
+        self.suffix = suffix
 
     def get(self, url: str) -> _Resp:
-        path = url.split("//", 1)[-1].split("/", 1)[-1]
+        path = url.split("//", 1)[-1].split("/", 1)[-1].split("?", 1)[0]
         if path in ("", "/"):
-            refs = "".join(f'<script src="/{p}"></script>' for p in self.scripts)
+            refs = "".join(f'<script src="/{p}{self.suffix}"></script>' for p in self.scripts)
             return _Resp(f"<html>{refs}</html>")
         return _Resp(self.scripts[path])
 
@@ -134,6 +135,14 @@ def test_the_key_is_taken_only_if_it_is_anon_of_the_same_project() -> None:
     text = f'"https://{REF}.supabase.co" "{service}" "{foreign}" "{ANON}"'
     assert find_credentials([text]) == (f"https://{REF}.supabase.co", ANON)
     assert find_credentials([f'"https://{REF}.supabase.co" "{service}"']) is None
+
+
+def test_scripts_with_a_build_mark_are_still_read(tmp_path: Path) -> None:
+    """24.11.2026 сайт почав писати `….js?dpl=…`, і обхід бачив «0 файлів»."""
+    site = _Site({"_next/static/chunks/a.js": "console.log(1)",
+                  "_next/static/chunks/b.js": GOOD_JS}, suffix="?dpl=dpl_X1")
+    src = InventariumSource(tmp_path, site=Fetcher(base="https://inv", delay=0.0, client=site))
+    assert src.credentials() == (f"https://{REF}.supabase.co", ANON)
 
 
 def test_no_key_in_scripts_is_said_aloud(tmp_path: Path) -> None:
