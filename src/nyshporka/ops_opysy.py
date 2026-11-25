@@ -378,9 +378,22 @@ def opysy_table(a: TableArgs) -> Envelope:
     from nyshporka.opysy import dochyt as DC
     from nyshporka.opysy import meta as M
 
+    meta = M.load(d)
     dd = W.dochyt_dir(d)
-    res = RU.build(W.run_dir(d), W.table_path(d), title_starts=a.title_starts, dobudova=a.dobudova,
-                   dochyt=dd if (dd / DC.MAPA).exists() else None, meta=M.load(d))
+    if meta is not None and meta.forma == "typed":
+        from nyshporka.opysy import vl_table as VT
+
+        if not any(W.vl_dir(d).glob("*.md")):
+            return fail(f"немає розмітки рушія друку в {W.vl_dir(d)} — `nysh opys read {a.dir}`")
+        res = VT.build(W.vl_dir(d), W.table_path(d), opys=str(W.load(d).get("opys") or ""))
+        res = {k: v for k, v in res.items() if not isinstance(v, (list, dict))}
+        res["confirmed"] = res.get("pidtverdzheno", 0)
+        if meta.sprav:
+            res["sprav"] = meta.sprav
+            res["povnota"] = round(res.get("cases", 0) / meta.sprav, 3)
+    else:
+        res = RU.build(W.run_dir(d), W.table_path(d), title_starts=a.title_starts, dobudova=a.dobudova,
+                       dochyt=dd if (dd / DC.MAPA).exists() else None, meta=meta)
     env = ok({**res, "file": str(W.table_path(d)), "next": f"nysh opys norm {a.dir}"})
     if res.get("povnota") is not None and res["povnota"] < 0.9:
         env.warn("povnota", f"справ у таблиці {res['cases']} з {res['sprav']} за метаданими "
@@ -504,7 +517,66 @@ class ReadOpysArgs(BaseModel):
                                                                            "як вирішить `nysh read`")
     form: Literal["hand_ruled", "typed"] = Field(default="hand_ruled",
                                                  description="вигляд опису: рукопис на розграфлених "
-                                                             "аркушах чи машинопис")
+                                                             "аркушах чи машинопис (остаточно — "
+                                                             "метадані `nysh opys meta --forma`)")
+    de: Literal["auto", "lokalno", "hmara"] = Field(
+        default="auto", description="де читати: `hmara` — орендована карта (`nysh cloud go`), "
+                                    "`lokalno` — ця машина, `auto` — хмара, якщо плагін оренди "
+                                    "стоїть, інакше тут. Машинопис — лише хмара")
+    hmara_param: list[str] = Field(default_factory=list,
+                                   description="параметри хмарного заходу `ключ=значення` (як `-p` "
+                                               "у `nysh cloud go`)")
+    confirm: bool = Field(default=False, description="дозвіл ЛЮДИНИ на хмарний захід понад стелю "
+                                                     "автозапуску")
+
+
+def _orenda_ye() -> bool:
+    """Чи стоїть плагін оренди (наглядач хмарних заходів) — тоді `auto` читає в хмарі."""
+    from nyshporka.cloud import supervised as SV
+
+    try:
+        SV.gpurunner_cmd()
+    except Exception:
+        return False
+    return True
+
+
+def _hmara_etap(d: Path, etap: str, kadry: Path, kudy: Path, a: ReadOpysArgs
+                ) -> tuple[str, dict[str, Any]]:
+    """Етап хмарного читання: `gotovo` (результат уже в `kudy`), `ide` (захід читає — повтор
+    забере) чи `postavleno` (щойно поставлено). Відмова `cloud go` — `HmaraError`."""
+    from nyshporka.opysy import hmara as H
+
+    zap = H.stan(d).get(etap)
+    if zap and zap.get("zabrano"):
+        return "gotovo", zap
+    if zap:
+        zrobleno, vsi = H.gotovo(d, etap)
+        if vsi and zrobleno >= vsi:
+            H.zabraty(d, etap, kudy)
+            if etap == "storinky":
+                # другий голос лягає поруч: `<тека результату>-<голос>` → `<тека>/run-<голос>`
+                out = Path(zap["out_dir"])
+                for sib in out.parent.glob(out.name + "-*"):
+                    if sib.is_dir():
+                        H.zabraty_tekou(sib, kudy.parent / f"{kudy.name}-{sib.name[len(out.name) + 1:]}")
+            return "gotovo", H.stan(d)[etap]
+        return "ide", {**zap, "prochytano": zrobleno, "vsi": vsi}
+    zap = H.postavyty(d, etap, kadry, script=a.script, params=a.hmara_param, confirm=a.confirm)
+    return "postavleno", zap
+
+
+def _hmara_vidpovid(d: Path, a: ReadOpysArgs, kroky: list[str], etap: str, stan: str,
+                    zap: dict[str, Any]) -> Envelope:
+    nazva = {"storinky": "сторінки опису", "kropy": "кропи колонки №", "druk": "машинопис (рушій друку)"}[etap]
+    run_id = zap.get("run_id") or ""
+    tekst = (f"{nazva}: захід поставлено в хмару" if stan == "postavleno" else
+             f"{nazva}: хмара ще читає — {zap.get('prochytano', 0)} з {zap.get('vsi', zap.get('kadriv', 0))}")
+    return ok({"dir": str(d.resolve()), "zrobleno": kroky, "hmara": {
+        "etap": etap, "stan": stan, "run_id": run_id, "out_dir": zap.get("out_dir"),
+        "byudzhet_usd": zap.get("budget_usd"), "vylka_do_usd": zap.get("fork_high")},
+        "how": tekst + (f"; стан — `nysh cloud state {run_id}`" if run_id else ""),
+        "next": f"nysh opys read {a.dir} — та сама команда забере результат, коли хмара дочитає"})
 
 
 def _chytaty(pages: Path, run: Path, script: str, *, whole_line: bool = False) -> int:
@@ -522,9 +594,13 @@ def _chytaty(pages: Path, run: Path, script: str, *, whole_line: bool = False) -
     return subprocess.run(cmd, check=False).returncode
 
 
-def _dochyt(d: Path, script: str) -> tuple[list[str], str]:
+def _dochyt(d: Path, a: ReadOpysArgs, *, hmara: bool = False
+            ) -> tuple[list[str], str, tuple[str, dict[str, Any]] | None]:
     """Кропи колонки № і плям чорнила (з метаданими) і їх читання цілими рядками; повтор —
-    з місця. Змінились метадані — кропи перерізаються. Повертає (кроки, причина збою)."""
+    з місця. Змінились метадані — кропи перерізаються. Повертає (кроки, причина збою, хмарний
+    етап, що ще йде). `hmara` — кропи читає орендована карта: на процесорі кроп ~1 с, а опис
+    на сотню сторінок дає тисячі кропів (25.11.2026: 1,1 с/кроп на i7-9750H)."""
+    script = a.script
     import hashlib
     import json
     import shutil
@@ -548,16 +624,33 @@ def _dochyt(d: Path, script: str) -> tuple[list[str], str]:
         kroky.append("кропи колонки №")
     hotovo = dd / "_chytannia_zaversheno.json"
     vsi, gotovi = _prochytano_teky(dd / DC.KROPY, dd / DC.KROPY_OUT)
+    if vsi and gotovi < vsi and not hotovo.exists() and hmara:
+        from nyshporka.opysy import hmara as H
+
+        if (H.stan(d).get("kropy") or {}).get("teka") and staryi != vidbytok:
+            # кропи перерізано після заходу — старий результат не їхній
+            st = H.stan(d)
+            st.pop("kropy", None)
+            (d / H.FILE).write_text(json.dumps(st, ensure_ascii=False, indent=1), encoding="utf-8")
+        try:
+            stan, zap = _hmara_etap(d, "kropy", dd / DC.KROPY, dd / DC.KROPY_OUT, a)
+        except H.HmaraError as exc:
+            return kroky, f"кропи колонки № у хмару не поставлено: {exc}", None
+        if stan != "gotovo":
+            return kroky, "", (stan, zap)
+        vsi, gotovi = _prochytano_teky(dd / DC.KROPY, dd / DC.KROPY_OUT)
+        hotovo.write_text(json.dumps({"kropiv": vsi, "prochytano": gotovi, "de": "hmara"}), encoding="utf-8")
+        kroky.append("дочит № (хмара)")
     if vsi and gotovi < vsi and not hotovo.exists():
         rc = _chytaty(dd / DC.KROPY, dd / DC.KROPY_OUT, script, whole_line=True)
         vsi, gotovi = _prochytano_teky(dd / DC.KROPY, dd / DC.KROPY_OUT)
         if gotovi < vsi and rc != 0:
-            return kroky, f"дочитано {gotovi} з {vsi} кропів колонки № (код {rc}) — та сама команда продовжить"
+            return kroky, f"дочитано {gotovi} з {vsi} кропів колонки № (код {rc}) — та сама команда продовжить", None
         # прогін скінчився, а кропа без тексту рушій не записав — дочит лише доповнює читання сторінок:
         # такий кроп лишається без номера, і повтор `read` не крутить його вічно
         hotovo.write_text(json.dumps({"kropiv": vsi, "prochytano": gotovi}), encoding="utf-8")
         kroky.append("дочит №")
-    return kroky, ""
+    return kroky, "", None
 
 
 def _prochytano(d: Path) -> tuple[int, int]:
@@ -591,9 +684,6 @@ def opysy_read(a: ReadOpysArgs) -> Envelope:
     пропускається: перерваний прогін — та сама команда ще раз."""
     from nyshporka.opysy import workdir as W
 
-    if a.form != "hand_ruled":
-        return fail("машинописні описи учасник поки не читає: розбір таблиці рушія друку ще "
-                    "звіряється на других описах. Зараз — лише рукопис на розграфлених аркушах")
     d = Path(a.dir)
     kroky: list[str] = []
     try:
@@ -623,10 +713,6 @@ def opysy_read(a: ReadOpysArgs) -> Envelope:
     from nyshporka.opysy import meta as M
 
     meta = M.load(d)
-    if meta is not None and meta.forma == "typed":
-        return fail("за метаданими опис машинописний — його учасник поки не читає: розбір таблиці рушія "
-                    "друку ще звіряється на других описах. Помилились формою — `nysh opys meta "
-                    f"{a.dir} --forma blank|hand_ruled`")
     if meta is None:
         # Агент задає те, що машині вгадувати важко (форма, колонки, скільки справ), ДО читання:
         # на цьому стоїть вибір схеми таблиці. 2–3 сторінки оком — і та сама команда далі.
@@ -638,17 +724,56 @@ def opysy_read(a: ReadOpysArgs) -> Envelope:
                    "next": f"nysh opys meta {a.dir} --forma blank|hand_ruled|typed --kolonky "
                            f"nomer,...,nazva,... --sprav N --dzherelo \"звідки число\" --storinky A-B; "
                            f"тоді та сама команда: nysh opys read {a.dir}"})
-    if gotovi < vsi:
-        rc = _chytaty(W.pages_dir(d), W.run_dir(d), a.script)
-        vsi, gotovi = _prochytano(d)
+    from nyshporka.opysy import hmara as H
+
+    poperedzhennia_hmary: list[str] = []
+    if meta.forma == "typed":
+        # Машинопис читає лише рушій друку, а він — лише в хмарі. Сторінки — під його висоту.
+        from nyshporka.opysy import pages as PG
+        from nyshporka.opysy import vl_table as VT
+
+        druk = W.druk_pages_dir(d)
+        if not any(druk.glob("*.jpg")):
+            PG.render(Path(W.load(d)["pdf"]), druk, target_h=VT.VYSOTA)
+            kroky.append("сторінки під рушій друку")
+        if not any(W.vl_dir(d).glob("*.md")):
+            try:
+                stan, zap = _hmara_etap(d, "druk", druk, W.vl_dir(d), a)
+            except H.HmaraError as exc:
+                return fail(f"машинопис читає рушій друку лише в хмарі, а захід не поставлено: {exc}")
+            if stan != "gotovo":
+                return _hmara_vidpovid(d, a, kroky, "druk", stan, zap)
+            kroky.append("читання (хмара, друк)")
+        if not any(W.run_dir(d).glob("*.txt")):
+            H.vl_do_run(W.vl_dir(d), W.run_dir(d), druk)
+    else:
+        de = a.de if a.de != "auto" else ("hmara" if _orenda_ye() else "lokalno")
+        if gotovi < vsi and de == "hmara":
+            try:
+                stan, zap = _hmara_etap(d, "storinky", W.pages_dir(d), W.run_dir(d), a)
+            except H.HmaraError as exc:
+                if a.de == "hmara":
+                    return fail(f"хмарне читання не поставлено: {exc}")
+                poperedzhennia_hmary.append(f"хмара не взяла захід ({exc}) — читаю на цій машині")
+                de = "lokalno"
+            else:
+                if stan != "gotovo":
+                    return _hmara_vidpovid(d, a, kroky, "storinky", stan, zap)
+                kroky.append("читання (хмара)")
+                vsi, gotovi = _prochytano(d)
         if gotovi < vsi:
-            return fail(f"прочитано {gotovi} з {vsi} сторінок (код {rc}) — та сама команда "
-                        f"продовжить з місця")
-        kroky.append("читання")
-    dk, zbii = _dochyt(d, a.script)
-    kroky += dk
-    if zbii:
-        return fail(zbii)
+            rc = _chytaty(W.pages_dir(d), W.run_dir(d), a.script)
+            vsi, gotovi = _prochytano(d)
+            if gotovi < vsi:
+                return fail(f"прочитано {gotovi} з {vsi} сторінок (код {rc}) — та сама команда "
+                            f"продовжить з місця")
+            kroky.append("читання")
+        dk, zbii, hm = _dochyt(d, a, hmara=(de == "hmara"))
+        kroky += dk
+        if hm is not None:
+            return _hmara_vidpovid(d, a, kroky, "kropy", hm[0], hm[1])
+        if zbii:
+            return fail(zbii)
     env = opysy_table(TableArgs(dir=a.dir))
     if not env.ok:
         return env
@@ -679,6 +804,8 @@ def opysy_read(a: ReadOpysArgs) -> Envelope:
               "novykh_pachok": len(env.data.get("batches") or []),
               "norm_dir": env.data.get("dir"), "how": env.data.get("how"), "next": nastupne})
     out.warnings.extend(poperedzhennia)
+    for t in poperedzhennia_hmary:
+        out.warn("hmara", t)
     return out
 
 

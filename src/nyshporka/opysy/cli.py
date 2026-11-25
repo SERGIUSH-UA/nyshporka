@@ -358,19 +358,34 @@ def read_cmd(
     language: str = typer.Option("", "--language", help="мова опису; порожньо — з тексту"),
     script: str = typer.Option("", "--script", help="latin / cyrillic; порожньо — як вирішить читання"),
     form: str = typer.Option("hand_ruled", "--form", help="hand_ruled (рукопис) · typed (машинопис)"),
+    de: str = typer.Option("auto", "--de", help="де читати: hmara (орендована карта) · lokalno (ця "
+                                                "машина) · auto (хмара, якщо плагін оренди стоїть). "
+                                                "Машинопис — лише хмара"),
+    hmara_param: list[str] = typer.Option([], "--param", "-p", help="параметр хмарного заходу "
+                                                                    "`ключ=значення`, як у `nysh cloud go`"),
+    confirm: bool = typer.Option(False, "--confirm", help="дозвіл ЛЮДИНИ на хмарний захід понад стелю "
+                                                          "автозапуску"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
     """Прочитати опис фонду одним кроком: паспорт, сторінки, читання, таблиця справ, пачки
-    нормалізації. Перервалось — та сама команда продовжить."""
+    нормалізації. Перервалось — та сама команда продовжить. Читання в хмарі відчеплене: команда
+    ставить захід і виходить, повтор забирає результат."""
     from nyshporka import ops as O
 
     env = O.call("opysy.read", {"dir": folder, "pdf": pdf, "repo": repo, "fond": fond,
                                 "opys": opys, "url": url, "published": published, "title": title,
                                 "years": years, "language": language, "script": script,
-                                "form": form})
+                                "form": form, "de": de, "hmara_param": hmara_param, "confirm": confirm})
     if _answer(env, as_json):
         return
     d = env.data or {}
+    if d.get("hmara"):
+        h = d["hmara"]
+        console.print(f"[warn]хмара[/warn] · {_e(d.get('how'))}")
+        if h.get("vylka_do_usd") is not None:
+            console.print(f"  [muted]кошторис до ${_e(h.get('vylka_do_usd'))} · бюджет ${_e(h.get('byudzhet_usd'))}[/muted]")
+        _next(d)
+        return
     if d.get("meta_potribni"):
         console.print(f"сторінок {_e(d.get('storinok'))} · [warn]перед читанням потрібні метадані опису[/warn]")
         console.print(f"  [muted]{_e(d.get('how'))}[/muted]")

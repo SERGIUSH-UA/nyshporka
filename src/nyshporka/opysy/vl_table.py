@@ -183,6 +183,12 @@ def _nomery_kolonok(g: list[list[tuple[str, bool]]]) -> int | None:
     return None
 
 
+def _persha_chysla(g: list[list[tuple[str, bool]]]) -> bool:
+    """Перша колонка таблиці — переважно числа (≥ 60 % непорожніх клітинок, хоча б дві)."""
+    persha = [r[0][0].strip() for r in g if r and r[0][1] and r[0][0].strip()]
+    return len(persha) >= 2 and sum(num(t) is not None for t in persha) >= 0.6 * len(persha)
+
+
 _MONTH = re.compile(r"(?:янв|фев|мар|апр|ма[яй]|июн|июл|ион|авг|сен|окт|ноя|дек|сiч|січ|лют|бер|"
                     r"кві|тра|чер|лип|сер|вер|жов|лис|гру)", re.I)
 
@@ -241,6 +247,12 @@ def records(md: str, prev: tuple[int, list[dict[str, int]]] | None = None
                 sides, body = [{"no": 0}], n
             elif prev and prev[0] == width:
                 sides, body = prev[1], 0
+            elif _persha_chysla(g):
+                # шапки немає, а розкладка попередньої не підходить (VL загубив порожню колонку
+                # «Примітки» — інша ширина): перша колонка переважно числа — це номери, решту
+                # клітинок `_split` розбирає за вмістом. Інакше таблиця сторінки пропадала цілком
+                # (машинописний опис ДРАЦС: 179 справ замість 217)
+                sides, body = [{"no": 0}], 0
             else:
                 continue
         prev = (width, sides)
@@ -340,6 +352,62 @@ def _nomery(recs: list[dict[str, Any]]) -> None:
             r.update(no=f"{n}{lit}", no_src="read")
 
 
+def _tochnyi_lantsiuzhok(reads: list[tuple[int, int]], look: int = 200) -> list[tuple[int, int]]:
+    """Найдовший ланцюжок прочитаних номерів, де номер росте РІВНО на стільки, скільки рядків між
+    ними: опора, між якою й наступною рядків рівно стільки, скільки бракує номерів."""
+    n = len(reads)
+    best, prev = [1] * n, [-1] * n
+    for b in range(n):
+        ib, nb = reads[b]
+        for a in range(max(0, b - look), b):
+            ia, na = reads[a]
+            if ib - ia >= 1 and nb - na == ib - ia and best[a] + 1 > best[b]:
+                best[b], prev[b] = best[a] + 1, a
+    if not n:
+        return []
+    k = max(range(n), key=lambda i: best[i])
+    out = []
+    while k >= 0:
+        out.append(reads[k])
+        k = prev[k]
+    return out[::-1]
+
+
+def _zapovnyty(recs: list[dict[str, Any]], idx: list[int], kotvy: list[tuple[int, int]]) -> None:
+    """Між сусідніми опорами, де рядків рівно стільки, скільки номерів, — номери за порядком."""
+    for (ka, va), (kb, vb) in pairwise(kotvy):
+        if kb - ka < 2 or kb - ka != vb - va:
+            continue
+        for k in range(ka + 1, kb):
+            r = recs[idx[k]]
+            if str(r.get("no")) != str(va + k - ka):
+                r.update(no=va + k - ka, no_src="seq", confirmed="between")
+
+
+def _lantsiuzhkom(recs: list[dict[str, Any]]) -> None:
+    """Номери, які VL прочитав не з тієї колонки чи переплутав цифри, — ланцюжком у межах розділу.
+
+    Машинописний опис часто має номер за порядком, вписаний ВІД РУКИ над порожньою клітинкою, і
+    друкований «№ за старим описом» поруч. VL читає рукописні цифри погано («10, 104, 108, 109»
+    замість 136–139) або бере старий номер («14, 15, 16» замість 72–74). Двома проходами:
+    1. строгий ланцюжок — опори лише там, де номер росте рівно на число рядків; між ними номери за
+       порядком. Випадкове прочитане, що лягло б у звичайний ланцюжок, лічби не ламає;
+    2. звичайний ланцюжок (`numbering.chain`) по вже виправлених — де лічба сходиться.
+    Літерні справи (номер не росте) розривають строгий ланцюжок: їхні межі лишаються за читанням.
+    Замір 25.11.2026 (опис ДРАЦС, 217 справ, звірено оком сторінки 24, 39–42): підтверджено 158 → 207,
+    стрибків номерів 24 → 5."""
+    from nyshporka.opysy import numbering as NU
+
+    for rozdil in sorted({r["_rozdil"] for r in recs}):
+        idx = [i for i, r in enumerate(recs) if r["_rozdil"] == rozdil]
+        reads = [(k, recs[i]["_n"][0]) for k, i in enumerate(idx)
+                 if recs[i]["_n"][0] is not None and not recs[i]["_n"][1]]
+        _zapovnyty(recs, idx, _tochnyi_lantsiuzhok(reads))
+        reads2 = [(k, int(v)) for k, i in enumerate(idx) for v in [recs[i].get("no")]
+                  if isinstance(v, int) or (isinstance(v, str) and v.isdigit())]
+        _zapovnyty(recs, idx, NU.chain(reads2))
+
+
 def _zlyty(chastyny: list[str]) -> str:
     """Назва з клітинок: перенос зливається лише на МЕЖІ клітинок і лише перед малою літерою;
     дефіси всередині клітинки («м-ко», «1881-1892») лишаються."""
@@ -432,6 +500,7 @@ def build(vl_dir: Path, out_tsv: Path, opys: str = "") -> dict[str, Any]:
             if recs[-1]["_n"][0] is None and v.get("no") is not None:
                 recs[-1]["_n"] = (v["no"], "")
     _nomery(recs)
+    _lantsiuzhkom(recs)
     out_tsv = Path(out_tsv)
     out_tsv.parent.mkdir(parents=True, exist_ok=True)
     with out_tsv.open("w", encoding="utf-8", newline="") as fh:

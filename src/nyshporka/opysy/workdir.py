@@ -46,6 +46,16 @@ def norm_dir(d: Path) -> Path:
     return Path(d) / "norm"
 
 
+def druk_pages_dir(d: Path) -> Path:
+    """Сторінки машинописного опису під рушій друку (висота `vl_table.VYSOTA`)."""
+    return Path(d) / "pages_druk"
+
+
+def vl_dir(d: Path) -> Path:
+    """Розмітка рушія друку (`NNNN.md`, `NNNN.blocks.json`), забрана з хмари."""
+    return Path(d) / "vl"
+
+
 def dochyt_dir(d: Path) -> Path:
     """Кропи колонки № і плям чорнила з їх читанням (`opysy.dochyt`)."""
     return Path(d) / "dochyt"

@@ -23,6 +23,20 @@ STOR = {"0001": [(200, 300, 1500, 360, "1. Дело о помещике Иван
         "0002": [(200, 300, 1500, 360, "3. Дело об откупе")]}
 
 
+@pytest.fixture(autouse=True)
+def _bez_orendy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 Тест не орендує машин: `auto` читає тут, а `cloud go`, якого тест не підставив сам, —
+    падіння. На машині з плагіном оренди `auto` інакше пішов би в справжню хмару."""
+    from nyshporka.opysy import hmara as H
+
+    monkeypatch.setattr(OO, "_orenda_ye", lambda: False)
+
+    def _ne_orenduvaty(args: list[str]) -> Any:
+        raise AssertionError(f"тест покликав справжній cloud go: {args}")
+
+    monkeypatch.setattr(H, "_cloud_go", _ne_orenduvaty)
+
+
 @pytest.fixture
 def server(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Пул: політика (відкрито, крім ЦДІАК 442) і заливка — без мережі."""
@@ -88,7 +102,7 @@ def _read_z_meta(d: Path, **kw: Any) -> Any:
         m = OO.opysy_meta(OO.MetaArgs(dir=str(d), forma="hand_ruled", kolonky="nomer,nazva,kinets",
                                       sprav=0))
         assert m.ok, m
-        env = _read(d, **{k: v for k, v in kw.items() if k in ("language", "script")})
+        env = _read(d, **{k: v for k, v in kw.items() if k in ("language", "script", "de")})
     return env
 
 
@@ -140,7 +154,7 @@ def test_nova_teka_bez_dzherela_i_mashynopys(tmp_path: Path, server: dict[str, A
     env = _read(tmp_path / "y", repo="ДАОО", fond="445")
     assert not env.ok and "--pdf" in env.error and "--url" in env.error
     env = _read(tmp_path / "z", form="typed")
-    assert not env.ok and "машинопис" in env.error
+    assert not env.ok and "--pdf" in env.error
 
 
 def test_obirvane_chytannia_kazhe_prodovzhyty(tmp_path: Path, server: dict[str, Any],
@@ -266,10 +280,14 @@ def test_cli_read_zupynka_na_metadanykh_i_povnota(tmp_path: Path, server: dict[s
     res = r.invoke(opys_app, ["read", str(d), "--language", "ru"])
     assert res.exit_code == 0, res.output
     assert "з 40 за метаданими" in res.output and "частина справ злиплась" in res.output
-    # машинопис за метаданими — відмова, як і `--form typed`
+    # машинопис читає лише рушій друку в хмарі; хмара відмовила — людина бачить чому
+    from nyshporka.opysy import hmara as H
+
+    monkeypatch.setattr(H, "_cloud_go", lambda args: (2, {"verdict": "refused",
+                                                         "why": "немає ключа оренди"}, ""))
     assert r.invoke(opys_app, ["meta", str(d), "--forma", "typed"]).exit_code == 0
     res = r.invoke(opys_app, ["read", str(d), "--language", "ru"])
-    assert res.exit_code == 1 and "машинописний" in res.output
+    assert res.exit_code == 1 and "машинопис" in res.output and "немає ключа оренди" in res.output
 
 
 def test_krop_bez_tekstu_ne_blokuie_read(tmp_path: Path, server: dict[str, Any],
@@ -297,3 +315,94 @@ def test_krop_bez_tekstu_ne_blokuie_read(tmp_path: Path, server: dict[str, Any],
     assert "дочит №" in env.data["zrobleno"] and len(kropy_vyklyky) == 1
     env2 = _read(d, language="ru")
     assert env2.ok and len(kropy_vyklyky) == 1, "дочит запустився вдруге на тому самому кропі"
+
+
+
+# ── хмара: етапи читання через `nysh cloud go` ─────────────────────────────────
+
+
+def _khmara(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[list[str]]:
+    """Підставний `cloud go`: ставить захід і запам'ятовує, куди ляже результат (як наглядач)."""
+    from nyshporka.opysy import hmara as H
+
+    vyklyky: list[list[str]] = []
+
+    def _go(args: list[str]) -> Any:
+        vyklyky.append(args)
+        teka = Path(args[0])
+        if "--out-root" in args:
+            out = Path(args[args.index("--out-root") + 1]) / teka.name
+        else:
+            out = tmp_path / "reports" / teka.name
+        return 0, {"verdict": "detached", "run_id": f"run-{len(vyklyky)}", "out_dir": str(out),
+                   "fork_high": 0.5, "budget_usd": 0.5}, ""
+
+    monkeypatch.setattr(H, "_cloud_go", _go)
+    return vyklyky
+
+
+def _nablyadach_storinky(out: Path, pages: Path) -> None:
+    """Що поклав би наглядач у теку результату прогону цілих сторінок."""
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "_htr_meta.json").write_text(json.dumps({"model": "pysar_cyr_v31.pt"}), encoding="utf-8")
+    for stem, lines in STOR.items():
+        w, h = Image.open(pages / f"{stem}.jpg").size
+        (out / f"{stem}.txt").write_text("\n".join(t for *_, t in lines), encoding="utf-8")
+        with gzip.open(out / f"{stem}.lines.json.gz", "wt", encoding="utf-8") as fh:
+            json.dump({"boxes": [list(b[:4]) for b in lines], "size": [w, h]}, fh)
+
+
+def test_hmara_storinky_i_kropy_postavyty_pak_zabraty(tmp_path: Path, server: dict[str, Any],
+                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--de hmara`: read ставить захід сторінок і виходить; повтор, поки результату немає, — «ще
+    читає»; коли наглядач поклав усе — забирає в `run`, ставить кропи й так само забирає їх."""
+    from nyshporka.opysy import hmara as H
+
+    vyklyky = _khmara(monkeypatch, tmp_path)
+    d = tmp_path / "opys"
+    env = _read_z_meta(d, pdf=str(_pdf(tmp_path)), repo="ДАОО", fond="445", opys="9", url=URL,
+                       language="ru", de="hmara")
+    assert env.ok and env.data["hmara"]["etap"] == "storinky" and env.data["hmara"]["stan"] == "postavleno"
+    assert len(vyklyky) == 1
+    teka = Path(vyklyky[0][0])
+    assert teka.name.startswith("opys-") and teka.name.endswith("-storinky")   # унікальне ім'я етапу
+    # повтор до результату — нового заходу немає
+    env = _read(d, language="ru", de="hmara")
+    assert env.ok and env.data["hmara"]["stan"] == "ide" and len(vyklyky) == 1
+    _nablyadach_storinky(Path(H.stan(d)["storinky"]["out_dir"]), d / "pages")
+    env = _read(d, language="ru", de="hmara")
+    assert (d / "run" / "0001.txt").exists()
+    if env.data.get("hmara"):
+        # кропи колонки № — другий етап; результат порожній → таблиця без дочиту
+        assert env.data["hmara"]["etap"] == "kropy" and "whole_line=1" in vyklyky[-1]
+        out = Path(H.stan(d)["kropy"]["out_dir"])
+        out.mkdir(parents=True, exist_ok=True)
+        for k in (d / "dochyt" / "kropy").glob("*.jpg"):
+            (out / f"{k.stem}.txt").write_text("", encoding="utf-8")
+        env = _read(d, language="ru", de="hmara")
+    assert env.ok and "таблиця" in env.data["zrobleno"], env.data
+
+
+def test_hmara_vidmova_auto_chytaie_tut(tmp_path: Path, server: dict[str, Any],
+                                        chytannia: list[Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    """`auto` з плагіном оренди, а хмара відмовила (немає ключа, балансу) — читає тут і каже чому."""
+    from nyshporka.opysy import hmara as H
+
+    monkeypatch.setattr(OO, "_orenda_ye", lambda: True)
+    monkeypatch.setattr(H, "_cloud_go", lambda args: (2, {"verdict": "refused", "why": "немає ключа оренди"}, ""))
+    env = _read_z_meta(tmp_path / "opys", pdf=str(_pdf(tmp_path)), repo="ДАОО", fond="445", opys="9",
+                       url=URL, language="ru")
+    assert env.ok and "таблиця" in env.data["zrobleno"]
+    assert any(w.code == "hmara" and "немає ключа" in w.text for w in env.warnings)
+
+
+def test_hmara_ponad_stelyu_lyshe_z_dozvolom(tmp_path: Path, server: dict[str, Any],
+                                             monkeypatch: pytest.MonkeyPatch) -> None:
+    """Понад стелю автозапуску `cloud go` не стартує; read каже, що запустити може лише людина."""
+    from nyshporka.opysy import hmara as H
+
+    monkeypatch.setattr(H, "_cloud_go", lambda args: (10, {"verdict": "needs_confirm", "launch": "needs_confirm",
+                                                          "fork_high": 7.5, "why": "понад стелю"}, ""))
+    env = _read_z_meta(tmp_path / "opys", pdf=str(_pdf(tmp_path)), repo="ДАОО", fond="445", opys="9",
+                       url=URL, language="ru", de="hmara")
+    assert not env.ok and "--confirm" in env.error and "людина" in env.error

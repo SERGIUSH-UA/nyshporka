@@ -408,7 +408,11 @@ def _cloud_registry_slim(root: Path) -> CheckResult:
     import sqlite3
 
     try:
-        from gpurunner.core import manifest  # type: ignore[import-untyped]
+        # плагін оренди — необов'язковий і без типів: імпорт за іменем, щоб mypy не залежав від того,
+        # чи стоїть він у цьому середовищі
+        import importlib
+
+        manifest = importlib.import_module("gpurunner.core.manifest")
     except Exception:
         return CheckResult("n/a", "плагін оренди (gpuhire) не встановлено")
     path = manifest.db_path()
