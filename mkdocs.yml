@@ -108,6 +108,7 @@ nav:
       - Спеціалісти: specialists.md
       - Нишпорка в Docker: docker.md
       - Обмінятись прочитаним (Супряга): share.md
+      - 'Засіки: описи фондів': zasiky.md
   - Що нового: whats-new.md
   - Ліцензії й приватність: signing.md
   - Для помічника й розробника: agents/index.md
