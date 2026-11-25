@@ -345,6 +345,45 @@ class ArchivesPack:
             got = _CANON_INDEX[id(self)] = (self, out)
         return dict(got[1])
 
+    def neodnoznachni(self, word: str | None) -> list[str]:
+        """Голе скорочення, яким пишуть кілька архівів одразу → їхні коди.
+
+        🔴 Обласні архіви, чиї області починаються з тієї самої літери, різнить
+        мала літера В СЕРЕДИНІ скорочення (ДАДнО/ДАДоО, ДАЗкО/ДАЗпО). Без неї
+        «ДАДО» однаково означає і Дніпропетровський, і Донецький. 25.11.2026
+        автор завів собі в накладці архів «DADO» для Донецька, і 86 його справ
+        жили окремим вигаданим архівом, поки сервер не переписав їх на DADOO.
+
+        Тому невпізнане слово звіряється з голими скороченнями довідника:
+        мітка без малих літер («ДАДнО» → «ДАДО») і її латинка («DADO»). Перелік
+        обчислюється з довідника, а не пишеться руками: нова пара областей
+        дістає підказку сама.
+
+        Порожньо, коли слово пак упізнав: у «ДАХО», «ДАЧО», «ДАЛО», «ДАКО» є
+        власний архів, а «ДАВО» — давнє написання Вінницького.
+        """
+        want = _norm_word(word)
+        if not want or self.resolve_code(word):
+            return []
+        got = _HOLI_INDEX.get(id(self))
+        if got is None or got[0] is not self:
+            out: dict[str, list[str]] = {}
+            for code, r in self.repositories.items():
+                label = r.label or ""
+                if not _KYRYLYTSIA.fullmatch(label):
+                    continue
+                hole = "".join(ch for ch in label if not ch.islower())
+                if hole == label:
+                    continue
+                canon = self.canon_repo(code)
+                for key in {_norm_word(hole), _norm_word(_latynka(hole))}:
+                    if key and canon not in out.setdefault(key, []):
+                        out[key].append(canon)
+            if len(_HOLI_INDEX) > 8:
+                _HOLI_INDEX.clear()
+            got = _HOLI_INDEX[id(self)] = (self, out)
+        return sorted(got[1].get(want, []))
+
     def default_opys(self, repo: str | None, fond: str | None) -> str | None:
         """Опис, який мають скановані теки фонду, коли їхнє ім'я його не несе."""
         f = self.fonds.get((str(repo or "").upper(), str(fond or "")))
@@ -564,6 +603,21 @@ _PINNED: ContextVar[ArchivesPack | None] = ContextVar("archives_pack_pinned", de
 #: id пака → (пак, словник написань); пак тримається, щоб id не перейшов до іншого.
 _WORD_INDEX: dict[int, tuple[ArchivesPack, dict[str, str]]] = {}
 _CANON_INDEX: dict[int, tuple[ArchivesPack, dict[str, str]]] = {}
+_HOLI_INDEX: dict[int, tuple[ArchivesPack, dict[str, list[str]]]] = {}
+
+#: Мітка з самої кирилиці — лише такі обласні скорочення мають «голу» форму.
+_KYRYLYTSIA = re.compile(r"[А-ЯІЇЄҐа-яіїєґ]+")
+#: Латинка голого скорочення так, як її пишуть коди довідника (DAHO, DAZHO, DACHO).
+_LATYNKA = {
+    "А": "A", "Б": "B", "В": "V", "Г": "H", "Ґ": "G", "Д": "D", "Е": "E", "Є": "YE",
+    "Ж": "ZH", "З": "Z", "И": "Y", "І": "I", "Ї": "YI", "Й": "Y", "К": "K", "Л": "L",
+    "М": "M", "Н": "N", "О": "O", "П": "P", "Р": "R", "С": "S", "Т": "T", "У": "U",
+    "Ф": "F", "Х": "H", "Ц": "TS", "Ч": "CH", "Ш": "SH", "Щ": "SHCH", "Ю": "YU", "Я": "YA",
+}
+
+
+def _latynka(slovo: str) -> str:
+    return "".join(_LATYNKA.get(ch, ch) for ch in slovo.upper())
 
 
 @contextlib.contextmanager
@@ -626,6 +680,15 @@ def add_repository(code: str, label: str, name: str = "",
         raise PackError(
             f"архів «{code}» уже відомий — це {pk.repositories[code].label}. "
             f"Щоб додати йому ще одне написання, впишіть його в `aliases`.")
+    for slovo in (code, label):
+        kandydaty = pk.neodnoznachni(slovo)
+        if kandydaty:
+            raise PackError(
+                f"«{slovo}» не заводиться окремим архівом: так скорочують "
+                + " і ".join(f"{pk.repo_label(c)} ({pk.repositories[c].name or c})"
+                             for c in kandydaty)
+                + ". Пишіть шифру з потрібним скороченням — інакше справи цього "
+                  "архіву житимуть під вигаданим кодом окремо від решти.")
     clash = pk.resolve_code(label)
     if clash:
         raise PackError(
