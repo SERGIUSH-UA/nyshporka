@@ -380,6 +380,41 @@ def read_cmd(
     _next(d)
 
 
+@app.command("meta")
+def meta_cmd(
+    folder: str = typer.Argument(..., help="робоча тека опису"),
+    forma: str = typer.Option("", "--forma", help="blank (друкований бланк) · hand_ruled (розграфлено "
+                                                  "від руки) · typed (машинопис)"),
+    rozvorot: bool | None = typer.Option(None, "--rozvorot/--odna", help="у кадрі розворот чи одна сторінка"),
+    kolonky: str = typer.Option("", "--kolonky", help="ролі колонок зліва направо через кому: nomer, "
+                                                      "delovod, pochatok, nazva, kinets, arkushi, vidmitka, inshe"),
+    kolonky_prava: str = typer.Option("", "--kolonky-prava", help="колонки правої сторінки, якщо інакші"),
+    sprav: int = typer.Option(-1, "--sprav", help="скільки справ в описі; 0 — невідомо"),
+    dzherelo: str = typer.Option("", "--dzherelo", help="звідки число справ (засвідчувальний напис, "
+                                                        "останній номер)"),
+    storinky: str = typer.Option("", "--storinky", help="сторінки таблиці справ «перша-остання»"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Метадані опису від агента: форма, колонки, скільки справ, сторінки таблиці. Без опцій — що вже
+    записано й які сторінки глянути."""
+    from nyshporka import ops as O
+
+    env = O.call("opysy.meta", {"dir": folder, "forma": forma, "rozvorot": rozvorot, "kolonky": kolonky,
+                                "kolonky_prava": kolonky_prava, "sprav": sprav, "dzherelo": dzherelo,
+                                "storinky": storinky})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    if d.get("meta"):
+        m = d["meta"]
+        console.print(f"форма {_e(m.get('forma'))} · розворот {_e(m.get('rozvorot'))} · колонки "
+                      f"{_e(', '.join(m.get('kolonky') or []))} · справ {_e(m.get('sprav'))} "
+                      f"({_e(m.get('sprav_dzherelo'))}) · сторінки {_e(m.get('storinky'))}")
+    for h in d.get("hlianuty") or []:
+        console.print(f"  глянути: {_e(h)}")
+    _next(d)
+
+
 @app.command("init")
 def init_cmd(
     folder: str = typer.Argument(..., help="робоча тека опису (буде створена)"),

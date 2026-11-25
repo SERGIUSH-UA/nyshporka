@@ -46,6 +46,11 @@ def norm_dir(d: Path) -> Path:
     return Path(d) / "norm"
 
 
+def dochyt_dir(d: Path) -> Path:
+    """Кропи колонки № і плям чорнила з їх читанням (`opysy.dochyt`)."""
+    return Path(d) / "dochyt"
+
+
 def norm_path(d: Path) -> Path:
     return Path(d) / "norm.tsv"
 

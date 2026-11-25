@@ -1544,6 +1544,10 @@ def read(
              "клітинки. Без прапорця — як каже паспорт справи (поле `form`), а акти "
              "цивільного стану (ЗАГС, РАГС, РАЦС) — самі, за описом справи; "
              "`--no-form-cells` знімає й автоматичне"),
+    whole_line: bool = typer.Option(
+        False, "--whole-line",
+        help="готові рядки: кожен кадр теки — уже рядок (кропи номерів справ опису, клітинки), "
+             "читається цілим, без сегментації; один голос — основна модель"),
     dry: bool = typer.Option(False, "--dry-run", help="лише показати план"),
 ) -> None:
     """Прочитати справу рукописним рушієм.
@@ -1567,7 +1571,8 @@ def read(
     _need("htr")
     try:
         p = make_plan(case_dir, out_dir=out, script=script,
-                      second_voice=not one_voice, model=model, seg_cache=seg_cache,
+                      second_voice=not one_voice and not whole_line, model=model,
+                      seg_cache=seg_cache, whole_line=whole_line,
                       also=with_, fix_sideways=not dry,
                       form_cells=form_cells)
     except ReadError as exc:

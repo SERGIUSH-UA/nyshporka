@@ -375,8 +375,73 @@ def opysy_table(a: TableArgs) -> Envelope:
         return _workdir_fail(exc)
     if not any(W.run_dir(d).glob("*.txt")):
         return fail(f"немає прочитаних сторінок — `nysh read {W.pages_dir(d)} --out {W.run_dir(d)}`")
-    res = RU.build(W.run_dir(d), W.table_path(d), title_starts=a.title_starts, dobudova=a.dobudova)
-    return ok({**res, "file": str(W.table_path(d)), "next": f"nysh opys norm {a.dir}"})
+    from nyshporka.opysy import dochyt as DC
+    from nyshporka.opysy import meta as M
+
+    dd = W.dochyt_dir(d)
+    res = RU.build(W.run_dir(d), W.table_path(d), title_starts=a.title_starts, dobudova=a.dobudova,
+                   dochyt=dd if (dd / DC.MAPA).exists() else None, meta=M.load(d))
+    env = ok({**res, "file": str(W.table_path(d)), "next": f"nysh opys norm {a.dir}"})
+    if res.get("povnota") is not None and res["povnota"] < 0.9:
+        env.warn("povnota", f"справ у таблиці {res['cases']} з {res['sprav']} за метаданими "
+                            f"({100 * res['povnota']:.0f} %) — частина справ злиплась чи загубилась")
+    return env
+
+
+class MetaArgs(BaseModel):
+    dir: str = Field(description="робоча тека опису")
+    forma: Literal["", "blank", "hand_ruled", "typed"] = Field(
+        default="", description="blank — друкований бланк; hand_ruled — розграфлено від руки; typed — машинопис")
+    rozvorot: bool | None = Field(default=None, description="у кадрі розворот двох сторінок")
+    kolonky: str = Field(default="", description="ролі колонок зліва направо через кому: nomer, delovod, "
+                                                 "pochatok, nazva, kinets, arkushi, vidmitka, inshe")
+    kolonky_prava: str = Field(default="", description="те саме для правої сторінки, якщо вона інакша")
+    sprav: int = Field(default=-1, description="скільки справ в описі (0 — невідомо)")
+    dzherelo: str = Field(default="", description="звідки число справ: засвідчувальний напис, останній номер")
+    storinky: str = Field(default="", description="сторінки таблиці справ «перша-остання»")
+
+
+@op("opysy.meta", summary="Метадані опису від агента: форма, колонки, скільки справ, сторінки таблиці",
+    args=MetaArgs, mutates=True, section=SECTION, tier="rare",
+    when="перед читанням опису: агент глянув 2–3 сторінки й записує те, що машині вгадувати важко")
+def opysy_meta(a: MetaArgs) -> Envelope:
+    from dataclasses import replace
+
+    from nyshporka.opysy import meta as M
+    from nyshporka.opysy import workdir as W
+
+    d = Path(a.dir)
+    try:
+        W.load(d)
+    except W.WorkdirError as exc:
+        return _workdir_fail(exc)
+    m = M.load(d) or M.Meta()
+    zminy: dict[str, Any] = {}
+    if a.forma:
+        zminy["forma"] = a.forma
+    if a.rozvorot is not None:
+        zminy["rozvorot"] = a.rozvorot
+    if a.kolonky:
+        zminy["kolonky"] = tuple(k.strip() for k in a.kolonky.split(",") if k.strip())
+    if a.kolonky_prava:
+        zminy["kolonky_prava"] = tuple(k.strip() for k in a.kolonky_prava.split(",") if k.strip())
+    if a.sprav >= 0:
+        zminy["sprav"] = a.sprav
+    if a.dzherelo:
+        zminy["sprav_dzherelo"] = a.dzherelo
+    try:
+        if a.storinky:
+            zminy["storinky"] = M.rozibraty_storinky(a.storinky)
+        if not zminy:
+            storinok = len(list(W.pages_dir(d).glob("*.jpg")))
+            return ok({"meta": None if M.load(d) is None else M.load(d).__dict__,
+                       "hlianuty": [str(W.pages_dir(d) / f"{n:04d}.jpg") for n in M.kudy_hlianuty(storinok)],
+                       "next": f"nysh opys meta {a.dir} --forma … --kolonky … --sprav N --dzherelo … --storinky A-B"})
+        p = M.save(d, replace(m, **zminy, zapovniv="агент", koly=""))
+    except M.MetaError as exc:
+        return fail(str(exc))
+    return ok({"file": str(p), "meta": M.load(d).__dict__ if M.load(d) else {},
+               "next": f"nysh opys read {a.dir}"})
 
 
 @op("opysy.norm", summary="Нормалізація назв справ опису: пачки запитів агентові або прийом "
@@ -442,16 +507,54 @@ class ReadOpysArgs(BaseModel):
                                                              "аркушах чи машинопис")
 
 
-def _chytaty(pages: Path, run: Path, script: str) -> int:
+def _chytaty(pages: Path, run: Path, script: str, *, whole_line: bool = False) -> int:
     """`nysh read <тека>/pages --out <тека>/run` тим самим інтерпретатором: прогрес — на екран,
-    як у звичайному прогоні; продовжує з місця, де читання обірвалось."""
+    як у звичайному прогоні; продовжує з місця, де читання обірвалось. `whole_line` — кропи
+    (`opysy.dochyt`): кадр — уже рядок."""
     import subprocess
     import sys
 
     cmd = [sys.executable, "-m", "nyshporka", "read", str(pages), "--out", str(run)]
     if script:
         cmd += ["--script", script]
+    if whole_line:
+        cmd.append("--whole-line")
     return subprocess.run(cmd, check=False).returncode
+
+
+def _dochyt(d: Path, script: str) -> tuple[list[str], str]:
+    """Кропи колонки № і плям чорнила (з метаданими) і їх читання цілими рядками; повтор —
+    з місця. Змінились метадані — кропи перерізаються. Повертає (кроки, причина збою)."""
+    import hashlib
+    import json
+    import shutil
+
+    from nyshporka.opysy import dochyt as DC
+    from nyshporka.opysy import meta as M
+    from nyshporka.opysy import workdir as W
+
+    dd = W.dochyt_dir(d)
+    mf = d / M.FILE
+    vidbytok = hashlib.sha256(mf.read_bytes()).hexdigest()[:16] if mf.exists() else ""
+    mapa = dd / DC.MAPA
+    kroky = []
+    staryi = json.loads((dd / "meta_sha.json").read_text(encoding="utf-8")).get("sha") \
+        if (dd / "meta_sha.json").exists() else None
+    if not mapa.exists() or staryi != vidbytok:
+        if dd.exists():
+            shutil.rmtree(dd)
+        DC.kropy(W.run_dir(d), W.pages_dir(d), dd, M.load(d))
+        (dd / "meta_sha.json").write_text(json.dumps({"sha": vidbytok}), encoding="utf-8")
+        kroky.append("кропи колонки №")
+    vsi = len(list((dd / DC.KROPY).glob("*.jpg")))
+    gotovi = len(list((dd / DC.KROPY_OUT).glob("*.txt"))) if (dd / DC.KROPY_OUT).exists() else 0
+    if vsi and gotovi < vsi:
+        rc = _chytaty(dd / DC.KROPY, dd / DC.KROPY_OUT, script, whole_line=True)
+        gotovi = len(list((dd / DC.KROPY_OUT).glob("*.txt"))) if (dd / DC.KROPY_OUT).exists() else 0
+        if gotovi < vsi:
+            return kroky, f"дочитано {gotovi} з {vsi} кропів колонки № (код {rc}) — та сама команда продовжить"
+        kroky.append("дочит №")
+    return kroky, ""
 
 
 def _prochytano(d: Path) -> tuple[int, int]:
@@ -511,6 +614,19 @@ def opysy_read(a: ReadOpysArgs) -> Envelope:
             return env
         kroky.append("сторінки")
         vsi, gotovi = _prochytano(d)
+    from nyshporka.opysy import meta as M
+
+    if M.load(d) is None:
+        # Агент задає те, що машині вгадувати важко (форма, колонки, скільки справ), ДО читання:
+        # на цьому стоїть вибір схеми таблиці. 2–3 сторінки оком — і та сама команда далі.
+        hl = [str(W.pages_dir(d) / f"{n:04d}.jpg") for n in M.kudy_hlianuty(vsi)]
+        return ok({"dir": str(d.resolve()), "zrobleno": kroky, "storinok": vsi,
+                   "meta_potribni": True, "hlianuty": hl,
+                   "how": "подивись ці сторінки (перша сторінка таблиці, середня, остання — там зазвичай "
+                          "засвідчувальний напис з числом справ) і запиши метадані опису",
+                   "next": f"nysh opys meta {a.dir} --forma blank|hand_ruled|typed --kolonky "
+                           f"nomer,...,nazva,... --sprav N --dzherelo \"звідки число\" --storinky A-B; "
+                           f"тоді та сама команда: nysh opys read {a.dir}"})
     if gotovi < vsi:
         rc = _chytaty(W.pages_dir(d), W.run_dir(d), a.script)
         vsi, gotovi = _prochytano(d)
@@ -518,6 +634,10 @@ def opysy_read(a: ReadOpysArgs) -> Envelope:
             return fail(f"прочитано {gotovi} з {vsi} сторінок (код {rc}) — та сама команда "
                         f"продовжить з місця")
         kroky.append("читання")
+    dk, zbii = _dochyt(d, a.script)
+    kroky += dk
+    if zbii:
+        return fail(zbii)
     env = opysy_table(TableArgs(dir=a.dir))
     if not env.ok:
         return env

@@ -88,7 +88,7 @@ def split_spread(lines: list[tuple[int, int, int, int, str]], W: int, H: int) ->
 
 
 def half_cases(lines: list[tuple[int, int, int, int, str]], x0p: int, x1p: int, stem: str, part: int, *,
-               title_starts: bool = False) -> list[dict[str, Any]]:
+               title_starts: bool = False, bez_nomera: tuple[int, ...] | list[int] = ()) -> list[dict[str, Any]]:
     """Справи половини розвороту. `title_starts` — ще й початок справи за назвою
     («Дело…», «Тоже…» з великої на початку рядка), коли № у колонці не прочитався числом.
     """
@@ -121,6 +121,15 @@ def half_cases(lines: list[tuple[int, int, int, int, str]], x0p: int, x1p: int, 
                 continue
             starts.append((ln[1], 0, "", ln[4]))
         starts.sort(key=lambda s: s[0])
+    if bez_nomera:
+        # межі справ без номера (`dochyt`: пляма чорнила в колонці №, що не прочиталась числом)
+        hs2 = sorted(ln[3] - ln[1] for ln in L)
+        tol2 = (hs2[len(hs2) // 2] if hs2 else 40) * 0.7
+        for y in bez_nomera:
+            if not any(abs(y - s0[0]) <= tol2 for s0 in starts):
+                starts.append((y, 0, "", ""))
+        starts.sort(key=lambda s0: s0[0])
+    syn = {int(y) for y in bez_nomera}          # межі без власного рядка — нічого не «з'їдають»
     recs = []
     for k, (y, n, let, rest) in enumerate(starts):
         y0 = y - 15
@@ -130,7 +139,7 @@ def half_cases(lines: list[tuple[int, int, int, int, str]], x0p: int, x1p: int, 
             title.append(rest)
         for ln in L:
             yc = (ln[1] + ln[3]) / 2
-            if not (y0 <= yc < y1) or ln[1] == y:
+            if not (y0 <= yc < y1) or (ln[1] == y and y not in syn):
                 continue
             if rel(ln[0]) >= 0.62 and len(ln[4]) <= 18:
                 right.append((ln[0], ln[4]))
@@ -159,21 +168,14 @@ def half_cases(lines: list[tuple[int, int, int, int, str]], x0p: int, x1p: int, 
     return recs
 
 
-def build(run: Path, out_tsv: Path, *, title_starts: bool = False,
-          dobudova: bool = True) -> dict[str, Any]:
-    """Тека прогону цілих сторінок → таблиця справ TSV (`FIELDS`); підсумок — числа."""
-    run = Path(run)
-    stems = sorted({p.name.split(".")[0] for p in run.glob("*.txt")})
+def _tablytsia(pages: dict[str, Any], *, title_starts: bool, dobudova: bool,
+               bez: dict[tuple[str, int], list[int]] | None = None) -> tuple[list[dict[str, Any]], int]:
     recs: list[dict[str, Any]] = []
-    bad = 0
-    for stem in stems:
-        got = page_lines(run, stem)
-        if not got:
-            bad += 1
-            continue
-        lines, (W, H) = got
-        for part, (a, b) in enumerate(split_spread(lines, W, H)):
-            for r in half_cases(lines, a, b, stem, part, title_starts=title_starts):
+    for stem in sorted(pages):
+        lines, _wh, halves = pages[stem]
+        for part, (a, b) in enumerate(halves):
+            for r in half_cases(lines, a, b, stem, part, title_starts=title_starts,
+                                bez_nomera=(bez or {}).get((stem, part), ())):
                 if r.get("cont"):
                     if recs:
                         recs[-1]["title"] = (recs[-1]["title"] + " " + r["title"]).strip()
@@ -185,13 +187,67 @@ def build(run: Path, out_tsv: Path, *, title_starts: bool = False,
     raw = len(recs)
     for r in recs:
         r.setdefault("cont", False)
-    recs = number(recs, page_aware=title_starts, dobudova=dobudova)
+    return number(recs, page_aware=title_starts, dobudova=dobudova), raw
+
+
+def build(run: Path, out_tsv: Path, *, title_starts: bool = False,
+          dobudova: bool = True, dochyt: Path | None = None, meta: Any = None) -> dict[str, Any]:
+    """Тека прогону цілих сторінок → таблиця справ TSV (`FIELDS`); підсумок — числа.
+
+    `meta` — метадані агента (`opysy.meta`): сторінки поза таблицею пропускаються, `sprav` —
+    знаменник повноти. `dochyt` — тека `opysy.dochyt` з прочитаними кропами: номери колонки № —
+    дочитані, межі справ — ще й з плям чорнила за схемою (`dochyt.skhema`)."""
+    from nyshporka.opysy import dochyt as DC
+
+    run = Path(run)
+    stems = sorted({p.name.split(".")[0] for p in run.glob("*.txt")})
+    pages: dict[str, Any] = {}
+    bad = 0
+    for stem in stems:
+        if meta is not None and not meta.u_tablytsi(stem):
+            continue
+        got = page_lines(run, stem)
+        if not got:
+            bad += 1
+            continue
+        lines, (W, H) = got
+        # межа розвороту — з рядків прогону, до будь-яких вставок
+        pages[stem] = (lines, (W, H), split_spread(lines, W, H))
+    recs, raw = _tablytsia(pages, title_starts=title_starts, dobudova=dobudova)
+    sprav = int(getattr(meta, "sprav", 0) or 0)
+    extra: dict[str, Any] = {}
+    mapa = {}
+    if dochyt is not None and (Path(dochyt) / DC.MAPA).exists():
+        import json
+
+        mapa = json.loads((Path(dochyt) / DC.MAPA).read_text(encoding="utf-8"))
+    if mapa and dochyt is not None:
+        chyt = DC.chytannia(Path(dochyt))
+        # схема — за чистим прогоном (так її й міряно), злипання — після дочиту номерів
+        sk, why = DC.skhema(len(recs), sum(bool(r["confirmed"]) for r in recs), sprav)
+        p1 = {st: (DC.pidstavyty(st, L, mapa, chyt)[0], wh, hv) for st, (L, wh, hv) in pages.items()}
+        recs1, _ = _tablytsia(p1, title_starts=title_starts, dobudova=dobudova)
+        zlypli = {(r["page"], int(r["part"])) for r in recs1 if r["no_span"]}
+        p2: dict[str, Any] = {}
+        bez: dict[tuple[str, int], list[int]] = {}
+        for st, (L, wh, hv) in pages.items():
+            polovyny = range(len(hv)) if sk == "usi" else [pt for (s2, pt) in zlypli if s2 == st]
+            ln2, b = DC.pidstavyty(st, L, mapa, chyt, plyamy_polovyn=polovyny)
+            p2[st] = (ln2, wh, hv)
+            for pt, y in b:
+                bez.setdefault((st, pt), []).append(y)
+        recs, raw = _tablytsia(p2, title_starts=title_starts, dobudova=dobudova, bez=bez)
+        extra = {"skhema": sk, "skhema_chomu": why, "dochytano": len(chyt)}
     out_tsv = Path(out_tsv)
     out_tsv.parent.mkdir(parents=True, exist_ok=True)
     with out_tsv.open("w", encoding="utf-8", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=FIELDS, delimiter="\t", extrasaction="ignore")
         w.writeheader()
         w.writerows(recs)
-    return {"pages": len(stems), "bad_pages": bad, "rows_raw": raw, "cases": len(recs),
-            "read": sum(r["no_src"] == "read" for r in recs),
-            "confirmed": sum(bool(r["confirmed"]) for r in recs)}
+    res = {"pages": len(pages), "bad_pages": bad, "rows_raw": raw, "cases": len(recs),
+           "read": sum(r["no_src"] == "read" for r in recs),
+           "confirmed": sum(bool(r["confirmed"]) for r in recs), **extra}
+    if sprav:
+        res["sprav"] = sprav
+        res["povnota"] = round(len(recs) / sprav, 3)
+    return res

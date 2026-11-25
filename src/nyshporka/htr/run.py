@@ -107,6 +107,10 @@ class Plan:
     #: рішення — `form_why` (прапорець людини чи паспорт справи).
     form_cells: bool = False
     form_why: str = ""
+    #: 🧩 «Готові рядки» (`--whole-line` раннера): кожен кадр — уже рядок, без сегментації. Для
+    #: кропів, нарізаних пакетом: номери справ у колонці описів (`opysy.dochyt`), клітинки. Один
+    #: голос — основна модель: другий на коротких кропах лише подвоїв би час.
+    whole_line: bool = False
 
     @property
     def form_auto(self) -> bool:
@@ -177,6 +181,8 @@ class Plan:
             cmd += ["--voice-batch", str(voice_batch)]
         if self.form_cells:
             cmd.append("--form-cells")
+        if self.whole_line:
+            cmd.append("--whole-line")
         if progress_json:
             cmd.append("--progress-json")
         return cmd
@@ -189,7 +195,7 @@ class Plan:
                 "script_trust": self.script_trust, "script_why": self.script_why,
                 "bokovi": self.bokovi, "form_cells": self.form_cells,
                 "form_why": self.form_why, "form_auto": self.form_auto,
-                "form_warning": self.form_warning}
+                "form_warning": self.form_warning, "whole_line": self.whole_line}
 
     # ── шарди ────────────────────────────────────────────────────────────────
     def shards(self, workers: int = 1, *, device: str = "", dynamic: bool = True,
@@ -607,7 +613,7 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
          second_voice: bool = True, model: str = "",
          seg_cache: str | Path = "", also: Sequence[str] = (),
          zone: bool = False, fix_sideways: bool = False,
-         form_cells: bool | None = None) -> Plan:
+         form_cells: bool | None = None, whole_line: bool = False) -> Plan:
     """Зібрати план прогону або пояснити, чого бракує.
 
     `model` — перечитати справу ЯВНО названою моделлю (напр. Скрибою, коли
@@ -751,7 +757,7 @@ def plan(case_dir: str | Path, *, out_dir: str | Path = "", script: str = "",
                 extra_voices=extra, seg_cache=seg, gpu_lock=lock_dir / "gpu.lock",
                 script_trust=trust, script_why=why, seg_why=seg_why,
                 seg_ready=seg_ready, bokovi=bokom,
-                form_cells=form_on, form_why=form_why)
+                form_cells=form_on, form_why=form_why, whole_line=whole_line)
 
 
 def _passport(case_dir: Path) -> dict[str, Any]:

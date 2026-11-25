@@ -49,9 +49,13 @@ def chytannia(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
     """Що робить `nysh read <тека>/pages --out <тека>/run`: текст і рамки рядків кожної сторінки."""
     vyklyky: list[Path] = []
 
-    def _chytaty(pages: Path, run: Path, script: str) -> int:
-        vyklyky.append(pages)
+    def _chytaty(pages: Path, run: Path, script: str, whole_line: bool = False) -> int:
         run.mkdir(parents=True, exist_ok=True)
+        if whole_line:
+            for k in pages.glob("*.jpg"):
+                (run / f"{k.stem}.txt").write_text("", encoding="utf-8")
+            return 0
+        vyklyky.append(pages)
         (run / "_htr_meta.json").write_text(json.dumps({"model": "pysar_cyr_v31.pt"}),
                                             encoding="utf-8")
         for stem, lines in STOR.items():
@@ -76,13 +80,25 @@ def _read(d: Path, **kw: Any) -> Any:
     return OO.opysy_read(OO.ReadOpysArgs(dir=str(d), **kw))
 
 
+def _read_z_meta(d: Path, **kw: Any) -> Any:
+    """Перший `read` зупиняється по метадані опису (агент глянув сторінки), другий — читає далі."""
+    env = _read(d, **kw)
+    if env.ok and env.data.get("meta_potribni"):
+        assert env.data["hlianuty"] and env.data["zrobleno"] == ["паспорт", "сторінки"]
+        m = OO.opysy_meta(OO.MetaArgs(dir=str(d), forma="hand_ruled", kolonky="nomer,nazva,kinets",
+                                      sprav=0))
+        assert m.ok, m
+        env = _read(d, **{k: v for k, v in kw.items() if k in ("language", "script")})
+    return env
+
+
 def test_read_i_push_dvoma_komandamy(tmp_path: Path, server: dict[str, Any],
                                      chytannia: list[Path]) -> None:
     d = tmp_path / "opys"
-    env = _read(d, pdf=str(_pdf(tmp_path)), repo="ДАОО", fond="445", opys="9", url=URL,
-                language="ru")
+    env = _read_z_meta(d, pdf=str(_pdf(tmp_path)), repo="ДАОО", fond="445", opys="9", url=URL,
+                       language="ru")
     assert env.ok, env
-    assert env.data["zrobleno"] == ["паспорт", "сторінки", "читання", "таблиця"]
+    assert env.data["zrobleno"][0] == "читання" and env.data["zrobleno"][-1] == "таблиця"
     assert env.data["sprav"] == 3 and env.data["pachok_normalizatsii"] == 1
     assert "nysh opys push" in env.data["next"] and "--norm-model" in env.data["next"]
     # повтор — зроблене не повторюється, читання не запускається вдруге
@@ -129,9 +145,9 @@ def test_nova_teka_bez_dzherela_i_mashynopys(tmp_path: Path, server: dict[str, A
 
 def test_obirvane_chytannia_kazhe_prodovzhyty(tmp_path: Path, server: dict[str, Any],
                                               monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(OO, "_chytaty", lambda pages, run, script: 1)
-    env = _read(tmp_path / "o", pdf=str(_pdf(tmp_path)), repo="ДАОО", fond="445", opys="9",
-                url=URL)
+    monkeypatch.setattr(OO, "_chytaty", lambda pages, run, script, whole_line=False: 1)
+    env = _read_z_meta(tmp_path / "o", pdf=str(_pdf(tmp_path)), repo="ДАОО", fond="445", opys="9",
+                       url=URL)
     assert not env.ok and "0 з 2" in env.error and "продовжить" in env.error
     assert W.load(tmp_path / "o")  # паспорт і сторінки лишились — повтор продовжить
 
@@ -149,8 +165,12 @@ def test_mova_z_tekstu_doreformena_i_ukrainska() -> None:
 def test_porozhnia_storinka_bez_tekstu_ne_blokuie(tmp_path: Path, server: dict[str, Any],
                                                   monkeypatch: pytest.MonkeyPatch) -> None:
     """Сторінка, яку рушій пройшов, але тексту не дав (порожня, титул), — прочитана за метою."""
-    def _chytaty(pages: Path, run: Path, script: str) -> int:
+    def _chytaty(pages: Path, run: Path, script: str, whole_line: bool = False) -> int:
         run.mkdir(parents=True, exist_ok=True)
+        if whole_line:
+            for k in pages.glob("*.jpg"):
+                (run / f"{k.stem}.txt").write_text("", encoding="utf-8")
+            return 0
         stem, lines = "0001", STOR["0001"]
         w, h = Image.open(pages / f"{stem}.jpg").size
         (run / f"{stem}.txt").write_text("\n".join(t for *_, t in lines), encoding="utf-8")
@@ -162,8 +182,8 @@ def test_porozhnia_storinka_bez_tekstu_ne_blokuie(tmp_path: Path, server: dict[s
         return 0
 
     monkeypatch.setattr(OO, "_chytaty", _chytaty)
-    env = _read(tmp_path / "p", pdf=str(_pdf(tmp_path)), repo="ДАОО", fond="445", opys="9", url=URL,
-                language="ru")
+    env = _read_z_meta(tmp_path / "p", pdf=str(_pdf(tmp_path)), repo="ДАОО", fond="445", opys="9",
+                       url=URL, language="ru")
     assert env.ok, env
     assert "читання" in env.data["zrobleno"] and env.data["sprav"] == 2
 
@@ -175,7 +195,7 @@ def test_push_na_obmin_bez_normalizatsii(tmp_path: Path, server: dict[str, Any],
     from nyshporka.opysy import bundle as B
 
     d = tmp_path / "opys"
-    env = _read(d, pdf=str(_pdf(tmp_path)), repo="ДАОО", fond="445", opys="9", url=URL,
+    env = _read_z_meta(d, pdf=str(_pdf(tmp_path)), repo="ДАОО", fond="445", opys="9", url=URL,
                 language="ru")
     assert env.ok and "--na-obmin" in env.data["next"] and "--norm-model" in env.data["next"]
     bez = OO.opysy_push(OO.PushArgs(file=str(d)))
@@ -213,7 +233,7 @@ def test_manifest_bez_obminu_bez_polia(tmp_path: Path, server: dict[str, Any],
     from nyshporka.opysy import bundle as B
 
     d = tmp_path / "opys"
-    _read(d, pdf=str(_pdf(tmp_path)), repo="ДАОО", fond="445", opys="9", url=URL, language="ru")
+    _read_z_meta(d, pdf=str(_pdf(tmp_path)), repo="ДАОО", fond="445", opys="9", url=URL, language="ru")
     for b in Path(d / "norm").glob("batch_*.json"):
         titles = json.loads(b.read_text(encoding="utf-8"))["titles"]
         b.with_name(b.stem + ".out.txt").write_text(json.dumps(titles, ensure_ascii=False),
