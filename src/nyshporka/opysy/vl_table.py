@@ -31,6 +31,7 @@ import html
 import json
 import math
 import re
+from collections.abc import Callable
 from html.parser import HTMLParser
 from itertools import pairwise
 from pathlib import Path
@@ -550,9 +551,13 @@ def _rik_zaholovok(v: dict[str, Any]) -> bool:
     return True
 
 
-def build(vl_dir: Path, out_tsv: Path, opys: str = "") -> dict[str, Any]:
-    """Тека виходу VL опису → таблиця справ TSV (`KOLONKY`); підсумок — числа."""
+def build(vl_dir: Path, out_tsv: Path, opys: str = "",
+          u_tablytsi: Callable[[str], bool] | None = None) -> dict[str, Any]:
+    """Тека виходу VL опису → таблиця справ TSV (`KOLONKY`); підсумок — числа. `u_tablytsi` —
+    сторінки таблиці з метаданих опису (`Meta.u_tablytsi`): титул і засвідчувальний напис — поза нею."""
     st = storinky(Path(vl_dir))
+    if u_tablytsi is not None:
+        st = {k: v for k, v in st.items() if u_tablytsi(f"{k:04d}")}
     recs: list[dict[str, Any]] = []
     stat = {"sprav": 0, "mistse_vl": 0, "bez_ramky": 0}
     for page in sorted(st):

@@ -106,9 +106,6 @@ def _verdict_env(data: dict[str, Any], verdict: Any) -> Envelope:
     return env
 
 
-@op("opysy.check", summary="Перевірити робочу теку опису воротами Супряги, нічого не пакуючи",
-    args=CheckArgs, section=SECTION, tier="rare",
-    when="перед пакуванням опису — що не пройде і що лише позначиться")
 def _robocha_teka(d: Path) -> Envelope | None:
     """Дали робочу теку `opys read` замість теки пакета — назвати, звідки береться пакет."""
     if (d / "opys.json").exists() and not (d / "manifest.json").exists():
@@ -117,6 +114,9 @@ def _robocha_teka(d: Path) -> Envelope | None:
     return None
 
 
+@op("opysy.check", summary="Перевірити робочу теку опису воротами Супряги, нічого не пакуючи",
+    args=CheckArgs, section=SECTION, tier="rare",
+    when="перед пакуванням опису — що не пройде і що лише позначиться")
 def opysy_check(a: CheckArgs) -> Envelope:
     from nyshporka.opysy import bundle as B
     from nyshporka.opysy import gates as G
@@ -397,7 +397,11 @@ def opysy_table(a: TableArgs) -> Envelope:
 
         if not any(W.vl_dir(d).glob("*.md")):
             return fail(f"немає розмітки рушія друку в {W.vl_dir(d)} — `nysh opys read {a.dir}`")
-        res = VT.build(W.vl_dir(d), W.table_path(d), opys=str(W.load(d).get("opys") or ""))
+        from nyshporka.opysy import meta as M
+
+        mt = M.load(d) if (d / M.FILE).exists() else None
+        res = VT.build(W.vl_dir(d), W.table_path(d), opys=str(W.load(d).get("opys") or ""),
+                       u_tablytsi=mt.u_tablytsi if mt is not None else None)
         res = {k: v for k, v in res.items() if not isinstance(v, (list, dict))}
         res["confirmed"] = res.get("pidtverdzheno", 0)
         # справа — рядок з назвою: рядок без назви пакет однаково відкидає (порожня клітинка VL)

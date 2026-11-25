@@ -53,7 +53,7 @@ nysh opys push <тека> --norm-model <модель>
 таблиці, середня й остання; на останній буває засвідчувальний напис. Глянь їх і запиши:
 
 ```
-nysh opys meta <тека> --forma blank|hand_ruled|typed --rozvorot|--odna \
+nysh opys meta <тека> --forma blank|hand_ruled|typed \
   --kolonky nomer,pochatok,nazva,kinets,arkushi,vidmitka --sprav 441 \
   --dzherelo "засвідчувальний напис, стор. 34" --storinky 3-34
 ```
