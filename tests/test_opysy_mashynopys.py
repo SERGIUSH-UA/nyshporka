@@ -147,3 +147,12 @@ def test_dzherelo_teka_kadriv(tmp_path: Path) -> None:
     Image.new("RGB", (1728, 2592), "black").save(teka / "00003.JPG")
     assert W.init(tmp_path / "opys2", teka, repo="ДАОО", fond="445", opys="9",
                   url="https://archive.example/d/s/1")["source"]["sha256"] != pas["source"]["sha256"]
+
+
+def test_zaholovok_roku_ne_sprava(tmp_path: Path) -> None:
+    """Машинопис ставить рік окремим рядком між справами («1799») — це не справа й не номер."""
+    vl = tmp_path / "vl"
+    riadky = [SHAPKA, *_spravy(1, 3), ["1799", "", "", "", ""], *_spravy(4, 6)]
+    _md(vl, "0001", _tablytsia(riadky))
+    res = VT.build(vl, tmp_path / "t.tsv", opys="1")
+    assert res["cases"] == 6, res

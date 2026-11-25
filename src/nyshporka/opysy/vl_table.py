@@ -465,6 +465,14 @@ def storinky(vl_dir: Path) -> dict[int, tuple[list[dict[str, Any]], dict[str, An
     return out
 
 
+def _rik_zaholovok(v: dict[str, Any]) -> bool:
+    """Рядок таблиці — рік, а не справа: число 1500–2030 у колонці № і без аркушів. Назва тут буває
+    уривком сусідньої колонки дат («ЗАНВАРА»), штампом («ЦИФРОВА КОПІЯ») чи засвідчувальним написом —
+    справа машинопису має кількість аркушів завжди (ДАВіО ф.792: 12 таких рядків, жоден не справа)."""
+    n = v.get("no")
+    return isinstance(n, int) and 1500 <= n <= 2030 and not v.get("folios")
+
+
 def build(vl_dir: Path, out_tsv: Path, opys: str = "") -> dict[str, Any]:
     """Тека виходу VL опису → таблиця справ TSV (`KOLONKY`); підсумок — числа."""
     st = storinky(Path(vl_dir))
@@ -474,7 +482,10 @@ def build(vl_dir: Path, out_tsv: Path, opys: str = "") -> dict[str, Any]:
         stem = f"{page:04d}"
         vse, blocks = st[page]
         khvist = [v for v in vse if v.get("cont")]
-        spravy = [v for v in vse if not v.get("cont")]
+        # Рядок, де стоїть лише рік (1799, 1828…), — заголовок року між справами машинопису, не справа:
+        # VL дає його рядком таблиці з числом у колонці №. Без цього опис ДАВіО ф.792 мав 169 «справ»
+        # замість 114, а роки, що йдуть один за одним, збивали ланцюжок номерів.
+        spravy = [v for v in vse if not v.get("cont") and not _rik_zaholovok(v)]
         stat["sprav"] += len(spravy)
         # хвіст справи з попередньої сторінки — до неї
         prev = recs[-1] if recs and recs[-1]["src_page"] == page - 1 else None

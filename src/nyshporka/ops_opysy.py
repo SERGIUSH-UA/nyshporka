@@ -388,6 +388,11 @@ def opysy_table(a: TableArgs) -> Envelope:
         res = VT.build(W.vl_dir(d), W.table_path(d), opys=str(W.load(d).get("opys") or ""))
         res = {k: v for k, v in res.items() if not isinstance(v, (list, dict))}
         res["confirmed"] = res.get("pidtverdzheno", 0)
+        # справа — рядок з назвою: рядок без назви пакет однаково відкидає (порожня клітинка VL)
+        import csv
+
+        with W.table_path(d).open(encoding="utf-8", newline="") as fh:
+            res["cases"] = sum(1 for r in csv.DictReader(fh, delimiter="	") if (r.get("title") or "").strip())
         if meta.sprav:
             res["sprav"] = meta.sprav
             res["povnota"] = round(res.get("cases", 0) / meta.sprav, 3)
