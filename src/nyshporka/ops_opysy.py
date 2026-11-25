@@ -109,10 +109,20 @@ def _verdict_env(data: dict[str, Any], verdict: Any) -> Envelope:
 @op("opysy.check", summary="Перевірити робочу теку опису воротами Супряги, нічого не пакуючи",
     args=CheckArgs, section=SECTION, tier="rare",
     when="перед пакуванням опису — що не пройде і що лише позначиться")
+def _robocha_teka(d: Path) -> Envelope | None:
+    """Дали робочу теку `opys read` замість теки пакета — назвати, звідки береться пакет."""
+    if (d / "opys.json").exists() and not (d / "manifest.json").exists():
+        return fail(f"{d} — робоча тека опису, а не пакет: `nysh opys push {d}` збере пакет і пройде "
+                    f"ворота сам; лише перевірити — `nysh opys build {d}`, тоді `nysh opys check {d / 'paket'}`")
+    return None
+
+
 def opysy_check(a: CheckArgs) -> Envelope:
     from nyshporka.opysy import bundle as B
     from nyshporka.opysy import gates as G
 
+    if (vidmova := _robocha_teka(Path(a.dir))) is not None:
+        return vidmova
     try:
         c = B.read_workdir(Path(a.dir))
     except B.BundleError as exc:
@@ -131,6 +141,8 @@ def opysy_pack(a: PackArgs) -> Envelope:
     from nyshporka.opysy import bundle as B
 
     work = Path(a.dir)
+    if (vidmova := _robocha_teka(work)) is not None:
+        return vidmova
     out = Path(a.out)
     if out.is_dir() or not out.suffix:
         out.mkdir(parents=True, exist_ok=True)

@@ -137,3 +137,10 @@ def test_liva_nazv_ne_vid_riadka_z_nomerom() -> None:
     riadky: list[Any] = [(2460, 600 + 150 * k, 3400, 700 + 150 * k, f"{21 + k}. Книга решений суда") for k in range(5)]
     riadky += [(2740, 1500 + 150 * k, 3400, 1600 + 150 * k, "Книга регистрации торговых сделок") for k in range(5)]
     assert DC.liva_nazv(riadky) == 2740
+
+
+def test_check_i_pack_na_robochii_tetsi_kazhut_zvidky_paket(tmp_path: Path) -> None:
+    (tmp_path / "opys.json").write_text("{}", encoding="utf-8")
+    for env in (OO.opysy_check(OO.CheckArgs(dir=str(tmp_path))),
+                OO.opysy_pack(OO.PackArgs(dir=str(tmp_path), out=str(tmp_path / "x.nyshopys")))):
+        assert not env.ok and "nysh opys push" in env.error and "nysh opys build" in env.error
