@@ -408,7 +408,7 @@ def _cloud_registry_slim(root: Path) -> CheckResult:
     import sqlite3
 
     try:
-        from gpurunner.core import manifest
+        from gpurunner.core import manifest  # type: ignore[import-untyped]
     except Exception:
         return CheckResult("n/a", "плагін оренди (gpuhire) не встановлено")
     path = manifest.db_path()
