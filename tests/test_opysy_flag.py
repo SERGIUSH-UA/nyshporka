@@ -90,7 +90,8 @@ def _probe(flag: str | None, tmp: Path) -> dict:
 
 
 def test_off_hides_everything_on_shows_it(tmp_path: Path) -> None:
-    off = _probe(None, tmp_path)
+    # Засіки запущено в 0.49.0: без змінної — увімкнено, `NYSH_OPYSY=0` ховає
+    off = _probe("0", tmp_path)
     assert "opys" not in off["groups"]
     assert off["ops"] == []
     assert off["policy"]["exit"] != 0

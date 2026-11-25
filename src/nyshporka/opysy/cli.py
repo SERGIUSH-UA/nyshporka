@@ -14,6 +14,7 @@ import typer
 from nyshporka import brand
 from nyshporka.cli_emit import answer as _answer
 from nyshporka.cli_emit import notes, untrusted
+from nyshporka.core.routes import route
 
 app = typer.Typer(help="Описи фондів (Супряга): перевірити й спакувати опис.",
                   no_args_is_help=True)
@@ -665,6 +666,8 @@ app.add_typer(api_app, name="api")
 
 
 @api_app.command("nalashtuvaty")
+@route("opys api nalashtuvaty", skill="read-opys", mutates=True, tier="rare",
+       when="людина вмикає нормалізацію описів своїм ключем API: згода, модель, бюджет, ключ")
 def api_nalashtuvaty() -> None:
     """Згода, модель, бюджет і ключ — лише людина у своєму терміналі (агентові недоступно)."""
     import getpass
@@ -707,6 +710,8 @@ def api_stan(as_json: bool = typer.Option(False, "--json", help="машинни�
 
 
 @api_app.command("vymknuty")
+@route("opys api vymknuty", skill="read-opys", mutates=True, tier="rare",
+       when="прибрати ключ API нормалізації зі сховища паролів")
 def api_vymknuty() -> None:
     """Прибрати ключ зі сховища паролів і налаштування (облік витрат лишається)."""
     from nyshporka.opysy import norm_api as NA
