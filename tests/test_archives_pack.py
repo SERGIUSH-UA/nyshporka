@@ -756,3 +756,35 @@ def test_dachko_codes() -> None:
     pk = P.load()
     assert pk.codes_for("DACHKO", "duck") == ("ДАЧкО",)
     assert pk.codes_for("DACHKO", "babynyar") == ("39",)
+
+
+def test_a_bare_oblast_abbreviation_names_both_archives(tmp_path) -> None:
+    """«ДАДО» — і Дніпропетровський, і Донецький: відмова називає обидва.
+
+    25.11.2026 автор завів собі архів «DADO», і 86 донецьких справ жили окремим
+    вигаданим архівом. Голе скорочення двох областей тепер не «невідомий архів,
+    додайте свій», а підказка, яку літеру дописати. Перелік — з довідника.
+    """
+    from nyshporka.cases.register import RegisterError, parse_shifra
+    from nyshporka.core import workspace as W
+
+    W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
+    pk = P.active()
+    assert pk.neodnoznachni("ДАДО") == ["DADNO", "DADOO"]
+    assert pk.neodnoznachni("dado") == ["DADNO", "DADOO"]
+    assert pk.neodnoznachni("ДАЗО") == ["DAZKO", "DAZPO"]
+    # Скорочення, за якими стоїть власний архів чи давнє написання, — не голі.
+    for slovo in ("ДАХО", "ДАЧО", "ДАЛО", "ДАКО", "ДАВО", "ДАДнО", "ЦДІАК"):
+        assert pk.neodnoznachni(slovo) == [], slovo
+    assert parse_shifra("ДАХО 1-1-1").repo == "DAHO"
+
+    for shifra in ("ДАДО 20-1-1", "DADO 20-1-1"):
+        with pytest.raises(RegisterError) as e:
+            parse_shifra(shifra)
+        assert "ДАДнО" in str(e.value) and "ДАДоО" in str(e.value)
+        assert "додайте" not in str(e.value)
+
+    with pytest.raises(P.PackError, match=r"ДАЗкО.*ДАЗпО"):
+        P.add_repository("DAZO", "ДАЗО", "Запорізький", "UA")
+    with pytest.raises(P.PackError, match=r"ДАДнО.*ДАДоО"):
+        P.add_repository("DADO", "ДАДонО", "Донецький", "UA")
