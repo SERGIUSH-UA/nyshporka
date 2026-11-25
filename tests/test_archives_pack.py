@@ -565,9 +565,9 @@ def test_adding_an_archive_survives_a_comma_in_its_name(tmp_path) -> None:
     from nyshporka.core import workspace as W
 
     W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
-    P.add_repository("ANK", "ANK", "Archiwum Narodowe w Krakowie, Kraków", "PL")
+    P.add_repository("APSZ", "APSZ", "Archiwum Państwowe w Szczecinie, Szczecin", "PL")
 
-    assert parse_shifra("ANK 1-2-3").repo == "ANK"
+    assert parse_shifra("APSZ 1-2-3").repo == "APSZ"
     # І головне: вбудовані архіви живі. Саме це ламалось непомітно.
     assert parse_shifra("ДАХмО 315-1-8433").repo == "DAHMO"
 
@@ -586,12 +586,12 @@ def test_an_archive_label_with_a_hyphen_is_parsed_whole(tmp_path) -> None:
     from nyshporka.share.publish import _case_block
 
     W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
-    P.add_repository("ANKNS", "ANK-NS", "Archiwum Narodowe w Krakowie, Oddział w Nowym Sączu", "PL")
+    P.add_repository("APKSA", "APK-SA", "Archiwum Państwowe w Kielcach, Oddział w Sandomierzu", "PL")
 
-    sh = parse_shifra("ANK-NS 587-1-7")
-    assert (sh.repo, sh.fond, sh.opys, sh.spr) == ("ANKNS", "587", "1", "7")
-    blok = _case_block({"key": "ANKNS/587/1/7", "shifra": "ANK-NS 587-1-7"}, None)
-    assert (blok["repo"], blok["fond"], blok["opys"], blok["spr"]) == ("ANKNS", "587", "1", "7")
+    sh = parse_shifra("APK-SA 587-1-7")
+    assert (sh.repo, sh.fond, sh.opys, sh.spr) == ("APKSA", "587", "1", "7")
+    blok = _case_block({"key": "APKSA/587/1/7", "shifra": "APK-SA 587-1-7"}, None)
+    assert (blok["repo"], blok["fond"], blok["opys"], blok["spr"]) == ("APKSA", "587", "1", "7")
     # Дефіс — лише між літерами: префікс радянського фонду архівом не стає.
     assert parse_shifra("ДАВіО Р-6129-24-5").repo == "DAVIO"
     with pytest.raises(Exception, match="архів"):
@@ -626,7 +626,7 @@ def test_a_broken_overlay_is_rolled_back_not_left_broken(tmp_path, monkeypatch) 
     from nyshporka.core import workspace as W
 
     W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
-    P.add_repository("ANK", "ANK", "Archiwum", "PL")
+    P.add_repository("APSZ", "APSZ", "Archiwum", "PL")
     was = P.overlay_path().read_text(encoding="utf-8")
 
     # Імітуємо запис, що ламає YAML, — так, як це зробила б будь-яка майбутня
@@ -663,11 +663,11 @@ def test_an_archive_added_now_is_visible_to_every_reader_now(tmp_path) -> None:
     from nyshporka.pagestore.store import _label2repo
 
     W.use(W.Workspace(root=tmp_path, name="тест", origin="test"))
-    assert _canon_repo("ANK") == "ANK", "код невідомого архіву лишається як є"
-    P.add_repository("ANK", "ANK", "Archiwum Narodowe w Krakowie", "PL")
+    assert _canon_repo("APSZ") == "APSZ", "код невідомого архіву лишається як є"
+    P.add_repository("APSZ", "APSZ", "Archiwum Państwowe w Szczecinie", "PL")
 
-    assert _label2repo().get("ank") == "ANK", "сховище сторінок не бачить нового архіву"
-    assert _canon_repo("ank") == "ANK", "бібліотека не бачить нового архіву"
+    assert _label2repo().get("apsz") == "APSZ", "сховище сторінок не бачить нового архіву"
+    assert _canon_repo("apsz") == "APSZ", "бібліотека не бачить нового архіву"
 
 
 @pytest.mark.parametrize("shape", [

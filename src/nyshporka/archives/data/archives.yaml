@@ -175,6 +175,108 @@ repositories:
     sites:
       web:
         url: https://przemysl.ap.gov.pl
+  # Ще польські архіви й бібліотеки, книги яких уже лежать у Супрязі під
+  # голим кодом (24.11.2026). Підпис — польською сигнатурою, як APL і AGAD:
+  # латиницю тут не перекладаємо, генеалог шукає їх саме так.
+  APRZESZOW:
+    label: APRz
+    name: Archiwum Państwowe w Rzeszowie
+    country: PL
+    sites:
+      web:
+        url: https://rzeszow.ap.gov.pl
+  APRZ:
+    # Той самий Жешув: у шифрі учасника «APRz» — польська сигнатура архіву
+    # (Перемишль — «APPrz»). Код уже в ключі книги, тож лишається.
+    label: APRz
+    name: Archiwum Państwowe w Rzeszowie
+    country: PL
+    same_as: APRZESZOW
+  APK:
+    label: APK
+    name: Archiwum Państwowe w Kielcach
+    country: PL
+    sites:
+      web:
+        url: https://kielce.ap.gov.pl
+  APLD:
+    # У шифрі учасника — «APŁ»; латинський код без діакритики.
+    label: APŁ
+    name: Archiwum Państwowe w Łodzi
+    country: PL
+    sites:
+      web:
+        url: https://www.lodz.ap.gov.pl
+  ANK:
+    label: ANK
+    name: Archiwum Narodowe w Krakowie
+    country: PL
+    sites:
+      web:
+        url: https://www.ank.gov.pl
+  ANKNS:
+    label: ANK-NS
+    name: Archiwum Narodowe w Krakowie, Oddział w Nowym Sączu
+    country: PL
+  AAN:
+    label: AAN
+    name: Archiwum Akt Nowych
+    country: PL
+    sites:
+      web:
+        url: https://www.aan.gov.pl
+  BJ:
+    label: BJ
+    name: Biblioteka Jagiellońska
+    country: PL
+    sites:
+      web:
+        url: https://bj.uj.edu.pl
+  BU:
+    # У шифрі учасника — «BU KUL»: просто «BU» мають кілька університетів.
+    # Дефіс замість пробілу: підпис мусить розбиратись у шифрі одним словом.
+    label: BU-KUL
+    name: Biblioteka Uniwersytecka Katolickiego Uniwersytetu Lubelskiego
+    country: PL
+  WBP:
+    # У шифрі учасника — «WBP Lublin».
+    label: WBP-Lublin
+    name: Wojewódzka Biblioteka Publiczna im. Hieronima Łopacińskiego w Lublinie
+    country: PL
+  MNK:
+    # Рукописи Бібліотеки Чарторийських (інвентарі ключів Потоцьких).
+    label: MNK
+    name: Muzeum Narodowe w Krakowie (Biblioteka Książąt Czartoryskich)
+    country: PL
+  LVIA:
+    label: LVIA
+    name: Lietuvos valstybės istorijos archyvas
+    country: LT
+  LVVA:
+    # Метрики лютеранських парафій і ревізії Риги.
+    label: LVVA
+    name: Latvijas Valsts vēstures arhīvs
+    country: LV
+  HUNGARICANA:
+    # Не архів, а портал угорських архівів і бібліотек: перепис 1921 р.
+    # Закарпаття (оригінал — ДАЗакО, Берегівське відділення).
+    label: Hungaricana
+    name: Hungaricana — Magyar Kulturális Örökség Portál
+    country: HU
+    sites:
+      web:
+        url: https://library.hungaricana.hu
+  NIAB:
+    # Кирилична країна — підпис українським скороченням, як РДІА.
+    label: НІАБ
+    name: Національний історичний архів Білорусі
+    country: BY
+  FSLPOLTAVA:
+    # Не архів, а колекція FamilySearch «Family Letters from German
+    # Occupation, Poltava» — листи остарбайтерів із Полтавщини.
+    label: FamilySearch
+    name: Листи остарбайтерів із Полтавщини (колекція FamilySearch)
+    country: UA
   IRNBUV:
     label: ІРНБУВ
     name: Інститут рукопису Національної бібліотеки України імені В. І. Вернадського
