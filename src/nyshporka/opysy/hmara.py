@@ -186,9 +186,9 @@ def vl_do_run(vl: Path, run: Path, pages: Path) -> int:
 
     Текст сторінки — `NNNN.txt` рушія; мета прогону — модель друку; геометрія — лише розмір
     сторінки (пакет рахує місце справи в частках сторінки, а VL дає одну рамку на таблицю)."""
-    import gzip
-
     from PIL import Image
+
+    from nyshporka.htr.layout import write_geometry
 
     run = Path(run)
     run.mkdir(parents=True, exist_ok=True)
@@ -202,8 +202,7 @@ def vl_do_run(vl: Path, run: Path, pages: Path) -> int:
         (run / f"{stem}.txt").write_text(txt.read_text(encoding="utf-8") if txt.exists()
                                          else md.read_text(encoding="utf-8"), encoding="utf-8")
         w, h = Image.open(src).size
-        with gzip.open(run / f"{stem}.lines.json.gz", "wt", encoding="utf-8") as fh:
-            json.dump({"boxes": [], "size": [w, h]}, fh)
+        write_geometry(run, stem, {"boxes": [], "size": [w, h]})
         n += 1
     (run / "_htr_meta.json").write_text(json.dumps({"model": "paddleocr_vl", "engine": "print"}),
                                         encoding="utf-8")
