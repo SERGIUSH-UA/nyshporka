@@ -124,3 +124,26 @@ def test_read_mashynopys_cherez_hmaru_druku(tmp_path: Path, server: None,
     assert env.ok, env
     assert env.data["sprav"] == 7 and env.data["pachok_normalizatsii"] >= 1
     assert (d / "run" / "0001.txt").exists() and (d / "run" / "0001.lines.json.gz").exists()
+
+
+def test_dzherelo_teka_kadriv(tmp_path: Path) -> None:
+    """Архів публікує опис кадрами (тека на своєму файлообміннику): тека — джерело так само, як PDF.
+    Сторінки — самі кадри під висоту читання; відбиток — з імен і вмісту кадрів; адреса не мусить
+    вести на файл."""
+    from nyshporka.opysy import pages as PG
+    from nyshporka.opysy import workdir as W
+
+    teka = tmp_path / "010792"
+    teka.mkdir()
+    for i in range(3):
+        Image.new("RGB", (1728, 2592), "white").save(teka / f"0000{i + 1}.JPG")
+    d = tmp_path / "opys"
+    pas = W.init(d, teka, repo="ДАОО", fond="445", opys="9",
+                 url="https://archive.example/d/s/600562020850376707/z56")
+    assert pas["pages"] == 3 and len(pas["source"]["sha256"]) == 64
+    res = PG.render(teka, d / "pages", target_h=2400)
+    assert res["pages"] == 3 and Image.open(d / "pages" / "0001.jpg").size[1] == 2400
+    # інший кадр — інший відбиток
+    Image.new("RGB", (1728, 2592), "black").save(teka / "00003.JPG")
+    assert W.init(tmp_path / "opys2", teka, repo="ДАОО", fond="445", opys="9",
+                  url="https://archive.example/d/s/1")["source"]["sha256"] != pas["source"]["sha256"]

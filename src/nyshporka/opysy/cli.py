@@ -382,8 +382,9 @@ def read_cmd(
     if d.get("hmara"):
         h = d["hmara"]
         console.print(f"[warn]хмара[/warn] · {_e(d.get('how'))}")
-        if h.get("vylka_do_usd") is not None:
-            console.print(f"  [muted]кошторис до ${_e(h.get('vylka_do_usd'))} · бюджет ${_e(h.get('byudzhet_usd'))}[/muted]")
+        if h.get("byudzhet_usd") is not None or h.get("vylka_do_usd") is not None:
+            vylka = f"кошторис до ${_e(h.get('vylka_do_usd'))} · " if h.get("vylka_do_usd") is not None else ""
+            console.print(f"  [muted]{vylka}стеля витрат заходу ${_e(h.get('byudzhet_usd'))}[/muted]")
         _next(d)
         return
     if d.get("meta_potribni"):

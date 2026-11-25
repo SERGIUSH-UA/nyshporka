@@ -111,24 +111,44 @@ def init(d: Path, pdf: Path, *, repo: str, fond: str, opys: str, url: str, kind:
     if why:
         raise WorkdirError(f"{repo} ф.{fond}: {why} (подробиці: nysh opys policy {repo} {fond})")
     pdf = Path(pdf).resolve()
-    if not pdf.is_file():
+    teka = pdf.is_dir()
+    if teka:
+        from nyshporka.opysy.pages import obrazy
+
+        if not obrazy(pdf):
+            raise WorkdirError(f"у теці {pdf} немає кадрів (jpg, png, tif)")
+    elif not pdf.is_file():
         raise WorkdirError(f"немає файлу {pdf}")
     if not url.strip():
         raise WorkdirError("потрібна адреса, де цей файл опубліковано (сайт архіву, Commons): "
                            "посилання справи в Супрязі веде туди")
     orig = Path(published).resolve() if published else pdf
-    if not orig.is_file():
+    if not (orig.is_file() or (orig.is_dir() and teka)):
         raise WorkdirError(f"немає файлу {orig}")
-    vyd = Path(unquote(urlparse(url.strip()).path)).suffix.lower()
-    if vyd and vyd != orig.suffix.lower():
-        raise WorkdirError(f"адреса веде на файл «{vyd}», а хеш рахувався б із «{orig.name}»: "
-                           f"дай оригінал, опублікований за адресою (`--published <файл{vyd}>`)")
-    doc = pdfium.PdfDocument(str(pdf))
-    try:
-        n = len(doc)
-    finally:
-        doc.close()
-    src = {**_source(url, kind, page_link, orig.name if published else ""), "sha256": _sha256(orig)}
+    if orig.is_file():
+        vyd = Path(unquote(urlparse(url.strip()).path)).suffix.lower()
+        if vyd and vyd != orig.suffix.lower():
+            raise WorkdirError(f"адреса веде на файл «{vyd}», а хеш рахувався б із «{orig.name}»: "
+                               f"дай оригінал, опублікований за адресою (`--published <файл{vyd}>`)")
+    if teka:
+        # Архів публікує опис кадрами (тека на сайті чи файлообміннику архіву): сторінки — самі кадри,
+        # відбиток джерела — з імен і вмісту кадрів за порядком.
+        from nyshporka.opysy.pages import obrazy
+
+        n = len(obrazy(pdf))
+        h = hashlib.sha256()
+        for k in obrazy(pdf):
+            h.update(k.name.encode("utf-8") + b"\0" + _sha256(k).encode("ascii") + b"\n")
+        vidbytok = h.hexdigest()
+    else:
+        doc = pdfium.PdfDocument(str(pdf))
+        try:
+            n = len(doc)
+        finally:
+            doc.close()
+        vidbytok = _sha256(orig)
+    label = orig.name if (published or teka) else ""
+    src = {**_source(url, kind, page_link, label), "sha256": vidbytok}
     Source(**src, pages=n)  # перевірка схемою: вид, адреса, шаблон посилання
     repo_c, fond_c = G.repo_fond(repo, fond)
     pas = {"repo": repo_c, "fond": fond_c, "opys": str(opys).strip(), "form": form, "pdf": str(pdf),
