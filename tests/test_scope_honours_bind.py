@@ -156,7 +156,7 @@ def test_share_suggest_offers_the_bound_key(scope: Any, monkeypatch) -> None:
     monkeypatch.setattr(SG, "vidmovleni", lambda: set())
     monkeypatch.setattr(SG, "viddani", lambda: set())
     monkeypatch.setattr(SG, "_u_puli", lambda k: None)
-    monkeypatch.setattr(SG, "_u_puli_poruch", lambda k, s: {})
+    monkeypatch.setattr(SG, "_u_puli_poruch", lambda k, s, pool_key=None: {})
     monkeypatch.setattr(PB, "znamennyk_spravy",
                         lambda k, s: {"total": 12 if k == KEY else 0, "unknown": ""})
     R.bind_run("проба-фонд-Р", KEY, "номер у теці застарів", force=True)
@@ -178,7 +178,7 @@ def test_share_suggest_ready_only_against_the_passport_film(scope: Any, monkeypa
     monkeypatch.setattr(SG, "vidmovleni", lambda: set())
     monkeypatch.setattr(SG, "viddani", lambda: set())
     monkeypatch.setattr(SG, "_u_puli", lambda k: None)
-    monkeypatch.setattr(SG, "_u_puli_poruch", lambda k, s: {})
+    monkeypatch.setattr(SG, "_u_puli_poruch", lambda k, s, pool_key=None: {})
     monkeypatch.setattr(PB, "kadriv_pasporta", lambda k: 1229 if k == KEY else 0)
 
     got = SG.nepodileni()
