@@ -711,7 +711,7 @@ def nalashtuvaty_interaktyvno(*, vvid: Callable[[str], str], pryhovano: Callable
     if prov_name is None:
         raise ApiError("провайдер — 1 або 2")
     modeli = sorted((c for c in ceny().values() if c.provider == prov_name),
-                    key=lambda c: (not c.rekomendovano, c.vkhid))
+                    key=lambda c: (not c.rekomendovano, c.riven != "середня", c.vkhid))
     druk("Модель (ціна 1 000 назв — орієнтовно, за заміром шаблону; межу тримає бюджет):")
     for i, c in enumerate(modeli, 1):
         druk(f"  {i} — {c.model} · {c.riven}{' · радимо' if c.rekomendovano else ''} · "
