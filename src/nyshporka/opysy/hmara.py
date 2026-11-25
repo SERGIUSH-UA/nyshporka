@@ -18,6 +18,7 @@
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -36,7 +37,12 @@ VYHID = {"storinky": "*.txt", "kropy": "*.txt", "druk": "*.md"}
 
 
 class HmaraError(RuntimeError):
-    """Захід не поставлено: причина людською мовою (відмова `cloud go`, немає плагіна оренди)."""
+    """Захід не поставлено: причина людською мовою (відмова `cloud go`, немає плагіна оренди).
+    `zghoda` — відмова лише за стелею автозапуску: потрібен `--confirm` людини, а не інше місце."""
+
+    def __init__(self, why: str, *, zghoda: bool = False) -> None:
+        super().__init__(why)
+        self.zghoda = zghoda
 
 
 def slug(d: Path) -> str:
@@ -55,28 +61,53 @@ def _stan_file(d: Path) -> Path:
 
 
 def stan(d: Path) -> dict[str, Any]:
+    """Стан хмарних етапів опису. Битий файл (обрив запису) — як порожній: етап поставиться
+    знову, а не кожен `read` падатиме до ручного видалення."""
     p = _stan_file(d)
-    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    if not p.exists():
+        return {}
+    try:
+        got = json.loads(p.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
+def zapysaty_stan(d: Path, s: dict[str, Any]) -> None:
+    from nyshporka.utils.atomic import atomic_write_text
+
+    atomic_write_text(_stan_file(d), json.dumps(s, ensure_ascii=False, indent=1))
 
 
 def _zapysaty(d: Path, etap: str, zap: dict[str, Any]) -> None:
     s = stan(d)
     s[etap] = zap
-    _stan_file(d).write_text(json.dumps(s, ensure_ascii=False, indent=1), encoding="utf-8")
+    zapysaty_stan(d, s)
+
+
+def zabuty(d: Path, etap: str) -> None:
+    """Зняти етап зі стану: наступний `read` поставить його знову."""
+    s = stan(d)
+    if s.pop(etap, None) is not None:
+        zapysaty_stan(d, s)
 
 
 def _kadry(teka: Path) -> list[Path]:
     return sorted(p for p in Path(teka).iterdir() if p.suffix.lower() in (".jpg", ".jpeg", ".png"))
 
 
-def _podaty(d: Path, etap: str, kadry: Path) -> Path:
-    """Тека кадрів етапу під унікальним іменем — жорсткі посилання (інакше копії)."""
-    teka = Path(d) / DIR / f"{slug(d)}-{etap}"
+def _podaty(d: Path, etap: str, kadry: Path, mitka: str = "") -> Path:
+    """Тека кадрів етапу під унікальним іменем — жорсткі посилання (інакше копії).
+
+    Тека складається наново щоразу: кропи, перерізані після зміни метаданих, мають ті самі імена, і
+    старе посилання тримало б старий вміст. `mitka` (відбиток метаданих) дає новому заходу нове ім'я —
+    отже й нову теку результату, без чужого старого тексту в ній."""
+    teka = Path(d) / DIR / (f"{slug(d)}-{etap}" + (f"-{mitka}" if mitka else ""))
+    if teka.exists():
+        shutil.rmtree(teka)
     teka.mkdir(parents=True, exist_ok=True)
     for k in _kadry(kadry):
         dest = teka / k.name
-        if dest.exists():
-            continue
         try:
             os.link(k, dest)
         except OSError:
@@ -103,14 +134,14 @@ def _cloud_go(args: list[str]) -> tuple[int, dict[str, Any], str]:
 
 
 def postavyty(d: Path, etap: str, kadry: Path, *, script: str = "", params: list[str] | None = None,
-              confirm: bool = False) -> dict[str, Any]:
+              confirm: bool = False, mitka: str = "") -> dict[str, Any]:
     """Поставити захід етапу. Повертає запис стану: `run_id`, `out_dir`, рішення, вилку.
 
     Відмова `cloud go` (немає плагіна оренди, ключа, балансу, понад стелю автозапуску) —
     `HmaraError` з його ж причиною: людина бачить, що зробити, а не «код 2»."""
     if etap not in ETAPY:
         raise ValueError(etap)
-    teka = _podaty(d, etap, kadry)
+    teka = _podaty(d, etap, kadry, mitka)
     # теку етапу склали щойно й цілком — запобіжник «тека ще качається» (кадр молодший 5 хв) тут хибний
     args = [str(teka), "--allow-partial"]
     if etap == "druk":
@@ -128,11 +159,11 @@ def postavyty(d: Path, etap: str, kadry: Path, *, script: str = "", params: list
     if verdict not in ("detached", "ok"):
         why = str(res.get("why") or "") or khvist or f"код {kod}"
         if res.get("launch") == "needs_confirm":
-            why = (f"кошторис понад стелю автозапуску (до ${res.get('fork_high')}) — запустити може лише "
-                   f"людина: та сама команда з `--confirm`. {why}")
+            raise HmaraError(f"кошторис понад стелю автозапуску (до ${res.get('fork_high')}) — запустити "
+                             f"може лише людина: та сама команда з `--confirm`. {why}", zghoda=True)
         raise HmaraError(why)
     zap = {"run_id": res.get("run_id") or "", "out_dir": res.get("out_dir") or "",
-           "teka": str(teka), "kadriv": len(_kadry(teka)), "verdict": verdict,
+           "teka": str(teka), "kadriv": len(_kadry(teka)), "verdict": verdict, "mitka": mitka,
            "fork_high": res.get("fork_high"), "budget_usd": res.get("budget_usd"),
            "postavleno": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     if not zap["out_dir"] and res.get("cases"):
@@ -142,7 +173,9 @@ def postavyty(d: Path, etap: str, kadry: Path, *, script: str = "", params: list
 
 
 def gotovo(d: Path, etap: str) -> tuple[int, int]:
-    """(прочитано, кадрів) етапу — за файлами в теці результату."""
+    """(прочитано, кадрів) етапу — за файлами в теці результату. Прочитана — є вихід АБО рушій
+    записав сторінку в мету прогону: порожня сторінка чи кроп без числа тексту не мають, і без мети
+    «прочитано N−1 з N» не минало б ніколи (так рахує й локальне читання)."""
     zap = stan(d).get(etap) or {}
     out = Path(zap.get("out_dir") or "")
     vsi = int(zap.get("kadriv") or 0)
@@ -150,7 +183,34 @@ def gotovo(d: Path, etap: str) -> tuple[int, int]:
         return 0, vsi
     kadry = {p.stem for p in _kadry(Path(zap["teka"]))} if Path(zap.get("teka") or "").is_dir() else set()
     zrobleno = {p.name.split(".")[0] for p in out.glob(VYHID[etap])}
+    meta = out / "_htr_meta.json"
+    if etap != "druk" and meta.exists():
+        with contextlib.suppress(ValueError, OSError, AttributeError):
+            zrobleno |= {Path(k).stem for k in (json.loads(meta.read_text(encoding="utf-8"))
+                                                .get("pages") or {})}
     return len(zrobleno & kadry) if kadry else len(zrobleno), vsi
+
+
+def skinchyvsia(zap: dict[str, Any]) -> bool:
+    """Захід етапу вже не читає: наглядач записав кінець (`done` / `failed`). Відчеплений запис, що
+    ще стоїть «читає», спершу звіряється з наглядачем (`settle_open`). Невідомо — False: краще
+    почекати ще один повтор, ніж забрати недочитане."""
+    run_id = str(zap.get("run_id") or "")
+    if not run_id:
+        return False
+    try:
+        from nyshporka.cloud import state as ST
+        from nyshporka.cloud import supervised as SUP
+
+        st = ST.load(run_id)
+        if st is None:
+            return False
+        if st.phase not in ("done", "failed"):
+            SUP.settle_open([st])
+            st = ST.load(run_id) or st
+        return st.phase in ("done", "failed")
+    except Exception:
+        return False
 
 
 def zabraty(d: Path, etap: str, kudy: Path) -> int:

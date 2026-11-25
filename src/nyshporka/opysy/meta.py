@@ -69,6 +69,18 @@ class Meta:
         return "nomer" in k and "nazva" in k and k.index("nazva") - k.index("nomer") > 1
 
 
+def vidbytok_dochytu(m: Meta) -> str:
+    """Відбиток полів, від яких залежать кропи дочиту (форма — шапка бланка, колонки — ширина
+    колонки №, сторінки таблиці). Мітка часу й інше — ні: та сама правка не скидає дочиту."""
+    import hashlib
+    import json
+
+    polia = {"forma": m.forma, "kolonky": list(m.kolonky), "kolonky_prava": list(m.kolonky_prava),
+             "storinky": list(m.storinky) if m.storinky else None}
+    return hashlib.sha256(json.dumps(polia, sort_keys=True, ensure_ascii=False).encode("utf-8")
+                          ).hexdigest()[:16]
+
+
 def perevirka(m: Meta) -> Meta:
     if m.forma not in FORMY:
         raise MetaError(f"форма «{m.forma}»: є {', '.join(FORMY)}")

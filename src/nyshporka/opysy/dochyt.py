@@ -87,10 +87,29 @@ def _kryla(g: np.ndarray, box: tuple[int, int, int, int], d: int) -> tuple[int, 
     return max(0, min(xl, x0)), max(xr, x1)
 
 
+def liva_nazv(L: list[tuple[int, int, int, int, str]]) -> int | None:
+    """Лівий край колонки назв половини: 10-й процентиль початку довгих рядків, що не починаються
+    числом (рядок «21. Книга…» стоїть у колонці №, а не назв). Немає таких — усіх довгих; немає
+    довгих — None."""
+    from nyshporka.opysy import ruled as RU
+
+    dovgi = [ln for ln in L if len(ln[4]) > 12]
+    chysti = [ln for ln in dovgi if not RU.NUM_START.match(ln[4])] or dovgi
+    return int(np.percentile([ln[0] for ln in chysti], 10)) if chysti else None
+
+
+def _u_kolontsi_nazv(ln: tuple[int, int, int, int, str], tl: int | None) -> bool:
+    """Рядок починається вже в колонці назв (не лівіше за неї щонайменше на третину висоти рядка):
+    номером справи бути не може. На сторінці, де рушій не побачив колонки № зовсім, «ліва зона» —
+    це колонка назв, і короткі «тоже» з неї ставали кропами номерів (ДАОО ф.445 оп.4, 25.11.2026)."""
+    return tl is not None and ln[0] > tl - .33 * max(1, ln[3] - ln[1])
+
+
 def nomerni(lines: list[tuple[int, int, int, int, str]], W: int, H: int
             ) -> list[tuple[int, int, tuple[int, int, int, int, str]]]:
     """Рядки колонки № сторінки — тим самим правилом, що `ruled.half_cases`, плюс короткі рядки лівої
-    зони (номер, який рушій прочитав літерами): (номер рядка, половина, рядок)."""
+    зони (номер, який рушій прочитав літерами): (номер рядка, половина, рядок). Рядки, що стоять уже
+    в колонці назв, — ні."""
     from nyshporka.opysy import ruled as RU
 
     out = []
@@ -100,8 +119,9 @@ def nomerni(lines: list[tuple[int, int, int, int, str]], W: int, H: int
         if not L:
             continue
         left = min(ln[0] for _, ln in L)
+        tl = liva_nazv([ln for _, ln in L])
         for i, ln in L:
-            if (ln[0] - left) / Wp >= 0.12:
+            if (ln[0] - left) / Wp >= 0.12 or _u_kolontsi_nazv(ln, tl):
                 continue
             m = RU.NUM_START.match(ln[4])
             if (m and int(m.group(1)) > 0) or len(ln[4].strip()) <= 6:
@@ -327,20 +347,25 @@ def kropy(run: Path, pages: Path, out: Path, meta: Any = None) -> dict[str, Any]
     stems = [s for s in stems if meta is None or meta.u_tablytsi(s)]
     # 1-й прохід: де колонка № відносно лівого краю назв — за прочитаними номерами кожної сторони
     kadry, zsuv = [], []
+    samotni: set[str] = set()  # кадри, де ліва половина порожня: таблиця лише на правій сторінці
     for stem in stems:
         got = RU.page_lines(Path(run), stem)
         if not got:
             continue
         lines, (W, H) = got
-        for part, (x0p, x1p) in enumerate(RU.split_spread(lines, W, H)):
+        polovyny = RU.split_spread(lines, W, H)
+        if len(polovyny) == 2 and not any(polovyny[0][0] <= (ln[0] + ln[2]) / 2 < polovyny[0][1]
+                                          for ln in lines):
+            samotni.add(stem)
+        for part, (x0p, x1p) in enumerate(polovyny):
             L = [ln for ln in lines if x0p <= (ln[0] + ln[2]) / 2 < x1p]
-            dovgi = [ln for ln in L if len(ln[4]) > 12]
-            if not dovgi:
+            title_left = liva_nazv(L)
+            if title_left is None:
                 continue
-            title_left = int(np.percentile([ln[0] for ln in dovgi], 10))
             left = min(ln[0] for ln in L)
             Wp = max(1, x1p - x0p)
             nom = [(ln[0] + ln[2]) / 2 for ln in L if (ln[0] - left) / Wp < .12
+                   and not _u_kolontsi_nazv(ln, title_left)
                    and (m := RU.NUM_START.match(ln[4])) and int(m.group(1)) > 0 and len(ln[4]) <= 8]
             poch = [ln[1] for ln in L if RU.TITLE_START.match(ln[4])] or [
                 ln[1] for ln in L if (m := RU.NUM_START.match(ln[4])) and int(m.group(1)) > 0 and len(ln[4]) <= 8]
@@ -350,6 +375,11 @@ def kropy(run: Path, pages: Path, out: Path, meta: Any = None) -> dict[str, Any]
             kadry.append((stem, part, x0p, title_left, kc, min(poch) if poch else None))
     zsuv_po = {pt: float(np.median([z for q, z in zsuv if q == pt])) for pt in {q for q, _ in zsuv}}
     zsuv_med = float(np.median([z for _, z in zsuv])) if zsuv else 300.0
+    # Зсув стабільний на своїй стороні (≥ 3 виміри, розкид у межах пів рядка) — йому віри більше,
+    # ніж корінцю: корінець шукається біля межі половин, а вона на кадрі з порожньою лівою сторінкою
+    # стоїть посеред порожнечі (ф.445 оп.4: на 300 px лівіше справжнього).
+    zsuv_rozkyd = {pt: float(np.subtract(*np.percentile([z for q, z in zsuv if q == pt], [75, 25])))
+                   for pt in zsuv_po if sum(1 for q, _ in zsuv if q == pt) >= 3}
     mapa: dict[str, Any] = {}
     g = np.zeros((1, 1), dtype=np.float32)
     hmed = 100.0
@@ -383,11 +413,15 @@ def kropy(run: Path, pages: Path, out: Path, meta: Any = None) -> dict[str, Any]
             vuzko = bool(meta is not None and meta.vuzko(part))
             shyr = .8 if vuzko else 1.6
             col_c = kc if kc is not None else title_left - zsuv_po.get(part, zsuv_med)
-            if x0p > 0 and kc is None:
+            stalyi = zsuv_rozkyd.get(part, 1e9) <= .5 * hmed
+            if x0p > 0 and kc is None and not stalyi:
                 # права сторінка без прочитаних номерів: колонка № — від корінця (найтемніший стовпчик
                 # біля межі розвороту) до ~1 висоти рядка правіше; номер буває й у тіні корінця
                 h0, h1 = int(.15 * g.shape[0]), int(.9 * g.shape[0])
                 a0, a1 = max(0, x0p - 250), min(g.shape[1], x0p + 60)
+                if st2 in samotni:
+                    # ліва сторінка порожня: межа половин — посеред неї, корінець — аж біля таблиці
+                    a1 = min(g.shape[1], max(a1, int(title_left - .5 * hmed)))
                 sm = np.convolve(g[h0:h1, a0:a1].mean(axis=0), np.ones(15) / 15, mode="same")
                 kor = a0 + int(np.argmin(sm[7:-7])) + 7
                 xa, xb = int(kor - .25 * hmed), int(min(title_left - 15, kor + 1.0 * hmed))

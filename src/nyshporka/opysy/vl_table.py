@@ -66,6 +66,14 @@ def num(t: str) -> int | None:
 # ── таблиця сторінки ─────────────────────────────────────────────────────────
 
 
+def _span(v: str | None) -> int:
+    """rowspan/colspan з розмітки; нечислове чи менше 1 — як 1."""
+    try:
+        return max(1, int(str(v or "1").strip()))
+    except ValueError:
+        return 1
+
+
 class _Tables(HTMLParser):
     """Усі `<table>` сторінки: [[(текст, rowspan, colspan)…] рядок…] таблиця…"""
 
@@ -83,7 +91,7 @@ class _Tables(HTMLParser):
             self.tables[-1].append([])
         elif tag in ("td", "th") and self.tables and self.tables[-1]:
             self._cell = []
-            self._span = (int(a.get("rowspan") or 1), int(a.get("colspan") or 1))
+            self._span = (_span(a.get("rowspan")), _span(a.get("colspan")))
 
     def handle_endtag(self, tag: str) -> None:
         if tag in ("td", "th") and self._cell is not None:
@@ -220,6 +228,11 @@ def _split(row: list[tuple[str, bool]], lo: int, hi: int) -> dict[str, Any]:
         elif (out["no"] is not None and not out["old"] and not out["title"] and not out["dates"]
               and re.search(r"\d", t) and len(t) <= 12 and not _is_date(t)):
             out["old"] = t
+        elif (n is not None and out["title"] and not out["dates"] and re.fullmatch(r"\d{4}", t)
+              and 1600 <= n <= 2030
+              and any(row[k][1] and num(row[k][0].strip()) is not None
+                      for k in range(c + 1, min(hi, len(row))))):
+            out["dates"].append(t)  # рік без місяця після назви, а за ним ще число (аркуші)
         elif n is not None and (out["dates"] or out["title"]):
             if re.search(r"\d", t):
                 out["folios"].append(t)

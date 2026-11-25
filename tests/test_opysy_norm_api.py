@@ -260,3 +260,39 @@ def test_guard_lets_normal_work_through(tmp_path: Path) -> None:
     assert G.decide({"tool_name": "Write", "tool_input": {
         "file_path": str(tmp_path / "x.py"), "content": "import keyring\nkeyring.get_password('a', 'b')"},
         "cwd": str(tmp_path)})
+
+
+def test_collect_persists_each_closed_job_before_next_one_fails(env: FakeKeyring, tmp_path: Path) -> None:
+    """Збій мережі на другій задачі не змушує наступний виклик знову облікувати першу."""
+    d = _batches(tmp_path / "norm", 1)
+
+    class Slow(FakeProv):
+        ready = False
+        boom: str | None = None
+
+        def hotovo(self, job: str) -> bool:
+            return self.ready
+
+        def rezultaty(self, job: str) -> dict[str, NA.Vidpovid]:
+            if job == self.boom:
+                raise OSError("мережа")
+            return super().rezultaty(job)
+
+    prov = Slow()
+    n = _nal(1.0)
+    _run(d, prov, n, chekaty_s=0.0)
+    # друга пачка — друга задача
+    (d / "batch_001.json").write_text((d / "batch_000.json").read_text(encoding="utf-8"), encoding="utf-8")
+    _run(d, prov, n, chekaty_s=0.0)
+    assert len(prov.jobs) == 2
+    prov.ready, prov.boom = True, "job1"
+    with pytest.raises(OSError):
+        _run(d, prov, n, chekaty_s=0.0)
+    n_oblik = len(_vytraty())
+    zbereg = json.loads((d / NA.ZAVDANNIA_API).read_text(encoding="utf-8"))
+    assert [z["job"] for z in zbereg] == ["job1"]
+    prov.boom = None
+    _run(d, prov, n, chekaty_s=0.0)
+    # перша задача вдруге не облікована: додався лише облік другої
+    zakryti = [x for x in _vytraty()[n_oblik:] if x.get("job")]
+    assert [x["job"] for x in zakryti] == ["job1"]

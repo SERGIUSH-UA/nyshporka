@@ -552,11 +552,9 @@ def normalizuvaty(teka_p: Path, *, rezhym: Rezhym = "batch", chekaty_s: float = 
     pidsumok: dict[str, Any] = {"model": n.model, "pryiniato": 0, "ne_hodytsia": [], "podano": 0}
 
     def zibraty() -> None:
-        nonlocal zavd, vytrata
-        lyshylos = []
-        for z in zavd:
+        nonlocal vytrata
+        for z in list(zavd):
             if not prov.hotovo(z["job"]):
-                lyshylos.append(z)
                 continue
             got = prov.rezultaty(z["job"])
             usd = 0.0
@@ -574,7 +572,11 @@ def normalizuvaty(teka_p: Path, *, rezhym: Rezhym = "batch", chekaty_s: float = 
                     pidsumok["pryiniato"] += 1
             zakryty(z["rid"], usd=usd, stan="faktychno", vkhid=vkh, vykhid=vykh, job=z["job"])
             vytrata += usd
-        zavd = lyshylos
+            # задачу закрито (облік, резерв знято) — знімаємо й пишемо одразу: збій на наступній
+            # не повинен змусити повтор облікувати цю вдруге
+            zavd.remove(z)
+            _zapys(teka_p / ZAVDANNIA_API, zavd)
+            _zapys(teka_p / SPROBY, sproby)
         _zapys(teka_p / ZAVDANNIA_API, zavd)
         _zapys(teka_p / SPROBY, sproby)
 
