@@ -23,8 +23,9 @@ from typing import Any
 
 #: Ім'я копії запобіжника в теці хуків і мітка нашого запису в конфігу.
 SCRIPT = "nysh-skill-guard.py"
-#: Які виклики бачить запобіжник.
-MATCHER = "Bash|PowerShell|Grep|Read"
+#: Які виклики бачить запобіжник: скіли (Bash, PowerShell, Grep, Read) і сховище паролів з ключем
+#: API людини (Bash, PowerShell, Write, Edit).
+MATCHER = "Bash|PowerShell|Grep|Read|Write|Edit|MultiEdit"
 #: Контрольний файл: рішення людини по кожному конфігу агента.
 CONTROL = "agent-hook.json"
 

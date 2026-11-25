@@ -530,7 +530,12 @@ def opysy_read(a: ReadOpysArgs) -> Envelope:
 
     # чекають відповіді — і нарізані щойно, і ті, що лишились з попереднього запуску
     pachky = NB.bez_vidpovidi(W.norm_dir(d))
-    nastupne = (f"агент нормалізує пачки в {env.data.get('dir')}, тоді "
+    from nyshporka.opysy import norm_api as NA
+
+    api = NA.stan()
+    cherez_api = (f"`nysh opys norm {a.dir} --api` (ключ API людини: {api.get('model')}, лишилось "
+                  f"${api.get('zalyshok_usd')}), або ") if api.get("nalashtovano") else ""
+    nastupne = (f"{cherez_api}агент нормалізує пачки в {env.data.get('dir')}, тоді "
                 f"`nysh opys push {a.dir} --norm-model <модель>`; немає агента чи ресурсів — "
                 f"`nysh opys push {a.dir} --na-obmin` (нормалізує обмін у Супрязі)") if pachky \
         else f"nysh opys push {a.dir}"
@@ -619,7 +624,8 @@ class VziatyArgs(BaseModel):
 
 class ViddatyArgs(BaseModel):
     dir: str = Field(description="тека, взята `nysh opys vziaty`")
-    model: str = Field(description="модель, що нормалізувала (назва моделі агента)")
+    model: str = Field(default="", description="модель, що нормалізувала (назва моделі агента); "
+                                               "порожньо — з `model.txt` теки (пише `norm --api`)")
     base: str = Field(default="", description="адреса пулу; порожньо — типова")
 
 
@@ -667,6 +673,10 @@ def opysy_viddaty(a: ViddatyArgs) -> Envelope:
     if not zfile.exists():
         return fail(f"у {d} немає взятого опису — `nysh opys vziaty {d}`")
     z = json.loads(zfile.read_text(encoding="utf-8"))
+    model = a.model.strip() or ((d / "model.txt").read_text(encoding="utf-8").strip()
+                                if (d / "model.txt").exists() else "")
+    if not model:
+        return fail(f"назвіть модель, що нормалізувала: `nysh opys viddaty {d} --model <модель>`")
     vidp, gotovi, bad = OB.vidpovidi(d)
     if not vidp:
         env = fail("немає нових відповідей — агент кладе batch_NNN.out.txt поруч із пачкою")
@@ -675,7 +685,7 @@ def opysy_viddaty(a: ViddatyArgs) -> Envelope:
         return env
     pidsumok: dict[str, Any] = {"pryiniato": 0, "ne_sprava": 0, "avtora": 0, "poznachky": []}
     for i in range(0, len(vidp), 500):
-        env = _remote(R.obmin_viddaty, int(z["obmin"]), model=a.model,
+        env = _remote(R.obmin_viddaty, int(z["obmin"]), model=model,
                       vidpovidi=vidp[i:i + 500], base=a.base)
         if not env.ok:
             return env
@@ -687,4 +697,73 @@ def opysy_viddaty(a: ViddatyArgs) -> Envelope:
     env = ok({**pidsumok, "shyfra": z.get("shyfra"), "pachok_bez_vidpovidi": OB.bez_vidpovidi(d)})
     for b in bad:
         env.warn("norm_bad", b, level=ALERT)
+    return env
+
+
+# ── нормалізація ключем API учасника ─────────────────────────────────────────
+
+
+class ApiStanArgs(BaseModel):
+    pass
+
+
+@op("opysy.api_stan", summary="Нормалізація ключем API: модель, бюджет, витрачено, лишилось",
+    args=ApiStanArgs, section=SECTION, tier="rare",
+    when="перед `nysh opys norm --api` — чи налаштовано ключ і скільки лишилось бюджету")
+def opysy_api_stan(a: ApiStanArgs) -> Envelope:
+    from nyshporka.opysy import norm_api as NA
+
+    return ok(NA.stan())
+
+
+class NormApiArgs(BaseModel):
+    dir: str = Field(description="робоча тека опису (`nysh opys read`) чи тека, взята `nysh opys vziaty`")
+    rezhym: Literal["batch", "zaraz"] = Field(default="batch", description="batch — удвічі дешевше, "
+                                              "відповідь за хвилини-години; zaraz — по одному запиту")
+    chekaty_hv: float = Field(default=30.0, description="скільки хвилин чекати задачу batch; далі — "
+                                                        "та сама команда забере готове")
+
+
+def _teka_pachok(d: Path) -> Path | None:
+    from nyshporka.opysy import obmin as OB
+    from nyshporka.opysy import workdir as W
+
+    try:
+        W.load(d)
+        return W.norm_dir(d)
+    except W.WorkdirError:
+        return d if (d / OB.ZAVDANNIA).exists() else None
+
+
+@op("opysy.norm_api", summary="Нормалізувати назви справ ключем API людини в межах її бюджету",
+    args=NormApiArgs, mutates=True, long=True, section=SECTION, tier="rare",
+    when="людина налаштувала ключ API (`nysh opys api nalashtuvaty`) і є пачки без відповіді")
+def opysy_norm_api(a: NormApiArgs) -> Envelope:
+    from nyshporka.opysy import norm_api as NA
+
+    d = Path(a.dir)
+    teka_p = _teka_pachok(d)
+    if teka_p is None or not any(teka_p.glob("batch_*.json")):
+        return fail(f"у {d} немає пачок нормалізації — спершу `nysh opys read` (свій опис) чи "
+                    f"`nysh opys vziaty` (з обміну)")
+    try:
+        res = NA.normalizuvaty(teka_p, rezhym=a.rezhym, chekaty_s=a.chekaty_hv * 60)
+    except NA.ApiError as exc:
+        return fail(str(exc))
+    obmin = teka_p == d
+    if res["bez_vidpovidi"] == 0:
+        nastupne = f"nysh opys viddaty {a.dir}" if obmin else f"nysh opys push {a.dir}"
+    elif res["v_roboti"]:
+        nastupne = f"задача в роботі — пізніше та сама команда: nysh opys norm {a.dir} --api"
+    else:
+        nastupne = (f"решту пачок — агентом (batch_NNN.out.txt), тоді "
+                    f"{'nysh opys viddaty' if obmin else 'nysh opys push'} {a.dir}")
+    env = ok({**res, "dir": str(teka_p), "next": nastupne})
+    if res["biudzhet"]:
+        env.warn("api_budget", res["biudzhet"])
+    for x in res["ne_hodytsia"][:10]:
+        env.warn("api_bad", x)
+    if res["vycherpano_sproby"]:
+        env.warn("api_sproby", f"пачок, на які модель {NA.SPROB} рази дала невідповідь: "
+                               f"{len(res['vycherpano_sproby'])} — їх лишено агентові")
     return env

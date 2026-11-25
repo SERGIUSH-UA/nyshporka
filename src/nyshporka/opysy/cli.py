@@ -453,14 +453,31 @@ def table_cmd(
 
 @app.command("norm")
 def norm_cmd(
-    folder: str = typer.Argument(..., help="робоча тека опису"),
+    folder: str = typer.Argument(..., help="робоча тека опису (чи тека, взята `vziaty`, для --api)"),
     collect: bool = typer.Option(False, "--collect", help="прийняти відповіді batch_NNN.out.txt"),
     language: str = typer.Option("", "--language", help="ru чи uk; порожньо — з паспорта"),
+    api: bool = typer.Option(False, "--api", help="нормалізувати ключем API людини (налаштовує "
+                                                  "людина: `nysh opys api nalashtuvaty`)"),
+    zaraz: bool = typer.Option(False, "--zaraz", help="з --api: по одному запиту, а не batch (удвічі "
+                                                      "дорожче, зате без чекання)"),
+    chekaty: float = typer.Option(30.0, "--chekaty", help="з --api: хвилин чекати задачу batch"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
-    """Нормалізація назв: пачки запитів для агента або прийом його відповідей."""
+    """Нормалізація назв: пачки запитів для агента, прийом його відповідей або ключ API людини."""
     from nyshporka import ops as O
 
+    if api:
+        env = O.call("opysy.norm_api", {"dir": folder, "rezhym": "zaraz" if zaraz else "batch",
+                                        "chekaty_hv": chekaty})
+        if _answer(env, as_json):
+            return
+        d = env.data or {}
+        console.print(f"[green]прийнято[/green] {_e(d.get('pryiniato'))} пачок · {_e(d.get('model'))} · "
+                      f"витрачено ${_e(d.get('vytracheno_zaraz_usd'))} · лишилось бюджету "
+                      f"${_e(d.get('zalyshok_usd'))} · у роботі {_e(d.get('v_roboti'))} · без відповіді "
+                      f"{_e(d.get('bez_vidpovidi'))}")
+        _next(d)
+        return
     env = O.call("opysy.norm", {"dir": folder, "collect": collect, "language": language})
     if _answer(env, as_json):
         return
@@ -557,7 +574,8 @@ def vziaty_cmd(folder: str = typer.Argument(..., help="тека, куди пок
 
 @app.command("viddaty")
 def viddaty_cmd(folder: str = typer.Argument(..., help="тека, взята `nysh opys vziaty`"),
-                model: str = typer.Option(..., "--model", help="модель, що нормалізувала"),
+                model: str = typer.Option("", "--model", help="модель, що нормалізувала; порожньо — "
+                                                             "з model.txt теки (пише `norm --api`)"),
                 base: str = typer.Option("", "--base", help="адреса пулу; порожньо — типова"),
                 as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)")) -> None:
     """Віддати нормалізацію взятого опису: пачки з відповіддю; можна по ходу, кілька разів."""
@@ -576,3 +594,61 @@ def viddaty_cmd(folder: str = typer.Argument(..., help="тека, взята `ny
                      if d.get("pachok_bez_vidpovidi") else ""))
     for p in d.get("poznachky") or []:
         console.print(f"[yellow]•[/yellow] {_e(p)}")
+
+
+# ── ключ API людини ──────────────────────────────────────────────────────────
+
+api_app = typer.Typer(help="Нормалізація ключем API людини: налаштування (лише в терміналі людини), "
+                           "стан, вимкнення.", no_args_is_help=True)
+app.add_typer(api_app, name="api")
+
+
+@api_app.command("nalashtuvaty")
+def api_nalashtuvaty() -> None:
+    """Згода, модель, бюджет і ключ — лише людина у своєму терміналі (агентові недоступно)."""
+    import getpass
+    import sys
+
+    from nyshporka.opysy import norm_api as NA
+
+    try:
+        n = NA.nalashtuvaty_interaktyvno(
+            vvid=input, pryhovano=getpass.getpass, druk=print,
+            terminal=sys.stdin.isatty() and sys.stdout.isatty())
+    except NA.ApiError as exc:
+        console.print(f"[warn]![/warn] {_e(exc)}")
+        raise typer.Exit(code=1) from None
+    except (KeyboardInterrupt, EOFError):
+        console.print("скасовано — нічого не збережено")
+        raise typer.Exit(code=1) from None
+    console.print(f"✅ {_e(NA.PROVIDER_LABEL[n.provider])} · {_e(n.model)} · бюджет ${n.biudzhet_usd:g} · "
+                  f"ключ …{_e(n.kliuch_kinets)} у сховищі паролів системи")
+    console.print("далі агент нормалізує: [bold]nysh opys norm <тека> --api[/bold]")
+
+
+@api_app.command("stan")
+def api_stan(as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)")) -> None:
+    """Модель, бюджет, витрачено, лишилось. Ключ не показується."""
+    from nyshporka import ops as O
+
+    env = O.call("opysy.api_stan", {})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    if not d.get("nalashtovano"):
+        console.print(_e(d.get("how") or "не налаштовано"))
+        return
+    console.print(f"{_e(d.get('provider'))} · {_e(d.get('model'))} · ключ {_e(d.get('kliuch'))} · бюджет "
+                  f"${_e(d.get('biudzhet_usd'))} · витрачено ${_e(d.get('vytracheno_usd'))} · у резерві "
+                  f"${_e(d.get('rezervy_usd'))} · лишилось ${_e(d.get('zalyshok_usd'))}")
+    if not d.get("mezha_provaidera"):
+        console.print("[warn]![/warn] межі витрат у провайдера немає — раджу окремий ключ із межею")
+
+
+@api_app.command("vymknuty")
+def api_vymknuty() -> None:
+    """Прибрати ключ зі сховища паролів і налаштування (облік витрат лишається)."""
+    from nyshporka.opysy import norm_api as NA
+
+    NA.vymknuty()
+    console.print("ключ API прибрано; нормалізація — знову агентом")
