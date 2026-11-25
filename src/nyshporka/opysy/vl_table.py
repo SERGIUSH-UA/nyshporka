@@ -465,6 +465,63 @@ def storinky(vl_dir: Path) -> dict[int, tuple[list[dict[str, Any]], dict[str, An
     return out
 
 
+def _porozhni(spravy: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Рядки без назви: продовження колонки дат — до попередньої справи; назва, яку VL поклав у дати, — у
+    назву.
+
+    Машинопис ставить дату початку й кінця в два рядки («5 марта / 1828 / 30 декаб / 1828»), і VL робить
+    з другого окремий рядок, а уривок року («805», «1806») бере за номер (ДАВіО ф.792: 15 таких).
+    Справа ж, у якої VL відніс назву до дат («Книга записи доверенностей», «Решения суда за 1799 г.»), —
+    справа."""
+    out: list[dict[str, Any]] = []
+    for v in spravy:
+        if any(t.strip() for t in v.get("title") or []):
+            out.append(v)
+            continue
+        daty = " ".join(v.get("dates") or [])
+        if len(re.findall(r"[^\W\d_]", daty)) >= 12:
+            out.append({**v, "title": [daty], "dates": []})
+            continue
+        poperednia = out[-1] if out else None
+        n = v.get("no")
+        pn = poperednia.get("no") if poperednia else None
+        if poperednia is not None and (n is None or n >= 1500 or (isinstance(pn, int) and n > pn + 50)):
+            poperednia["dates"] = [*poperednia.get("dates", []), *(v.get("dates") or [])]
+            if not poperednia.get("folios") and v.get("folios"):
+                poperednia["folios"] = v["folios"]
+            continue
+        out.append(v)
+    return out
+
+
+def _poriadok_storinok(recs: list[dict[str, Any]]) -> list[int]:
+    """Сторінки в порядку опису: сусідні дві, кожна зі своїм послідовним рядом номерів, що стикуються з
+    сусідами лише переставленими, — переставлені (порядок файлів ≠ порядок аркушів).
+
+    ДАВіО ф.792 (25.11.2026): кадри 10, 11, 12 мають 59–66, 76–84, 67–75 — VL читав правильно, а ланцюжок
+    за порядком файлів «виправляв» правильні номери. Переставляються лише такі пари: ряди з ≥ 3 номерів,
+    ≥ 70 % кроків +1 (VL буває задвоює номер), і стик точний з обох боків."""
+    storinky: list[int] = []
+    for r in recs:
+        if r["src_page"] not in storinky:
+            storinky.append(r["src_page"])
+    riad: dict[int, tuple[int, int] | None] = {}
+    for st in storinky:
+        nn = [r["_n"][0] for r in recs if r["src_page"] == st and r["_n"][0] is not None and not r["_n"][1]]
+        if nn:
+            # уривки років між номерами («818», «1824») — геть: від медіани сторінки далі, ніж рядків + 5
+            med = sorted(nn)[len(nn) // 2]
+            nn = [n for n in nn if abs(n - med) <= len(nn) + 5]
+        kroky = [b - a for a, b in pairwise(nn)]
+        riad[st] = (nn[0], nn[-1]) if len(nn) >= 3 and sum(k == 1 for k in kroky) >= 0.7 * len(kroky) else None
+    p = storinky[:]
+    for i in range(1, len(p) - 1):
+        pered, a, b = riad.get(p[i - 1]), riad.get(p[i]), riad.get(p[i + 1])
+        if pered and a and b and a[0] != pered[1] + 1 and b[0] == pered[1] + 1 and a[0] == b[1] + 1:
+            p[i], p[i + 1] = p[i + 1], p[i]
+    return p
+
+
 def _rik_zaholovok(v: dict[str, Any]) -> bool:
     """Рядок таблиці — рік, а не справа: число 1500–2030 у колонці № і без аркушів, а назва — уривок
     сусідньої колонки дат («ЗАНВАРА») чи штамп («ЦИФРОВА КОПІЯ»), коротше 12 літер. Довша назва —
@@ -499,6 +556,7 @@ def build(vl_dir: Path, out_tsv: Path, opys: str = "") -> dict[str, Any]:
         tekst = [t for v in khvist for t in v["title"] if not _SHAPKA_RYADOK.search(t)]
         if prev is not None and tekst:
             prev["title"] = _zlyty([prev["title"], *tekst])
+        spravy = _porozhni(spravy)
         sm = smuhy(spravy, khvist, blocks)
         for k, v in enumerate(spravy):
             if sm is not None:
@@ -517,8 +575,11 @@ def build(vl_dir: Path, out_tsv: Path, opys: str = "") -> dict[str, Any]:
                 "_n": (_nomer_vl(v.get("no_raw") or "") if v.get("no") is not None else (None, ""))})
             if recs[-1]["_n"][0] is None and v.get("no") is not None:
                 recs[-1]["_n"] = (v["no"], "")
-    _nomery(recs)
-    _lantsiuzhkom(recs)
+    # номери — у порядку сторінок ОПИСУ: архів буває викладає два аркуші переставленими
+    poriadok = _poriadok_storinok(recs)
+    za_opysom = sorted(recs, key=lambda r: (poriadok.index(r["src_page"]), r["row"]))
+    _nomery(za_opysom)
+    _lantsiuzhkom(za_opysom)
     out_tsv = Path(out_tsv)
     out_tsv.parent.mkdir(parents=True, exist_ok=True)
     with out_tsv.open("w", encoding="utf-8", newline="") as fh:

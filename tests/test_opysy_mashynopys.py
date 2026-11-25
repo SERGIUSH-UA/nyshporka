@@ -156,3 +156,35 @@ def test_zaholovok_roku_ne_sprava(tmp_path: Path) -> None:
     _md(vl, "0001", _tablytsia(riadky))
     res = VT.build(vl, tmp_path / "t.tsv", opys="1")
     assert res["cases"] == 6, res
+
+
+def test_perestavleni_arkushi_ne_psuiut_nomeriv(tmp_path: Path) -> None:
+    """Архів виклав два аркуші переставленими (кадри: 1–5, 11–15, 6–10, 16–20): номери, прочитані
+    правильно, лишаються, а не «виправляються» за порядком файлів."""
+    import csv
+
+    vl = tmp_path / "vl"
+    _md(vl, "0001", _tablytsia([SHAPKA, *_spravy(1, 5)]))
+    _md(vl, "0002", _tablytsia(_spravy(11, 15)))
+    _md(vl, "0003", _tablytsia(_spravy(6, 10)))
+    _md(vl, "0004", _tablytsia(_spravy(16, 20)))
+    VT.build(vl, tmp_path / "t.tsv", opys="1")
+    rows = list(csv.DictReader((tmp_path / "t.tsv").open(encoding="utf-8"), delimiter="\t"))
+    assert [r["no"] for r in rows if r["page"] == "0002"] == ["11", "12", "13", "14", "15"]
+    assert [r["no"] for r in rows if r["page"] == "0003"] == ["6", "7", "8", "9", "10"]
+
+
+def test_druhyi_riadok_daty_ne_sprava(tmp_path: Path) -> None:
+    """Друга частина дати окремим рядком («805 | | 30 декаб 1805»): уривок року — не номер, рядок — не
+    справа; назва, яку VL поклав у дати, — назва справи."""
+    import csv
+
+    vl = tmp_path / "vl"
+    riadky = [SHAPKA, *_spravy(1, 3), ["805", "", "30 декаб 1805", "", ""], *_spravy(4, 5),
+              ["6", "", "Книга записи доверенностей 1806 г.", "", ""], *_spravy(7, 8)]
+    _md(vl, "0001", _tablytsia(riadky))
+    res = VT.build(vl, tmp_path / "t.tsv", opys="1")
+    rows = list(csv.DictReader((tmp_path / "t.tsv").open(encoding="utf-8"), delimiter="\t"))
+    assert res["cases"] == 8, res
+    assert [r["no"] for r in rows] == [str(n) for n in range(1, 9)]
+    assert "доверенностей" in rows[5]["title"]
