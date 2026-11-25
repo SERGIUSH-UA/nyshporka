@@ -504,11 +504,35 @@ def obmin_cmd(base: str = typer.Option("", "--base", help="адреса пулу
     env = O.call("opysy.obmin", {"base": base})
     if _answer(env, as_json):
         return
-    for x in (env.data or {}).get("opysy") or []:
+    opysy = (env.data or {}).get("opysy") or []
+    if not opysy:
+        console.print("немає описів, що чекають нормалізації")
+        return
+    for x in opysy:
+        stan = _STAN_OBMINU.get(str(x.get("stan")), str(x.get("stan")))
+        if x.get("do"):
+            stan += f" до {_koly(x['do'])}"
         console.print(f"{_e(x.get('shyfra'))} · справ {_e(x.get('spravy'))} · "
-                      f"нормалізовано {_e(x.get('normalizovano'))} · {_e(x.get('stan'))} "
-                      f"[muted](внесок {_e(x.get('vnesok'))})[/muted]")
+                      f"нормалізовано {_e(x.get('normalizovano'))} · {_e(stan)} "
+                      f"[muted](--vnesok {_e(x.get('vnesok'))})[/muted]")
+        if x.get("dzherelo"):
+            console.print(f"  [muted]цифровий опис: {_e(x['dzherelo'])}[/muted]")
     console.print("узяти: [bold]nysh opys vziaty <тека> [--vnesok N][/bold]")
+
+
+_STAN_OBMINU = {"chekaie": "чекає нормалізації", "v_roboti": "нормалізують",
+               "povna": "опис нормалізовано повністю", "chastkova": "нормалізовано частково",
+               "nemaie": "нормалізації немає"}
+
+
+def _koly(iso: object) -> str:
+    """`2026-11-26T23:56:11.7+00:00` → `26.11.2026 23:56 UTC` (сирий рядок, якщо не дата)."""
+    from datetime import UTC, datetime
+
+    try:
+        return datetime.fromisoformat(str(iso)).astimezone(UTC).strftime("%d.%m.%Y %H:%M UTC")
+    except ValueError:
+        return str(iso)
 
 
 @app.command("vziaty")
@@ -523,7 +547,7 @@ def vziaty_cmd(folder: str = typer.Argument(..., help="тека, куди пок
     if _answer(env, as_json):
         return
     d = env.data or {}
-    console.print(f"узято {_e(d.get('shyfra'))} до {_e(d.get('do'))} · назв {_e(d.get('nazv'))} · "
+    console.print(f"узято {_e(d.get('shyfra'))} до {_e(_koly(d.get('do')))} · назв {_e(d.get('nazv'))} · "
                   f"пачок {_e(d.get('pachok'))}")
     if d.get("dzherelo"):
         console.print(f"  цифровий опис: {_e(d.get('dzherelo'))}")
@@ -543,8 +567,12 @@ def viddaty_cmd(folder: str = typer.Argument(..., help="тека, взята `ny
     if _answer(env, as_json):
         return
     d = env.data or {}
-    console.print(f"[green]прийнято[/green] {_e(d.get('pryiniato'))} назв · {_e(d.get('shyfra'))} "
-                  f"нормалізовано {_e(d.get('normalizovano'))}/{_e(d.get('spravy'))} · "
-                  f"{_e(d.get('stan'))} · пачок без відповіді {_e(d.get('pachok_bez_vidpovidi'))}")
+    ne_sprava = int(d.get("ne_sprava") or 0)
+    console.print(f"[green]прийнято[/green] {_e(d.get('pryiniato'))} назв"
+                  + (f" і {ne_sprava} «не справа»" if ne_sprava else "")
+                  + f" · {_e(d.get('shyfra'))} нормалізовано {_e(d.get('normalizovano'))}/"
+                  f"{_e(d.get('spravy'))} · {_e(_STAN_OBMINU.get(str(d.get('stan')), d.get('stan')))}"
+                  + (f" · пачок без відповіді {_e(d['pachok_bez_vidpovidi'])}"
+                     if d.get("pachok_bez_vidpovidi") else ""))
     for p in d.get("poznachky") or []:
         console.print(f"[yellow]•[/yellow] {_e(p)}")
