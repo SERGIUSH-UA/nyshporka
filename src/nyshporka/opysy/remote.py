@@ -43,15 +43,10 @@ def push(path: Path, *, base: str = "") -> dict[str, Any]:
 
 def search(q: str, *, repo: str = "", fond: str = "", limit: int = 50,
            base: str = "") -> dict[str, Any]:
-    """Нечіткий пошук по описах — лише з ключем учасника, що увійшов з поштою. Без ключа відмова тут,
-    до мережі: пул (і край перед ним) гостей через Нишпорку не обслуговує, а сторінка перевірки
-    Cloudflare нічого б людині не пояснила."""
+    """Нечіткий пошук по описах. Хто має доступ, вирішує сервер (бета-тест, вхід, норми) і сам
+    пояснює відмову: клієнт не відмовляє за нього — перемкнути доступ можна без нового релізу."""
     home = catalog.base_url(base)
     tok = U.token() if catalog.may_send_key(home, explicit=False) else ""
-    if not tok:
-        raise U.UploadError("пошук по описах (Засіки) через Нишпорку — учасникам Супряги, що увійшли з "
-                            "поштою: `nysh share login` і вхід з адресою пошти. Без входу — пошук на "
-                            "сайті nyshporka.online/zasiky")
     params = {"q": q, "limit": limit}
     if repo:
         params["repo"] = repo
