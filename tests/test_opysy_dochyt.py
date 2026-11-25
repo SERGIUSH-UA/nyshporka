@@ -150,12 +150,14 @@ def test_whole_line_reaches_the_runner(tmp_path: Path) -> None:
 # ── шапка бланка ────────────────────────────────────────────────────────────
 
 
-def _blank(nahyl: float = 0.02) -> np.ndarray:
+def _blank(nahyl: float = 0.02, riadky_linii: bool = False) -> np.ndarray:
     """Бланк: верхня межа рамки, лінія під шапкою (з нахилом аркуша), вертикалі колонок, підкреслення
-    прізвища в тілі таблиці (коротке — не лінія шапки)."""
+    прізвища в тілі таблиці (коротке — не лінія шапки); `riadky_linii` — друкована лінія під кожним
+    рядком тіла («Форма № 1»)."""
     im = Image.new("L", (2000, 3000), 235)
     d = ImageDraw.Draw(im)
-    for y in (200, 460):
+    ys = [200, 460] + (list(range(540, 900, 80)) if riadky_linii else [])
+    for y in ys:
         d.line((40, y, 1960, y + nahyl * 1920), fill=30, width=4)
     for x in (200, 420, 1500, 1750):
         d.line((x, 200, x, 2950), fill=30, width=3)
@@ -163,20 +165,43 @@ def _blank(nahyl: float = 0.02) -> np.ndarray:
     return np.asarray(im, dtype=np.float32)
 
 
+def _riadky(nahyl: float = 0.0) -> list[tuple[int, int, int, int, str]]:
+    """Шапка — дрібний друк (висота 30), тіло — рукопис (висота 60) у кожному рядку бланка."""
+    def y(x: int, y0: int) -> int:
+        return int(y0 + nahyl * (x - 40))
+    shapka = [(220, y(220, 300), 400, y(220, 300) + 30, "№ по"), (600, y(600, 320), 1200, y(600, 320) + 30,
+              "СОДЕРЖАНІЕ ДѢЛЪ"), (1520, y(1520, 310), 1700, y(1520, 310) + 30, "Когда")]
+    tilo = [(600, y(600, y0), 1400, y(600, y0) + 60, "Дело о споре") for y0 in range(470, 1500, 80)]
+    return shapka + tilo
+
+
 @pytest.mark.parametrize("nahyl", [0.0, 0.02, -0.05])
 def test_shapka_finds_the_rule_under_the_header_with_tilt(nahyl: float) -> None:
-    lin = DC.shapka(_blank(nahyl), 0, 2000)
+    lin = DC.shapka(_blank(nahyl), 0, 2000, _riadky(nahyl))
     assert lin is not None
     y_mid = lin[1] + lin[2] * (1000 - lin[0])
     assert abs(y_mid - (460 + nahyl * 960)) < 15, lin     # нижня з двох ліній, не верхня межа рамки
     assert abs(lin[2] - nahyl) < 0.011
 
 
+def test_shapka_on_a_blank_ruled_under_every_row_stops_at_the_header() -> None:
+    """«Форма № 1» (ДАОО ф.445 оп.5): лінія під кожним рядком тіла. Найнижча лінія верхньої третини —
+    це вже рядок справи; шапка — та, над якою дрібний друк, а не рукопис."""
+    lin = DC.shapka(_blank(0.0, riadky_linii=True), 0, 2000, _riadky())
+    assert lin is not None and abs(lin[1] + lin[2] * (1000 - lin[0]) - 460) < 15, lin
+
+
 def test_shapka_absent_on_a_page_without_printed_header() -> None:
     im = Image.new("L", (2000, 3000), 235)
     d = ImageDraw.Draw(im)
     d.line((600, 700, 900, 700), fill=40, width=4)
-    assert DC.shapka(np.asarray(im, dtype=np.float32), 0, 2000) is None
+    assert DC.shapka(np.asarray(im, dtype=np.float32), 0, 2000, _riadky()) is None
+
+
+def test_shapka_needs_printed_text_above_the_rule() -> None:
+    """Лінія є, а над нею рукопис (продовження справи) — не шапка."""
+    rukopys = [(600, 300, 1400, 360, "совладельцу Ряшевского"), (600, 380, 1400, 440, "и других")]
+    assert DC.shapka(_blank(0.0), 0, 2000, rukopys) is None
 
 
 def test_bez_shapky_and_blob_touching_the_rule() -> None:

@@ -53,6 +53,8 @@ SHAPKA_TOP = 0.30
 SHAPKA_SMUH = 16
 SHAPKA_FILL = 0.5
 SHAPKA_MIN = 10
+#: Шапка — смуга, чия медіанна висота рядка нижча за цю частку медіани половини (рукопису).
+SHAPKA_DRIBNI = 0.85
 POVNOTA_MIN = 0.95
 PIDTV_MIN = 0.40
 
@@ -223,22 +225,15 @@ def plyamy(g: np.ndarray, xa: int, xb: int, y_top: int, hmed: float) -> list[tup
 # ── кропи на диск ───────────────────────────────────────────────────────────
 
 
-def shapka(g: np.ndarray, x0p: int, x1p: int) -> list[float] | None:
-    """Нижня лінія друкованої шапки бланка на половині розвороту: [x0, y0, нахил] — y(x) = y0 +
-    нахил·(x − x0); не знайшлась — None.
-
-    Шапка («№ по порядку · СОДЕРЖАНІЕ ДѢЛЪ · …») інакше лягає в назву першої справи половини, а раз
-    стає й окремою справою, що зсуває номери (ЦДІАК ф.442 оп.52: 60 рядків з 476). Під шапкою —
-    суцільна друкована лінія через усю ширину; тіло таблиці на таких бланках горизонталей не має, а
-    продовження справи з попередньої сторінки лежить уже під лінією. Береться НАЙНИЖЧА така лінія
-    у верхніх SHAPKA_TOP сторінки. 🔴 Лише для бланка (`forma=blank`): на аркуші, розграфленому від
-    руки, горизонталі бувають і між справами."""
+def _linii(g: np.ndarray, x0p: int, x1p: int) -> list[list[float]]:
+    """Суцільні горизонтальні лінії у верхніх SHAPKA_TOP сторінки на половині: [x0, y0, нахил] згори
+    вниз. Лінія — ряд, де чорнило заповнює ≥ SHAPKA_FILL смуги, у ≥ SHAPKA_MIN смуг на одній прямій."""
     from nyshporka.htr import form_cells as FC
 
     y1 = int(SHAPKA_TOP * g.shape[0])
     a, b = int(x0p + .03 * (x1p - x0p)), int(x1p - .03 * (x1p - x0p))
     if y1 < 50 or b - a < 200:
-        return None
+        return []
     reg = g[:y1, a:b]
     ink = FC._local_mean(reg, 41) - INK_DELTA > reg
     w = (b - a) // SHAPKA_SMUH
@@ -254,16 +249,46 @@ def shapka(g: np.ndarray, x0p: int, x1p: int) -> list[float] | None:
             continue
         for grp in np.split(rows, np.flatnonzero(np.diff(rows) > 3) + 1):
             pts.append((k, a + (k + .5) * w, float(grp.mean())))
-    best: tuple[float, float, float, float] | None = None
+    kand: list[tuple[float, int, list[float]]] = []
     for _k0, x0, y0 in pts:
         for nahyl in np.arange(-0.08, 0.0801, 0.005):
             smuhy = {k for k, x, y in pts if abs(y - (y0 + nahyl * (x - x0))) <= 12}
-            if len(smuhy) < SHAPKA_MIN:
-                continue
-            yc = float(y0 + nahyl * ((a + b) / 2 - x0))
-            if best is None or yc > best[0] + 5:
-                best = (yc, x0, y0, float(nahyl))
-    return None if best is None else [best[1], best[2], best[3]]
+            if len(smuhy) >= SHAPKA_MIN:
+                kand.append((float(y0 + nahyl * ((a + b) / 2 - x0)), len(smuhy), [x0, y0, float(nahyl)]))
+    # та сама лінія з різних опорних точок — одна, з найбільшим числом смуг
+    linii: list[tuple[float, int, list[float]]] = []
+    for yc, n, lin in sorted(kand, key=lambda t: -t[1]):
+        if all(abs(yc - y2) > 15 for y2, _, _ in linii):
+            linii.append((yc, n, lin))
+    return [lin for _, _, lin in sorted(linii, key=lambda t: t[0])]
+
+
+def shapka(g: np.ndarray, x0p: int, x1p: int,
+           riadky: list[tuple[int, int, int, int, str]]) -> list[float] | None:
+    """Нижня лінія друкованої шапки бланка на половині розвороту: [x0, y0, нахил] — y(x) = y0 +
+    нахил·(x − x0); не знайшлась — None.
+
+    Шапка («№ по порядку · СОДЕРЖАНІЕ ДѢЛЪ · …») інакше лягає в назву першої справи половини, а раз
+    стає й окремою справою, що зсуває номери (ЦДІАК ф.442 оп.52: 60 рядків з 476). Під шапкою —
+    суцільна друкована лінія; продовження справи з попередньої сторінки лежить уже під нею.
+
+    Котра з ліній верхньої частини — під шапкою, вирішує текст над нею (`riadky` — рядки прогону
+    половини): друкована шапка дрібніша за рукопис (медіана 0,62–0,76 висоти рядка проти ~1,0 у тілі
+    на ф.442 і ф.445). Береться найнижча лінія, над якою (до попередньої) ≥ 2 рядки з медіанною
+    висотою < SHAPKA_DRIBNI рукописного. Так лінії під кожним рядком, що їх друкують деякі бланки («Форма № 1», ДАОО
+    ф.445 оп.5), шапкою не стають: над ними — рукопис. 🔴 Лише для бланка (`forma=blank`)."""
+    linii = _linii(g, x0p, x1p)
+    L = [ln for ln in riadky if x0p <= (ln[0] + ln[2]) / 2 < x1p]
+    if not linii or not L:
+        return None
+    hm = float(np.median([ln[3] - ln[1] for ln in L])) or 1.0
+    best = None
+    for k, lin in enumerate(linii):
+        smuha = [ln for ln in L if nad_shapkoiu(lin, (ln[0] + ln[2]) / 2, (ln[1] + ln[3]) / 2)
+                 and (k == 0 or not nad_shapkoiu(linii[k - 1], (ln[0] + ln[2]) / 2, (ln[1] + ln[3]) / 2))]
+        if len(smuha) >= 2 and float(np.median([ln[3] - ln[1] for ln in smuha])) < SHAPKA_DRIBNI * hm:
+            best = lin
+    return best
 
 
 def nad_shapkoiu(lin: list[float], x: float, y: float) -> bool:
@@ -340,7 +365,7 @@ def kropy(run: Path, pages: Path, out: Path, meta: Any = None) -> dict[str, Any]
         zap: dict[str, Any] = {"nomery": [], "plyamy": []}
         if meta is not None and meta.forma == "blank":
             sh = {str(pt): lin for pt, (a, z) in enumerate(RU.split_spread(lines, W, H))
-                  if (lin := shapka(g, a, z)) is not None}
+                  if (lin := shapka(g, a, z, lines)) is not None}
             if sh:
                 zap["shapka"] = sh
         # дочит рядків колонки №
