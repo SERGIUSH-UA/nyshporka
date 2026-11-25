@@ -144,3 +144,19 @@ def test_check_i_pack_na_robochii_tetsi_kazhut_zvidky_paket(tmp_path: Path) -> N
     for env in (OO.opysy_check(OO.CheckArgs(dir=str(tmp_path))),
                 OO.opysy_pack(OO.PackArgs(dir=str(tmp_path), out=str(tmp_path / "x.nyshopys")))):
         assert not env.ok and "nysh opys push" in env.error and "nysh opys build" in env.error
+
+
+def test_zakhid_bez_rezultatu_znimaietsia_z_prychynoiu(tmp_path: Path,
+                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    """Захід скінчився, не прочитавши нічого (ринок порожній), а теки результату немає — етап
+    знімається, причина названа; `read` не падає на відсутній теці (живий захід 26.11.2026)."""
+    d = tmp_path / "opys"
+    out = _etap(d, tmp_path, kadriv=3, txt=[])
+    out.rmdir()
+    a = OO.ReadOpysArgs(dir=str(d), de="hmara", language="ru")
+    monkeypatch.setattr(H, "skinchyvsia", lambda zap: True)
+    monkeypatch.setattr(H, "prychyna", lambda zap: "market_empty")
+    with pytest.raises(H.HmaraError, match="market_empty"):
+        OO._hmara_etap(d, "storinky", tmp_path / "teka", tmp_path / "run", a)
+    assert "storinky" not in H.stan(d)
+    assert H.zabraty(d, "storinky", tmp_path / "run") == 0

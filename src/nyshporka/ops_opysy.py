@@ -575,6 +575,14 @@ def _hmara_etap(d: Path, etap: str, kadry: Path, kudy: Path, a: ReadOpysArgs, *,
         zrobleno, vsi = H.gotovo(d, etap)
         povno = bool(vsi) and zrobleno >= vsi
         if not povno and H.skinchyvsia(zap):
+            if zrobleno == 0:
+                # Захід скінчився, не прочитавши нічого (ринок порожній, машина не встала): етап геть,
+                # причину названо; `auto` читає тут, повтор `read` поставить захід знову.
+                pr = H.prychyna(zap)
+                H.zabuty(d, etap)
+                raise H.HmaraError("хмарний захід скінчився без результату"
+                                   + (f" ({pr})" if pr else "")
+                                   + " — та сама команда поставить його знову")
             # Захід скінчився з нестачею (обрив, карантин сторінки): чекати більше нічого — береться
             # прочитане, решту дочитує ця машина (сторінки, кропи) або бракує (машинопис).
             zap["nepovno"] = f"{zrobleno} з {vsi}"

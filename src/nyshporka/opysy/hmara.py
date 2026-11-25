@@ -191,6 +191,19 @@ def gotovo(d: Path, etap: str) -> tuple[int, int]:
     return len(zrobleno & kadry) if kadry else len(zrobleno), vsi
 
 
+def prychyna(zap: dict[str, Any]) -> str:
+    """Чим скінчився захід етапу — людською мовою зі стану (`market_empty`, причина наглядача)."""
+    try:
+        from nyshporka.cloud import state as ST
+
+        st = ST.load(str(zap.get("run_id") or ""))
+    except Exception:
+        return ""
+    if st is None:
+        return ""
+    return " · ".join(x for x in (st.verdict, st.why) if x)
+
+
 def skinchyvsia(zap: dict[str, Any]) -> bool:
     """Захід етапу вже не читає: наглядач записав кінець (`done` / `failed`). Відчеплений запис, що
     ще стоїть «читає», спершу звіряється з наглядачем (`settle_open`). Невідомо — False: краще
@@ -220,6 +233,8 @@ def zabraty(d: Path, etap: str, kudy: Path) -> int:
     kudy = Path(kudy)
     kudy.mkdir(parents=True, exist_ok=True)
     n = 0
+    if not zap.get("out_dir") or not out.is_dir():
+        return 0
     for f in out.iterdir():
         if f.is_file():
             shutil.copy2(f, kudy / f.name)
