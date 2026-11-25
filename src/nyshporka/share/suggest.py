@@ -122,15 +122,79 @@ def _pool_key(case_key: str) -> str | None:
     return pool.quad_key(ref.repo, ref.fond, ref.opys or "", ref.spr)
 
 
-def _komirka(case_key: str) -> Any:
+def _komirka(case_key: str, pool_key: str | None = None) -> Any:
     """Що пул знає про книгу незалежно від того, чия вона (`PoolCell | None`)."""
     from nyshporka.share import pool
 
-    key = _pool_key(case_key)
+    key = pool_key or _pool_key(case_key)
     return None if key is None else pool.by_key(key)
 
 
-def _u_puli_poruch(case_key: str, stan: str | None) -> dict[str, Any]:
+def _shifry_zhurnalu() -> dict[str, set[str]]:
+    """Ключ справи → шифри, під якими її пакували й віддавали (журнал обміну).
+
+    🔴 Пакет іде в пул під шифрою маніфесту, а не під локальним ключем: справа
+    простору `KOSTEL/685/855` лежить у пулі як `DAHMO/685/2/855`, `DAVO/172/4/112`
+    — як `DAVIO/Д-172/4/112`, `ANRM/208/938` (опису в ключі немає) — як
+    `ANRM/208/6/938`. Пошук лише за ключем показував 80 своїх внесків
+    «невіддані» (замір 24.11.2026), і перелік брехав людині, що все віддає.
+    """
+    out: dict[str, set[str]] = {}
+    for event in (journal.PACKED, journal.PUBLISHED):
+        for e in journal.read(event):
+            k, s = str(e.get("case_key") or ""), str(e.get("shifra") or "")
+            if k and s:
+                out.setdefault(k, set()).add(s)
+    return out
+
+
+def _kliuchi_shifry(shifra: str) -> list[str]:
+    """Ключі пулу, під якими могла лягти справа з цією шифрою.
+
+    Два розбори, бо вони розходяться саме там, де ламалось: `resolve_case`
+    зводить фонд до написання бібліотеки (`Д-172` → `172`), а пул тримає
+    фонд так, як його назвала шифра пакета.
+    """
+    from nyshporka.share import pool
+
+    out: list[str] = []
+    k = _pool_key(shifra)
+    if k:
+        out.append(k)
+    try:
+        from nyshporka.library import parse_address
+
+        a = parse_address(shifra)
+    except Exception:
+        a = None
+    if a:
+        q = pool.quad_key(a.repo, a.fond, "" if a.opys == "_" else (a.opys or ""), a.spr)
+        if q:
+            out.append(q)
+    return list(dict.fromkeys(out))
+
+
+def _u_puli_za_zhurnalom(shifry: set[str]) -> tuple[str, str] | None:
+    """Свій внесок у пулі під однією з шифр журналу: `(стан, ключ пулу)`.
+
+    Лише `text`/`text+geom`: «немає» за іншою шифрою нічого не каже, а
+    `pool.known` чужий внесок і так рахує «немає» — тож тут лише своє.
+    """
+    from nyshporka.share import pool
+
+    for shifra in sorted(shifry):
+        for q in _kliuchi_shifry(shifra):
+            try:
+                stan = pool.known(q)
+            except Exception:
+                continue
+            if stan in ("text", "text+geom"):
+                return stan, q
+    return None
+
+
+def _u_puli_poruch(case_key: str, stan: str | None,
+                   pool_key: str | None = None) -> dict[str, Any]:
     """Присутність книги в пулі — поруч зі `pool`, а не замість нього.
 
     🔴 `pool` відповідає на «чи віддавати своє», і чужий внесок там — `none`.
@@ -142,7 +206,7 @@ def _u_puli_poruch(case_key: str, stan: str | None) -> dict[str, Any]:
     if stan is None:
         return {"pool_n": None, "pool_pages": None, "pool_mine": None,
                 "pool_publishers": None, "pool_frames": None, "pool_coverage": None}
-    cell = _komirka(case_key)
+    cell = _komirka(case_key, pool_key) if pool_key else _komirka(case_key)
     if cell is None:
         return {"pool_n": 0, "pool_pages": 0, "pool_mine": None, "pool_publishers": [],
                 "pool_frames": None, "pool_coverage": None}
@@ -304,6 +368,7 @@ def _nepodileni_now() -> list[dict[str, Any]]:
     from nyshporka.setup import sample as zrazok
 
     spakovani = viddani()
+    shifry = _shifry_zhurnalu()
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     vsi = S.list_cases()
@@ -333,6 +398,11 @@ def _nepodileni_now() -> list[dict[str, Any]]:
         if zrazok.tse_zrazok(key, progony.get(key, [])):
             continue
         stan = _u_puli(key)
+        kliuch_puli: str | None = None
+        if stan in (None, "none") and key in shifry:
+            zhurnal = _u_puli_za_zhurnalom(shifry[key])
+            if zhurnal is not None:
+                stan, kliuch_puli = zhurnal
         if stan is None and (key in spakovani or shifra in spakovani):
             continue
         if stan == "text+geom":
@@ -371,7 +441,7 @@ def _nepodileni_now() -> list[dict[str, Any]]:
             "model": row.get("model") or "",
             "updated": row.get("updated") or "",
             "pool": stan,
-            **_u_puli_poruch(key, stan),
+            **_u_puli_poruch(key, stan, kliuch_puli),
             "status": BEZ_RAMOK if stan == "text" else _status(pages, frames),
         })
         if out[-1]["status"] == GOTOVA:

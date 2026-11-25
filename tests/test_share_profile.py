@@ -319,6 +319,35 @@ def test_zriz_pulu_vyrishuie_viddane(space: Path, monkeypatch: Any) -> None:
                    "DAHMO/315/4": S.NEPOVNA, "DAHMO/315/5": S.BEZ_KADRIV}
 
 
+def test_viddane_pid_shyfroiu_paketa_ne_proponuietsia(space: Path, monkeypatch: Any) -> None:
+    """🔴 Справа лягла в пул під шифрою маніфесту, а не під локальним ключем.
+
+    `KOSTEL/685/855` віддано як «ДАХмО 685-2-855», `DAVO/172/4/112` — як
+    «ДАВіО Д-172-4-112» (фонд з префіксом, якого бібліотека не знає). За
+    самим ключем пул їх не бачив, і 80 своїх внесків стояли «невіддані»
+    (24.11.2026). Шифра журналу пакувань — другий шлях до тієї самої книги.
+    """
+    rows = [_ryadok("KOSTEL/685/855", "костел 685-2-855"),
+            _ryadok("DAVO/172/4/112", "ДАВіО ф.Д-172 оп.4 спр.112"),
+            _ryadok("DAHMO/315/7", "ДАХмО 315-1-7")]
+    monkeypatch.setattr("nyshporka.htr_store.list_cases", lambda: rows)
+    journal.record(journal.PACKED, shifra="ДАХмО 685-2-855", case_key="KOSTEL/685/855")
+    journal.record(journal.PUBLISHED, shifra="ДАВіО Д-172-4-112", case_key="DAVO/172/4/112")
+    journal.record(journal.PACKED, shifra="ДАХмО 315-1-7", case_key="DAHMO/315/7")
+    monkeypatch.setattr("nyshporka.share.pool.meta", lambda: {"taken_at": "x"})
+    monkeypatch.setattr(S, "_u_puli", lambda key: "none")
+    monkeypatch.setattr(S, "_kliuchi_shifry", lambda sh: {
+        "ДАХмО 685-2-855": ["DAHMO/685/2/855"],
+        "ДАВіО Д-172-4-112": ["DAVO/172/4/112", "DAVO/Д-172/4/112"],
+    }.get(sh, ["DAHMO/315/1/7"]))
+    u_puli = {"DAHMO/685/2/855": "text+geom", "DAVO/Д-172/4/112": "text+geom"}
+    monkeypatch.setattr("nyshporka.share.pool.known", lambda q: u_puli.get(q, "none"))
+
+    got = [r["case_key"] for r in S.nepodileni()]
+
+    assert got == ["DAHMO/315/7"], "віддане під шифрою пакета пропонувалось знову"
+
+
 def test_bez_ramok_na_dysku_ne_pytaie(space: Path, monkeypatch: Any) -> None:
     """Текст у пулі, а рамок на диску немає — довозити нічого."""
     monkeypatch.setattr("nyshporka.htr_store.list_cases",
