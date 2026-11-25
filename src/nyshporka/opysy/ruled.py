@@ -223,9 +223,18 @@ def build(run: Path, out_tsv: Path, *, title_starts: bool = False,
         mapa = json.loads((Path(dochyt) / DC.MAPA).read_text(encoding="utf-8"))
     if mapa and dochyt is not None:
         chyt = DC.chytannia(Path(dochyt))
+        # шапка бланка — геть з усіх трьох проходів; ПІСЛЯ підстановки: дочит № прив'язаний до
+        # номера рядка вихідного прогону
+        def _bez(st: str, L: list[Any], hv: list[tuple[int, int]]) -> list[Any]:
+            return DC.bez_shapky(st, L, mapa, hv)
+
+        if any((v or {}).get("shapka") for v in mapa.values()):
+            recs, raw = _tablytsia({st: (_bez(st, L, hv), wh, hv) for st, (L, wh, hv) in pages.items()},
+                                   title_starts=title_starts, dobudova=dobudova)
         # схема — за чистим прогоном (так її й міряно), злипання — після дочиту номерів
         sk, why = DC.skhema(len(recs), sum(bool(r["confirmed"]) for r in recs), sprav)
-        p1 = {st: (DC.pidstavyty(st, L, mapa, chyt)[0], wh, hv) for st, (L, wh, hv) in pages.items()}
+        p1 = {st: (_bez(st, DC.pidstavyty(st, L, mapa, chyt)[0], hv), wh, hv)
+              for st, (L, wh, hv) in pages.items()}
         recs1, _ = _tablytsia(p1, title_starts=title_starts, dobudova=dobudova)
         zlypli = {(r["page"], int(r["part"])) for r in recs1 if r["no_span"]}
         p2: dict[str, Any] = {}
@@ -233,11 +242,12 @@ def build(run: Path, out_tsv: Path, *, title_starts: bool = False,
         for st, (L, wh, hv) in pages.items():
             polovyny = range(len(hv)) if sk == "usi" else [pt for (s2, pt) in zlypli if s2 == st]
             ln2, b = DC.pidstavyty(st, L, mapa, chyt, plyamy_polovyn=polovyny, polovyny_x=hv)
-            p2[st] = (ln2, wh, hv)
+            p2[st] = (_bez(st, ln2, hv), wh, hv)
             for pt, y in b:
                 bez.setdefault((st, pt), []).append(y)
         recs, raw = _tablytsia(p2, title_starts=title_starts, dobudova=dobudova, bez=bez)
-        extra = {"skhema": sk, "skhema_chomu": why, "dochytano": len(chyt)}
+        extra = {"skhema": sk, "skhema_chomu": why, "dochytano": len(chyt),
+                 "shapok": sum(len((v or {}).get("shapka") or {}) for v in mapa.values())}
     out_tsv = Path(out_tsv)
     out_tsv.parent.mkdir(parents=True, exist_ok=True)
     with out_tsv.open("w", encoding="utf-8", newline="") as fh:

@@ -145,3 +145,47 @@ def test_whole_line_reaches_the_runner(tmp_path: Path) -> None:
     p2 = Plan(case_dir=tmp_path, out_dir=tmp_path / "out", model=tmp_path / "m.pt", script="cyrillic",
               frames=3, python=tmp_path / "py.exe", runner=tmp_path / "runner.py")
     assert "--whole-line" not in p2.command()
+
+
+# ── шапка бланка ────────────────────────────────────────────────────────────
+
+
+def _blank(nahyl: float = 0.02) -> np.ndarray:
+    """Бланк: верхня межа рамки, лінія під шапкою (з нахилом аркуша), вертикалі колонок, підкреслення
+    прізвища в тілі таблиці (коротке — не лінія шапки)."""
+    im = Image.new("L", (2000, 3000), 235)
+    d = ImageDraw.Draw(im)
+    for y in (200, 460):
+        d.line((40, y, 1960, y + nahyl * 1920), fill=30, width=4)
+    for x in (200, 420, 1500, 1750):
+        d.line((x, 200, x, 2950), fill=30, width=3)
+    d.line((600, 700, 900, 700), fill=40, width=4)           # підкреслення від руки
+    return np.asarray(im, dtype=np.float32)
+
+
+@pytest.mark.parametrize("nahyl", [0.0, 0.02, -0.05])
+def test_shapka_finds_the_rule_under_the_header_with_tilt(nahyl: float) -> None:
+    lin = DC.shapka(_blank(nahyl), 0, 2000)
+    assert lin is not None
+    y_mid = lin[1] + lin[2] * (1000 - lin[0])
+    assert abs(y_mid - (460 + nahyl * 960)) < 15, lin     # нижня з двох ліній, не верхня межа рамки
+    assert abs(lin[2] - nahyl) < 0.011
+
+
+def test_shapka_absent_on_a_page_without_printed_header() -> None:
+    im = Image.new("L", (2000, 3000), 235)
+    d = ImageDraw.Draw(im)
+    d.line((600, 700, 900, 700), fill=40, width=4)
+    assert DC.shapka(np.asarray(im, dtype=np.float32), 0, 2000) is None
+
+
+def test_bez_shapky_and_blob_touching_the_rule() -> None:
+    mapa = {"0010": {"shapka": {"0": [1000.0, 460.0, 0.0]}, "nomery": [],
+                     "plyamy": [{"id": "p0", "part": 0, "box": [100, 300, 160, 360], "xv": 100},     # «№» у шапці
+                                {"id": "p1", "part": 0, "box": [100, 440, 160, 540], "xv": 100}]}}  # номер торкається лінії
+    lines = [(100, 300, 180, 360, "№ по"), (600, 380, 1400, 440, "СОДЕРЖАНІЕ ДѢЛЪ"),
+             (600, 470, 1400, 540, "Книга на запись")]
+    out = DC.bez_shapky("0010", lines, mapa, [(0, 2000)])
+    assert [ln[4] for ln in out] == ["Книга на запись"]
+    _, bez = DC.pidstavyty("0010", lines, mapa, {"p0": "", "p1": ""}, plyamy_polovyn=[0], polovyny_x=[(0, 2000)])
+    assert bez == [(0, 440)], "пляма, що лише верхом заходить у шапку, — справжня межа справи"

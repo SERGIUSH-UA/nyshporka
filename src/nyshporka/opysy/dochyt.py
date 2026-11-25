@@ -46,6 +46,13 @@ KROPY = "kropy"
 KROPY_OUT = "kropy_out"
 MAPA = "dochyt.json"
 #: Вибір схеми меж з чорнила (заміри 25.11.2026 на чотирьох описах; пороги попередні).
+#: Лінія під друкованою шапкою бланка: шукається у верхній частці сторінки, смугами по ширині
+#: половини; лінія — ряд, де чорнило заповнює ≥ SHAPKA_FILL смуги, у ≥ SHAPKA_MIN смуг з SHAPKA_SMUH
+#: на одній прямій (з нахилом аркуша).
+SHAPKA_TOP = 0.30
+SHAPKA_SMUH = 16
+SHAPKA_FILL = 0.5
+SHAPKA_MIN = 10
 POVNOTA_MIN = 0.95
 PIDTV_MIN = 0.40
 
@@ -216,6 +223,72 @@ def plyamy(g: np.ndarray, xa: int, xb: int, y_top: int, hmed: float) -> list[tup
 # ── кропи на диск ───────────────────────────────────────────────────────────
 
 
+def shapka(g: np.ndarray, x0p: int, x1p: int) -> list[float] | None:
+    """Нижня лінія друкованої шапки бланка на половині розвороту: [x0, y0, нахил] — y(x) = y0 +
+    нахил·(x − x0); не знайшлась — None.
+
+    Шапка («№ по порядку · СОДЕРЖАНІЕ ДѢЛЪ · …») інакше лягає в назву першої справи половини, а раз
+    стає й окремою справою, що зсуває номери (ЦДІАК ф.442 оп.52: 60 рядків з 476). Під шапкою —
+    суцільна друкована лінія через усю ширину; тіло таблиці на таких бланках горизонталей не має, а
+    продовження справи з попередньої сторінки лежить уже під лінією. Береться НАЙНИЖЧА така лінія
+    у верхніх SHAPKA_TOP сторінки. 🔴 Лише для бланка (`forma=blank`): на аркуші, розграфленому від
+    руки, горизонталі бувають і між справами."""
+    from nyshporka.htr import form_cells as FC
+
+    y1 = int(SHAPKA_TOP * g.shape[0])
+    a, b = int(x0p + .03 * (x1p - x0p)), int(x1p - .03 * (x1p - x0p))
+    if y1 < 50 or b - a < 200:
+        return None
+    reg = g[:y1, a:b]
+    ink = FC._local_mean(reg, 41) - INK_DELTA > reg
+    w = (b - a) // SHAPKA_SMUH
+    pts: list[tuple[int, float, float]] = []
+    for k in range(SHAPKA_SMUH):
+        fr = ink[:, k * w:(k + 1) * w].mean(axis=1)
+        # ±6 рядків: нахил і вигин аркуша в межах смуги; без загортання країв (чорне поле сканера
+        # згори інакше ставало «лінією» внизу області)
+        pad = np.pad(fr, 6)
+        fr = np.max(np.stack([pad[6 + d:6 + d + fr.size] for d in range(-6, 7)]), axis=0)
+        rows = np.flatnonzero(fr >= SHAPKA_FILL)
+        if not rows.size:
+            continue
+        for grp in np.split(rows, np.flatnonzero(np.diff(rows) > 3) + 1):
+            pts.append((k, a + (k + .5) * w, float(grp.mean())))
+    best: tuple[float, float, float, float] | None = None
+    for _k0, x0, y0 in pts:
+        for nahyl in np.arange(-0.08, 0.0801, 0.005):
+            smuhy = {k for k, x, y in pts if abs(y - (y0 + nahyl * (x - x0))) <= 12}
+            if len(smuhy) < SHAPKA_MIN:
+                continue
+            yc = float(y0 + nahyl * ((a + b) / 2 - x0))
+            if best is None or yc > best[0] + 5:
+                best = (yc, x0, y0, float(nahyl))
+    return None if best is None else [best[1], best[2], best[3]]
+
+
+def nad_shapkoiu(lin: list[float], x: float, y: float) -> bool:
+    """Точка (центр рядка) лежить над лінією шапки."""
+    x0, y0, nahyl = lin
+    return y < y0 + nahyl * (x - x0)
+
+
+def bez_shapky(stem: str, lines: list[Any], mapa: dict[str, Any],
+               polovyny_x: list[tuple[int, int]]) -> list[Any]:
+    """Рядки сторінки без тих, що над лінією шапки своєї половини (`shapka` у мапі дочиту)."""
+    sh = (mapa.get(stem) or {}).get("shapka") or {}
+    if not sh:
+        return lines
+    out = []
+    for ln in lines:
+        xc, yc = (ln[0] + ln[2]) / 2, (ln[1] + ln[3]) / 2
+        part = next((k for k, (a, z) in enumerate(polovyny_x) if a <= xc < z), -1)
+        lin = sh.get(str(part))
+        if lin is not None and nad_shapkoiu(lin, xc, yc):
+            continue
+        out.append(ln)
+    return out
+
+
 def kropy(run: Path, pages: Path, out: Path, meta: Any = None) -> dict[str, Any]:
     """Кропи дочиту (рядки колонки №) і плям чорнила кожної сторінки таблиці → `<out>/kropy/*.jpg`,
     мапа → `<out>/dochyt.json`. Повтор переписує: кропи — похідне від прочитаних сторінок."""
@@ -265,6 +338,11 @@ def kropy(run: Path, pages: Path, out: Path, meta: Any = None) -> dict[str, Any]
         hs = sorted(ln[3] - ln[1] for ln in lines) or [100]
         hmed = float(hs[len(hs) // 2])
         zap: dict[str, Any] = {"nomery": [], "plyamy": []}
+        if meta is not None and meta.forma == "blank":
+            sh = {str(pt): lin for pt, (a, z) in enumerate(RU.split_spread(lines, W, H))
+                  if (lin := shapka(g, a, z)) is not None}
+            if sh:
+                zap["shapka"] = sh
         # дочит рядків колонки №
         for i, _part, ln in nomerni(lines, W, H):
             h = max(1, ln[3] - ln[1])
@@ -302,6 +380,7 @@ def kropy(run: Path, pages: Path, out: Path, meta: Any = None) -> dict[str, Any]
         mapa[stem] = zap
     (out / MAPA).write_text(json.dumps(mapa, ensure_ascii=False), encoding="utf-8")
     return {"kropiv": sum(len(v["nomery"]) + len(v["plyamy"]) for v in mapa.values()),
+            "shapok": sum(len(v.get("shapka") or {}) for v in mapa.values()),
             "nomeriv": sum(len(v["nomery"]) for v in mapa.values()),
             "plyam": sum(len(v["plyamy"]) for v in mapa.values()), "dir": str(kd)}
 
@@ -371,8 +450,13 @@ def pidstavyty(stem: str, lines: list[tuple[int, int, int, int, str]], mapa: dic
             out[i] = (*out[i][:4], t)
     out = [ln for i, ln in enumerate(out) if i not in het]
     bez: list[tuple[int, int]] = []
+    sh = zap.get("shapka") or {}
     for p in plyamy:
         x0, y0, x1, y1 = p["box"]
+        lin = sh.get(str(p["part"]))
+        if lin is not None and nad_shapkoiu(lin, (x0 + x1) / 2, (y0 + y1) / 2):
+            continue              # пляма в шапці бланка («№») — не справа; за ЦЕНТРОМ: номер, що
+            #                       торкається лінії шапки, верхом лежить над нею (ф.445, №136)
         m = re.search(r"\d{1,5}", chyt.get(p["id"], ""))
         xv = p.get("xv", x0)
         if m and int(m.group(0)) > 0:
