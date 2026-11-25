@@ -82,12 +82,23 @@ def test_push_refused_locally_never_touches_network(
 def test_search_encodes_query(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[str] = []
     monkeypatch.setattr(U, "_request", lambda method, url, **k: seen.append(url) or {"zbihy": []})
-    monkeypatch.setattr(U, "token", lambda: "")
+    monkeypatch.setattr(U, "token", lambda: "ключ")
     R.search("Липовеньки Чижевич", repo="ДАОО", fond="445",
              base="https://api.nyshporka.online/v1")
     q = parse_qs(urlsplit(seen[0]).query)
     assert q["q"] == ["Липовеньки Чижевич"] and q["repo"] == ["ДАОО"] and q["fond"] == ["445"]
     assert seen[0].startswith("https://api.nyshporka.online/v1/opysy/search?")
+
+
+def test_search_without_key_refuses_before_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Засіки через Нишпорку — лише з ключем: без нього відмова тут, з поясненням, без запиту."""
+    def boom(*a: Any, **k: Any) -> Any:
+        raise AssertionError("мережа без ключа")
+
+    monkeypatch.setattr(U, "_request", boom)
+    monkeypatch.setattr(U, "token", lambda: "")
+    with pytest.raises(U.UploadError, match="share login"):
+        R.search("Липовеньки", base="https://api.nyshporka.online/v1")
 
 
 def test_names_and_rules_go_with_key_and_exact_fields(monkeypatch: pytest.MonkeyPatch) -> None:
