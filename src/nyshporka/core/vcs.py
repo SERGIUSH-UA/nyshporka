@@ -34,6 +34,9 @@ from nyshporka.core import workspace as W
 #: Таблиця маркера Майстерні з налаштуваннями історії.
 TABLE = "history"
 AUTHOR = ("Нишпорка", "nyshporka@localhost")
+#: Файл, більший за це, у перший знімок не йде. Канон, облік і докази-вирізки
+#: менші на порядки; більше буває лише скан чи архів, який людина поклала сама.
+BIG_FILE = 20 * 1024 * 1024
 
 
 class VcsError(RuntimeError):
@@ -125,6 +128,7 @@ class Report:
     gitignore: bool = False
     hook: str = ""
     commit: str = ""
+    big: list[str] = field(default_factory=list)   # великі файли поза першим знімком
     auto: bool = False
     notes: list[str] = field(default_factory=list)
 
@@ -167,6 +171,13 @@ def ensure_repo(hub: Path) -> Report:
         # Перший коміт знімає стан як є — ДО хука: хук стереже наступні зміни,
         # а давня помилка в каноні не має зривати саме заведення історії.
         _set_auto(hub)
+        big, size = _exclude_big(hub)
+        if big:
+            rep.big = big
+            rep.notes.append(
+                f"{len(big)} великих файлів (разом {size / 1024 ** 3:.1f} ГБ) в історію не "
+                f"взято: кожен понад {BIG_FILE // 1024 ** 2} МБ. Самі файли на місці; перелік "
+                "у .git/info/exclude, і рядок звідти можна прибрати")
         _git(hub, "add", "-A")
         _git(hub, "commit", "-q", "-m", "Простір заведено (nysh history setup)",
              "--allow-empty")
@@ -177,6 +188,43 @@ def ensure_repo(hub: Path) -> Report:
         rep.notes.append(f"хук канону не поставлено: {exc}")
     rep.auto = auto_enabled(hub)
     return rep
+
+
+def _ignore_line(rel: str) -> str:
+    """Шлях файла рядком `.gitignore`: від кореня й без дії шаблонних знаків."""
+    line = re.sub(r"([\\*?\[\]])", r"\\\1", rel)
+    if line.endswith(" "):
+        line = line[:-1] + "\\ "
+    return "/" + line
+
+
+def _exclude_big(hub: Path) -> tuple[list[str], int]:
+    """Винести великі файли з першого знімка. Повертає (шляхи, разом байтів).
+
+    Шаблон винятків знає теки Нишпорки, але не знає, що людина поклала поруч:
+    теку з оригіналами PDF перший `add -A` копіював у `.git` цілком. Перелік
+    іде в `.git/info/exclude`, а не в `.gitignore`: це знахідка цієї машини,
+    і чужого файла вона не править.
+    """
+    names = _git(hub, "ls-files", "-o", "--exclude-standard", "-z").split("\0")
+    big: list[str] = []
+    total = 0
+    for rel in filter(None, names):
+        try:
+            size = (hub / rel).stat().st_size
+        except OSError:
+            continue
+        if size > BIG_FILE:
+            big.append(rel)
+            total += size
+    if big:
+        info = hub / ".git" / "info"
+        info.mkdir(parents=True, exist_ok=True)
+        with (info / "exclude").open("a", encoding="utf-8", newline="\n") as fh:
+            fh.write("\n# Нишпорка: великі файли поза історією простору "
+                     "(nysh history setup).\n")
+            fh.writelines(_ignore_line(rel) + "\n" for rel in big)
+    return big, total
 
 
 def _layer(ws: W.Workspace) -> list[Path]:
