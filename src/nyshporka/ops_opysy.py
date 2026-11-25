@@ -125,7 +125,7 @@ def opysy_check(a: CheckArgs) -> Envelope:
 
 @op("opysy.pack", summary="Спакувати опис у .nyshopys, якщо ворота пропускають",
     args=PackArgs, mutates=True, section=SECTION, tier="rare",
-    when="віддати прочитаний опис фонду в Супрягу (поки — лише пакет)")
+    when="спакувати прочитаний опис фонду без заливки (заливає `opysy.push`)")
 def opysy_pack(a: PackArgs) -> Envelope:
     from nyshporka import __version__
     from nyshporka.opysy import bundle as B

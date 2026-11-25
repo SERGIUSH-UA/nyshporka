@@ -1,4 +1,4 @@
-"""`nysh opys` — описи фондів: перевірити й спакувати опис для Супряги.
+"""`nysh opys` — Засіки: прочитати опис фонду й віддати в Супрягу, шукати по описах.
 
 🔴 Монтується в `nysh` лише з увімкненим флагом `NYSH_OPYSY`
 (`nyshporka.features`); без нього команди немає взагалі.
@@ -16,7 +16,8 @@ from nyshporka.cli_emit import answer as _answer
 from nyshporka.cli_emit import notes, untrusted
 from nyshporka.core.routes import route
 
-app = typer.Typer(help="Описи фондів (Супряга): перевірити й спакувати опис.",
+app = typer.Typer(help="Засіки — описи фондів у Супрязі: прочитати опис (`read`), віддати (`push`), "
+                           "шукати по описах (`search`).",
                   no_args_is_help=True)
 console = brand.console()
 
