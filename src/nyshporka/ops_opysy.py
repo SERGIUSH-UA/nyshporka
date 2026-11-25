@@ -562,8 +562,19 @@ def _hmara_etap(d: Path, etap: str, kadry: Path, kudy: Path, a: ReadOpysArgs
                         H.zabraty_tekou(sib, kudy.parent / f"{kudy.name}-{sib.name[len(out.name) + 1:]}")
             return "gotovo", H.stan(d)[etap]
         return "ide", {**zap, "prochytano": zrobleno, "vsi": vsi}
-    zap = H.postavyty(d, etap, kadry, script=a.script, params=a.hmara_param, confirm=a.confirm)
+    zap = H.postavyty(d, etap, kadry, script=_pysmo(d, a), params=a.hmara_param, confirm=a.confirm)
     return "postavleno", zap
+
+
+def _pysmo(d: Path, a: ReadOpysArgs) -> str:
+    """Письмо для хмари: явне, інакше з мови опису (ru/uk — кирилиця, pl/la — латинка). `cloud go`
+    без письма відмовляє: вгаданий рушій дає не збій, а осмислене на вигляд сміття."""
+    if a.script:
+        return a.script
+    from nyshporka.opysy import workdir as W
+
+    mova = (a.language or str(W.load(d).get("language") or "")).lower()
+    return {"ru": "cyrillic", "uk": "cyrillic", "be": "cyrillic", "pl": "latin", "la": "latin"}.get(mova, "")
 
 
 def _hmara_vidpovid(d: Path, a: ReadOpysArgs, kroky: list[str], etap: str, stan: str,

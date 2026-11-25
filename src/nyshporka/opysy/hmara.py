@@ -111,7 +111,8 @@ def postavyty(d: Path, etap: str, kadry: Path, *, script: str = "", params: list
     if etap not in ETAPY:
         raise ValueError(etap)
     teka = _podaty(d, etap, kadry)
-    args = [str(teka)]
+    # теку етапу склали щойно й цілком — запобіжник «тека ще качається» (кадр молодший 5 хв) тут хибний
+    args = [str(teka), "--allow-partial"]
     if etap == "druk":
         args += ["--print", "--not-an-edition", "--out-root", str(Path(d) / DIR / "vyhid")]
     elif script:
