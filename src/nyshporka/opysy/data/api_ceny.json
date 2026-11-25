@@ -4,7 +4,7 @@
   "anthropic": "https://platform.claude.com/docs/en/about-claude/pricing (таблиця моделей скіла claude-api, знімок 2026-11-03)",
   "openai": "https://developers.openai.com/api/docs/pricing (25.11.2026)"
  },
- "_onovleno": "2026-11-25",
+ "_onovleno": "2026-11-26",
  "models": {
   "claude-sonnet-5-5": {"provider": "anthropic", "vkhid": 2.0, "vykhid": 10.0, "batch": 0.5, "effort": "low",
                         "riven": "середня", "rekomendovano": true,
@@ -15,7 +15,8 @@
                        "riven": "нижча", "zamir": "не заміряно"},
   "gpt-6.1-terra": {"provider": "openai", "vkhid": 1.0, "vykhid": 5.0, "batch": 0.5, "effort": "low",
                     "riven": "середня",
-                    "zamir": "не заміряно (замір шаблону b2-1 — у роботі)"},
+                    "rekomendovano": true,
+                    "zamir": "шаблон b2-1 заміряно 26.11.2026: ~$0.00014 за назву через Batch; якість на рівні claude-sonnet-5-5 (160 назв, 98 з еталоном), частіше ставить ⟨?⟩"},
   "gpt-6.1-sol": {"provider": "openai", "vkhid": 2.0, "vykhid": 10.0, "batch": 0.5, "effort": "low",
                   "riven": "вища", "zamir": "не заміряно"},
   "gpt-6-luna": {"provider": "openai", "vkhid": 0.10, "vykhid": 0.50, "batch": 0.5, "effort": "low",
