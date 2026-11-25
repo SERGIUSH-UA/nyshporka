@@ -396,6 +396,39 @@ def _models_current(root: Path) -> CheckResult:
     return CheckResult("ok", "бойові ваги на місці")
 
 
+#: Реєстр прогонів gpurunner, від якого наглядач уже хвилинами вибирає машину (21.11.2026: 1.9 ГБ).
+CLOUD_REGISTRY_FAT_MB = 300
+
+
+def _cloud_registry_slim(root: Path) -> CheckResult:
+    """Реєстр прогонів плагіна оренди не роздутий посиланнями R2 (з 0.49.0, gpuhire 0.10.1).
+
+    Лише читає: стискає сам плагін при першому відкритті бази новою версією.
+    """
+    import sqlite3
+
+    try:
+        from gpurunner.core import manifest
+    except Exception:
+        return CheckResult("n/a", "плагін оренди (gpuhire) не встановлено")
+    path = manifest.db_path()
+    if not path.exists():
+        return CheckResult("n/a", "хмарних прогонів на цій машині не було")
+    mb = path.stat().st_size / 1e6
+    try:
+        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+    except sqlite3.Error as e:
+        return CheckResult("todo", f"реєстр прогонів не прочитати ({e})")
+    if version < 1:
+        return CheckResult("todo", f"реєстр прогонів {mb:.0f} МБ, стара схема — оновити плагін: "
+                                   "`nysh update` (тягне gpuhire ≥ 0.10.1); стиснеться сам при першому хмарному запуску")
+    if mb > CLOUD_REGISTRY_FAT_MB:
+        return CheckResult("todo", f"реєстр прогонів стиснуто, але файл ще {mb:.0f} МБ — повернути місце: "
+                                   "`python -c \"from gpurunner.core import manifest; manifest.compact()\"`")
+    return CheckResult("ok", f"реєстр прогонів {mb:.0f} МБ, без посилань R2")
+
+
 def _skill_guard(root: Path) -> CheckResult:
     """Запобіжник скілів: поставлено й живе, або людина відмовилась (з 0.30.1).
 
@@ -439,6 +472,7 @@ CHECKS: dict[str, Callable[[Path], CheckResult]] = {
     "engines_current": _engines_current,
     "models_current": _models_current,
     "skill_guard": _skill_guard,
+    "cloud_registry_slim": _cloud_registry_slim,
 }
 
 
