@@ -232,7 +232,7 @@ def build(run: Path, out_tsv: Path, *, title_starts: bool = False,
         bez: dict[tuple[str, int], list[int]] = {}
         for st, (L, wh, hv) in pages.items():
             polovyny = range(len(hv)) if sk == "usi" else [pt for (s2, pt) in zlypli if s2 == st]
-            ln2, b = DC.pidstavyty(st, L, mapa, chyt, plyamy_polovyn=polovyny)
+            ln2, b = DC.pidstavyty(st, L, mapa, chyt, plyamy_polovyn=polovyny, polovyny_x=hv)
             p2[st] = (ln2, wh, hv)
             for pt, y in b:
                 bez.setdefault((st, pt), []).append(y)

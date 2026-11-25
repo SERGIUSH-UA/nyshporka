@@ -80,10 +80,15 @@ def test_pidstavyty_replaces_number_lines_and_injects_blobs() -> None:
                      "plyamy": [{"id": "0077__p000", "part": 0, "box": [90, 400, 160, 460], "xv": 90},
                                 {"id": "0077__p001", "part": 0, "box": [90, 700, 160, 760], "xv": 90}]}}
     chyt = {"0077__n000": "1313", "0077__p000": "1314", "0077__p001": "•"}
-    out, bez = DC.pidstavyty("0077", lines, mapa, chyt, plyamy_polovyn=[0])
-    assert out[0][4] == "1313"
+    out, bez = DC.pidstavyty("0077", lines, mapa, chyt, plyamy_polovyn=[0], polovyny_x=[(0, 1000)])
+    # половина з плямами: номер — лише з плям, дочит не підставляється (два початки на рядку)
+    assert out[0][4] == "313"
     assert (90, 400, 160, 460, "1314") in out and not any(ln[4] == "за" for ln in out)
     assert bez == [(0, 700)]
+    # половина без плям: дочит підставляється
+    out1, _ = DC.pidstavyty("0077", lines, mapa, chyt, plyamy_polovyn=[1],
+                            polovyny_x=[(0, 1000), (1000, 2000)])
+    assert out1[0][4] == "1313"
     # половина не вибрана — плями не ставляться
     out2, bez2 = DC.pidstavyty("0077", lines, mapa, chyt, plyamy_polovyn=[])
     assert bez2 == [] and any(ln[4] == "за" for ln in out2)

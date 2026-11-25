@@ -335,26 +335,44 @@ def skhema(spraw: int, pidtv: int, sprav: int) -> tuple[str, str]:
 
 
 def pidstavyty(stem: str, lines: list[tuple[int, int, int, int, str]], mapa: dict[str, Any],
-               chyt: dict[str, str], *, plyamy_polovyn: Iterable[int] = ()) -> tuple[list[Any], list[tuple[int, int]]]:
+               chyt: dict[str, str], *, plyamy_polovyn: Iterable[int] = (),
+               polovyny_x: list[tuple[int, int]] | None = None) -> tuple[list[Any], list[tuple[int, int]]]:
     """Рядки сторінки з дочитаними номерами й плямами вибраних половин.
 
     Повертає (рядки, межі без номера [(половина, y)]). Пляма з числом — рядок номера на місці,
-    де його побачить `half_cases`; без числа — межа справи без номера."""
+    де його побачить `half_cases`; без числа — межа справи без номера.
+
+    Одне джерело номера на половину: де стоять плями, дочит № не підставляється (`polovyny_x` —
+    межі половин, щоб знати, чия). Обидва разом дають два початки на одному рядку (дочит «98»
+    поруч із плямою «5»): оп.52 — збіг № з Duck 90 → 78 %."""
     zap = mapa.get(stem) or {}
+    vybrani = set(plyamy_polovyn)
+    plyamy = [p for p in zap.get("plyamy", []) if p["part"] in vybrani]
+    # під плямою знімається короткий рядок колонки № — за ВИХІДНИМ текстом: дочитаний номер буває
+    # довшим (у кроп із запасом заходить дата сусідньої колонки), і тоді лишалось би два номери
+    # на одному місці (оп.52: збіг № з Duck 90 → 78 %)
+    het = {i for i, ln in enumerate(lines) for p in plyamy
+            if ln[0] < p["box"][2] + 40 and ln[2] > p["box"][0] - 40 and ln[1] < p["box"][3]
+            and ln[3] > p["box"][1] and len(ln[4]) <= 8}
     out = list(lines)
+    def _chyia(b: list[int]) -> int:
+        xc = (b[0] + b[2]) / 2
+        for k, (a, z) in enumerate(polovyny_x or [(-10**9, 10**9)]):
+            if a <= xc < z:
+                return k
+        return -1
+
     for n in zap.get("nomery", []):
+        if vybrani and _chyia(n["box"]) in vybrani:
+            continue
         t = chyt.get(n["id"])
         i = n["i"]
         if t and i < len(out) and tuple(out[i][:4]) == tuple(n["box"]):
             out[i] = (*out[i][:4], t)
+    out = [ln for i, ln in enumerate(out) if i not in het]
     bez: list[tuple[int, int]] = []
-    vybrani = set(plyamy_polovyn)
-    for p in zap.get("plyamy", []):
-        if p["part"] not in vybrani:
-            continue
+    for p in plyamy:
         x0, y0, x1, y1 = p["box"]
-        out = [ln for ln in out if not (ln[0] < x1 + 40 and ln[2] > x0 - 40 and
-                                        ln[1] < y1 and ln[3] > y0 and len(ln[4]) <= 8)]
         m = re.search(r"\d{1,5}", chyt.get(p["id"], ""))
         xv = p.get("xv", x0)
         if m and int(m.group(0)) > 0:
