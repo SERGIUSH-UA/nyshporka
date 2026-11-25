@@ -546,13 +546,16 @@ def _dochyt(d: Path, script: str) -> tuple[list[str], str]:
         DC.kropy(W.run_dir(d), W.pages_dir(d), dd, M.load(d))
         (dd / "meta_sha.json").write_text(json.dumps({"sha": vidbytok}), encoding="utf-8")
         kroky.append("кропи колонки №")
-    vsi = len(list((dd / DC.KROPY).glob("*.jpg")))
-    gotovi = len(list((dd / DC.KROPY_OUT).glob("*.txt"))) if (dd / DC.KROPY_OUT).exists() else 0
-    if vsi and gotovi < vsi:
+    hotovo = dd / "_chytannia_zaversheno.json"
+    vsi, gotovi = _prochytano_teky(dd / DC.KROPY, dd / DC.KROPY_OUT)
+    if vsi and gotovi < vsi and not hotovo.exists():
         rc = _chytaty(dd / DC.KROPY, dd / DC.KROPY_OUT, script, whole_line=True)
-        gotovi = len(list((dd / DC.KROPY_OUT).glob("*.txt"))) if (dd / DC.KROPY_OUT).exists() else 0
-        if gotovi < vsi:
+        vsi, gotovi = _prochytano_teky(dd / DC.KROPY, dd / DC.KROPY_OUT)
+        if gotovi < vsi and rc != 0:
             return kroky, f"дочитано {gotovi} з {vsi} кропів колонки № (код {rc}) — та сама команда продовжить"
+        # прогін скінчився, а кропа без тексту рушій не записав — дочит лише доповнює читання сторінок:
+        # такий кроп лишається без номера, і повтор `read` не крутить його вічно
+        hotovo.write_text(json.dumps({"kropiv": vsi, "prochytano": gotovi}), encoding="utf-8")
         kroky.append("дочит №")
     return kroky, ""
 
@@ -560,13 +563,16 @@ def _dochyt(d: Path, script: str) -> tuple[list[str], str]:
 def _prochytano(d: Path) -> tuple[int, int]:
     """(сторінок, прочитано). Прочитана — є текст АБО рушій записав її в мету прогону: порожня
     чи титульна сторінка тексту може не мати, і без мети «прочитано 3 з 4» не минало б ніколи."""
+    from nyshporka.opysy import workdir as W
+
+    return _prochytano_teky(W.pages_dir(d), W.run_dir(d))
+
+
+def _prochytano_teky(kadry: Path, run: Path) -> tuple[int, int]:
     import contextlib
     import json
 
-    from nyshporka.opysy import workdir as W
-
-    run = W.run_dir(d)
-    vsi = {p.stem for p in W.pages_dir(d).glob("*.jpg")} if W.pages_dir(d).exists() else set()
+    vsi = {p.stem for p in kadry.glob("*.jpg")} if kadry.exists() else set()
     gotovi = {p.stem for p in run.glob("*.txt")} if run.exists() else set()
     meta = run / "_htr_meta.json"
     if meta.exists():
@@ -616,7 +622,12 @@ def opysy_read(a: ReadOpysArgs) -> Envelope:
         vsi, gotovi = _prochytano(d)
     from nyshporka.opysy import meta as M
 
-    if M.load(d) is None:
+    meta = M.load(d)
+    if meta is not None and meta.forma == "typed":
+        return fail("за метаданими опис машинописний — його учасник поки не читає: розбір таблиці рушія "
+                    "друку ще звіряється на других описах. Помилились формою — `nysh opys meta "
+                    f"{a.dir} --forma blank|hand_ruled`")
+    if meta is None:
         # Агент задає те, що машині вгадувати важко (форма, колонки, скільки справ), ДО читання:
         # на цьому стоїть вибір схеми таблиці. 2–3 сторінки оком — і та сама команда далі.
         hl = [str(W.pages_dir(d) / f"{n:04d}.jpg") for n in M.kudy_hlianuty(vsi)]
@@ -642,6 +653,7 @@ def opysy_read(a: ReadOpysArgs) -> Envelope:
     if not env.ok:
         return env
     tablytsia = env.data
+    poperedzhennia = list(env.warnings)
     kroky.append("таблиця")
     env = opysy_norm(NormArgs(dir=a.dir, language=a.language))
     if not env.ok:
@@ -659,11 +671,15 @@ def opysy_read(a: ReadOpysArgs) -> Envelope:
                 f"`nysh opys push {a.dir} --norm-model <модель>`; немає агента чи ресурсів — "
                 f"`nysh opys push {a.dir} --na-obmin` (нормалізує обмін у Супрязі)") if pachky \
         else f"nysh opys push {a.dir}"
-    return ok({"dir": str(d.resolve()), "zrobleno": kroky, "storinok": vsi,
-               "sprav": tablytsia.get("cases"), "pidtverdzheno_nomeriv": tablytsia.get("confirmed"),
-               "pachok_normalizatsii": len(pachky),
-               "novykh_pachok": len(env.data.get("batches") or []),
-               "norm_dir": env.data.get("dir"), "how": env.data.get("how"), "next": nastupne})
+    out = ok({"dir": str(d.resolve()), "zrobleno": kroky, "storinok": vsi,
+              "sprav": tablytsia.get("cases"), "pidtverdzheno_nomeriv": tablytsia.get("confirmed"),
+              "sprav_za_metadanymy": tablytsia.get("sprav"), "povnota": tablytsia.get("povnota"),
+              "skhema": tablytsia.get("skhema"),
+              "pachok_normalizatsii": len(pachky),
+              "novykh_pachok": len(env.data.get("batches") or []),
+              "norm_dir": env.data.get("dir"), "how": env.data.get("how"), "next": nastupne})
+    out.warnings.extend(poperedzhennia)
+    return out
 
 
 def _zibraty_paket(d: Path, norm_model: str, *, na_obmin: bool = False) -> Envelope:

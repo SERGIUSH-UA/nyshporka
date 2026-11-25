@@ -241,3 +241,59 @@ def test_manifest_bez_obminu_bez_polia(tmp_path: Path, server: dict[str, Any],
     assert OO.opysy_push(OO.PushArgs(file=str(d), norm_model="m")).ok
     contents, _ = B.verify(server["pushed"][-1].read_bytes())
     assert "normalization_exchange" not in contents.manifest
+
+
+def test_cli_read_zupynka_na_metadanykh_i_povnota(tmp_path: Path, server: dict[str, Any],
+                                                   chytannia: list[Path],
+                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    """`nysh opys read` людині: зупинка на метаданих каже, що глянути; далі — повнота за метаданими
+    й попередження, коли справ у таблиці набагато менше, ніж в описі."""
+    from typer.testing import CliRunner
+
+    from nyshporka.opysy.cli import app as opys_app
+
+    monkeypatch.setenv("NYSH_OPYSY", "1")
+    monkeypatch.setenv("COLUMNS", "300")
+    r = CliRunner()
+    d = tmp_path / "opys"
+    res = r.invoke(opys_app, ["read", str(d), "--pdf", str(_pdf(tmp_path)), "--repo", "ДАОО", "--fond", "445",
+                              "--opys", "9", "--url", URL, "--language", "ru"])
+    assert res.exit_code == 0, res.output
+    assert "метадані" in res.output and "глянути" in res.output and "nysh opys meta" in res.output
+    res = r.invoke(opys_app, ["meta", str(d), "--forma", "blank", "--kolonky", "nomer,nazva",
+                              "--sprav", "40", "--dzherelo", "засвідчувальний напис"])
+    assert res.exit_code == 0, res.output
+    res = r.invoke(opys_app, ["read", str(d), "--language", "ru"])
+    assert res.exit_code == 0, res.output
+    assert "з 40 за метаданими" in res.output and "частина справ злиплась" in res.output
+    # машинопис за метаданими — відмова, як і `--form typed`
+    assert r.invoke(opys_app, ["meta", str(d), "--forma", "typed"]).exit_code == 0
+    res = r.invoke(opys_app, ["read", str(d), "--language", "ru"])
+    assert res.exit_code == 1 and "машинописний" in res.output
+
+
+def test_krop_bez_tekstu_ne_blokuie_read(tmp_path: Path, server: dict[str, Any],
+                                         chytannia: list[Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    """Рушій пройшов кропи дочиту, а для одного тексту не записав: `read` іде до таблиці, а повтор не
+    запускає дочит знову."""
+    pidmina = OO._chytaty
+    kropy_vyklyky: list[Path] = []
+
+    def _chytaty(pages: Path, run: Path, script: str, whole_line: bool = False) -> int:
+        if not whole_line:
+            return pidmina(pages, run, script)
+        kropy_vyklyky.append(pages)
+        run.mkdir(parents=True, exist_ok=True)
+        for k in sorted(pages.glob("*.jpg"))[1:]:            # перший кроп — без тексту
+            (run / f"{k.stem}.txt").write_text("12", encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(OO, "_chytaty", _chytaty)
+    d = tmp_path / "opys"
+    env = _read_z_meta(d, pdf=str(_pdf(tmp_path)), repo="ДАОО", fond="445", opys="9", url=URL, language="ru")
+    assert env.ok, env
+    if not kropy_vyklyky:
+        pytest.skip("синтетичні сторінки не дали кропів колонки №")
+    assert "дочит №" in env.data["zrobleno"] and len(kropy_vyklyky) == 1
+    env2 = _read(d, language="ru")
+    assert env2.ok and len(kropy_vyklyky) == 1, "дочит запустився вдруге на тому самому кропі"

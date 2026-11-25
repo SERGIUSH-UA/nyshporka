@@ -13,7 +13,7 @@ import typer
 
 from nyshporka import brand
 from nyshporka.cli_emit import answer as _answer
-from nyshporka.cli_emit import untrusted
+from nyshporka.cli_emit import notes, untrusted
 
 app = typer.Typer(help="Описи фондів (Супряга): перевірити й спакувати опис.",
                   no_args_is_help=True)
@@ -371,12 +371,22 @@ def read_cmd(
     if _answer(env, as_json):
         return
     d = env.data or {}
+    if d.get("meta_potribni"):
+        console.print(f"сторінок {_e(d.get('storinok'))} · [warn]перед читанням потрібні метадані опису[/warn]")
+        console.print(f"  [muted]{_e(d.get('how'))}[/muted]")
+        for h in d.get("hlianuty") or []:
+            console.print(f"  глянути: {_e(h)}")
+        _next(d)
+        return
+    povnota = (f" з {_e(d.get('sprav_za_metadanymy'))} за метаданими ({100 * d['povnota']:.0f} %)"
+               if d.get("povnota") is not None else "")
     console.print(f"[green]прочитано[/green] {_e(d.get('dir'))} · сторінок {_e(d.get('storinok'))} · "
-                  f"справ {_e(d.get('sprav'))} · номерів підтверджено "
+                  f"справ {_e(d.get('sprav'))}{povnota} · номерів підтверджено "
                   f"{_e(d.get('pidtverdzheno_nomeriv'))} · пачок нормалізації "
                   f"{_e(d.get('pachok_normalizatsii'))}")
     if d.get("pachok_normalizatsii"):
         console.print(f"  [muted]{_e(d.get('how'))}[/muted]")
+    notes(env)
     _next(d)
 
 
