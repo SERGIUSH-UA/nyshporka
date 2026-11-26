@@ -810,3 +810,109 @@ def api_vymknuty() -> None:
 
     NA.vymknuty()
     console.print("ключ API прибрано; нормалізація — знову агентом")
+
+
+# ── власник Нишпорки: передачі зі сховища (рішення дослідника 27.11.2026) ─────────
+
+peredachi_app = typer.Typer(help="Власнику Нишпорки: забрати зі сховища матеріал для навчання й скани "
+                                 "описів, записати адресу скану на Commons. Іншим сервер відповідає 404.",
+                            no_args_is_help=True)
+app.add_typer(peredachi_app, name="peredachi")
+
+_ROZSH = {"navchannia": ".tar.gz", "skan": ""}
+
+
+@peredachi_app.command("spysok")
+@route("opys peredachi spysok", skill="read-opys", tier="rare",
+       when="власник: що лежить у сховищі — матеріал для навчання й скани описів для Commons")
+def peredachi_spysok(
+    vyd: str = typer.Option("", "--vyd", help="navchannia · skan; порожньо — усе"),
+    status: str = typer.Option("gotovo", "--status", help="gotovo · zabrano · na_commons"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Що лежить для власника: вид, внесок, розмір, сторінки, кропи; скан — архів, фонд, опис."""
+    import json as _json
+
+    from nyshporka.opysy import remote as R
+    from nyshporka.share.upload import UploadError
+
+    try:
+        rows = R.peredachi(vyd=vyd, status=status).get("rows") or []
+    except UploadError as exc:
+        console.print(f"[warn]![/warn] {_e(exc)}")
+        raise typer.Exit(code=1) from None
+    if as_json:
+        print(_json.dumps(rows, ensure_ascii=False, indent=1))
+        return
+    if not rows:
+        console.print("порожньо")
+    for r in rows:
+        m = r.get("meta") or {}
+        pro = (f"{_e(m.get('repo'))} ф.{_e(m.get('fond'))} оп.{_e(m.get('opys'))} · {_e(r.get('imia'))}"
+               if r.get("vyd") == "skan" else f"кропів {_e(r.get('kropiv'))}")
+        console.print(f"#{_e(r.get('peredacha'))} {_e(r.get('vyd'))} · внесок {_e(r.get('vnesok'))} · "
+                      f"{round((r.get('bytes') or 0) / 1048576, 1)} МБ · сторінок {_e(r.get('storinok'))} · "
+                      f"{pro}" + (f" · {_e(r['commons_url'])}" if r.get("commons_url") else ""))
+
+
+@peredachi_app.command("zabraty")
+@route("opys peredachi zabraty", skill="read-opys", mutates=True, tier="rare",
+       when="власник: завантажити готові передачі зі сховища, звірити відбиток і прибрати їх звідти")
+def peredachi_zabraty(
+    teka: str = typer.Argument(..., help="куди класти (підтеки navchannia/ і skan/)"),
+    vyd: str = typer.Option("", "--vyd", help="navchannia · skan; порожньо — усе"),
+    lyshyty: bool = typer.Option(False, "--lyshyty", help="не прибирати зі сховища після забору"),
+) -> None:
+    """Кожна готова передача — у файл; відбиток звіряється з прийнятим сервером, і лише тоді об'єкт
+    прибирається зі сховища (рядок на сервері лишається слідом). Скан після забору заливається на
+    Commons, тоді `nysh opys peredachi commons <№> --url …`."""
+    from pathlib import Path
+
+    from nyshporka.opysy import remote as R
+    from nyshporka.share.upload import UploadError
+
+    try:
+        rows = R.peredachi(vyd=vyd).get("rows") or []
+    except UploadError as exc:
+        console.print(f"[warn]![/warn] {_e(exc)}")
+        raise typer.Exit(code=1) from None
+    zbii = 0
+    for r in rows:
+        pid, v = int(r["peredacha"]), str(r.get("vyd") or "")
+        imia = (f"{pid}-{Path(str(r.get('imia') or 'skan.pdf')).name}" if v == "skan"
+                else f"{pid}-vnesok{r.get('vnesok')}{_ROZSH.get(v, '')}")
+        kudy = Path(teka) / v / imia
+        try:
+            n = R.peredachu_zavantazhyty(str(r.get("url") or ""), kudy, str(r.get("sha256") or ""))
+            if not lyshyty:
+                R.peredacha_zabrano(pid, str(r["sha256"]))
+        except UploadError as exc:
+            zbii += 1
+            console.print(f"[warn]![/warn] #{pid}: {_e(exc)}")
+            continue
+        console.print(f"✅ #{pid} → {_e(kudy)} ({n / 1048576:.1f} МБ)"
+                      + ("" if lyshyty else " · зі сховища прибрано"))
+    if not rows:
+        console.print("готових передач немає")
+    if zbii:
+        raise typer.Exit(code=1)
+
+
+@peredachi_app.command("commons")
+@route("opys peredachi commons", skill="read-opys", mutates=True, tier="rare",
+       when="власник: скан опису опубліковано на Commons — записати адресу, посилання справ ведуть туди")
+def peredachi_commons(
+    peredacha: int = typer.Argument(..., help="номер передачі скану (`spysok --vyd skan`)"),
+    url: str = typer.Option(..., "--url", help="сторінка файлу: https://commons.wikimedia.org/wiki/File:…"),
+) -> None:
+    """Сервер звіряє SHA-1 файлу на Commons із переданим сканом і дописує адресу в джерела описів, що
+    її чекали."""
+    from nyshporka.opysy import remote as R
+    from nyshporka.share.upload import UploadError
+
+    try:
+        got = R.skan_na_commons(peredacha, url)
+    except UploadError as exc:
+        console.print(f"[warn]![/warn] {_e(exc)}")
+        raise typer.Exit(code=1) from None
+    console.print(f"✅ {_e(got.get('text'))}")

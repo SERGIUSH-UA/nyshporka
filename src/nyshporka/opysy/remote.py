@@ -83,6 +83,65 @@ def skan_stan(sha256: str, *, base: str = "") -> dict[str, Any]:
     return U._request("GET", f"{home}/opysy/skany?{urlencode({'sha256': sha256})}", auth=tok)
 
 
+# ── власник: забрати передачі з R2, скан на Commons ─────────────────────────
+
+
+def peredachi(*, vyd: str = "", status: str = "gotovo", after: int = 0,
+              base: str = "") -> dict[str, Any]:
+    """Що лежить у сховищі для власника (адмін; іншим сервер відповідає 404)."""
+    tok, home = U._tok_i_dim(base)
+    params = {"vyd": vyd, "status": status, "after": after}
+    return U._request("GET", f"{home}/opysy/admin/peredachi?{urlencode(params)}", auth=tok)
+
+
+def peredachu_zavantazhyty(url: str, kudy: Path, sha256: str) -> int:
+    """Байти передачі за підписаним посиланням — у файл, потоком; відбиток мусить збігтися з тим,
+    що прийняв сервер, інакше файл геть і `UploadError`."""
+    import hashlib
+
+    import httpx
+
+    from nyshporka.sources.http import proxy_url, transport
+
+    kudy = Path(kudy)
+    kudy.parent.mkdir(parents=True, exist_ok=True)
+    part = kudy.with_name(kudy.name + ".part")
+    h = hashlib.sha256()
+    n = 0
+    try:
+        with httpx.Client(transport=transport(proxy_url()), timeout=600.0) as c, \
+                c.stream("GET", url) as r:
+            if r.status_code >= 400:
+                raise U.UploadError(f"сховище відповіло {r.status_code}", status=r.status_code)
+            with part.open("wb") as fh:
+                for chunk in r.iter_bytes(1 << 20):
+                    fh.write(chunk)
+                    h.update(chunk)
+                    n += len(chunk)
+    except httpx.HTTPError as exc:
+        part.unlink(missing_ok=True)
+        raise U.UploadError(f"не завантажилось: {exc}") from exc
+    if h.hexdigest() != sha256:
+        part.unlink(missing_ok=True)
+        raise U.UploadError("відбиток завантаженого не збігся з прийнятим сервером")
+    part.replace(kudy)
+    return n
+
+
+def peredacha_zabrano(peredacha: int, sha256: str, *, base: str = "") -> dict[str, Any]:
+    """Власник забрав і звірив: сервер прибирає об'єкт зі сховища (рядок лишається слідом)."""
+    tok, home = U._tok_i_dim(base)
+    return U._request("POST", f"{home}/opysy/admin/peredachi/{int(peredacha)}/zabrano",
+                      body={"sha256": sha256}, auth=tok)
+
+
+def skan_na_commons(peredacha: int, url: str, *, base: str = "") -> dict[str, Any]:
+    """Скан опубліковано на Commons: сервер звіряє SHA-1 файлу там і дописує адресу в джерела."""
+    tok, home = U._tok_i_dim(base)
+    return U._request("POST", f"{home}/opysy/admin/skany/{int(peredacha)}/commons",
+                      body={"url": url}, auth=tok)
+
+
 def umovy(*, base: str = "") -> dict[str, Any]:
     """Чи прийняла людина чинні умови Засік і де їх прочитати."""
     tok, home = U._tok_i_dim(base)

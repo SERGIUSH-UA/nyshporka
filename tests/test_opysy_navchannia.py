@@ -111,3 +111,36 @@ def test_perevirka_vidkydaie(chleny: dict[str, bytes], prychyna: str) -> None:
 def test_perevirka_ne_arkhiv() -> None:
     with pytest.raises(NV.NavchanniaError, match="не архів"):
         NV.perevirka(b"not a tar")
+
+
+def test_vlasnyk_zabyraie_peredachi_zi_zvirkoiu(tmp_path: Path,
+                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    """`nysh opys peredachi zabraty`: файл лише зі збіглим відбитком, і лише тоді «забрано» (сервер
+    прибирає об'єкт зі сховища); відбиток не збігся — файлу немає, сховище не чіпається."""
+    import hashlib
+
+    import httpx
+    from typer.testing import CliRunner
+
+    from nyshporka.opysy import remote as R
+    from nyshporka.opysy.cli import app as opys_app
+    from nyshporka.sources import http as H
+
+    dobre, zle = b"%PDF-1.4 skan", b"tar.gz bytes"
+    skhovyshche = {"https://r2.example/1": dobre, "https://r2.example/2": b"pidmineno"}
+    monkeypatch.setattr(H, "transport", lambda proxy=None: httpx.MockTransport(
+        lambda req: httpx.Response(200, content=skhovyshche[str(req.url)])))
+    rows = [{"peredacha": 1, "vyd": "skan", "imia": "opys_1_9.pdf", "vnesok": 7,
+             "url": "https://r2.example/1", "sha256": hashlib.sha256(dobre).hexdigest(), "bytes": 13},
+            {"peredacha": 2, "vyd": "navchannia", "imia": "", "vnesok": 8,
+             "url": "https://r2.example/2", "sha256": hashlib.sha256(zle).hexdigest(), "bytes": 12}]
+    zabrano: list[tuple[int, str]] = []
+    monkeypatch.setattr(R, "peredachi", lambda **kw: {"rows": rows})
+    monkeypatch.setattr(R, "peredacha_zabrano",
+                        lambda pid, sha, **kw: zabrano.append((pid, sha)) or {})
+    monkeypatch.setenv("NYSH_OPYSY", "1")
+    res = CliRunner().invoke(opys_app, ["peredachi", "zabraty", str(tmp_path / "z")])
+    assert res.exit_code == 1, res.output
+    assert (tmp_path / "z" / "skan" / "1-opys_1_9.pdf").read_bytes() == dobre
+    assert not list((tmp_path / "z").rglob("2-*")), "чужі байти не лишаються на диску"
+    assert zabrano == [(1, hashlib.sha256(dobre).hexdigest())]
