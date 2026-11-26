@@ -36,6 +36,8 @@ class PushArgs(BaseModel):
                                                    "залито")
     na_obmin: bool = Field(default=False, description="віддати нормалізацію назв на обмін: опис "
                                                       "приймається без неї, нормалізує будь-хто")
+    bez_navchannia: bool = Field(default=False, description="не віддавати матеріал для навчання "
+                                                            "(геометрія рядків, кропи колонки №)")
     base: str = Field(default="", description="адреса пулу; порожньо — типова")
 
 
@@ -192,22 +194,28 @@ def opysy_push(a: PushArgs) -> Envelope:
     from nyshporka.share.upload import UploadError
 
     path = Path(a.file)
+    teka = path if path.is_dir() else None
     slid: Path | None = None
     sha = ""
-    if path.is_dir():
-        zibrano = _zibraty_paket(path, a.norm_model, na_obmin=a.na_obmin)
+    bulo: dict[str, Any] = {}
+    if teka is not None:
+        zibrano = _zibraty_paket(teka, a.norm_model, na_obmin=a.na_obmin)
         if not zibrano.ok:
             return zibrano
-        slid = path / "zalyto.json"
+        slid = teka / "zalyto.json"
         path = Path(zibrano.data["file"])
         sha = hashlib.sha256(path.read_bytes()).hexdigest()
         bulo = json.loads(slid.read_text(encoding="utf-8")) if slid.exists() else {}
         if bulo.get("sha256") == sha and not a.znovu:
             # той самий пакет: сервер однаково відповів би «уже в Супрязі», але байти вже лягли б
             # у сховище й лишились би там без внеску
-            return ok({"duplicate": True, "vnesok": bulo.get("vnesok"), "shyfra": bulo.get("shyfra"),
-                       "text": "цей самий пакет із теки вже залито — змін немає (`--znovu`, щоб "
-                               "залити все одно)"})
+            env = ok({"duplicate": True, "vnesok": bulo.get("vnesok"), "shyfra": bulo.get("shyfra"),
+                      "text": "цей самий пакет із теки вже залито — змін немає (`--znovu`, щоб "
+                              "залити все одно)"})
+            if not a.bez_navchannia and not bulo.get("navchannia") and bulo.get("vnesok"):
+                # матеріал минулого разу не доїхав — дослати до того самого внеску
+                _navchannia(teka, slid, {**bulo}, sha, a.base, env)
+            return env
     try:
         got = R.push(path, base=a.base)
     except (UploadError, OSError) as exc:
@@ -215,14 +223,38 @@ def opysy_push(a: PushArgs) -> Envelope:
         for d in getattr(exc, "details", None) or []:
             env.warn(str(d.get("rule") or "refusal"), str(d.get("text") or ""), level=ALERT)
         return env
-    if slid is not None:
-        slid.write_text(json.dumps({"sha256": sha, "vnesok": got.get("vnesok"),
-                                    "shyfra": got.get("shyfra")}, ensure_ascii=False),
-                        encoding="utf-8")
     env = ok(got)
     for w in got.get("warnings") or []:
         env.warn(str(w.get("code") or ""), str(w.get("text") or ""))
+    if slid is not None and teka is not None:
+        zapys = {"sha256": sha, "vnesok": got.get("vnesok"), "shyfra": got.get("shyfra")}
+        slid.write_text(json.dumps(zapys, ensure_ascii=False), encoding="utf-8")
+        if not a.bez_navchannia and got.get("vnesok"):
+            _navchannia(teka, slid, zapys, sha, a.base, env)
     return env
+
+
+def _navchannia(teka: Path, slid: Path, zapys: dict[str, Any], paket_sha: str, base: str,
+                env: Envelope) -> None:
+    """Матеріал для навчання до щойно прийнятого внеску. Опис уже в Супрязі, тож збій тут — лише
+    попередження з тим, як дослати; удалий — позначка в `zalyto.json`, щоб не слати вдруге."""
+    import json
+
+    from nyshporka import __version__
+    from nyshporka.opysy import navchannia as NV
+    from nyshporka.opysy import remote as R
+    from nyshporka.share.upload import UploadError
+
+    try:
+        blob, zvit = NV.zibraty(teka, paket_sha256=paket_sha, tool=f"nyshporka {__version__}")
+        R.navchannia(int(zapys["vnesok"]), blob, base=base)
+    except (NV.NavchanniaError, UploadError, OSError, ValueError) as exc:
+        env.warn("navchannia", f"опис віддано, а матеріал для навчання — ні: {exc}. Дослати: та сама "
+                               f"`nysh opys push {teka}`")
+        return
+    zapys["navchannia"] = zvit.as_json()
+    slid.write_text(json.dumps(zapys, ensure_ascii=False), encoding="utf-8")
+    env.data["navchannia"] = zvit.as_json()
 
 
 @op("opysy.search", summary="Нечіткий пошук по описах фондів у Супрязі",

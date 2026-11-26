@@ -40,7 +40,7 @@ def _bez_orendy(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def server(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Пул: політика (відкрито, крім ЦДІАК 442) і заливка — без мережі."""
-    st: dict[str, Any] = {"pushed": []}
+    st: dict[str, Any] = {"pushed": [], "navchannia": [], "navchannia_zbii": 0}
 
     def _policy(repo: str, fond: str, **kw: Any) -> dict[str, Any]:
         if fond == "442":
@@ -53,8 +53,18 @@ def server(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         return {"vnesok": 7, "shyfra": "ДАОО 445-9", "duplicate": False, "summary": {"rows": 3},
                 "warnings": []}
 
+    def _navchannia(vnesok: int, blob: bytes, **kw: Any) -> dict[str, Any]:
+        from nyshporka.share.upload import UploadError
+
+        if st["navchannia_zbii"]:
+            st["navchannia_zbii"] -= 1
+            raise UploadError("обрив мережі")
+        st["navchannia"].append((vnesok, blob))
+        return {"ready": True}
+
     monkeypatch.setattr(R, "policy", _policy)
     monkeypatch.setattr(R, "push", _push)
+    monkeypatch.setattr(R, "navchannia", _navchannia)
     return st
 
 
@@ -140,6 +150,33 @@ def test_read_i_push_dvoma_komandamy(tmp_path: Path, server: dict[str, Any],
     # після прийняття нормалізації повтор `read` нічого не нарізає й веде одразу до `push`
     env3 = _read(d, language="ru")
     assert env3.ok and env3.data["pachok_normalizatsii"] == 0 and "--norm-model" not in env3.data["next"]
+
+
+def test_push_vidsylaie_material_dlia_navchannia_raz(tmp_path: Path, server: dict[str, Any],
+                                                    chytannia: list[Path]) -> None:
+    """Після прийнятого опису їде матеріал для навчання — до того самого внеску й один раз; не
+    доїхав — опис однаково прийнято, попередження каже, як дослати, і повтор `push` дошле."""
+    from nyshporka.opysy import navchannia as NV
+
+    d = tmp_path / "opys"
+    _read_z_meta(d, pdf=str(_pdf(tmp_path)), repo="ДАОО", fond="445", opys="9", url=URL,
+                 language="ru")
+    server["navchannia_zbii"] = 1
+    got = OO.opysy_push(OO.PushArgs(file=str(d), na_obmin=True))
+    assert got.ok and not server["navchannia"]
+    assert any(w.code == "navchannia" and "nysh opys push" in w.text for w in got.warnings)
+    znov = OO.opysy_push(OO.PushArgs(file=str(d), na_obmin=True))
+    assert znov.ok and znov.data["duplicate"] and len(server["pushed"]) == 1
+    assert [v for v, _ in server["navchannia"]] == [7], "дослано до того самого внеску"
+    zvit = NV.perevirka(server["navchannia"][0][1])
+    assert zvit.storinok == 2 and zvit.golosy == ["run"]
+    OO.opysy_push(OO.PushArgs(file=str(d), na_obmin=True))
+    assert len(server["navchannia"]) == 1, "доїхало — удруге не шле"
+    bez = tmp_path / "bez"
+    _read_z_meta(bez, pdf=str(_pdf(tmp_path)), repo="ДАОО", fond="445", opys="9", url=URL,
+                 language="ru")
+    assert OO.opysy_push(OO.PushArgs(file=str(bez), na_obmin=True, bez_navchannia=True)).ok
+    assert len(server["navchannia"]) == 1
 
 
 def test_zakrytyi_fond_odrazu_z_posylanniam(tmp_path: Path, server: dict[str, Any],

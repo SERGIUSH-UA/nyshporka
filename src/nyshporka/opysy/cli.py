@@ -102,14 +102,19 @@ def push_cmd(
     znovu: bool = typer.Option(False, "--znovu", help="залити, навіть якщо цей самий пакет уже залито"),
     na_obmin: bool = typer.Option(False, "--na-obmin",
                                   help="віддати нормалізацію назв на обмін: опис приймається без неї"),
+    bez_navchannia: bool = typer.Option(False, "--bez-navchannia",
+                                        help="не віддавати матеріал для навчання (геометрія рядків, "
+                                             "кропи колонки №)"),
     base: str = typer.Option("", "--base", help="адреса пулу; порожньо — типова"),
     as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
 ) -> None:
-    """Віддати опис у Супрягу. Тека — усе за раз: відповіді нормалізації, пакет, ворота, заливка."""
+    """Віддати опис у Супрягу. Тека — усе за раз: відповіді нормалізації, пакет, ворота, заливка,
+    матеріал для навчання (за умовами Засік)."""
     from nyshporka import ops as O
 
     env = O.call("opysy.push", {"file": file, "norm_model": norm_model, "znovu": znovu,
-                                "na_obmin": na_obmin, "base": base})
+                                "na_obmin": na_obmin, "bez_navchannia": bez_navchannia,
+                                "base": base})
     if _answer(env, as_json):
         return
     d = env.data or {}
@@ -117,15 +122,22 @@ def push_cmd(
     if d.get("duplicate"):
         console.print(f"{_e(d.get('shyfra'))}: той самий пакет уже в Супрязі "
                       f"(внесок {_e(d.get('vnesok'))})" + (f" — {_e(d['text'])}" if d.get("text") else ""))
-        return
-    console.print(f"[green]прийнято[/green] {_e(d.get('shyfra'))} · внесок {_e(d.get('vnesok'))} · "
-                  f"сторінок {_e(s.get('pages_read'))}/{_e(s.get('pages_total'))} · "
-                  f"справ {_e(s.get('rows'))}")
-    if d.get("obmin"):
-        console.print("  нормалізацію назв віддано на обмін — її візьме інший учасник "
-                      "(`nysh opys obmin`)")
-    for w in d.get("warnings") or []:
-        console.print(f"[yellow]•[/yellow] {_e(w.get('text'))}")
+    else:
+        console.print(f"[green]прийнято[/green] {_e(d.get('shyfra'))} · внесок {_e(d.get('vnesok'))} · "
+                      f"сторінок {_e(s.get('pages_read'))}/{_e(s.get('pages_total'))} · "
+                      f"справ {_e(s.get('rows'))}")
+        if d.get("obmin"):
+            console.print("  нормалізацію назв віддано на обмін — її візьме інший учасник "
+                          "(`nysh opys obmin`)")
+        for w in d.get("warnings") or []:
+            console.print(f"[yellow]•[/yellow] {_e(w.get('text'))}")
+    nv = d.get("navchannia")
+    if nv:
+        console.print(f"  матеріал для навчання: сторінок {_e(nv.get('storinok'))} · кропів колонки № "
+                      f"{_e(nv.get('kropiv'))} · {_e(round((nv.get('bytes') or 0) / 1048576, 1))} МБ")
+    for w in env.warnings:
+        if getattr(w, "code", "") == "navchannia":
+            console.print(f"[yellow]•[/yellow] {_e(w.text)}")
 
 
 @app.command("search")

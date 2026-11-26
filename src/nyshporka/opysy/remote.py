@@ -41,6 +41,29 @@ def push(path: Path, *, base: str = "") -> dict[str, Any]:
             "obmin": bool(done.get("obmin"))}
 
 
+def navchannia(vnesok: int, blob: bytes, *, base: str = "") -> dict[str, Any]:
+    """Матеріал для навчання до прийнятого внеску: реєстрація → байти в сховище → `complete`.
+
+    Той самий двоходовий шлях, що в пакета: великі байти не йдуть через сервер (там стеля 1 МБ).
+    Сервер забирає архів зі сховища, перевіряє тим самим `navchannia.perevirka`, кладе у своє
+    закрите сховище й прибирає тимчасовий об'єкт."""
+    from nyshporka.opysy import navchannia as NV
+
+    NV.perevirka(blob)  # не везти байти заради відмови, яку видно тут
+    tok, home = U._tok_i_dim(base)
+    reg = U._request("POST", f"{home}/opysy/{int(vnesok)}/navchannia", auth=tok,
+                     body={"bytes": len(blob)})
+    U._put(str(reg["upload"]), blob)
+    return U._request("POST", f"{home}/opysy/{int(vnesok)}/navchannia/complete", auth=tok,
+                      timeout=U.COMPLETE_TIMEOUT)
+
+
+def umovy(*, base: str = "") -> dict[str, Any]:
+    """Чи прийняла людина чинні умови Засік і де їх прочитати."""
+    tok, home = U._tok_i_dim(base)
+    return U._request("GET", f"{home}/opysy/umovy", auth=tok)
+
+
 def search(q: str, *, repo: str = "", fond: str = "", limit: int = 50,
            base: str = "") -> dict[str, Any]:
     """Нечіткий пошук по описах. Хто має доступ, вирішує сервер (бета-тест, вхід, норми) і сам
