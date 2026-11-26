@@ -106,3 +106,31 @@ def test_storinka_tekstom_khvist_poperednoi() -> None:
     r = V.records("ского уезда Подольской губернии.\n\n## I44\n\nДело о разделе имения Литинцы.\n")[0][0]
     assert r[0].get("cont") and r[0]["title"] == ["ского уезда Подольской губернии."]
     assert r[1]["no"] == 144 and r[1]["title"] == ["Дело о разделе имения Литинцы."]
+
+
+def test_storinka_tekstom_smuhy_v_ramtsi_tekstu(tmp_path: Path) -> None:
+    d = tmp_path / "vl"
+    d.mkdir()
+    (d / "0001.md").write_text("785\n\nПисьма Боровского Потоцким за 1712 г.\n\n786\n\n"
+                               "Письма Браницких Потоцким за 1716 г.\n\n787\n\nПисьма Брукль Потоцким за 1763 г.\n",
+                               encoding="utf-8")
+    (d / "0001.blocks.json").write_text(json.dumps({"blocks": [
+        {"label": "number", "bbox": [1386, 100, 1474, 177]},
+        {"label": "content", "bbox": [69, 229, 1310, 2250]}]}), encoding="utf-8")
+    res = V.build(d, tmp_path / "t.tsv", "2")
+    rows = _rows(tmp_path / "t.tsv")
+    assert [r["no"] for r in rows] == ["785", "786", "787"] and res["mistse_vl"] == 3
+    smuhy = [tuple(map(int, r["y"].split("-"))) for r in rows]
+    # кожна справа — своя смуга в рамці тексту, а не вся сторінка
+    assert len(set(smuhy)) == 3 and all(229 - V.ZAPAS <= a < b <= 2250 for a, b in smuhy)
+
+
+def test_storinka_tekstom_nomer_lantsiuzhkom_ne_rik(tmp_path: Path) -> None:
+    d = tmp_path / "vl"
+    d.mkdir()
+    (d / "0001.md").write_text("1785\n\nПисьма Боровского Потоцким за 1712 г.\n\n1786\n\n"
+                               "Письма Браницких Потоцким за 1716 г.\n\n1787\n\nПисьма Брукль Потоцким за 1763 г.\n",
+                               encoding="utf-8")
+    V.build(d, tmp_path / "t.tsv", "2")
+    # перший номер сторінки без сусіда ще може бути роком над справою; наступні йдуть ланцюжком — номери
+    assert [r["no"] for r in _rows(tmp_path / "t.tsv")][1:] == ["1786", "1787"]
