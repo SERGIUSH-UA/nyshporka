@@ -252,8 +252,14 @@ def _split(row: list[tuple[str, bool]], lo: int, hi: int) -> dict[str, Any]:
     return out
 
 
-_LAT = re.compile(r"[A-Za-z]")
 _KYR = re.compile(r"[А-Яа-яЁёІіЇїЄєҐґѢѣ]")
+#: Початок засвідчувального напису: «В даний розділ опису внесено…», «В настоящую опись внесено…»,
+#: «Внесено на підставі акту…», «Итого…», «Разом…», «Літерні номери — немає», «Опис склав», «СХВАЛЕНО».
+#: Слово після «В» буває прочитане криво («В дачий розділ опису»), тому — будь-яке.
+_ZASVIDCHENNIA = re.compile(r"(?:в\s+\w{2,10}\s+(?:опис|розд)|внесено\b|итого\b|всего\b|"
+                            r"разом\b|усього\b|всього\b|л[іи]терн\w*\s+номер|пропущен\w*\s+номер|"
+                            r"опис\w*\s+склав|опись\s+составил|схвалено\b|одобрено\b|перев[іи]рено\b|"
+                            r"проверено\b)", re.I)
 
 
 def _nomer_ryadka(t: str) -> int | None:
@@ -290,7 +296,9 @@ def tekst_records(md: str) -> list[dict[str, Any]]:
                 ostannii = n
                 kinets_rechennia = False
             continue
-        if len(_LAT.findall(ln)) > len(_KYR.findall(ln)):
+        if 2 * len(_KYR.findall(ln)) < len(re.findall(r"[^\W\d_]", ln)):
+            # кирилиці менше половини літер: рукописна вставка, прочитана латиницею чи грецькою
+            # («Cnucos pereii», «ΠΕΡΕΒΙΡΕΗΟ»)
             continue
         # номер і назва одним рядком: «1935 Письма Земецкого … за 1765-66 гг. 4»
         m = re.match(r"((?:[Il1]\s?)?\d{1,5}(?:\s?[а-вa-b](?![^\W\d_]))?)\.?\s+(\S.*)$", ln)
@@ -305,6 +313,10 @@ def tekst_records(md: str) -> list[dict[str, Any]]:
             ostannii = n
             kinets_rechennia = nazva.endswith(".")
             continue
+        if _ZASVIDCHENNIA.match(ln):
+            # засвідчувальний напис розділу чи опису — далі справ на сторінці немає. Інакше напис ставав
+            # «справою без номера» і збивав ланцюжок (ДАХмО ф.17 оп.2, стор. 23: №72–74 → 14–16)
+            break
         litery = len(re.findall(r"[^\W\d_]", ln))
         if litery < 3:
             continue
