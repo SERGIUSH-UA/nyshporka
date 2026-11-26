@@ -58,9 +58,15 @@ KOLONKY = ["opys", "no", "title", "end", "year_from", "year_to", "folios", "src_
            "golos", "mistse"]
 
 
+def _bez_latex(t: str) -> str:
+    """Номер у LaTeX-обгортці з цифровим індексом — сам номер: «$ 721^{{2}} $» → «721» (ДАВіО ф.200
+    оп.1, кадр 81). Літерний індекс («$ ^{a} $») розбирає `_split` — тут не чіпається."""
+    return re.sub(r"^\$\s*(\d{1,5})\s*\^\s*\{+\s*\d?\s*\}+\s*\$$", r"\1", t)
+
+
 def num(t: str) -> int | None:
     # «I 53» — машинописна одиниця літерою з пробілом (ЦДІАК ф.49 оп.2, стор. 24: №153–163 губились)
-    s = re.sub(r"^([Il1])\s+(?=\d)", r"\1", t.strip()).translate(TR)
+    s = re.sub(r"^([Il1])\s+(?=\d)", r"\1", _bez_latex(t.strip())).translate(TR)
     s = re.sub(r"(?<=\d)\s*\^\s*(?=\d)", "0", s)  # «5^5» — 505: нуль, прочитаний як «^» (ДАВіО ф.7 оп.2)
     m = re.fullmatch(r"[^\d]{0,2}(\d{1,5})[а-яa-z]?[^\d]{0,2}", s)
     return int(m.group(1)) if m else None
@@ -224,7 +230,25 @@ def _persha_chysla(g: list[list[tuple[str, bool]]]) -> bool:
         c = next(((t.strip(), first) for t, first in r if t.strip()), None)
         if c is not None and c[1]:
             persha.append(c[0])
-    return len(persha) >= 2 and sum(num(t) is not None for t in persha) >= 0.6 * len(persha)
+    if len(persha) >= 2 and sum(num(t) is not None for t in persha) >= 0.6 * len(persha):
+        return True
+    return _kolonka_nomeriv(g)
+
+
+def _kolonka_nomeriv(g: list[list[tuple[str, bool]]]) -> bool:
+    """Одна з перших трьох колонок — колонка номерів: її непорожні клітинки (≥ 3) переважно (≥ 60 %)
+    числа, а праворуч від числа в тому самому рядку — назва (≥ 6 літер). Так розпізнається сторінка,
+    де назва справи займає кілька рядків таблиці без об'єднаних клітинок: рядків із номером там
+    лише кожен четвертий-п'ятий, і частка за першою непорожньою клітинкою рядка її відкидала (ДАВіО
+    ф.200 оп.1, кадр 81: справи 721–728). Покажчик сіл (номери справ без назв праворуч) — не таблиця."""
+    width = max((len(r) for r in g), default=0)
+    for c in range(min(3, width)):
+        klitynky = [(r, r[c][0].strip()) for r in g if len(r) > c and r[c][1] and r[c][0].strip()]
+        z_nazvoiu = [t for r, t in klitynky if num(t) is not None
+                     and any(first and len(re.findall(r"[^\W\d_]", x)) >= 6 for x, first in r[c + 1:])]
+        if len(klitynky) >= 3 and len(z_nazvoiu) >= 2 and len(z_nazvoiu) >= 0.6 * len(klitynky):
+            return True
+    return False
 
 
 _MONTH = re.compile(r"(?:янв|фев|мар|апр|ма[яй]|июн|июл|ион|авг|сен|окт|ноя|дек|сiч|січ|лют|бер|"
@@ -258,7 +282,7 @@ def _split(row: list[tuple[str, bool]], lo: int, hi: int) -> dict[str, Any]:
         t = re.sub(r"\s*\$\s*\^\s*\{?\s*([^\W\d_])\s*\}?\s*\$", r"\1", text).strip()
         # нуль усередині номера VL буває читає як «^»: «5^5» — це 505 (ДАВіО ф.7 оп.2, стор. 47: №505–509
         # лишались без номера й липли до №504)
-        t = re.sub(r"(?<=\d)\s*\^\s*(?=\d)", "0", t)
+        t = re.sub(r"(?<=\d)\s*\^\s*(?=\d)", "0", _bez_latex(t))
         if not first or not t:
             continue
         n = num(t)
@@ -464,6 +488,40 @@ def _nomer_vl(raw: str) -> tuple[int | None, str]:
     return int(m.group(1)), _LITERA.get(lit, lit)
 
 
+#: На скільки номер мусить упасти, щоб бути підозрою на втрачені перші цифри; на скільки вперед
+#: шукати продовження.
+SPAD = 20
+VPERED_TSYFRY = 3
+
+
+def _pershi_tsyfry(recs: list[dict[str, Any]]) -> None:
+    """Номер, якому VL загубив перші цифри, — продовження ряду: «85» після 384 — це 385, якщо 385
+    закінчується на «85». Ряд таких номерів буває довгий (ДАВіО ф.200 оп.1, кадр 45: 385–395 читались
+    85–95), і строгий ланцюжок його не перекривав, коли в описі пропущено номер (393): рядків між
+    опорами 384 і 396 на один менше, ніж номерів. Добудований номер підтвердженим не стає."""
+    ost: int | None = None
+    rozdil = None
+    for r in recs:
+        if r["_rozdil"] != rozdil:
+            rozdil, ost = r["_rozdil"], None
+        n, lit = r["_n"]
+        if n is None:
+            continue
+        s = str(n)
+        if ost is not None and n + SPAD < ost and len(s) >= 2:
+            # одна цифра («0», «3») — надто часто шум чи уривок сусіднього рядка (ЦДІАК ф.442: «0» біля
+            # рядка-продовження ставав 60 і зсував прочитаний 62); добудовується рівно одна перша цифра
+            c = next((c for c in range(ost + 1, ost + 1 + VPERED_TSYFRY)
+                      if len(str(c)) == len(s) + 1 and str(c).endswith(s)), None)
+            if c is not None:
+                r["_n"] = (c, lit)
+                r["_dobudovano"] = True
+                ost = c
+                continue
+        if not lit:
+            ost = n
+
+
 def _nomery(recs: list[dict[str, Any]]) -> None:
     """Номери справ із читання VL (див. докстрінг модуля, п. 4)."""
     rozdil = 0
@@ -475,6 +533,7 @@ def _nomery(recs: list[dict[str, Any]]) -> None:
         r["_rozdil"] = rozdil
         if n is not None:
             ostannii = n
+    _pershi_tsyfry(recs)
     z_nomerom = [r for r in recs if r["_n"][0] is not None]
     for k, r in enumerate(z_nomerom):
         n, lit = r["_n"]
@@ -509,6 +568,9 @@ def _nomery(recs: list[dict[str, Any]]) -> None:
         lit_pislia = pislia["_n"][1] if pislia is not None else ""
         if r.get("_vyvedena"):
             r.update(no=f"{n}{lit}", no_src="read")
+        elif r.get("_dobudovano"):
+            # перші цифри — з ряду, а не з читання: не підтверджено, у Супрязі — «звірити»
+            r.update(no=f"{n}{lit}", no_src="seq")
         elif n is not None and skilky[(r["_rozdil"], n, lit)] == 1 and (
                 (p is not None and (n == p + 1 or (lit and n == p)))
                 or (q is not None and (q == n + 1 or (q == n and lit_pislia)))):
@@ -547,7 +609,8 @@ def _zapovnyty(recs: list[dict[str, Any]], idx: list[int], kotvy: list[tuple[int
             continue
         for k in range(ka + 1, kb):
             r = recs[idx[k]]
-            if str(r.get("no")) != str(va + k - ka):
+            # добудований (перші цифри з ряду), що збігся з ланцюжком, підтверджено так само
+            if str(r.get("no")) != str(va + k - ka) or (r.get("_dobudovano") and not r.get("confirmed")):
                 r.update(no=va + k - ka, no_src="seq", confirmed="between")
 
 
@@ -567,11 +630,13 @@ def _lantsiuzhkom(recs: list[dict[str, Any]]) -> None:
 
     for rozdil in sorted({r["_rozdil"] for r in recs}):
         idx = [i for i, r in enumerate(recs) if r["_rozdil"] == rozdil]
+        # опора — лише прочитаний номер: добудований (перші цифри з ряду) підтверджується ланцюжком
         reads = [(k, recs[i]["_n"][0]) for k, i in enumerate(idx)
-                 if recs[i]["_n"][0] is not None and not recs[i]["_n"][1]]
+                 if recs[i]["_n"][0] is not None and not recs[i]["_n"][1] and not recs[i].get("_dobudovano")]
         _zapovnyty(recs, idx, _tochnyi_lantsiuzhok(reads))
         reads2 = [(k, int(v)) for k, i in enumerate(idx) for v in [recs[i].get("no")]
-                  if isinstance(v, int) or (isinstance(v, str) and v.isdigit())]
+                  if (isinstance(v, int) or (isinstance(v, str) and v.isdigit()))
+                  and not (recs[i].get("_dobudovano") and not recs[i].get("confirmed"))]
         _zapovnyty(recs, idx, NU.chain(reads2))
 
 
