@@ -59,7 +59,8 @@ KOLONKY = ["opys", "no", "title", "end", "year_from", "year_to", "folios", "src_
 
 
 def num(t: str) -> int | None:
-    s = t.strip().translate(TR)
+    # «I 53» — машинописна одиниця літерою з пробілом (ЦДІАК ф.49 оп.2, стор. 24: №153–163 губились)
+    s = re.sub(r"^([Il1])\s+(?=\d)", r"\1", t.strip()).translate(TR)
     m = re.fullmatch(r"[^\d]{0,2}(\d{1,5})[а-яa-z]?[^\d]{0,2}", s)
     return int(m.group(1)) if m else None
 
@@ -211,6 +212,11 @@ def _starts_case(t: str) -> bool:
                          r"Отчет)", t))
 
 
+#: «То же …» / «Те саме …» — назва справи, що повторює попередню (VL пише й латиницею: «To me»). З роком
+#: така клітинка схожа на дату й губилась разом зі справою (ЦДІАК ф.49 оп.2, №2872–2908: «То же за 1730 г.»).
+_TO_ZHE = re.compile(r"\s*(?:т[оo]\s*ж[еe]|t[oо]\s*m[eе]|тоже|те\s*саме|те\s*ж)\b", re.I)
+
+
 def _split(row: list[tuple[str, bool]], lo: int, hi: int) -> dict[str, Any]:
     """Клітинки одного боку розвороту за ВМІСТОМ: номер — перше число до назви; дата — місяць
     або рік; аркуші — число після дати."""
@@ -237,11 +243,87 @@ def _split(row: list[tuple[str, bool]], lo: int, hi: int) -> dict[str, Any]:
         elif n is not None and (out["dates"] or out["title"]):
             if re.search(r"\d", t):
                 out["folios"].append(t)
+        elif not out["title"] and _TO_ZHE.match(t):
+            out["title"].append(t)
         elif _is_date(t) and not (len(re.findall(r"[^\W\d_]", t)) > 25):
             out["dates"].append(t)
         elif len(re.findall(r"[^\W\d_]", t)) >= 6:
             out["title"].append(t)
     return out
+
+
+_LAT = re.compile(r"[A-Za-z]")
+_KYR = re.compile(r"[А-Яа-яЁёІіЇїЄєҐґѢѣ]")
+
+
+def _nomer_ryadka(t: str) -> int | None:
+    """Рядок тексту — сам номер справи («1785», «I44», «144a», «## 340»), без назви; інакше None."""
+    t = re.sub(r"^#+\s*", "", t).strip()
+    if len(re.findall(r"[^\W\d_]", t)) > 2:
+        return None
+    m = re.fullmatch(r"(\d{1,5})\s*[а-вa-b]?\.?", t.translate(TR))
+    return int(m.group(1)) if m else None
+
+
+def tekst_records(md: str) -> list[dict[str, Any]]:
+    """Справи сторінки, яку VL віддав текстом, а не таблицею: номер — окремим рядком, за ним назва.
+
+    Обережно, бо в тексті немає колонок: номер відкриває справу, лише коли йде за попереднім (крок 0–3,
+    0 — літерна справа) або, перший на сторінці, коли за ним стоїть назва; решта чисел — аркуші чи
+    номер сторінки, і їх відкинуто. Рядок з великої літери після рядка, що скінчився крапкою, — справа,
+    якій VL загубив номер (номер поставить ланцюжок). Текст до першої справи з малої літери — хвіст
+    попередньої сторінки. Рядок, де латиниці більше, ніж кирилиці, — рукописна вставка, яку рушій друку
+    прочитав латиницею («Cnucos pereii»): геть. Аркуші не беруться — VL кладе їх стовпчиком у кінці."""
+    lines = [s for s in (re.sub(r"^#+\s*", "", ln).strip()
+                         for ln in html.unescape(re.sub(r"<[^>]+>", " ", md)).splitlines()) if s]
+    recs: list[dict[str, Any]] = []
+    ostannii: int | None = None
+    kinets_rechennia = True
+    for i, ln in enumerate(lines):
+        n = _nomer_ryadka(ln)
+        if n is not None:
+            dali = next((x for x in lines[i + 1:i + 3] if _nomer_ryadka(x) is None), "")
+            if ((ostannii is None and len(_KYR.findall(dali)) >= 6)
+                    or (ostannii is not None and 0 <= n - ostannii <= 3)):
+                recs.append({"no": n, "no_raw": re.sub(r"^#+\s*", "", ln), "old": "", "title": [],
+                             "dates": [], "folios": []})
+                ostannii = n
+                kinets_rechennia = False
+            continue
+        if len(_LAT.findall(ln)) > len(_KYR.findall(ln)):
+            continue
+        # номер і назва одним рядком: «1935 Письма Земецкого … за 1765-66 гг. 4»
+        m = re.match(r"((?:[Il1]\s?)?\d{1,5}(?:\s?[а-вa-b](?![^\W\d_]))?)\.?\s+(\S.*)$", ln)
+        if m and (n := _nomer_ryadka(m.group(1))) is not None and len(_KYR.findall(m.group(2))) >= 3 and (
+                (ostannii is not None and 0 <= n - ostannii <= 3)
+                or (ostannii is None and m.group(2)[:1].isupper() and len(_KYR.findall(m.group(2))) >= 6)):
+            nazva, fol = m.group(2).strip(), []
+            if (f := re.search(r"(?<=[^\d\s])\s+(\d{1,4})$", nazva)) and re.search(r"г\.?\s+\d{1,4}$", nazva):
+                nazva, fol = nazva[:f.start()].strip(), [f.group(1)]
+            recs.append({"no": n, "no_raw": m.group(1), "old": "", "title": [nazva], "dates": [],
+                         "folios": fol})
+            ostannii = n
+            kinets_rechennia = nazva.endswith(".")
+            continue
+        litery = len(re.findall(r"[^\W\d_]", ln))
+        if litery < 3:
+            continue
+        if _is_date(ln) and litery <= 6 and recs and not recs[-1].get("cont"):
+            recs[-1]["dates"].append(ln)
+            continue
+        nova = kinets_rechennia and ln[:1].isupper()
+        if not recs:
+            # хвіст попередньої сторінки теж буває з великої («Потоцкому за 1790 г.») — справою без
+            # номера стає лише довгий рядок
+            nova = nova and litery >= 20
+            recs.append({"no": None, "title": [ln], "dates": [], "folios": [],
+                         **({"lost_no": True} if nova else {"cont": True})})
+        elif nova and (recs[-1]["title"] or recs[-1].get("no") is None):
+            recs.append({"no": None, "title": [ln], "dates": [], "folios": [], "lost_no": True})
+        else:
+            recs[-1]["title"].append(ln)
+        kinets_rechennia = ln.rstrip().endswith(".")
+    return recs
 
 
 def records(md: str, prev: tuple[int, list[dict[str, int]]] | None = None
@@ -250,6 +332,11 @@ def records(md: str, prev: tuple[int, list[dict[str, int]]] | None = None
     p = _Tables()
     p.feed(md)
     sides_out: list[list[dict[str, Any]]] = []
+    if not p.tables:
+        # VL віддав сторінку текстом, без таблиці (машинопис без ліній — ЦДІАК ф.49 оп.2: 21 сторінка
+        # з 283): справи — за рядками номерів
+        recs = tekst_records(md)
+        return ([recs] if recs else []), prev
     for rows in p.tables:
         g = grid(rows)
         if not g:
@@ -303,8 +390,11 @@ _NASTUPNA = {"": "а", "а": "б", "б": "в", "в": "г"}
 
 
 def _nomer_vl(raw: str) -> tuple[int | None, str]:
-    """(номер, літера) з клітинки номера: «136a» → (136, «а»)."""
-    m = re.fullmatch(r"\D{0,2}(\d{1,5})\s*([^\W\d_])?\W{0,2}", raw.strip())
+    """(номер, літера) з клітинки номера: «136a» → (136, «а»); «I304» → (1304, «»): машинопис бив
+    одиницю літерою I, і без заміни номер губив першу цифру (ЦДІАК ф.49 оп.2: 304 замість 1304)."""
+    raw = re.sub(r"^([Il1])\s+(?=\d)", r"\1", raw.strip())
+    m = re.fullmatch(r"\D{0,2}(\d{1,5})\s*([^\W\d_])?\W{0,2}", re.sub(
+        r"^\D{0,2}[\dIlі]+", lambda x: x.group(0).translate(TR), raw))
     if not m:
         return None, ""
     lit = (m.group(2) or "").lower()
@@ -499,6 +589,13 @@ def _porozhni(spravy: list[dict[str, Any]]) -> list[dict[str, Any]]:
         poperednia = out[-1] if out else None
         n = v.get("no")
         pn = poperednia.get("no") if poperednia else None
+        if isinstance(pn, int) and n is not None and 0 < n - pn <= 2:
+            # номер іде слідом за попереднім — справа, хоч і ≥ 1500: у великому описі це не уривок року
+            # (ЦДІАК ф.49 оп.2, №2872–2908 «То же за 1730 г.» зливались у №2871)
+            if len(re.findall(r"[^\W\d_]", daty)) >= 3:
+                v = {**v, "title": [daty], "dates": []}
+            out.append(v)
+            continue
         if poperednia is not None and (n is None or n >= 1500 or (isinstance(pn, int) and n > pn + 50)):
             poperednia["dates"] = [*poperednia.get("dates", []), *(v.get("dates") or [])]
             if not poperednia.get("folios") and v.get("folios"):

@@ -60,3 +60,49 @@ def test_bez_ramky_tablytsi_vsia_storinka(tmp_path: Path) -> None:
     res = V.build(d, tmp_path / "t.tsv", "1")
     assert res["bez_ramky"] == 3
     assert {r["y"] for r in _rows(tmp_path / "t.tsv")} == {f"0-{V.VYSOTA}"}
+
+
+# ── ЦДІАК ф.49 оп.2 (26.11.2026): машинопис 1950-х, одиниця літерою I, сторінки текстом ──
+
+
+def test_odynytsia_literoiu_I_ne_hubyt_pershoi_tsyfry() -> None:
+    assert V._nomer_vl("I304") == (1304, "")
+    assert V._nomer_vl("I 53") == (153, "")
+    assert V._nomer_vl("136a") == (136, "а")
+    assert V.num("I 53") == 153
+
+
+def test_to_zhe_z_rokom_okrema_sprava(tmp_path: Path) -> None:
+    d = tmp_path / "vl"
+    d.mkdir()
+    (d / "0001.md").write_text(
+        "<table><tr><td>2871</td><td>Акты на латинском языке за 1725-29гг. часть I.</td><td>78</td></tr>"
+        "<tr><td>2872</td><td>To me - &quot; - - &quot; - за 1730г.</td><td>53</td></tr>"
+        "<tr><td>2873</td><td>То же за 1730-1735гг.</td><td>166</td></tr>"
+        "<tr><td>2874</td><td>1736г.</td><td>45</td></tr></table>", encoding="utf-8")
+    V.build(d, tmp_path / "t.tsv", "2")
+    rows = _rows(tmp_path / "t.tsv")
+    assert [r["no"] for r in rows] == ["2871", "2872", "2873", "2874"]
+    assert rows[2]["title"].startswith("То же")
+
+
+def test_storinka_tekstom_bez_tablytsi() -> None:
+    md = ("208\n\n1 2 3 4 5\n\n1785\n\nПисьма Боровского Потоцким за 1712, 1714 и 1715 гг.\n\n"
+          "1786\n\nПисьма Браницких Потоцким за 1716 и 1789 гг.\n\n"
+          "Cnucos pereii, npousnecnmop na ceiwk.\n\n"
+          "1787 То же Броповчика Потоцким за 1731 и 1839 гг. 3\n\n"
+          "Проект письма неустановленного лица о продаже леса в имении Потоцких.\n\n6\n\n20\n\n3\n")
+    sides, prev = V.records(md, (5, [{"no": 0}]))
+    assert prev == (5, [{"no": 0}])
+    r = sides[0]
+    # номер сторінки й стовпчик аркушів — не справи; латиниця рукописної вставки — геть
+    assert [x["no"] for x in r] == [1785, 1786, 1787, None]
+    assert r[1]["title"] == ["Письма Браницких Потоцким за 1716 и 1789 гг."]
+    assert r[2]["title"] == ["То же Броповчика Потоцким за 1731 и 1839 гг."] and r[2]["folios"] == ["3"]
+    assert r[3].get("lost_no") and r[3]["title"][0].startswith("Проект письма")
+
+
+def test_storinka_tekstom_khvist_poperednoi() -> None:
+    r = V.records("ского уезда Подольской губернии.\n\n## I44\n\nДело о разделе имения Литинцы.\n")[0][0]
+    assert r[0].get("cont") and r[0]["title"] == ["ского уезда Подольской губернии."]
+    assert r[1]["no"] == 144 and r[1]["title"] == ["Дело о разделе имения Литинцы."]
