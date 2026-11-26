@@ -217,6 +217,11 @@ def test_map_hides_disabled_section_read_only_writes_and_project_layer(
     ("сусідні села", "nysh geog near"),
     ("знайти прізвище в прочитаному", "nysh text find"),
     ("кроп рядка", "nysh text crop"),
+    # Книга — теж матеріал: 26.11.2026 «чи є книга на Чтиві» пішло у вебпошук,
+    # бо `nysh find` про друковане мовчав, а «чтиво» не сходилось із «чтиві».
+    ("чи є книга на чтиві", "nysh find"),
+    ("чтиво книга бібліотека", "nysh find"),
+    ("які книги цієї парафії", "nysh parish find"),
 ])
 def test_find_puts_the_right_command_in_top_three(tmp_path: Path, query: str,
                                                   want: str) -> None:
@@ -260,6 +265,14 @@ def test_find_matches_word_forms() -> None:
     assert M._stems("прогону") == M._stems("прогони") == ["прого"]
     assert M._match("прогі", {"прогі"})
     assert not M.find("")
+
+
+def test_find_matches_short_word_forms() -> None:
+    """П'ятилітерні «чтиво»/«чтиві»/«чтива», «книга»/«книгу» — один префікс."""
+    assert M._stems("чтиво") == M._stems("чтиві") == M._stems("чтива") == ["чтив"]
+    assert M._stems("книга") == M._stems("книгу") == M._stems("книги") == ["книг"]
+    assert M._stems("текст") == ["текст"], "на приголосну — слово ціле"
+    assert M._match(M._stems("чтивом")[0], set(M._stems("на Чтиві")))
 
 
 # ── хук ──────────────────────────────────────────────────────────────────────
