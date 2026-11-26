@@ -518,31 +518,31 @@ def dzherelo_cmd(
 
 @app.command("skan")
 @route("opys skan", skill="read-opys", mutates=True, tier="rare",
-       when="людина передає власникові Нишпорки скан опису, якого немає онлайн, для Wikimedia Commons")
+       when="людина погоджується передати власникові Нишпорки скан опису, якого немає онлайн, для "
+            "Wikimedia Commons")
 def skan_cmd(folder: str = typer.Argument(..., help="робоча тека опису")) -> None:
-    """Передати власникові Нишпорки скан опису, якого немає онлайн: він заллє його на Wikimedia
-    Commons, і посилання справ у Засіках вестимуть туди. Лише людина у своєму терміналі — скан стане
-    публічним назавжди (агентові недоступно)."""
+    """Згода людини передати власникові Нишпорки скан опису, якого немає онлайн: `nysh opys push`
+    тоді віддасть опис разом зі сканом, власник заллє скан на Wikimedia Commons, і посилання справ у
+    Засіках вестимуть туди. Лише людина у своєму терміналі — скан стане публічним назавжди
+    (агентові недоступно)."""
     import sys
     from pathlib import Path
 
-    from nyshporka.opysy import remote as R
     from nyshporka.opysy import workdir as W
-    from nyshporka.share.upload import UploadError
 
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
-        console.print("[warn]![/warn] скан передає лише людина у своєму терміналі: він стане публічним "
-                      "на Wikimedia Commons. Попросіть людину набрати цю команду самій.")
+        console.print("[warn]![/warn] згоду на передачу скану дає лише людина у своєму терміналі: скан "
+                      "стане публічним на Wikimedia Commons. Попросіть людину набрати цю команду самій.")
         raise typer.Exit(code=1)
     try:
         pas = W.load(Path(folder))
     except W.WorkdirError as exc:
         console.print(f"[warn]![/warn] {_e(exc)}")
         raise typer.Exit(code=1) from None
-    fail = Path(pas.get("published") or pas["pdf"])
-    sha = str((pas.get("source") or {}).get("sha256") or "")
-    if not fail.is_file() or fail.suffix.lower() not in (".pdf", ".djvu"):
-        console.print(f"[warn]![/warn] передати можна лише файл PDF чи DjVu, а опис заведено з {_e(fail)}")
+    fail = W.skan_fail(pas)
+    if fail is None:
+        console.print(f"[warn]![/warn] передати можна лише файл PDF чи DjVu, а опис заведено з "
+                      f"{_e(pas.get('published') or pas['pdf'])}")
         raise typer.Exit(code=1)
     mb = fail.stat().st_size / 1048576
     console.print(f"Скан [bold]{_e(fail.name)}[/bold] ({mb:.1f} МБ, сторінок {_e(pas.get('pages'))}) — "
@@ -552,24 +552,20 @@ def skan_cmd(folder: str = typer.Argument(..., help="робоча тека оп�
     console.print("Передавайте лише скан, який можна поширювати, і лише якщо згодні з публікацією. "
                   "Умови: https://nyshporka.online/zasiky/umovy")
     try:
-        vidpovid = input("Передати скан? Напишіть «так»: ")
+        vidpovid = input("Передати скан разом з описом? Напишіть «так»: ")
     except (KeyboardInterrupt, EOFError):
         vidpovid = ""
     if vidpovid.strip().lower() != "так":
-        console.print("скасовано — нічого не передано")
+        console.print("скасовано — згоди не записано")
         raise typer.Exit(code=1)
     try:
-        got = R.skan_viddaty(fail, sha256=sha, meta={"repo": pas.get("repo"), "fond": pas.get("fond"),
-                                                      "opys": pas.get("opys"),
-                                                      "storinok": pas.get("pages")})
-    except (UploadError, OSError) as exc:
+        W.zapysaty_skan_zghodu(Path(folder))
+    except (W.WorkdirError, OSError) as exc:
         console.print(f"[warn]![/warn] {_e(exc)}")
         raise typer.Exit(code=1) from None
-    console.print(f"✅ {_e(got.get('text') or 'передано')}")
-    if got.get("commons_url"):
-        console.print(f"  на Commons: {_e(got['commons_url'])}")
-    console.print(f"далі: [bold]nysh opys push {_e(folder)}[/bold] — коли скан буде на Commons, адреса "
-                  f"ляже сама")
+    console.print("✅ згоду записано: опис піде в Засіки разом зі сканом, посилання на Commons з'являться, "
+                  "щойно власник його там опублікує")
+    console.print(f"далі: [bold]nysh opys push {_e(folder)}[/bold] (може й агент)")
 
 
 @app.command("pages")

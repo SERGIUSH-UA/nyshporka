@@ -215,9 +215,12 @@ def opysy_push(a: PushArgs) -> Envelope:
             env = ok({"duplicate": True, "vnesok": bulo.get("vnesok"), "shyfra": bulo.get("shyfra"),
                       "text": "цей самий пакет із теки вже залито — змін немає (`--znovu`, щоб "
                               "залити все одно)"})
+            if bulo.get("vnesok") and not bulo.get("skan"):
+                # скан минулого разу не доїхав — дослати до того самого внеску
+                _skan(teka, slid, bulo, a.base, env)
             if not a.bez_navchannia and not bulo.get("navchannia") and bulo.get("vnesok"):
                 # матеріал минулого разу не доїхав — дослати до того самого внеску
-                _navchannia(teka, slid, {**bulo}, sha, a.base, env)
+                _navchannia(teka, slid, bulo, sha, a.base, env)
             return env
     try:
         got = R.push(path, base=a.base)
@@ -232,15 +235,17 @@ def opysy_push(a: PushArgs) -> Envelope:
     if slid is not None and teka is not None:
         zapys = {"sha256": sha, "vnesok": got.get("vnesok"), "shyfra": got.get("shyfra")}
         slid.write_text(json.dumps(zapys, ensure_ascii=False), encoding="utf-8")
+        if got.get("vnesok"):
+            _skan(teka, slid, zapys, a.base, env)
         if not a.bez_navchannia and got.get("vnesok"):
             _navchannia(teka, slid, zapys, sha, a.base, env)
     return env
 
 
 def _adresa_z_commons(teka: Path, base: str) -> Envelope | None:
-    """Тека без адреси публікації: скан, переданий власнику (`nysh opys skan`), уже на Commons —
-    адресу береться звідти, і `push` іде далі (None). Ще чекає власника — відмова з тим, що
-    робити; не передавали — None, і `build` назве всі шляхи."""
+    """Тека без адреси, скан якої власник уже опублікував на Commons (передано раніше тим самим
+    `push`): адреса лягає в паспорт, і перезалив іде з посиланням. Інакше нічого не змінює —
+    `build` сам вирішить: скан їде разом з описом (згода людини) чи потрібна адреса."""
     from nyshporka.opysy import remote as R
     from nyshporka.opysy import workdir as W
     from nyshporka.share.upload import UploadError
@@ -250,22 +255,47 @@ def _adresa_z_commons(teka: Path, base: str) -> Envelope | None:
     except W.WorkdirError:
         return None
     sha = str((pas.get("source") or {}).get("sha256") or "")
-    if not W.bez_adresy(pas) or not sha:
+    if not W.bez_adresy(pas) or not sha or W.skan_zghoda(teka) is None:
         return None
     try:
         stan = R.skan_stan(sha, base=base)
     except (UploadError, OSError):
-        return None  # сервер без передач (старий) чи без мережі — `build` скаже про адресу
+        return None  # сервер без передач чи без мережі — опис піде зі сканом, як заплановано
     if stan.get("status") == "na_commons" and stan.get("commons_url"):
         try:
             W.set_source(teka, url=str(stan["commons_url"]), kind="commons")
         except W.WorkdirError as exc:
             return fail(f"скан на Commons, а адреса не лягла в паспорт: {exc}")
-        return None
-    if stan.get("status") in ("gotovo", "zabrano", "zaiavleno"):
-        return fail("скан опису передано власникові Нишпорки, він ще не на Commons. Опис піде в "
-                    "Засіки з посиланням на Commons — та сама `nysh opys push` пізніше")
     return None
+
+
+def _skan(teka: Path, slid: Path, zapys: dict[str, Any], base: str, env: Envelope) -> None:
+    """Скан опису без адреси — власникові Нишпорки для Commons, слідом за прийнятим описом (людина
+    погодилась `nysh opys skan`). Опис уже в Засіках, тож збій — попередження; повтор push дошле."""
+    import json
+
+    from nyshporka.opysy import remote as R
+    from nyshporka.opysy import workdir as W
+    from nyshporka.share.upload import UploadError
+
+    pas = W.load(teka)
+    if not W.bez_adresy(pas) or W.skan_zghoda(teka) is None:
+        return
+    f = W.skan_fail(pas)
+    if f is None:
+        return
+    try:
+        got = R.skan_viddaty(f, sha256=str(pas["source"]["sha256"]), vnesok=int(zapys["vnesok"]),
+                             meta={"repo": pas.get("repo"), "fond": pas.get("fond"),
+                                   "opys": pas.get("opys"), "storinok": pas.get("pages")},
+                             base=base)
+    except (UploadError, OSError, ValueError) as exc:
+        env.warn("skan", f"опис віддано, а скан власникові — ні: {exc}. Дослати: та сама "
+                         f"`nysh opys push {teka}`")
+        return
+    zapys["skan"] = {"status": got.get("status"), "commons_url": got.get("commons_url") or ""}
+    slid.write_text(json.dumps(zapys, ensure_ascii=False), encoding="utf-8")
+    env.data["skan"] = zapys["skan"]
 
 
 def _navchannia(teka: Path, slid: Path, zapys: dict[str, Any], paket_sha: str, base: str,

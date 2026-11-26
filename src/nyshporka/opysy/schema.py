@@ -30,7 +30,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 #: 2 (22.11.2026) — `Row.no_span`: рядок таблиці охоплює кілька номерів справ.
 SCHEMA = 2
 
-SourceKind = Literal["commons", "archive_site", "fs", "private", "public_other"]
+#: `pending_commons` (27.11.2026) — опису онлайн немає, скан їде тим самим `push` власникові Нишпорки,
+#: і він заливає його на Wikimedia Commons; адресу сервер допише в джерело сам. Доти адреси немає,
+#: але це не «скан лише в автора» (`private`): звірка буде публічною.
+SourceKind = Literal["commons", "archive_site", "fs", "private", "public_other", "pending_commons"]
+#: Види джерела, що їдуть без адреси.
+BEZ_ADRESY = ("private", "pending_commons")
 NoStatus = Literal["chain", "neighbors", "between", "unconfirmed", "eye"]
 QualityClass = Literal["high", "mid", "low"]
 #: Форма опису: машинопис; рукопис на друкованому бланку; рукопис на розграфленому
@@ -91,8 +96,10 @@ class Source(_Strict):
                 raise ValueError("той самий кадр двічі")
         elif not self.sha256:
             raise ValueError("файлове джерело без sha256 (а набір кадрів — без frames)")
-        if self.kind != "private" and not self.url:
+        if self.kind not in BEZ_ADRESY and not self.url:
             raise ValueError(f"джерело «{self.kind}» без адреси; немає адреси — це private")
+        if self.kind == "pending_commons" and (self.url or self.page_link or self.frames):
+            raise ValueError("pending_commons — без адреси й кадрів: адресу Commons допише сервер")
         for what, val in (("url", self.url), ("page_link", self.page_link)):
             if val and not val.startswith(("https://", "http://")):
                 raise ValueError(f"{what} — не веб-адреса: людина не відкриє «{val[:60]}»")

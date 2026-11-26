@@ -68,6 +68,15 @@ def test_source_requires_web_url_unless_private() -> None:
     assert _src(kind="private", url="").kind == "private"
 
 
+def test_pending_commons_bez_adresy() -> None:
+    """Скан їде власникові для Commons: адреси ще немає й не має бути — її допише сервер."""
+    assert _src(kind="pending_commons", url="").kind == "pending_commons"
+    with pytest.raises(ValidationError):
+        _src(kind="pending_commons")  # з адресою
+    with pytest.raises(ValidationError):
+        _src(kind="pending_commons", url="", page_link="https://x.example/?p={page}")
+
+
 def test_source_frames_identity_and_links() -> None:
     s = Source(kind="fs", url="https://www.familysearch.org/search/film/004123456",
                page_link="https://www.familysearch.org/search/film/004123456?i={i}",

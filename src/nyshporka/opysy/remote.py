@@ -60,14 +60,16 @@ def navchannia(vnesok: int, blob: bytes, *, base: str = "") -> dict[str, Any]:
                       auth=tok, timeout=U.COMPLETE_TIMEOUT)
 
 
-def skan_viddaty(path: Path, *, sha256: str, meta: dict[str, Any],
+def skan_viddaty(path: Path, *, sha256: str, meta: dict[str, Any], vnesok: int | None = None,
                  base: str = "") -> dict[str, Any]:
-    """Скан опису, якого немає онлайн, — власнику Нишпорки для Commons (тимчасово в сховище).
-    Сервер звіряє відбиток залитого з `sha256` джерела з паспорта опису."""
+    """Скан опису, якого немає онлайн, — власнику Нишпорки для Commons (тимчасово в сховище), до
+    прийнятого внеску. Сервер звіряє відбиток залитого з `sha256` джерела; коли власник опублікує
+    скан на Commons, посилання справ цього внеску сервер допише сам."""
     blob = Path(path).read_bytes()
     tok, home = U._tok_i_dim(base)
     reg = U._request("POST", f"{home}/opysy/skany", auth=tok,
-                     body={"sha256": sha256, "bytes": len(blob), "imia": Path(path).name, **meta})
+                     body={"sha256": sha256, "bytes": len(blob), "imia": Path(path).name,
+                           "vnesok": vnesok, **meta})
     if "upload" not in reg:
         return reg  # той самий скан уже передано чи вже на Commons
     U._put(str(reg["upload"]), blob)

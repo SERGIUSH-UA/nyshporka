@@ -188,6 +188,45 @@ def bez_adresy(pas: dict[str, Any]) -> bool:
     return not str((pas.get("source") or {}).get("url") or "").strip()
 
 
+#: Згода людини передати скан власникові Нишпорки для Commons (`nysh opys skan`, лише в терміналі).
+SKAN_ZGODA = "skan_zghoda.json"
+
+
+def skan_fail(pas: dict[str, Any]) -> Path | None:
+    """Файл скану, що лежить за адресою джерела: оригінал (`published`) чи сам PDF; тека кадрів —
+    None (передати можна лише файл PDF чи DjVu)."""
+    f = Path(pas.get("published") or pas["pdf"])
+    return f if f.is_file() and f.suffix.lower() in (".pdf", ".djvu") else None
+
+
+def skan_zghoda(d: Path) -> dict[str, Any] | None:
+    """Згода на передачу скану — лише чинна: для того самого файлу (sha256 джерела)."""
+    f = Path(d) / SKAN_ZGODA
+    try:
+        z = json.loads(f.read_text(encoding="utf-8")) if f.is_file() else None
+    except (OSError, ValueError):
+        return None
+    pas = load(d)
+    if not isinstance(z, dict) or z.get("sha256") != (pas.get("source") or {}).get("sha256"):
+        return None
+    return z
+
+
+def zapysaty_skan_zghodu(d: Path) -> dict[str, Any]:
+    """Людина погодилась передати скан (CLI питає її в терміналі; агентові команда відмовляє)."""
+    from datetime import UTC, datetime
+
+    pas = load(d)
+    f = skan_fail(pas)
+    if f is None:
+        raise WorkdirError("передати можна лише файл PDF чи DjVu, а опис заведено з "
+                           f"{pas.get('published') or pas['pdf']}")
+    z = {"sha256": (pas.get("source") or {}).get("sha256"), "fail": f.name,
+         "at": datetime.now(UTC).isoformat(timespec="seconds")}
+    (Path(d) / SKAN_ZGODA).write_text(json.dumps(z, ensure_ascii=False), encoding="utf-8")
+    return z
+
+
 def set_source(d: Path, *, url: str, kind: str = "", page_link: str = "",
                published: Path | None = None) -> dict[str, Any]:
     """Назвати адресу публікації опису для вже заведеної теки — до `build`.
@@ -233,15 +272,20 @@ def build(d: Path, *, norm_model: str = "", tool: str = "nysh opys build",
     from nyshporka.opysy import pack_dir as PD
 
     pas = load(d)
+    source = dict(pas["source"])
     if bez_adresy(pas):
-        raise WorkdirError(
-            f"адресу, де опис опубліковано, ще не названо — посилання справ у Засіках ведуть туди, "
-            f"щоб кожну справу можна було звірити зі сканом. Три шляхи: (1) знайти цей файл на сайті "
-            f"архіву, перевірити, що опис той самий, — `nysh opys dzherelo {d} --url <адреса>`; "
-            f"(2) опису онлайн немає — людина сама заливає скан на Wikimedia Commons і дає адресу "
-            f"файлу там тією самою командою; (3) не може — людина у своєму терміналі передає скан "
-            f"власникові Нишпорки: `nysh opys skan {d}` (він заллє на Commons, і повтор push візьме "
-            f"адресу сам). Скан на Commons стає публічним назавжди — це вирішує людина")
+        if skan_zghoda(d) is None:
+            raise WorkdirError(
+                f"адресу, де опис опубліковано, ще не названо — посилання справ у Засіках ведуть туди, "
+                f"щоб кожну справу можна було звірити зі сканом. Три шляхи: (1) знайти цей файл на "
+                f"сайті архіву, перевірити, що опис той самий, — `nysh opys dzherelo {d} --url "
+                f"<адреса>`; (2) опису онлайн немає — людина сама заливає скан на Wikimedia Commons і "
+                f"дає адресу файлу там тією самою командою; (3) не може — людина у своєму терміналі "
+                f"погоджується передати скан власникові Нишпорки: `nysh opys skan {d}`, і тоді push "
+                f"віддасть опис разом зі сканом (власник заллє його на Commons, посилання допише "
+                f"сервер). Скан на Commons стає публічним назавжди — це вирішує людина")
+        source = {"kind": "pending_commons", "url": "", "page_link": "",
+                  "label": source.get("label") or "", "sha256": source.get("sha256") or ""}
     voices = PD.run_voices(run_dir(d))
     if not voices:
         raise WorkdirError(f"немає прочитаних сторінок у {run_dir(d)} — "
@@ -259,7 +303,7 @@ def build(d: Path, *, norm_model: str = "", tool: str = "nysh opys build",
         raise WorkdirError("назви нормалізовано — назви модель, що нормалізувала (`--norm-model`)")
     lang = pas.get("language") or PD.language(pages, "other")
     m = PD.manifest(repo=pas["repo"], fond=pas["fond"], opys=pas["opys"], language=lang,
-                    source=pas["source"], pages=total, spread=spread,
+                    source=source, pages=total, spread=spread,
                     engines=[n for n, _ in voices],
                     # рукопис — `low`: нормалізація тоді обов'язкова воротами
                     quality={"klass": "low", "form": pas["form"]}, tool=tool,

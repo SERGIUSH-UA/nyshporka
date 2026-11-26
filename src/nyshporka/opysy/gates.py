@@ -187,6 +187,9 @@ def check(m: Manifest, pages: list[Page], rows: list[Row], *,
     if any(s.kind == "private" for s in m.sources):
         v.warn("private_source", "скан лише в автора: звірити рядок можна через автора "
                                  "чи в читальній залі; у видачі такий опис стоїть нижче")
+    if any(s.kind == "pending_commons" for s in m.sources):
+        v.warn("pending_commons", "скан передається власникові Нишпорки для Wikimedia Commons: "
+                                  "посилання справ на сторінки скану з'являться, щойно він буде там")
     return v
 
 

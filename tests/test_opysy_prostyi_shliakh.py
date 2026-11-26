@@ -63,10 +63,23 @@ def server(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         return {"ready": True}
 
     st["skan"] = {"status": None}
+    st["skany"] = []
+    st["skan_zbii"] = 0
+
+    def _skan_viddaty(path: Path, **kw: Any) -> dict[str, Any]:
+        from nyshporka.share.upload import UploadError
+
+        if st["skan_zbii"]:
+            st["skan_zbii"] -= 1
+            raise UploadError("обрив мережі")
+        st["skany"].append((Path(path).name, kw))
+        return {"status": "gotovo", "commons_url": ""}
+
     monkeypatch.setattr(R, "policy", _policy)
     monkeypatch.setattr(R, "push", _push)
     monkeypatch.setattr(R, "navchannia", _navchannia)
     monkeypatch.setattr(R, "skan_stan", lambda sha, **kw: dict(st["skan"]))
+    monkeypatch.setattr(R, "skan_viddaty", _skan_viddaty)
     return st
 
 
@@ -154,26 +167,55 @@ def test_read_i_push_dvoma_komandamy(tmp_path: Path, server: dict[str, Any],
     assert env3.ok and env3.data["pachok_normalizatsii"] == 0 and "--norm-model" not in env3.data["next"]
 
 
-def test_skan_peredano_vlasnyku_push_bere_adresu_z_commons(
+def test_opys_bez_onlain_skanu_odnym_push_razom_zi_skanom(
         tmp_path: Path, server: dict[str, Any], chytannia: list[Path]) -> None:
-    """Опису онлайн немає, скан передано власникові (`nysh opys skan`): поки він не на Commons,
-    `push` чекає; щойно на Commons — адреса лягає в паспорт сама, і опис іде з посиланням туди."""
+    """Опису онлайн немає, людина погодилась передати скан (`nysh opys skan`): ОДИН `push` віддає
+    опис (джерело `pending_commons` — у Засіках одразу) і слідом скан власникові для Commons. Скан
+    не доїхав — повтор push дошле до того самого внеску. Без згоди людини — відмова з усіма
+    шляхами (рішення дослідника 27.11.2026)."""
     from nyshporka.opysy import bundle as B
 
     d = tmp_path / "opys"
     _read_z_meta(d, pdf=str(_pdf(tmp_path)), repo="ДАПО", fond="1", opys="9", language="ru")
     bez = OO.opysy_push(OO.PushArgs(file=str(d), na_obmin=True))
     assert not bez.ok and "nysh opys skan" in bez.error and "Commons" in bez.error
-    server["skan"] = {"status": "gotovo", "commons_url": ""}
-    chekaie = OO.opysy_push(OO.PushArgs(file=str(d), na_obmin=True))
-    assert not chekaie.ok and "ще не на Commons" in chekaie.error and not server["pushed"]
-    commons = "https://commons.wikimedia.org/wiki/File:DAPO_1_9.pdf"
-    server["skan"] = {"status": "na_commons", "commons_url": commons}
+    assert not server["pushed"]
+    W.zapysaty_skan_zghodu(d)  # людина в терміналі написала «так»
+    server["skan_zbii"] = 1
     got = OO.opysy_push(OO.PushArgs(file=str(d), na_obmin=True))
     assert got.ok, got
+    contents, verdict = B.verify(server["pushed"][-1].read_bytes())
+    src = contents.manifest["sources"][0]
+    assert src["kind"] == "pending_commons" and not src["url"] and src["sha256"]
+    assert any(c == "pending_commons" for c, _ in verdict.warnings)
+    assert contents.manifest["normalization_exchange"], "обмін нормалізацією можливий: скан буде публічним"
+    assert any(w.code == "skan" for w in got.warnings) and not server["skany"]
+    znov = OO.opysy_push(OO.PushArgs(file=str(d), na_obmin=True))
+    assert znov.ok and len(server["pushed"]) == 1
+    assert [(n, kw["vnesok"], kw["sha256"]) for n, kw in server["skany"]] == [
+        ("opys.pdf", 7, src["sha256"])], "дослано до того самого внеску"
+    OO.opysy_push(OO.PushArgs(file=str(d), na_obmin=True))
+    assert len(server["skany"]) == 1, "доїхав — удруге не шле"
+    # власник опублікував скан на Commons — перезалив іде вже з адресою
+    commons = "https://commons.wikimedia.org/wiki/File:DAPO_1_9.pdf"
+    server["skan"] = {"status": "na_commons", "commons_url": commons}
+    assert OO.opysy_push(OO.PushArgs(file=str(d), na_obmin=True, znovu=True)).ok
     src = B.verify(server["pushed"][-1].read_bytes())[0].manifest["sources"][0]
-    assert src["kind"] == "commons" and src["url"] == commons
-    assert src["page_link"] == commons + "?page={page}"
+    assert src["kind"] == "commons" and src["page_link"] == commons + "?page={page}"
+
+
+def test_zghoda_na_skan_lyshe_dlia_toho_samoho_failu(tmp_path: Path, server: dict[str, Any],
+                                                    chytannia: list[Path]) -> None:
+    """Згода прив'язана до відбитка скану: інший файл під тим самим ім'ям її не успадковує."""
+    import json as _json
+
+    d = tmp_path / "opys"
+    _read_z_meta(d, pdf=str(_pdf(tmp_path)), repo="ДАПО", fond="1", opys="9", language="ru")
+    W.zapysaty_skan_zghodu(d)
+    z = _json.loads((d / W.SKAN_ZGODA).read_text(encoding="utf-8"))
+    (d / W.SKAN_ZGODA).write_text(_json.dumps({**z, "sha256": "0" * 64}), encoding="utf-8")
+    assert W.skan_zghoda(d) is None
+    assert not OO.opysy_push(OO.PushArgs(file=str(d), na_obmin=True)).ok
 
 
 def test_skan_peredaie_lyshe_liudyna_v_terminali(tmp_path: Path, server: dict[str, Any],
