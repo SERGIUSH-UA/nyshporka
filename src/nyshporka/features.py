@@ -34,7 +34,8 @@ DEFAULT_ON = frozenset({OPYSY})
 #: рівно ці імена — відсутні навмисно, а не через описку. Поіменно, а не
 #: префіксом, щоб описка в імені операції функції за флагом теж ловилась.
 HIDDEN: dict[str, dict[str, tuple[str, ...]]] = {
-    OPYSY: {"cli": ("opys",), "ops": ("opysy.api_stan", "opysy.build", "opysy.check", "opysy.init",
+    OPYSY: {"cli": ("opys",), "ops": ("opysy.api_stan", "opysy.build", "opysy.check",
+                                      "opysy.dzherelo", "opysy.init",
                                       "opysy.meta", "opysy.names", "opysy.norm", "opysy.norm_api", "opysy.obmin", "opysy.pack", "opysy.pages", "opysy.policy",
                                       "opysy.push", "opysy.read", "opysy.rule_add", "opysy.rule_undo",
                                       "opysy.rules", "opysy.search", "opysy.table", "opysy.viddaty",

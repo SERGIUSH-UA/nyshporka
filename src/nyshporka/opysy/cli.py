@@ -518,8 +518,7 @@ def dzherelo_cmd(
 
 @app.command("skan")
 @route("opys skan", skill="read-opys", mutates=True, tier="rare",
-       when="людина погоджується передати власникові Нишпорки скан опису, якого немає онлайн, для "
-            "Wikimedia Commons")
+       when="людина згодна передати власникові скан опису без онлайн-копії для Wikimedia Commons")
 def skan_cmd(folder: str = typer.Argument(..., help="робоча тека опису")) -> None:
     """Згода людини передати власникові Нишпорки скан опису, якого немає онлайн: `nysh opys push`
     тоді віддасть опис разом зі сканом, власник заллє скан на Wikimedia Commons, і посилання справ у

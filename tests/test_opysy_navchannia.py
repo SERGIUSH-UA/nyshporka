@@ -35,8 +35,9 @@ def _teka(tmp: Path) -> Path:
         "case_dir": "D:/Dokumenty/Ivan Petrenko/opys/pages", "device": "cuda:0"}), encoding="utf-8")
     for stem in ("0001", "0002"):
         (d / "run" / f"{stem}.txt").write_text("1313\nДело о ...", encoding="utf-8")
-        with gzip.open(d / "run" / f"{stem}.lines.json.gz", "wt", encoding="utf-8") as fh:
-            json.dump({"size": [1000, 1400], "boxes": [[10, 10, 50, 40]]}, fh)
+        # mtime=0: `gzip.open` пише в заголовок поточний час, і дві однакові теки різнились би
+        (d / "run" / f"{stem}.lines.json.gz").write_bytes(gzip.compress(json.dumps(
+            {"size": [1000, 1400], "boxes": [[10, 10, 50, 40]]}).encode(), mtime=0))
         (d / "run-diak_v16" / f"{stem}.txt").write_text("313", encoding="utf-8")
         (d / "pages" / f"{stem}.jpg").write_bytes(JPEG)
     (d / "dochyt" / "dochyt.json").write_text(json.dumps(
