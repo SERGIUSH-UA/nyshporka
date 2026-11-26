@@ -148,3 +148,64 @@ def test_storinka_tekstom_zasvidchennia_ne_sprava() -> None:
     assert [x["no"] for x in r] == [1785, 1786] and r[-1]["title"] == ["Письма Браницких Потоцким за 1716 г."]
     # підпис ЕК з числом над «СХВАЛЕНО» (ДАХмО ф.17 оп.2, стор. 41) — не справа
     assert V.records("Літерні номери - немає\n\nОпис склав :\n\n3\n\nСХВАЛЕНО\n\nПротокол ЕК\n")[0] == []
+
+
+# ── ДАВіО ф.5 оп.3 (26.11.2026): форма № 4, перші колонки порожні, шапка з номерів колонок з вадами ──
+
+
+def _td(*cells: str) -> str:
+    return "<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>"
+
+
+def _forma4(shapka: list[str], start: int, n: int = 3) -> str:
+    """Сторінка форми № 4: дві порожні колонки, номер справи в третій, назва, дата, аркуші."""
+    rows = [_td(*shapka)]
+    for k in range(start, start + n):
+        rows.append(_td("", "", str(k), f"То же, Ивана Петровича Маньковского {k}", "", "2"))
+    return "<table>" + "".join(rows) + "</table>"
+
+
+def test_shapka_nomeriv_kolonok_z_vadamy_ne_hubyt_storinku() -> None:
+    # VL склеїв дві клітинки, загубив номер порожньої колонки, домішав сусіднє число
+    for shapka in (["1", "2", "3", "2\n4", "5", "6"], ["2", "3", "", "", "6", ""],
+                   ["2", "3", "24", "", "6", ""], ["2", "3", "", "", "", ""]):
+        sides, _ = V.records(_forma4(shapka, 12))
+        assert [r["no"] for s in sides for r in s if r["no"] is not None] == [12, 13, 14], shapka
+
+
+def test_shapka_z_troiky_pravyi_bik_rozvorotu_ne_tablytsia_z_nomeramy() -> None:
+    # «3 4 5 6» — права сторінка розвороту без колонки №: назви не мають прилипнути до чужої справи
+    md = "<table>" + _td("3", "4", "5", "6") + _td("Грамота митрополита о работе крестьян", "1805г.", "1", "") + "</table>"
+    p = V._Tables()
+    p.feed(md)
+    assert V._nomery_kolonok(V.grid(p.tables[0])) is None
+
+
+def test_persha_neporozhnia_klitynka_i_rowspan() -> None:
+    # номер справи — у третій колонці; другий рядок назви наслідує номер через rowspan і не рахується
+    md = ("<table>" + _td("", "", "769", "Геодезическое описание земли с. Лю-", "", "6")
+          + _td("", "", "", "пинец, находящейся в пользовании", "", "")
+          + _td("", "", "770", "То же, Аполинария Людвиговича Орловского", "", "")
+          + "</table>")
+    p = V._Tables()
+    p.feed(md)
+    assert V._persha_chysla(V.grid(p.tables[0]))
+    md2 = ('<table><tr><td rowspan="2">197</td><td>Метрична книга</td></tr>'
+           "<tr><td>Чорноострівської церкви</td></tr>"
+           '<tr><td rowspan="2">198</td><td>Метрична книга</td></tr>'
+           "<tr><td>Фельштинської церкви</td></tr></table>")
+    p2 = V._Tables()
+    p2.feed(md2)
+    assert V._persha_chysla(V.grid(p2.tables[0]))
+
+
+def test_storinka_insha_shyryna_bez_shapky_ne_hubytsia(tmp_path: Path) -> None:
+    # стор. 2 — 7 колонок із шапкою, стор. 3 — 6 колонок без шапки: розкладка попередньої не підходить,
+    # але номери стоять першими в рядках — сторінка лишається (ДАВіО ф.5 оп.3, стор. 56→57)
+    d = tmp_path / "vl"
+    d.mkdir()
+    (d / "0001.md").write_text(_forma4(["1", "2", "3", "4", "5", "6", "7"], 1), encoding="utf-8")
+    rows = "".join(_td("", "", str(k), f"То же, Карла Ивановича Яблонского {k}", "") for k in (4, 5, 6))
+    (d / "0002.md").write_text("<table>" + rows + "</table>", encoding="utf-8")
+    V.build(d, tmp_path / "t.tsv", "3")
+    assert [r["no"] for r in _rows(tmp_path / "t.tsv")] == ["1", "2", "3", "4", "5", "6"]

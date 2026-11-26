@@ -181,21 +181,48 @@ def layout(g: list[list[tuple[str, bool]]]) -> tuple[list[dict[str, int]], int]:
     return sides, body
 
 
+def _zrostaiucha(a: list[int]) -> list[int]:
+    """Найдовша строго зростаюча підпослідовність (рядки шапки короткі — квадратична досить)."""
+    best: list[list[int]] = []
+    for i, x in enumerate(a):
+        kand = [best[j] for j in range(i) if a[j] < x]
+        best.append([*max(kand, key=len, default=[]), x])
+    return max(best, key=len, default=[])
+
+
 def _nomery_kolonok(g: list[list[tuple[str, bool]]]) -> int | None:
     """Шапка з самих номерів колонок («1 2 3 4 5 6») у перших двох рядках: індекс першого
-    рядка даних за нею, інакше None."""
+    рядка даних за нею, інакше None.
+
+    VL читає таку шапку з вадами, і через них сторінка губилась цілком (ДАВіО ф.5 оп.3: 18
+    сторінок із 56, 557 справ із 826): склеює дві клітинки («2\\n4»), губить номер порожньої
+    колонки («1 2 3 6») або домішує сусіднє число («2 3 24 6»). Тому клітинки діляться на
+    числа, і досить, щоб зростаючий ряд номерів колонок (до 12) покривав ≥ 70 % чисел рядка.
+    Рядок даних сюди не потрапляє: у ньому є назва, а тут кожне число — одна-дві цифри.
+    🔴 Ряд починається з 1 або 2: шапка «3 4 5 6» — права сторінка розвороту без колонки №, і
+    якби її взяти, назви справ сторінки приклеїлись би до останньої справи попередньої (ЦДІАК
+    ф.49 оп.2, стор. 112 → справа 995)."""
     for i, row in enumerate(g[:2]):
-        cyfry = [t.strip() for t, first in row if first and t.strip()]
-        if len(cyfry) >= 3 and all(re.fullmatch(r"\d{1,2}", t) for t in cyfry):
-            n = [int(t) for t in cyfry]
-            if n[0] in (1, 2) and all(b > a for a, b in pairwise(n)) and n[-1] - n[0] <= len(n):
-                return i + 1
+        chysla = [x for t, first in row if first for x in t.split()]
+        if len(chysla) < 2 or not all(re.fullmatch(r"\d{1,2}", x) for x in chysla):
+            continue
+        n = _zrostaiucha([int(x) for x in chysla if int(x) <= 12])
+        if n and n[0] in (1, 2) and len(n) >= max(2, 0.7 * len(chysla)) and (len(n) > 2 or n[-1] - n[0] <= 3):
+            return i + 1
     return None
 
 
 def _persha_chysla(g: list[list[tuple[str, bool]]]) -> bool:
-    """Перша колонка таблиці — переважно числа (≥ 60 % непорожніх клітинок, хоча б дві)."""
-    persha = [r[0][0].strip() for r in g if r and r[0][1] and r[0][0].strip()]
+    """Рядки таблиці починаються переважно з числа (≥ 60 % рядків, хоча б два). Береться перша
+    НЕПОРОЖНЯ клітинка рядка: у формі № 4 перші колонки («Порядковий №», «Старий архівний №»)
+    машинопис лишає порожніми, а номер справи стоїть у третій (ДАВіО ф.5 оп.3). Рядок, чия перша
+    непорожня клітинка лише продовжує об'єднану згори (номер справи з `rowspan`), не рахується:
+    інакше другий рядок назви тієї самої справи йшов би за «не число» (ДАХмО ф.17 оп.2, стор. 50)."""
+    persha = []
+    for r in g:
+        c = next(((t.strip(), first) for t, first in r if t.strip()), None)
+        if c is not None and c[1]:
+            persha.append(c[0])
     return len(persha) >= 2 and sum(num(t) is not None for t in persha) >= 0.6 * len(persha)
 
 
