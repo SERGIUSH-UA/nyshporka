@@ -199,6 +199,9 @@ def opysy_push(a: PushArgs) -> Envelope:
     sha = ""
     bulo: dict[str, Any] = {}
     if teka is not None:
+        bez = _adresa_z_commons(teka, a.base)
+        if bez is not None:
+            return bez
         zibrano = _zibraty_paket(teka, a.norm_model, na_obmin=a.na_obmin)
         if not zibrano.ok:
             return zibrano
@@ -232,6 +235,37 @@ def opysy_push(a: PushArgs) -> Envelope:
         if not a.bez_navchannia and got.get("vnesok"):
             _navchannia(teka, slid, zapys, sha, a.base, env)
     return env
+
+
+def _adresa_z_commons(teka: Path, base: str) -> Envelope | None:
+    """Тека без адреси публікації: скан, переданий власнику (`nysh opys skan`), уже на Commons —
+    адресу береться звідти, і `push` іде далі (None). Ще чекає власника — відмова з тим, що
+    робити; не передавали — None, і `build` назве всі шляхи."""
+    from nyshporka.opysy import remote as R
+    from nyshporka.opysy import workdir as W
+    from nyshporka.share.upload import UploadError
+
+    try:
+        pas = W.load(teka)
+    except W.WorkdirError:
+        return None
+    sha = str((pas.get("source") or {}).get("sha256") or "")
+    if not W.bez_adresy(pas) or not sha:
+        return None
+    try:
+        stan = R.skan_stan(sha, base=base)
+    except (UploadError, OSError):
+        return None  # сервер без передач (старий) чи без мережі — `build` скаже про адресу
+    if stan.get("status") == "na_commons" and stan.get("commons_url"):
+        try:
+            W.set_source(teka, url=str(stan["commons_url"]), kind="commons")
+        except W.WorkdirError as exc:
+            return fail(f"скан на Commons, а адреса не лягла в паспорт: {exc}")
+        return None
+    if stan.get("status") in ("gotovo", "zabrano", "zaiavleno"):
+        return fail("скан опису передано власникові Нишпорки, він ще не на Commons. Опис піде в "
+                    "Засіки з посиланням на Commons — та сама `nysh opys push` пізніше")
+    return None
 
 
 def _navchannia(teka: Path, slid: Path, zapys: dict[str, Any], paket_sha: str, base: str,

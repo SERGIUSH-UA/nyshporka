@@ -62,9 +62,11 @@ def server(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         st["navchannia"].append((vnesok, blob))
         return {"ready": True}
 
+    st["skan"] = {"status": None}
     monkeypatch.setattr(R, "policy", _policy)
     monkeypatch.setattr(R, "push", _push)
     monkeypatch.setattr(R, "navchannia", _navchannia)
+    monkeypatch.setattr(R, "skan_stan", lambda sha, **kw: dict(st["skan"]))
     return st
 
 
@@ -150,6 +152,43 @@ def test_read_i_push_dvoma_komandamy(tmp_path: Path, server: dict[str, Any],
     # після прийняття нормалізації повтор `read` нічого не нарізає й веде одразу до `push`
     env3 = _read(d, language="ru")
     assert env3.ok and env3.data["pachok_normalizatsii"] == 0 and "--norm-model" not in env3.data["next"]
+
+
+def test_skan_peredano_vlasnyku_push_bere_adresu_z_commons(
+        tmp_path: Path, server: dict[str, Any], chytannia: list[Path]) -> None:
+    """Опису онлайн немає, скан передано власникові (`nysh opys skan`): поки він не на Commons,
+    `push` чекає; щойно на Commons — адреса лягає в паспорт сама, і опис іде з посиланням туди."""
+    from nyshporka.opysy import bundle as B
+
+    d = tmp_path / "opys"
+    _read_z_meta(d, pdf=str(_pdf(tmp_path)), repo="ДАПО", fond="1", opys="9", language="ru")
+    bez = OO.opysy_push(OO.PushArgs(file=str(d), na_obmin=True))
+    assert not bez.ok and "nysh opys skan" in bez.error and "Commons" in bez.error
+    server["skan"] = {"status": "gotovo", "commons_url": ""}
+    chekaie = OO.opysy_push(OO.PushArgs(file=str(d), na_obmin=True))
+    assert not chekaie.ok and "ще не на Commons" in chekaie.error and not server["pushed"]
+    commons = "https://commons.wikimedia.org/wiki/File:DAPO_1_9.pdf"
+    server["skan"] = {"status": "na_commons", "commons_url": commons}
+    got = OO.opysy_push(OO.PushArgs(file=str(d), na_obmin=True))
+    assert got.ok, got
+    src = B.verify(server["pushed"][-1].read_bytes())[0].manifest["sources"][0]
+    assert src["kind"] == "commons" and src["url"] == commons
+    assert src["page_link"] == commons + "?page={page}"
+
+
+def test_skan_peredaie_lyshe_liudyna_v_terminali(tmp_path: Path, server: dict[str, Any],
+                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    """Скан стане публічним на Commons — без термінала людини (агент, скрипт) команда відмовляє
+    й нічого не передає."""
+    from typer.testing import CliRunner
+
+    from nyshporka.opysy.cli import app as opys_app
+
+    vyklyky: list[Any] = []
+    monkeypatch.setattr(R, "skan_viddaty", lambda *a, **kw: vyklyky.append(a) or {})
+    monkeypatch.setenv("NYSH_OPYSY", "1")
+    res = CliRunner().invoke(opys_app, ["skan", str(tmp_path / "opys")], input="так\n")
+    assert res.exit_code == 1 and "лише людина" in res.output and not vyklyky
 
 
 def test_push_vidsylaie_material_dlia_navchannia_raz(tmp_path: Path, server: dict[str, Any],
