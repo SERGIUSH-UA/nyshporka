@@ -31,6 +31,7 @@ import html
 import json
 import math
 import re
+from collections import Counter
 from collections.abc import Callable
 from html.parser import HTMLParser
 from itertools import pairwise
@@ -480,7 +481,9 @@ def _nomer_vl(raw: str) -> tuple[int | None, str]:
     """(номер, літера) з клітинки номера: «136a» → (136, «а»); «I304» → (1304, «»): машинопис бив
     одиницю літерою I, і без заміни номер губив першу цифру (ЦДІАК ф.49 оп.2: 304 замість 1304)."""
     raw = re.sub(r"^([Il1])\s+(?=\d)", r"\1", raw.strip())
-    m = re.fullmatch(r"\D{0,2}(\d{1,5})\s*([^\W\d_])?\W{0,2}", re.sub(
+    # літера через дефіс: «45-а» — літерна 45а (ДАВіО ф.200 оп.1); без цього рядок ішов за звичайний 45, і
+    # ланцюжок зсував на +1 правильні номери після нього
+    m = re.fullmatch(r"\D{0,2}(\d{1,5})\s*[-–]?\s*([^\W\d_])?\W{0,2}", re.sub(
         r"^\D{0,2}[\dIlі]+", lambda x: x.group(0).translate(TR), raw))
     if not m:
         return None, ""
@@ -602,13 +605,47 @@ def _tochnyi_lantsiuzhok(reads: list[tuple[int, int]], look: int = 200) -> list[
     return out[::-1]
 
 
+#: Довгий проміжок між опорами (рядків) і на скільки свій ряд прочитаних номерів може бути зсунутий від опор.
+DOVHYI_PROMIZHOK = 20
+ZSUV_RIADU = 10
+
+
+def _svii_riad(vnutri: list[tuple[int, int]], ka: int, va: int, kb: int) -> bool:
+    """Довгий проміжок між опорами, а прочитані номери в ньому — свій узгоджений ряд із невеликим зсувом
+    від опор: його не перебивати. Рядків і номерів між опорами буває порівну лише тому, що дві вади
+    взаємно гасяться: літерна справа (зайвий рядок «45а») і пропущений в описі номер (393) — і
+    ланцюжок зсував на +1 правильні 46–392 (ДАВіО ф.200 оп.1). Короткий проміжок заповнюється, як і
+    був: там VL буває читає «старі номери» (ДАХмО ф.17 оп.2, стор. 36: 101–105 замість 107–111)."""
+    if kb - ka <= DOVHYI_PROMIZHOK or len(vnutri) < 3:
+        return False
+    zsuv_opor = va - ka
+    zgoda = sum(1 for k, n in vnutri if n - k == zsuv_opor)
+    zsuv, skilky = Counter(n - k for k, n in vnutri).most_common(1)[0]
+    return (zsuv != zsuv_opor and abs(zsuv - zsuv_opor) <= ZSUV_RIADU and skilky >= 3
+            and skilky >= 0.6 * len(vnutri) and skilky > zgoda)
+
+
 def _zapovnyty(recs: list[dict[str, Any]], idx: list[int], kotvy: list[tuple[int, int]]) -> None:
-    """Між сусідніми опорами, де рядків рівно стільки, скільки номерів, — номери за порядком."""
+    """Між сусідніми опорами, де рядків рівно стільки, скільки номерів, — номери за порядком. У довгому
+    проміжку зі своїм узгодженим рядом прочитаних (`_svii_riad`) лишається прочитане, яке підтверджує
+    безпосередній сусід (n−1 перед ним чи n+1 після); решта рядків — як завжди, за опорами."""
     for (ka, va), (kb, vb) in pairwise(kotvy):
         if kb - ka < 2 or kb - ka != vb - va:
             continue
+        vnutri = [(k, n) for k in range(ka + 1, kb) for n, lit in [recs[idx[k]]["_n"]]
+                  if n is not None and not lit and not recs[idx[k]].get("_dobudovano")]
+        # лише коли в проміжку є прочитана літерна справа: саме вона з пропущеним номером дає «рядків
+        # стільки ж, скільки номерів» при зсунутому ряді. Без літери узгоджений ряд зі зсувом — це
+        # хибне читання, і ланцюжок його виправляє (ДАХмО ф.17 оп.2, стор. 26–32: 83–101 замість 85–102)
+        literna = any(recs[idx[k]]["_n"][1] for k in range(ka + 1, kb))
+        chytano = dict(vnutri) if literna and _svii_riad(vnutri, ka, va, kb) else {}
         for k in range(ka + 1, kb):
             r = recs[idx[k]]
+            n = chytano.get(k)
+            if n is not None and (chytano.get(k - 1) == n - 1 or chytano.get(k + 1) == n + 1):
+                continue
+            if r["_n"][1] and chytano:
+                continue  # літерна справа в такому проміжку — за читанням
             # добудований (перші цифри з ряду), що збігся з ланцюжком, підтверджено так само
             if str(r.get("no")) != str(va + k - ka) or (r.get("_dobudovano") and not r.get("confirmed")):
                 r.update(no=va + k - ka, no_src="seq", confirmed="between")
@@ -630,9 +667,22 @@ def _lantsiuzhkom(recs: list[dict[str, Any]]) -> None:
 
     for rozdil in sorted({r["_rozdil"] for r in recs}):
         idx = [i for i, r in enumerate(recs) if r["_rozdil"] == rozdil]
-        # опора — лише прочитаний номер: добудований (перші цифри з ряду) підтверджується ланцюжком
-        reads = [(k, recs[i]["_n"][0]) for k, i in enumerate(idx)
+        # опора — лише прочитаний номер: добудований (перші цифри з ряду) підтверджується ланцюжком;
+        # число, прочитане в розділі двічі, — теж не опора: одне з двох читань хибне, і хибне, що випадково
+        # лягло в ряд, перебивало правильні номери між рідкими опорами (ДАВіО ф.7 оп.2, стор. 5: «3» вдруге
+        # у рядку 5 — опора, і 7…45 ставали 4…42 «між опорами»; 236 справ зі зсувом −3)
+        skilky: dict[int, int] = {}
+        for i in idx:
+            n, lit = recs[i]["_n"]
+            if n is not None and not lit:
+                skilky[n] = skilky.get(n, 0) + 1
+        chyst = [(k, recs[i]["_n"][0]) for k, i in enumerate(idx)
                  if recs[i]["_n"][0] is not None and not recs[i]["_n"][1] and not recs[i].get("_dobudovano")]
+        za_riadkom = dict(chyst)
+        # повтор, якого не підтверджує жоден безпосередній сусід, — не опора; узгоджений ряд повторів
+        # («83, 84, 85» на місці 85–87, ДАХмО ф.17 оп.2) лишається опорою — його виправляє сам ланцюжок
+        reads = [(k, n) for k, n in chyst
+                 if not (skilky[n] > 1 and za_riadkom.get(k - 1) != n - 1 and za_riadkom.get(k + 1) != n + 1)]
         _zapovnyty(recs, idx, _tochnyi_lantsiuzhok(reads))
         reads2 = [(k, int(v)) for k, i in enumerate(idx) for v in [recs[i].get("no")]
                   if (isinstance(v, int) or (isinstance(v, str) and v.isdigit()))

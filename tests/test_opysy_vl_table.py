@@ -304,3 +304,40 @@ def test_pokazhchyk_sil_ne_tablytsia_nomeriv() -> None:
     p = V._Tables()
     p.feed(md)
     assert not V._kolonka_nomeriv(V.grid(p.tables[0]))
+
+
+# ── ланцюжок не перебиває правильно прочитане (ДАВіО ф.7 оп.2, ф.200 оп.1; ЦДІАК ф.49 оп.2; 26.11.2026) ──
+
+
+def _opys_riadkiv(tmp: Path, nomery: list[str]) -> list[dict[str, str]]:
+    d = tmp / "vl"
+    d.mkdir()
+    ryadky = [(n, f"Дело о межевании церковных земель с. Село{k} за 1853 г.", "3") for k, n in enumerate(nomery)]
+    (d / "0001.md").write_text(_tablytsia(*ryadky), encoding="utf-8")
+    V.build(d, tmp / "t.tsv", "1")
+    return _rows(tmp / "t.tsv")
+
+
+def test_samotnii_povtor_ne_opora(tmp_path: Path) -> None:
+    # стор. 5 ф.7 оп.2: «3» прочитано вдруге між 5 і 7; далі три рядки без номера, і довший ряд 41…100 має
+    # інший зсув «номер − рядок» — «3» лягала в нього опорою, і правильні 7…40 ставали 4…37
+    nomery = ["1", "2", "3", "4", "5", "3", *[str(n) for n in range(7, 41)], "", "", "",
+              *[str(n) for n in range(41, 101)]]
+    rows = _opys_riadkiv(tmp_path, nomery)
+    poruch = [(r["no_read"], r["no"]) for r in rows if r["no_read"].isdigit() and 7 <= int(r["no_read"]) <= 40]
+    assert poruch and all(a == b for a, b in poruch)
+
+
+def test_literna_cherez_defis() -> None:
+    assert V._nomer_vl("45-а") == (45, "а")
+    assert V._nomer_vl("169a") == (169, "а")
+
+
+def test_literna_i_propushchenyi_nomer_ne_zsuvaiut_riad(tmp_path: Path) -> None:
+    # ф.200 оп.1: після 45 — літерна «45-а», далі 46…69; номер 70 в описі пропущено, далі 71…80. Рядків між
+    # опорами 45 і 71 стільки ж, скільки номерів, але прочитане між ними — правильне й не зсувається на +1
+    nomery = [str(n) for n in range(30, 46)] + ["45-а"] + [str(n) for n in range(46, 70)] + \
+             [str(n) for n in range(71, 81)]
+    rows = _opys_riadkiv(tmp_path, nomery)
+    poruch = {r["no_read"]: r["no"] for r in rows}
+    assert poruch["45-а"] == "45а" and poruch["46"] == "46" and poruch["69"] == "69"
