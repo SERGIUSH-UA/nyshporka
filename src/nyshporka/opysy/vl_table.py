@@ -286,7 +286,7 @@ def tekst_records(md: str) -> list[dict[str, Any]]:
             if ((ostannii is None and len(_KYR.findall(dali)) >= 6)
                     or (ostannii is not None and 0 <= n - ostannii <= 3)):
                 recs.append({"no": n, "no_raw": re.sub(r"^#+\s*", "", ln), "old": "", "title": [],
-                             "dates": [], "folios": []})
+                             "dates": [], "folios": [], "lantsiuzhok": ostannii is not None})
                 ostannii = n
                 kinets_rechennia = False
             continue
@@ -301,7 +301,7 @@ def tekst_records(md: str) -> list[dict[str, Any]]:
             if (f := re.search(r"(?<=[^\d\s])\s+(\d{1,4})$", nazva)) and re.search(r"г\.?\s+\d{1,4}$", nazva):
                 nazva, fol = nazva[:f.start()].strip(), [f.group(1)]
             recs.append({"no": n, "no_raw": m.group(1), "old": "", "title": [nazva], "dates": [],
-                         "folios": fol})
+                         "folios": fol, "lantsiuzhok": ostannii is not None})
             ostannii = n
             kinets_rechennia = nazva.endswith(".")
             continue
@@ -536,13 +536,26 @@ def _vaha(r: dict[str, Any]) -> float:
     return max(1.0, math.ceil(len(" ".join(r["title"])) / ZNAKIV))
 
 
+#: Блоки VL з текстом сторінки (без номера сторінки й колонтитулів) — рамка справ, коли таблиці немає.
+TEKST_BLOKY = ("content", "text", "paragraph_title", "aside_text")
+
+
 def smuhy(spravy: list[dict[str, Any]], khvist: list[dict[str, Any]],
           blocks: dict[str, Any]) -> list[tuple[int, int]] | None:
-    """Смуги справ сторінки (y0, y1) у рамці таблиці VL; без рамки — None."""
+    """Смуги справ сторінки (y0, y1) у рамці таблиці VL; без таблиці — у рамці, що охоплює текстові
+    блоки (сторінка, яку VL віддав текстом: інакше кожна справа діставала всю сторінку, і ворота не
+    пускали опис — «рядки на тому самому місці», ЦДІАК ф.49 оп.2); без жодної рамки — None."""
     tab = next((b for b in blocks.get("blocks", []) if b.get("label") == "table"), None)
-    if tab is None or not spravy:
+    if not spravy:
         return None
-    y0, y1 = float(tab["bbox"][1]), float(tab["bbox"][3])
+    if tab is not None:
+        y0, y1 = float(tab["bbox"][1]), float(tab["bbox"][3])
+    else:
+        tekst = [b["bbox"] for b in blocks.get("blocks", [])
+                 if b.get("label") in TEKST_BLOKY and len(b.get("bbox") or []) == 4]
+        if not tekst:
+            return None
+        y0, y1 = float(min(b[1] for b in tekst)), float(max(b[3] for b in tekst))
     vagy = [_vaha(r) for r in spravy]
     kh = sum(_vaha(r) for r in khvist)
     krok = (y1 - y0) / (SHAPKA + kh + sum(vagy))
@@ -638,6 +651,9 @@ def _rik_zaholovok(v: dict[str, Any]) -> bool:
     сусідньої колонки дат («ЗАНВАРА») чи штамп («ЦИФРОВА КОПІЯ»), коротше 12 літер. Довша назва —
     справа, над якою стояв рік: номер у неї знімається, далі його ставить ланцюжок."""
     n = v.get("no")
+    if v.get("lantsiuzhok"):
+        # номер сторінки-тексту, прийнятий лише тому, що йде слідом за попереднім, — не рік
+        return False
     if not (isinstance(n, int) and 1500 <= n <= 2030 and not v.get("folios")):
         return False
     if len(re.findall(r"[^\W\d_]", " ".join(v.get("title") or []))) >= 12:
