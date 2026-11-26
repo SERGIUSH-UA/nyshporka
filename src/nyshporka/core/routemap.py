@@ -56,8 +56,10 @@ class Entry:
     scope: str
     mutates: bool
     section: str
-    kind: str          # "op" | "route"
+    kind: str          # "op" | "route" | "source"
     doc: str = ""
+    #: Рядки з тим самим `group` у видачі — один (майданчики ARCHIUM).
+    group: str = ""
 
     def card(self) -> dict[str, Any]:
         return {"name": self.name, "cli": self.cli, "summary": self.summary,
@@ -84,6 +86,63 @@ def entries() -> list[Entry]:
                   when=r.when, skill=r.skill, scope=r.scope, mutates=r.mutates,
                   section=r.section, kind="route")
             for r in R.ROUTES.values() if not r.op]
+    return out
+
+
+def source_entries() -> list[Entry]:
+    """Джерела з пошуком — рядками `nysh find <що> --source <id>`.
+
+    Джерело — не дія, а аргумент `nysh find`, тож описи дій його назви не
+    знають: «чи був прадід репресований» не знаходило мартиролога, «на Чтиві» —
+    Чтива, «катаграфії» — нічого (26.11.2026). Текст рядка — самоопис джерела
+    (`about`: питання, клас, що дає, межа), тож нове джерело стає знаходимим без
+    правки тут. Іменні бази (`explicit_only`) загальний `nysh find` не питає
+    взагалі — для них цей рядок єдиний шлях, яким агент про них дізнається.
+
+    Лише в `find`, не в `entries()`: карта старту — ядро, а збирати реєстр
+    джерел на кожному старті сесії заради рядків, яких карта не покаже, — марна
+    ціна.
+    """
+    from nyshporka import ops as O
+
+    finder, getter = O.get("catalog.search"), O.get("acquire.start")
+    try:
+        from nyshporka.core.workspace import WorkspaceError, workspace
+        from nyshporka.sources import load
+        from nyshporka.sources.base import about_of, supports
+
+        try:
+            root: Path | None = workspace().hub
+        except WorkspaceError:
+            root = None
+        sources = load(root).all()
+    except Exception:
+        # Зламаний реєстр не має гасити пошук команд: дії знаходяться й без
+        # рядків джерел, а `nysh op sources.list` покаже, що з ним.
+        return []
+    out = []
+    for s in sources:
+        about = about_of(s)
+        # Джерело без пошуку (Szukaj, Сканотека, Commons) відповідає лише на
+        # адресу — його рядок веде в `nysh get`, бо `--source` пошуку відмовив би.
+        if supports(s, "search"):
+            host, cli = finder, f"nysh find <що> --source {s.id}"
+        elif supports(s, "fetch"):
+            host, cli = getter, f"nysh get {s.id} <адреса> --out <тека>"
+        else:
+            continue
+        if about is None or host is None:
+            continue
+        note = about.scope.note if about.scope is not None else ""
+        label = str(getattr(s, "label", "") or s.id)
+        # Назва джерела — у «коли брати», бо з усього рядка вона найрідкісніша:
+        # «на Чтиві» мусить важити більше за спільне «книга».
+        out.append(Entry(
+            name=f"source.{s.id}", cli=cli, summary=label, tier="situational",
+            when=f"{label} — {about.answers}", skill="", scope=host.scope,
+            mutates=host.mutates, section=host.section, kind="source",
+            doc=" · ".join(t for t in (about.where_class, about.gives, note) if t),
+            group=about.answers))
     return out
 
 
@@ -176,7 +235,7 @@ def find(query: str, *, limit: int = 8, show_all: bool = False) -> list[tuple[En
     qs = list(dict.fromkeys(_stems(query)))
     if not qs:
         return []
-    pool = visible(entries(), show_all=show_all)
+    pool = visible(entries() + source_entries(), show_all=show_all)
     # Слово, що стоїть у кожній п'ятій дії («справа», «прочитане»), нічого не
     # розрізняє, а лише топить рідкісне: «чи був уже прогін справи» віддавав
     # `nysh find`. Його не рахуємо, якщо в запиті є бодай одне інше.
@@ -197,7 +256,18 @@ def find(query: str, *, limit: int = 8, show_all: bool = False) -> list[tuple[En
         if score:
             scored.append((e, score))
     scored.sort(key=lambda p: (-p[1], _TIER_RANK.get(p[0].tier, 3), p[0].name))
-    return scored[:limit]
+    # Десять майданчиків ARCHIUM і вісім сайтів архівів мають той самий
+    # самоопис: без цього загальний запит займав би ними всю видачу. Лишається
+    # найкращий — той, чию назву архіву запит назвав.
+    seen: set[str] = set()
+    out = []
+    for e, score in scored:
+        if e.group:
+            if e.group in seen:
+                continue
+            seen.add(e.group)
+        out.append((e, score))
+    return out[:limit]
 
 
 def _project_dir() -> Path | None:

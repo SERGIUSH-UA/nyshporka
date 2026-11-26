@@ -267,6 +267,42 @@ def test_find_matches_word_forms() -> None:
     assert not M.find("")
 
 
+@pytest.mark.parametrize(("query", "want"), [
+    # Джерело — аргумент `nysh find`, а не дія: до 26.11.2026 жодна з цих
+    # фраз його не знаходила, а іменні бази загальний пошук і не питає.
+    ("чи був прадід репресований", "martyrolog"),
+    ("ревізькі казки Бессарабії", "catagrafii"),
+    ("фотоархів Волока", "volok"),
+    ("маєткові інвентарі за селом", "inventarium"),
+    ("єпархіальні відомості", "ia"),
+    ("чи є книга на чтиві", "chtyvo"),
+])
+def test_find_names_the_source_by_its_own_description(tmp_path: Path, query: str,
+                                                     want: str) -> None:
+    """Рядок джерела будується з його самоопису — без слів, дописаних тут."""
+    W.use(W._build(_hub(tmp_path, 'preset = "lab"\n'), "test"))
+    tops = [e for e, _ in M.find(query, limit=5)]
+    srcs = [e.name for e in tops if e.kind == "source"]
+    assert f"source.{want}" in srcs, f"{query!r} → {[e.cli for e in tops]}"
+
+
+def test_source_without_search_leads_to_get(tmp_path: Path) -> None:
+    """Szukaj пошуку не має — його рядок веде в `nysh get`, а не на відмову `--source`."""
+    W.use(W._build(_hub(tmp_path, 'preset = "lab"\n'), "test"))
+    rows = {e.name: e.cli for e in M.source_entries()}
+    assert rows["source.szukaj"].startswith("nysh get szukaj ")
+    assert rows["source.martyrolog"] == "nysh find <що> --source martyrolog"
+    assert "source.local" not in rows, "диск не шукається й не качається"
+
+
+def test_source_rows_stay_out_of_the_start_map_and_repeat_once(tmp_path: Path) -> None:
+    """Карта старту — лише ядро; однакові майданчики ARCHIUM — одним рядком."""
+    W.use(W._build(_hub(tmp_path, 'preset = "lab"\n'), "test"))
+    assert "--source" not in M.agent_map()
+    clis = [e.cli for e, _ in M.find("забрати скани справи за шифрою", limit=8)]
+    assert sum("--source archium" in c for c in clis) <= 1, clis
+
+
 def test_find_matches_short_word_forms() -> None:
     """П'ятилітерні «чтиво»/«чтиві»/«чтива», «книга»/«книгу» — один префікс."""
     assert M._stems("чтиво") == M._stems("чтиві") == M._stems("чтива") == ["чтив"]
