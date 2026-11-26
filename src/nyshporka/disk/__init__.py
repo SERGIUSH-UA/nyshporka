@@ -555,7 +555,13 @@ def _folder(case: str) -> tuple[str, Path]:
         try:
             key = store.resolve_case(str(d)).key
         except ValueError as exc:
-            raise DiskError(f"тека {d} не розібралась як справа: {exc}") from exc
+            # Archium: кадри в `<справа>/pages/`, шифра — з теки справи (відгук №24, 23.11.2026)
+            if d.name != "pages":
+                raise DiskError(f"тека {d} не розібралась як справа: {exc}") from exc
+            try:
+                key = store.resolve_case(str(d.parent)).key
+            except ValueError:
+                raise DiskError(f"тека {d} не розібралась як справа: {exc}") from exc
     else:
         try:
             key = store.resolve_case(case).key
@@ -567,6 +573,7 @@ def _folder(case: str) -> tuple[str, Path]:
             pokaz = "; ".join(teky[:5]) or "жодної"
             raise DiskError(f"{key}: тек кадрів {len(teky)} ({pokaz}) — назвіть теку шляхом")
         d = Path(os.path.abspath(case_base() / teky[0]))
+    d = _teka_kadriv(d)
     if not d.is_dir():
         raise DiskError(f"{key}: {d} — не тека кадрів (файл або немає на диску)")
     if _real(d) != _norm(d):
@@ -589,6 +596,26 @@ def _folder(case: str) -> tuple[str, Path]:
         raise DiskError(f"{key}: у теці {pasport} немає паспорта ({', '.join(PASPORTY)}) — без "
                         f"нього справа після зняття кадрів зникне з реєстру")
     return key, d
+
+
+def _teka_kadriv(d: Path) -> Path:
+    """Тека, яку читав прогін: сама тека справи або її `pages/` (так кладе кадри Archium, поруч
+    `meta.json`, і прогін пише `case_dir = <справа>/pages`).
+
+    У `pages/` переходимо, лише коли в самій теці кадрів немає. Кадри в обох — дві різні теки зі
+    своїми прогонами, і кожну називають окремо (відгук №24, 23.11.2026)."""
+    p = d / "pages"
+    if d.name == "pages" or not d.is_dir() or not p.is_dir() or _is_link(p):
+        return d
+    return p if not _frames(d) and _frames(p) else d
+
+
+def _marker_files(d: Path) -> list[Path]:
+    """Де шукати позначку зняття: поруч паспорта (тека справи), а для `pages/` — і в ній самій.
+    `cases build` і бібліотека знаходять обидва місця."""
+    if d.name == "pages":
+        return [d.parent / OFFLOAD_MARKER, d / OFFLOAD_MARKER]
+    return [d / OFFLOAD_MARKER]
 
 
 def _frames(d: Path) -> list[Path]:
@@ -615,15 +642,29 @@ def _u_zhyvomu_zakhodi(d: Path) -> str:
     return ""
 
 
+def _marker_path(d: Path) -> Path:
+    """Куди писати позначку: туди, де вона вже є, інакше поруч паспорта."""
+    files = _marker_files(d)
+    return next((f for f in files if f.is_file()), files[0])
+
+
 def _marker(d: Path) -> dict[str, Any]:
-    f = d / OFFLOAD_MARKER
-    if not f.is_file():
-        return {}
-    try:
-        got = json.loads(f.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise DiskError(f"позначка {f} не читається ({exc}) — не перезаписую") from exc
-    return got if isinstance(got, dict) else {}
+    """Наявна позначка теки. Дві позначки з різними адресами копії — відмова: котра правдива,
+    не видно, а дописати до однієї означало б загубити другу."""
+    znaideni: list[tuple[Path, dict[str, Any]]] = []
+    for f in _marker_files(d):
+        if not f.is_file():
+            continue
+        try:
+            got = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise DiskError(f"позначка {f} не читається ({exc}) — не перезаписую") from exc
+        znaideni.append((f, got if isinstance(got, dict) else {}))
+    adresy = {str(m.get("restore") or "") for _, m in znaideni} - {""}
+    if len(adresy) > 1:
+        raise DiskError(f"дві позначки зняття з різними адресами копії ({', '.join(sorted(adresy))}): "
+                        f"{', '.join(str(f) for f, _ in znaideni)} — лишіть одну")
+    return znaideni[0][1] if znaideni else {}
 
 
 def offload(case: str, *, restore: str, apply: bool = False) -> dict[str, Any]:
@@ -706,7 +747,7 @@ def offload(case: str, *, restore: str, apply: bool = False) -> dict[str, Any]:
         _write_marker(d, marker)
     except DiskError as exc:
         # Кадри вже знято; лишилась позначка з адресою копії й `in_progress`.
-        out["errors"].append({"path": str(d / OFFLOAD_MARKER), "error": str(exc)})
+        out["errors"].append({"path": str(_marker_path(d)), "error": str(exc)})
     out["frames"] = znyato
     return out
 
@@ -743,7 +784,7 @@ def _zminenyi(f: Path) -> float:
 
 
 def _write_marker(d: Path, data: dict[str, Any]) -> None:
-    f = d / OFFLOAD_MARKER
+    f = _marker_path(d)
     part = f.with_name(f.name + ".part")
     try:
         part.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n",

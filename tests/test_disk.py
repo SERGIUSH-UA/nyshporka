@@ -460,6 +460,81 @@ def test_odnoimennyi_kadr_u_pages_ne_chipaietsia(ws: W.Workspace, svit: dict[str
     assert inshyi.exists()
 
 
+# ── Archium: кадри в `<справа>/pages/`, паспорт `meta.json` поруч (відгук №24, 23.11.2026) ──
+
+
+def _sprava_pages(root: Path, kadry: tuple[str, ...] = VSI) -> tuple[Path, Path]:
+    d = root / REL
+    for n in kadry:
+        _file(d / "pages" / n, 100, age=3600)
+    (d / "meta.json").write_text('{"shifra": "ДАХмО 315-1-8433"}', encoding="utf-8")
+    return d, d / "pages"
+
+
+@pytest.fixture
+def pages_ne_sprava(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Як у живому просторі: тека `…/pages` сама шифрою не розбирається, тека справи — так."""
+    from nyshporka.pagestore import store
+
+    def _rozibraty(v: str) -> Any:
+        if Path(v).name == "pages":
+            raise ValueError("не розпізнав справу")
+        return store.CaseRef(key=KEY, repo="DAHMO", fond="315", spr="8433", opys="1")
+
+    monkeypatch.setattr(store, "resolve_case", _rozibraty)
+
+
+@pytest.mark.parametrize("nazvaty", ["teka", "pages", "kliuch"])
+def test_kadry_v_pages_znimaiutsia(ws: W.Workspace, svit: dict[str, Any], pages_ne_sprava: None,
+                                   nazvaty: str) -> None:
+    """Прогін пише `case_dir = <справа>/pages`; справу знято, хоч як її назвати — текою справи,
+    текою `pages` чи шифрою. Позначка — поруч паспорта, де її шукають `cases build` і бібліотека."""
+    from nyshporka.library import _frames_removed
+
+    d, p = _sprava_pages(ws.root)
+    svit["lib"] = [{"key": KEY, "path": REL.as_posix()}]
+    _prohin(svit, p, VSI)
+    case = {"teka": str(d), "pages": str(p), "kliuch": "ДАХмО 315-1-8433"}[nazvaty]
+    got = D.offload(case, restore="Google Диск", apply=True)
+    assert got["frames"] == 3 and not list(p.glob("*.jpg"))
+    assert (d / "meta.json").exists()
+    marker = json.loads((d / D.OFFLOAD_MARKER).read_text(encoding="utf-8"))
+    assert marker["restore"] == "Google Диск" and marker["frames"] == 3
+    assert not (p / D.OFFLOAD_MARKER).exists()
+    assert _frames_removed(d)
+
+
+def test_kadry_i_v_tetsi_i_v_pages_kozhnu_nazyvaiut_okremo(ws: W.Workspace, svit: dict[str, Any],
+                                                           pages_ne_sprava: None) -> None:
+    """🔴 Кадри і в теці справи, і в `pages/`: це дві теки. Прогін `pages/` не дає права знімати
+    кадри самої теки, а тека справи не перескакує в `pages/`."""
+    d, p = _sprava_pages(ws.root)
+    for n in VSI:
+        _file(d / n, 100, age=3600)
+    _prohin(svit, p, VSI)
+    with pytest.raises(D.DiskError, match="жоден власний прогін"):
+        D.offload(str(d), restore="диск", apply=True)
+    assert len(list(d.glob("*.jpg"))) == 3 and len(list(p.glob("*.jpg"))) == 3
+    D.offload(str(p), restore="диск", apply=True)
+    assert len(list(d.glob("*.jpg"))) == 3 and not list(p.glob("*.jpg"))
+
+
+def test_pages_ruchna_poznachka_v_tetsi_spravy_druha_adresa(
+        ws: W.Workspace, svit: dict[str, Any], pages_ne_sprava: None) -> None:
+    """Позначку, покладену в теку справи власним скриптом учасника, offload бачить: друга адреса
+    копії — відмова, та сама — дописує до неї."""
+    d, p = _sprava_pages(ws.root)
+    (d / D.OFFLOAD_MARKER).write_text(json.dumps({"restore": "Google Диск: архів", "frames": 5,
+                                                  "bytes": 500}), encoding="utf-8")
+    _prohin(svit, p, VSI)
+    with pytest.raises(D.DiskError, match="Google Диск: архів"):
+        D.offload(str(d), restore="інший диск", apply=True)
+    assert len(list(p.glob("*.jpg"))) == 3
+    D.offload(str(d), restore="Google Диск: архів", apply=True)
+    marker = json.loads((d / D.OFFLOAD_MARKER).read_text(encoding="utf-8"))
+    assert marker["frames"] == 8 and not (p / D.OFFLOAD_MARKER).exists()
+
+
 def test_kliuch_iz_dvoma_tekamy_vymahaie_shliakhu(ws: W.Workspace, svit: dict[str, Any]) -> None:
     svit["lib"] = [{"key": KEY, "path": "data/raw/a/1"}, {"key": KEY, "path": "data/raw/b/1"}]
     with pytest.raises(D.DiskError, match="назвіть теку шляхом"):
