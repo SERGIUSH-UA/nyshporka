@@ -20,7 +20,10 @@ from typing import Any
 
 from nyshporka.opysy import norm_batches as NB
 
-LICENSE = "CC-BY-NC-SA-4.0"
+#: Ліцензія внеску в Засіки — умови Засік (nyshporka.online/zasiky/umovy), не відкрита ліцензія:
+#: поширення контролює власник Нишпорки (рішення дослідника 27.11.2026; до того — CC-BY-NC-SA-4.0).
+#: Форма `LicenseRef-…` — так SPDX позначає власну ліцензію.
+LICENSE = "LicenseRef-Nyshporka-Zasiky"
 #: Позначка номера таблиці → `Row.no_status`; решта — «звірити».
 STATUS = {"neighbors": "neighbors", "between": "between", "chain": "chain", "eye": "eye"}
 _SEG = re.compile(r"^\s*(?:(\d{4})_(\d):)?\s*(\d+)-(\d+)\s*$")
