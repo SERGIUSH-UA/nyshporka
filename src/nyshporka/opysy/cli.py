@@ -450,7 +450,8 @@ def init_cmd(
     repo: str = typer.Option(..., "--repo", help="архів: ЦДІАК, ДАОО…"),
     fond: str = typer.Option(..., "--fond", help="фонд"),
     opys: str = typer.Option(..., "--opys", help="номер опису"),
-    url: str = typer.Option(..., "--url", help="де файл опубліковано: сайт архіву чи Commons"),
+    url: str = typer.Option("", "--url", help="де файл опубліковано: сайт архіву чи Commons; "
+                                              "порожньо — назвати до push (`nysh opys dzherelo`)"),
     kind: str = typer.Option("", "--kind", help="commons / archive_site / public_other; "
                                                 "порожньо — з адреси"),
     page_link: str = typer.Option("", "--page-link", help="шаблон посилання на сторінку з {page}"),
@@ -472,7 +473,34 @@ def init_cmd(
         return
     d = env.data or {}
     console.print(f"тека {_e(d.get('dir'))} · сторінок {_e(d.get('pages'))} · "
-                  f"джерело {_e((d.get('source') or {}).get('url'))}")
+                  f"джерело {_e((d.get('source') or {}).get('url') or 'адресу ще не названо')}")
+    notes(env)
+    _next(d)
+
+
+@app.command("dzherelo")
+def dzherelo_cmd(
+    folder: str = typer.Argument(..., help="робоча тека опису"),
+    url: str = typer.Option(..., "--url", help="де файл опубліковано: сайт архіву чи Commons"),
+    kind: str = typer.Option("", "--kind", help="commons / archive_site / public_other; "
+                                                "порожньо — з адреси"),
+    page_link: str = typer.Option("", "--page-link", help="шаблон посилання на сторінку з {page}"),
+    published: str = typer.Option("", "--published", help="оригінал за адресою (напр. djvu), "
+                                                          "якщо PDF — перетворення"),
+    as_json: bool = typer.Option(False, "--json", help="машинний вивід (JSON)"),
+) -> None:
+    """Назвати адресу публікації опису, прочитаного зі збереженого колись файлу. Адресу знайти на
+    сайті архіву й перевірити, що там той самий опис; вигаданої не ставити. Прочитане не змінюється."""
+    from nyshporka import ops as O
+
+    env = O.call("opysy.dzherelo", {"dir": folder, "url": url, "kind": kind, "page_link": page_link,
+                                    "published": published})
+    if _answer(env, as_json):
+        return
+    d = env.data or {}
+    console.print(f"джерело {_e((d.get('source') or {}).get('url'))} · "
+                  f"{_e((d.get('source') or {}).get('kind'))}")
+    notes(env)
     _next(d)
 
 

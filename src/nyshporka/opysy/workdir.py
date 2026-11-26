@@ -91,15 +91,29 @@ def _source(url: str, kind: str, page_link: str, label: str) -> dict[str, Any]:
             "label": label or url.rsplit("/", 1)[-1].split("?", 1)[0]}
 
 
-def init(d: Path, pdf: Path, *, repo: str, fond: str, opys: str, url: str, kind: str = "",
+def _vyd_adresy(url: str, orig: Path) -> None:
+    """Адреса веде на файл іншого виду, ніж той, з якого рахується хеш, — відмова: інакше паспорт
+    ніс би хеш чужого файлу."""
+    if not orig.is_file():
+        return
+    vyd = Path(unquote(urlparse(url.strip()).path)).suffix.lower()
+    if vyd and vyd != orig.suffix.lower():
+        raise WorkdirError(f"адреса веде на файл «{vyd}», а хеш рахувався б із «{orig.name}»: "
+                           f"дай оригінал, опублікований за адресою (`--published <файл{vyd}>`)")
+
+
+def init(d: Path, pdf: Path, *, repo: str, fond: str, opys: str, url: str = "", kind: str = "",
          page_link: str = "", form: str = "hand_ruled", title: str = "", years: str = "",
          language: str = "", published: Path | None = None) -> dict[str, Any]:
     """Завести робочу теку: паспорт джерела з локального PDF (сторінки) і адреси, де опис
     опубліковано. Закритий для заливки фонд — відмова до будь-якого прогону.
 
+    Адреса може прийти пізніше (`set_source`): старий PDF, збережений колись із сайту архіву,
+    читається одразу, а адресу людина знаходить і перевіряє до `build` (відгук №27, 26.11.2026).
+    Вигаданої адреси не ставимо — `build` без неї відмовляє.
+
     sha256 джерела — того файлу, що лежить за адресою: `published` (оригінал, напр. djvu сайту
-    архіву, з якого зроблено PDF), інакше сам PDF. Адреса веде на файл іншого виду, ніж PDF, а
-    оригіналу не дали — відмова: інакше паспорт ніс би хеш чужого файлу."""
+    архіву, з якого зроблено PDF), інакше сам PDF."""
     import pypdfium2 as pdfium
 
     from nyshporka.opysy import gates as G
@@ -119,17 +133,11 @@ def init(d: Path, pdf: Path, *, repo: str, fond: str, opys: str, url: str, kind:
             raise WorkdirError(f"у теці {pdf} немає кадрів (jpg, png, tif)")
     elif not pdf.is_file():
         raise WorkdirError(f"немає файлу {pdf}")
-    if not url.strip():
-        raise WorkdirError("потрібна адреса, де цей файл опубліковано (сайт архіву, Commons): "
-                           "посилання справи в Супрязі веде туди")
     orig = Path(published).resolve() if published else pdf
     if not (orig.is_file() or (orig.is_dir() and teka)):
         raise WorkdirError(f"немає файлу {orig}")
-    if orig.is_file():
-        vyd = Path(unquote(urlparse(url.strip()).path)).suffix.lower()
-        if vyd and vyd != orig.suffix.lower():
-            raise WorkdirError(f"адреса веде на файл «{vyd}», а хеш рахувався б із «{orig.name}»: "
-                               f"дай оригінал, опублікований за адресою (`--published <файл{vyd}>`)")
+    if url.strip():
+        _vyd_adresy(url, orig)
     if teka:
         # Архів публікує опис кадрами (тека на сайті чи файлообміннику архіву): сторінки — самі кадри,
         # відбиток джерела — з імен і вмісту кадрів за порядком.
@@ -148,11 +156,18 @@ def init(d: Path, pdf: Path, *, repo: str, fond: str, opys: str, url: str, kind:
             doc.close()
         vidbytok = _sha256(orig)
     label = orig.name if (published or teka) else ""
-    src = {**_source(url, kind, page_link, label), "sha256": vidbytok}
-    Source(**src, pages=n)  # перевірка схемою: вид, адреса, шаблон посилання
+    if url.strip():
+        src = {**_source(url, kind, page_link, label), "sha256": vidbytok}
+        Source(**src, pages=n)  # перевірка схемою: вид, адреса, шаблон посилання
+    else:
+        # Адресу назвуть пізніше (`set_source`); вид джерела — тоді ж, з адреси.
+        src = {"kind": "", "url": "", "page_link": "", "label": label or orig.name,
+               "sha256": vidbytok}
     repo_c, fond_c = G.repo_fond(repo, fond)
     pas = {"repo": repo_c, "fond": fond_c, "opys": str(opys).strip(), "form": form, "pdf": str(pdf),
            "pages": n, "source": src, "title": title, "years": years, "language": language}
+    if published:
+        pas["published"] = str(orig)
     d = Path(d)
     d.mkdir(parents=True, exist_ok=True)
     (d / PASSPORT).write_text(json.dumps(pas, ensure_ascii=False, indent=1), encoding="utf-8",
@@ -168,6 +183,49 @@ def load(d: Path) -> dict[str, Any]:
     return pas
 
 
+def bez_adresy(pas: dict[str, Any]) -> bool:
+    """Адресу публікації ще не названо (тека заведена без `--url`)."""
+    return not str((pas.get("source") or {}).get("url") or "").strip()
+
+
+def set_source(d: Path, *, url: str, kind: str = "", page_link: str = "",
+               published: Path | None = None) -> dict[str, Any]:
+    """Назвати адресу публікації опису для вже заведеної теки — до `build`.
+
+    Прочитане не чіпається: хеш джерела той самий, якщо не дали оригінал (`published`), з якого
+    зроблено PDF. Тоді хеш рахується з оригіналу, бо саме він лежить за адресою."""
+    from nyshporka.opysy.schema import Source
+
+    if not url.strip():
+        raise WorkdirError("назвіть адресу, де цей файл опубліковано (`--url`): сайт архіву чи Commons")
+    pas = load(d)
+    pdf = Path(pas["pdf"])
+    teka = pdf.is_dir()
+    if published is not None:
+        if teka:
+            raise WorkdirError("опис заведено текою кадрів — оригіналу-файлу (`--published`) тут немає")
+        orig = Path(published).resolve()
+        if not orig.is_file():
+            raise WorkdirError(f"немає файлу {orig}")
+        vidbytok = _sha256(orig)
+        pas["published"] = str(orig)
+    else:
+        orig = Path(pas.get("published") or pdf)
+        vidbytok = str((pas.get("source") or {}).get("sha256") or "")
+    _vyd_adresy(url, orig)
+    label = orig.name if (pas.get("published") or teka) else ""
+    bulo = str((pas.get("source") or {}).get("url") or "")
+    src = {**_source(url, kind, page_link, label), "sha256": vidbytok}
+    try:
+        Source(**src, pages=int(pas["pages"]))
+    except ValueError as exc:
+        raise WorkdirError(f"адреса не годиться: {exc}") from exc
+    pas["source"] = src
+    (Path(d) / PASSPORT).write_text(json.dumps(pas, ensure_ascii=False, indent=1), encoding="utf-8",
+                                    newline="\n")
+    return {"source": src, "bulo": bulo}
+
+
 def build(d: Path, *, norm_model: str = "", tool: str = "nysh opys build",
           na_obmin: bool = False) -> dict[str, Any]:
     """Робоча тека пакета `<тека>/paket` з прочитаного, таблиці й нормалізації."""
@@ -175,6 +233,10 @@ def build(d: Path, *, norm_model: str = "", tool: str = "nysh opys build",
     from nyshporka.opysy import pack_dir as PD
 
     pas = load(d)
+    if bez_adresy(pas):
+        raise WorkdirError(f"адресу, де опис опубліковано, ще не названо — посилання справ у Супрязі "
+                           f"вестимуть туди. Знайдіть файл на сайті архіву й перевірте, що це той самий "
+                           f"опис: `nysh opys dzherelo {d} --url <адреса>`")
     voices = PD.run_voices(run_dir(d))
     if not voices:
         raise WorkdirError(f"немає прочитаних сторінок у {run_dir(d)} — "

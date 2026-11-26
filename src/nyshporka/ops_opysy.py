@@ -298,7 +298,9 @@ class InitArgs(BaseModel):
     repo: str = Field(description="архів: ЦДІАК, ДАОО…")
     fond: str = Field(description="фонд")
     opys: str = Field(description="номер опису")
-    url: str = Field(description="де цей файл опубліковано: сайт архіву чи Commons")
+    url: str = Field(default="", description="де цей файл опубліковано: сайт архіву чи Commons; "
+                                             "порожньо — назвати пізніше (`nysh opys dzherelo`), "
+                                             "до `build`")
     kind: str = Field(default="", description="commons / archive_site / public_other; "
                                               "порожньо — з адреси")
     page_link: str = Field(default="", description="шаблон посилання на сторінку з {page}; "
@@ -352,8 +354,44 @@ def opysy_init(a: InitArgs) -> Envelope:
                      language=a.language, published=Path(a.published) if a.published else None)
     except (W.WorkdirError, ValueError, OSError) as exc:
         return _workdir_fail(exc)
-    return ok({"dir": str(Path(a.dir).resolve()), "pages": pas["pages"], "source": pas["source"],
-               "next": f"nysh opys pages {a.dir}"})
+    env = ok({"dir": str(Path(a.dir).resolve()), "pages": pas["pages"], "source": pas["source"],
+              "next": f"nysh opys pages {a.dir}"})
+    if W.bez_adresy(pas):
+        env.warn("bez_adresy", _BEZ_ADRESY.format(dir=a.dir))
+    return env
+
+
+_BEZ_ADRESY = ("адресу публікації не названо: читати можна, а перед `nysh opys push` знайдіть цей файл "
+               "на сайті архіву, перевірте, що опис той самий, і назвіть адресу — "
+               "`nysh opys dzherelo {dir} --url <адреса>`")
+
+
+class DzhereloArgs(BaseModel):
+    dir: str = Field(description="робоча тека опису")
+    url: str = Field(description="де цей файл опубліковано: сайт архіву чи Commons")
+    kind: str = Field(default="", description="commons / archive_site / public_other; "
+                                              "порожньо — з адреси")
+    page_link: str = Field(default="", description="шаблон посилання на сторінку з {page}; "
+                                                   "Commons — сам")
+    published: str = Field(default="", description="оригінал, опублікований за адресою (напр. "
+                                                   "djvu сайту архіву), якщо PDF — перетворення")
+
+
+@op("opysy.dzherelo", summary="Назвати адресу публікації опису, прочитаного з локального файлу",
+    args=DzhereloArgs, mutates=True, section=SECTION, tier="rare",
+    when="опис читали зі збереженого колись PDF без адреси — перед `nysh opys push`")
+def opysy_dzherelo(a: DzhereloArgs) -> Envelope:
+    from nyshporka.opysy import workdir as W
+
+    try:
+        res = W.set_source(Path(a.dir), url=a.url, kind=a.kind, page_link=a.page_link,
+                           published=Path(a.published) if a.published else None)
+    except (W.WorkdirError, OSError) as exc:
+        return _workdir_fail(exc)
+    env = ok({"dir": str(Path(a.dir).resolve()), **res, "next": f"nysh opys push {a.dir}"})
+    if res["bulo"] and res["bulo"] != res["source"]["url"]:
+        env.warn("adresa_zminena", f"адресу замінено: було {res['bulo']}")
+    return env
 
 
 @op("opysy.pages", summary="Сторінки опису з PDF у JPEG під читання цілими сторінками",
@@ -528,7 +566,8 @@ class ReadOpysArgs(BaseModel):
     repo: str = Field(default="", description="архів: ЦДІАК, ДАОО… (для нової теки)")
     fond: str = Field(default="", description="фонд (для нової теки)")
     opys: str = Field(default="", description="номер опису (для нової теки)")
-    url: str = Field(default="", description="де файл опубліковано: сайт архіву чи Commons")
+    url: str = Field(default="", description="де файл опубліковано: сайт архіву чи Commons; "
+                                             "порожньо — назвати до push (`nysh opys dzherelo`)")
     published: str = Field(default="", description="оригінал за адресою (djvu сайту архіву), якщо "
                                                    "PDF — перетворення")
     title: str = Field(default="", description="установа фонду — для шаблону нормалізації")
@@ -749,7 +788,7 @@ def opysy_read(a: ReadOpysArgs) -> Envelope:
         W.load(d)
     except W.WorkdirError:
         brak = [k for k, v in (("--pdf", a.pdf), ("--repo", a.repo), ("--fond", a.fond),
-                               ("--opys", a.opys), ("--url", a.url)) if not v]
+                               ("--opys", a.opys)) if not v]
         if brak:
             return fail(f"нова тека опису — потрібні {', '.join(brak)}")
         pol = opysy_policy(PolicyArgs(repo=a.repo, fond=a.fond))
@@ -869,6 +908,8 @@ def opysy_read(a: ReadOpysArgs) -> Envelope:
     out.warnings.extend(poperedzhennia)
     for t in poperedzhennia_hmary:
         out.warn("hmara", t)
+    if W.bez_adresy(W.load(d)):
+        out.warn("bez_adresy", _BEZ_ADRESY.format(dir=a.dir))
     return out
 
 

@@ -152,9 +152,38 @@ def test_zakrytyi_fond_odrazu_z_posylanniam(tmp_path: Path, server: dict[str, An
 
 def test_nova_teka_bez_dzherela_i_mashynopys(tmp_path: Path, server: dict[str, Any]) -> None:
     env = _read(tmp_path / "y", repo="ДАОО", fond="445")
-    assert not env.ok and "--pdf" in env.error and "--url" in env.error
+    assert not env.ok and "--pdf" in env.error and "--opys" in env.error
+    assert "--url" not in env.error, "адресу називають і пізніше, до push"
     env = _read(tmp_path / "z", form="typed")
     assert not env.ok and "--pdf" in env.error
+
+
+def test_staryi_pdf_bez_adresy_chytaietsia_adresa_do_push(tmp_path: Path, server: dict[str, Any],
+                                                          chytannia: list[Path]) -> None:
+    """Опис зі збереженого колись PDF, точної адреси якого людина не пам'ятає: читається одразу,
+    `push` без адреси відмовляє з командою, адреса, названа потім, лягає в пакет із тим самим
+    хешем файлу (відгук порталу №27, 26.11.2026). Вигаданої адреси не ставиться."""
+    from nyshporka.opysy import bundle as B
+
+    d = tmp_path / "opys"
+    env = _read_z_meta(d, pdf=str(_pdf(tmp_path)), repo="ДАПО", fond="1", opys="9", language="ru")
+    assert env.ok, env
+    assert any(w.code == "bez_adresy" and "nysh opys dzherelo" in w.text for w in env.warnings)
+    hesh = W.load(d)["source"]["sha256"]
+    assert hesh and not W.load(d)["source"]["url"]
+    bez = OO.opysy_push(OO.PushArgs(file=str(d), na_obmin=True))
+    assert not bez.ok and "nysh opys dzherelo" in bez.error and not server["pushed"]
+    # адреса веде на djvu, а оригіналу не дали — відмова, паспорт не змінено
+    djvu = OO.opysy_dzherelo(OO.DzhereloArgs(dir=str(d), url="https://archive.example/o.djvu"))
+    assert not djvu.ok and "--published" in djvu.error and W.bez_adresy(W.load(d))
+    got = OO.opysy_dzherelo(OO.DzhereloArgs(dir=str(d), url="https://archive.example/f1/o9.pdf"))
+    assert got.ok, got
+    assert W.load(d)["source"]["sha256"] == hesh, "прочитане й хеш файлу ті самі"
+    assert OO.opysy_push(OO.PushArgs(file=str(d), na_obmin=True)).ok
+    contents, verdict = B.verify(server["pushed"][-1].read_bytes())
+    src = contents.manifest["sources"][0]
+    assert verdict.passed and src["url"] == "https://archive.example/f1/o9.pdf"
+    assert src["kind"] == "archive_site" and src["sha256"] == hesh and src["label"] == "o9.pdf"
 
 
 def test_obirvane_chytannia_kazhe_prodovzhyty(tmp_path: Path, server: dict[str, Any],
