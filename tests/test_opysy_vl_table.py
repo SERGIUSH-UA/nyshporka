@@ -209,3 +209,51 @@ def test_storinka_insha_shyryna_bez_shapky_ne_hubytsia(tmp_path: Path) -> None:
     (d / "0002.md").write_text("<table>" + rows + "</table>", encoding="utf-8")
     V.build(d, tmp_path / "t.tsv", "3")
     assert [r["no"] for r in _rows(tmp_path / "t.tsv")] == ["1", "2", "3", "4", "5", "6"]
+
+
+# ── ДАВіО ф.5/ф.7/ф.12 (26.11.2026): «To же», «5^5», засвідчувальний напис у таблиці ──
+
+
+def _tablytsia(*ryadky: tuple[str, ...]) -> str:
+    return "<table>" + "".join("<tr>" + "".join(f"<td>{c}</td>" for c in r) + "</tr>" for r in ryadky) + "</table>"
+
+
+def test_to_zhe_zmishanym_pysmom_nazva_a_ne_data(tmp_path: Path) -> None:
+    d = tmp_path / "vl"
+    d.mkdir()
+    # над справами — рядок, чий номер VL зіпсував («3» замість 529): без «То же» справи 530–531 далеко
+    # від нього за номером і зливались у його дати (стор. 49 ф.7 оп.2)
+    (d / "0001.md").write_text(_tablytsia(
+        ("3", "Геодезическое описание участка крестьянина с. Соколец за 1898 г.", "6"),
+        ("530", "To же за 1898 г.", "6"), ("531", "То ме за 1899 г.", "6")), encoding="utf-8")
+    V.build(d, tmp_path / "t.tsv", "2")
+    rows = _rows(tmp_path / "t.tsv")
+    assert [r["no"] for r in rows][1:] == ["530", "531"]
+    assert rows[1]["title"].startswith("To же") and rows[2]["title"].startswith("То ме")
+
+
+def test_nul_u_nomeri_yak_karet() -> None:
+    sides, _ = V.records(_tablytsia(("504", "То же за 1896 г.", "6"), ("5^5", "Геодезическое описание земли", "6"),
+                                    ("5 ^ 6", "То же за 1895 г.", "6")))
+    assert [r["no"] for s in sides for r in s] == [504, 505, 506]
+
+
+def test_zasvidchennia_u_tablytsi_ne_sprava_i_ne_hubyt_storinku() -> None:
+    # стор. 51 ф.7 оп.2: шапка — номер сторінки, 5 справ, 6 рядків напису
+    md = _tablytsia(("47", "", "", "6"),
+                    ("558", "Геодезическое описание земельного участка крестьянина с. Соколец", "", "6"),
+                    ("559", "То же м. Немирова за 1903 г.", "", "4"), ("560", "То же за 1908 г.", "", "4"),
+                    ("561", "То же д. Каролины за 1908 г.", "", "4"), ("562", "Недействующие описи 2,3", "", ""),
+                    ("", "Дважды дописаны дела №№ : 397, 451, 520.", "", ""),
+                    ("", "Под литером дела №№ : 15а, 194а, 420а.", "", ""),
+                    ("", "В данную опись внесено 561 / пятьсот шестьдесят одно/ дело.", "", ""),
+                    ("", "Опись усовершенствована арх. I кат.", "", ""), ("", "18.01.90", "", ""),
+                    ("", "Дописано дело 562 /см.справку от", "24.10.90", ""))
+    sides, _ = V.records(md, (7, [{"no": 0}]))
+    spravy = [r for s in sides for r in s if r["no"] is not None]
+    assert [r["no"] for r in spravy] == [47, 558, 559, 560, 561, 562]
+    assert not any("Дважды" in " ".join(r["title"]) or "внесено" in " ".join(r["title"]) for s in sides for r in s)
+    # російські й OCR-варіанти напису
+    for t in ("Под питером дела и 340а - 389а", "Отсутствуют ед. хр. 287, 320-333", "Выбыли дела № 373, 592",
+              "Опись перепечатана 03.02.90", "Пропущены №№ 393, 765", "В данную опась внесено 6 дел"):
+        assert V._ZASVIDCHENNIA.match(t), t
