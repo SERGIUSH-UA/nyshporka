@@ -703,13 +703,24 @@ def _hmara_etap(d: Path, etap: str, kadry: Path, kudy: Path, a: ReadOpysArgs, *,
     забере) чи `postavleno` (щойно поставлено). Відмова `cloud go` — `HmaraError`."""
     from nyshporka.opysy import hmara as H
 
-    zap = H.stan(d).get(etap)
+    # Стан теки не пам'ятає етапу — спершу готовий захід з реєстру хмари (0.49.5 стирав стан після
+    # успішного заходу, відгук №28), і лише тоді новий.
+    zap = H.stan(d).get(etap) or H.pidkhopyty(d, etap, mitka)
     if zap and zap.get("zabrano"):
         return "gotovo", zap
     if zap:
         zrobleno, vsi = H.gotovo(d, etap)
         povno = bool(vsi) and zrobleno >= vsi
         if not povno and H.skinchyvsia(zap):
+            if zrobleno == 0 and H.uspikh(zap):
+                # 🔴 Реєстр каже «прочитано», а результату не видно. Стерти етап означало б
+                # поставити платний захід удруге — тож стан лишається, а людина дістає адресу.
+                st = H._reiestr(str(zap.get("run_id") or ""))
+                raise H.HmaraError(
+                    f"хмарний захід {zap.get('run_id')} скінчився успішно, але його результату не "
+                    f"знайдено ({getattr(st, 'out_dir', '') or zap.get('out_dir') or 'адреси немає'}). "
+                    f"Нового заходу не ставлю, щоб не платити вдруге: `nysh cloud state "
+                    f"{zap.get('run_id')}`; коли тека результату на місці — та сама команда її забере")
             if zrobleno == 0:
                 # Захід скінчився, не прочитавши нічого (ринок порожній, машина не встала): етап геть,
                 # причину названо; `auto` читає тут, повтор `read` поставить захід знову.
@@ -725,9 +736,10 @@ def _hmara_etap(d: Path, etap: str, kadry: Path, kudy: Path, a: ReadOpysArgs, *,
             povno = True
         if povno:
             H.zabraty(d, etap, kudy)
-            if etap == "storinky":
+            out_ = H.teka_vyhodu(zap)
+            if etap == "storinky" and out_ is not None:
                 # другий голос лягає поруч: `<тека результату>-<голос>` → `<тека>/run-<голос>`
-                out = Path(zap["out_dir"])
+                out = out_
                 for sib in out.parent.glob(out.name + "-*"):
                     if sib.is_dir():
                         H.zabraty_tekou(sib, kudy.parent / f"{kudy.name}-{sib.name[len(out.name) + 1:]}")

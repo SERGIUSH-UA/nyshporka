@@ -392,7 +392,33 @@ def _ref_z_adresy(url: str) -> dict[str, str] | None:
     item = polona.resolve(url)
     if item is not None:
         return {"source": polona.SOURCE, "ref": item.ref, "url": item.url}
-    return None
+    return _govua(url)
+
+
+#: Джерело сканів «сайт державної установи України» (`*.gov.ua`): обласні архіви викладають
+#: справи на власних сайтах (ДАХО — archives.kh.gov.ua, файли на daho.archives.gov.ua).
+#: Рішення дослідника 27.11.2026: хост `.gov.ua` — відоме джерело без окремих перевірок архіву.
+GOVUA = "govua"
+
+
+def _govua(url: str) -> dict[str, str] | None:
+    """Адреса на `*.gov.ua` — зйомка `govua:url:<адреса>`; інакше None.
+
+    Хост звіряється розібраним, а не підрядком: `gov.ua.example.com` чи `…?x=.gov.ua` — не те.
+    Лише http(s) і без логіна в адресі: портал робить із неї посилання для людей."""
+    from urllib.parse import urlparse, urlunparse
+
+    try:
+        u = urlparse(str(url or "").strip())
+        host = (u.hostname or "").lower()
+    except ValueError:
+        return None
+    if u.scheme not in ("http", "https") or u.username or u.password:
+        return None
+    if not (host == "gov.ua" or host.endswith(".gov.ua")):
+        return None
+    clean = urlunparse((u.scheme, u.netloc.lower(), u.path or "/", "", u.query, ""))
+    return {"source": GOVUA, "ref": f"url:{clean}", "url": str(url).strip()}
 
 
 def _commons_nazvy(raw: Any) -> list[str]:

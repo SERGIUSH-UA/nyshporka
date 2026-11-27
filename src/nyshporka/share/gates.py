@@ -248,7 +248,7 @@ def _no_refs_text(m: Manifest) -> str:
     return (f"{lead}: посилання {urls[0]} у пакеті є, але цей хост не входить до "
             "відомих джерел сканів (FamilySearch, Wikimedia Commons, ARCHIUM, Skanoteka ПТГ, "
             "Szukaj w Archiwach, AGAD Metryka Koronna і метричні зеспіли, Hungaricana, "
-            "Polona). "
+            "Polona, сайти державних архівів на .gov.ua). "
             "Адреса лишиться в пакеті, а в каталозі пулу скани не покажуться; "
             "інше посилання на той самий хост цього не змінить")
 

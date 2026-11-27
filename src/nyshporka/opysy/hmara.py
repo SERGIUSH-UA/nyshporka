@@ -118,8 +118,12 @@ def _podaty(d: Path, etap: str, kadry: Path, mitka: str = "") -> Path:
 def _cloud_go(args: list[str]) -> tuple[int, dict[str, Any], str]:
     """`nysh cloud go … --json` тим самим інтерпретатором: (код, підсумок, хвіст виводу)."""
     cmd = [sys.executable, "-m", "nyshporka", "cloud", "go", *args, "--json"]
+    # 🔴 Дитина пише в трубу кодуванням консолі (cp1251, cp1252), а читається підсумок як UTF-8:
+    # кирилиця в `out_dir` ставала «?», і результат заходу не знаходився (відгук №28, 27.11.2026).
+    # Лише `PYTHONIOENCODING`: `PYTHONUTF8` змінив би й кодування файлів, а його успадкує наглядач.
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                       check=False)
+                       check=False, env=env)
     pidsumok: dict[str, Any] = {}
     for line in reversed((p.stdout or "").strip().splitlines()):
         line = line.strip()
@@ -168,27 +172,114 @@ def postavyty(d: Path, etap: str, kadry: Path, *, script: str = "", params: list
            "postavleno": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     if not zap["out_dir"] and res.get("cases"):
         zap["out_dir"] = res["cases"][0].get("out_dir") or ""
+    st = _reiestr(str(zap["run_id"] or ""))
+    if st is not None and st.out_dir:
+        zap["out_dir"] = st.out_dir   # реєстр пише наглядач у UTF-8 — адреса з нього надійніша
     _zapysaty(d, etap, zap)
     return zap
 
 
-def gotovo(d: Path, etap: str) -> tuple[int, int]:
-    """(прочитано, кадрів) етапу — за файлами в теці результату. Прочитана — є вихід АБО рушій
-    записав сторінку в мету прогону: порожня сторінка чи кроп без числа тексту не мають, і без мети
-    «прочитано N−1 з N» не минало б ніколи (так рахує й локальне читання)."""
-    zap = stan(d).get(etap) or {}
-    out = Path(zap.get("out_dir") or "")
-    vsi = int(zap.get("kadriv") or 0)
-    if not zap.get("out_dir") or not out.is_dir():
-        return 0, vsi
-    kadry = {p.stem for p in _kadry(Path(zap["teka"]))} if Path(zap.get("teka") or "").is_dir() else set()
+def _reiestr(run_id: str) -> Any:
+    """Запис заходу в реєстрі хмари (`cloud.state`) — або None."""
+    if not run_id:
+        return None
+    try:
+        from nyshporka.cloud import state as ST
+
+        return ST.load(run_id)
+    except Exception:
+        return None
+
+
+def teka_vyhodu(zap: dict[str, Any]) -> Path | None:
+    """Тека результату етапу: записана в стані, якщо вона є на диску, інакше — з реєстру хмари.
+
+    🔴 Стан пише `out_dir` з виводу дочірнього `cloud go`, а реєстр — сам наглядач у файл UTF-8.
+    До 0.49.6 вивід дитини губив кирилицю («?»), і записана адреса не існувала, хоча результат
+    лежав на диску (відгук №28)."""
+    p = str(zap.get("out_dir") or "")
+    if p and Path(p).is_dir():
+        return Path(p)
+    st = _reiestr(str(zap.get("run_id") or ""))
+    if st is not None and st.out_dir and Path(st.out_dir).is_dir():
+        return Path(st.out_dir)
+    return None
+
+
+def uspikh(zap: dict[str, Any]) -> bool:
+    """Реєстр хмари каже, що захід скінчився успішно (`done` · `ok`)."""
+    st = _reiestr(str(zap.get("run_id") or ""))
+    return st is not None and st.phase == "done" and st.verdict == "ok"
+
+
+def _zrobleno(out: Path, etap: str) -> set[str]:
+    """Прочитані кадри в теці результату. Прочитана — є вихід АБО рушій записав сторінку в мету
+    прогону: порожня сторінка чи кроп без числа тексту не мають, і без мети «прочитано N−1 з N» не
+    минало б ніколи (так рахує й локальне читання)."""
     zrobleno = {p.name.split(".")[0] for p in out.glob(VYHID[etap])}
     meta = out / "_htr_meta.json"
     if etap != "druk" and meta.exists():
         with contextlib.suppress(ValueError, OSError, AttributeError):
             zrobleno |= {Path(k).stem for k in (json.loads(meta.read_text(encoding="utf-8"))
                                                 .get("pages") or {})}
+    return zrobleno
+
+
+def gotovo(d: Path, etap: str) -> tuple[int, int]:
+    """(прочитано, кадрів) етапу — за файлами в теці результату (`_zrobleno`)."""
+    zap = stan(d).get(etap) or {}
+    vsi = int(zap.get("kadriv") or 0)
+    out = teka_vyhodu(zap)
+    if out is None:
+        return 0, vsi
+    kadry = {p.stem for p in _kadry(Path(zap["teka"]))} if Path(zap.get("teka") or "").is_dir() else set()
+    zrobleno = _zrobleno(out, etap)
     return len(zrobleno & kadry) if kadry else len(zrobleno), vsi
+
+
+def _toi_samyi(a: str | Path, b: Path) -> bool:
+    try:
+        return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+    except (OSError, ValueError):
+        return False
+
+
+def pidkhopyty(d: Path, etap: str, mitka: str = "") -> dict[str, Any] | None:
+    """Готовий захід етапу з реєстру хмари, коли стан теки його не пам'ятає.
+
+    0.49.5 стирав стан етапу, не знайшовши результату за зіпсованою адресою (відгук №28), і
+    наступний `read` поставив би платний захід удруге. Тут береться останній захід, що прочитав
+    саме цю теку кадрів (та сама мітка метаданих — те саме ім'я теки) успішно й повністю: кожен
+    її кадр має вихід. Неповний чи чужий не береться — тоді захід ставиться, як і раніше."""
+    teka = Path(d) / DIR / (f"{slug(d)}-{etap}" + (f"-{mitka}" if mitka else ""))
+    if not teka.is_dir():
+        return None
+    kadry = {p.stem for p in _kadry(teka)}
+    if not kadry:
+        return None
+    try:
+        from nyshporka.cloud import state as ST
+
+        runs = ST.all_runs()
+    except Exception:
+        return None
+    best: Any = None
+    for st in runs:
+        if st.phase != "done" or st.verdict != "ok" or not st.case_dir or not st.out_dir:
+            continue
+        if not _toi_samyi(st.case_dir, teka) or not Path(st.out_dir).is_dir():
+            continue
+        if not kadry <= _zrobleno(Path(st.out_dir), etap):
+            continue
+        if best is None or st.updated > best.updated:
+            best = st
+    if best is None:
+        return None
+    zap = {"run_id": best.run_id, "out_dir": best.out_dir, "teka": str(teka), "kadriv": len(kadry),
+           "verdict": "ok", "mitka": mitka, "pidkhopleno": time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                                                         time.gmtime())}
+    _zapysaty(d, etap, zap)
+    return zap
 
 
 def prychyna(zap: dict[str, Any]) -> str:
@@ -229,12 +320,13 @@ def skinchyvsia(zap: dict[str, Any]) -> bool:
 def zabraty(d: Path, etap: str, kudy: Path) -> int:
     """Результат етапу — у `kudy` (копія: тека результату лишається за наглядачем)."""
     zap = stan(d).get(etap) or {}
-    out = Path(zap.get("out_dir") or "")
+    out = teka_vyhodu(zap)
     kudy = Path(kudy)
     kudy.mkdir(parents=True, exist_ok=True)
     n = 0
-    if not zap.get("out_dir") or not out.is_dir():
+    if out is None:
         return 0
+    zap["out_dir"] = str(out)   # адреса з реєстру заступає зіпсовану з виводу дитини
     for f in out.iterdir():
         if f.is_file():
             shutil.copy2(f, kudy / f.name)
