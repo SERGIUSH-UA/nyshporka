@@ -26,6 +26,7 @@ import shutil
 import subprocess
 import sys
 import time
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,13 @@ DIR = "hmara"
 ETAPY = ("storinky", "kropy", "druk")
 #: Що вважається прочитаною сторінкою в теці результату етапу.
 VYHID = {"storinky": "*.txt", "kropy": "*.txt", "druk": "*.md"}
+
+
+#: Збирач відкладених заходів: поки він стоїть (`nysh opys read` на кілька тек), етап не ставить
+#: свого заходу, а лишає запит тут, і всі теки їдуть ОДНИМ `cloud go` — одна черга на одну машину.
+#: 🔴 Без цього кожна тека орендувала свою машину: накладні заходу (від кількох центів на рукописі до
+#: ~$0.2 на машинописі) — незалежно від обсягу (27.11.2026 — 110 заходів на 429 сторінок, $5.35).
+ZBIR: ContextVar[list[dict[str, Any]] | None] = ContextVar("opysy_hmara_zbir", default=None)
 
 
 class HmaraError(RuntimeError):
@@ -139,17 +147,61 @@ def _cloud_go(args: list[str]) -> tuple[int, dict[str, Any], str]:
 
 def postavyty(d: Path, etap: str, kadry: Path, *, script: str = "", params: list[str] | None = None,
               confirm: bool = False, mitka: str = "") -> dict[str, Any]:
-    """Поставити захід етапу. Повертає запис стану: `run_id`, `out_dir`, рішення, вилку.
+    """Поставити захід етапу однієї теки. Повертає запис стану: `run_id`, `out_dir`, рішення, вилку.
 
     Відмова `cloud go` (немає плагіна оренди, ключа, балансу, понад стелю автозапуску) —
     `HmaraError` з його ж причиною: людина бачить, що зробити, а не «код 2»."""
-    if etap not in ETAPY:
-        raise ValueError(etap)
-    teka = _podaty(d, etap, kadry, mitka)
+    got = postavyty_razom([{"d": d, "etap": etap, "kadry": kadry, "script": script, "mitka": mitka}],
+                          params=params, confirm=confirm)[str(Path(d))]
+    if isinstance(got, HmaraError):
+        raise got
+    return got
+
+
+def _toi_samyi_shliakh(a: str | Path, b: str | Path) -> bool:
+    try:
+        return os.path.normcase(str(Path(a).resolve())) == os.path.normcase(str(Path(b).resolve()))
+    except (OSError, ValueError):
+        return False
+
+
+def _korin_druku(teky: list[Path]) -> Path:
+    """Куди рушій друку кладе результат спільного заходу кількох описів.
+
+    Одна тека — як і досі, `<тека>/hmara/vyhid`. Кілька — не в теку одного з описів (платний вихід
+    чужих описів не має жити там, де його знесуть разом з одним), а в простір, `data/derived/opysy`.
+    Кожна тека однаково забирає свій результат копією (`zabraty`)."""
+    if len(teky) == 1:
+        return Path(teky[0]) / DIR / "vyhid"
+    try:
+        from nyshporka.core.workspace import workspace
+
+        return workspace().derived / "opysy" / "hmara-vyhid"
+    except Exception:
+        return Path(teky[0]) / DIR / "vyhid"
+
+
+def postavyty_razom(zapyty: list[dict[str, Any]], *, params: list[str] | None = None,
+                    confirm: bool = False) -> dict[str, dict[str, Any] | HmaraError]:
+    """Один захід `cloud go` на кілька тек того самого етапу й письма: одна черга, одна машина.
+
+    `zapyty` — `{"d", "etap", "kadry", "script", "mitka"}` на теку. Повертає на кожну теку
+    (`str(d)`) або записаний стан етапу, або `HmaraError`. Відмова всього заходу (понад стелю,
+    немає оренди) — та сама помилка всім: 🔴 жодного заходу «по одному» замість відмови.
+    Справу черги зіставляється з текою за шляхом (`cases[].case_dir`), не за порядком; тека, якої
+    захід не взяв (`dropped`) чи не назвав, дістає помилку й не дістає стану."""
+    if not zapyty:
+        return {}
+    etap = zapyty[0]["etap"]
+    script = zapyty[0].get("script") or ""
+    if etap not in ETAPY or any(z["etap"] != etap or (z.get("script") or "") != script for z in zapyty):
+        raise ValueError("один захід — один етап і одне письмо")
+    teky = [_podaty(z["d"], etap, z["kadry"], z.get("mitka") or "") for z in zapyty]
     # теку етапу склали щойно й цілком — запобіжник «тека ще качається» (кадр молодший 5 хв) тут хибний
-    args = [str(teka), "--allow-partial"]
+    args = [*map(str, teky), "--allow-partial"]
     if etap == "druk":
-        args += ["--print", "--not-an-edition", "--out-root", str(Path(d) / DIR / "vyhid")]
+        args += ["--print", "--not-an-edition", "--out-root",
+                 str(_korin_druku([Path(z["d"]) for z in zapyty]))]
     elif script:
         args += ["--script", script]
     for p in (params or []):
@@ -160,23 +212,47 @@ def postavyty(d: Path, etap: str, kadry: Path, *, script: str = "", params: list
         args.append("--confirm")
     kod, res, khvist = _cloud_go(args)
     verdict = str(res.get("verdict") or "")
+    out: dict[str, dict[str, Any] | HmaraError] = {}
     if verdict not in ("detached", "ok"):
         why = str(res.get("why") or "") or khvist or f"код {kod}"
         if res.get("launch") == "needs_confirm":
-            raise HmaraError(f"кошторис понад стелю автозапуску (до ${res.get('fork_high')}) — запустити "
+            err = HmaraError(f"кошторис понад стелю автозапуску (до ${res.get('fork_high')}) — запустити "
                              f"може лише людина: та сама команда з `--confirm`. {why}", zghoda=True)
-        raise HmaraError(why)
-    zap = {"run_id": res.get("run_id") or "", "out_dir": res.get("out_dir") or "",
-           "teka": str(teka), "kadriv": len(_kadry(teka)), "verdict": verdict, "mitka": mitka,
-           "fork_high": res.get("fork_high"), "budget_usd": res.get("budget_usd"),
-           "postavleno": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
-    if not zap["out_dir"] and res.get("cases"):
-        zap["out_dir"] = res["cases"][0].get("out_dir") or ""
-    st = _reiestr(str(zap["run_id"] or ""))
-    if st is not None and st.out_dir:
-        zap["out_dir"] = st.out_dir   # реєстр пише наглядач у UTF-8 — адреса з нього надійніша
-    _zapysaty(d, etap, zap)
-    return zap
+        else:
+            err = HmaraError(why)
+        return {str(Path(z["d"])): err for z in zapyty}
+    cases = [c for c in (res.get("cases") or []) if isinstance(c, dict)]
+    teper = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    for z, teka in zip(zapyty, teky, strict=True):
+        if len(zapyty) == 1:
+            # одна тека — рівно як до 0.49.7: верхні поля відповіді, `cases[0]` — запасом
+            c0 = cases[0] if cases else {}
+            case: dict[str, Any] | None = {"run_id": res.get("run_id") or c0.get("run_id"),
+                                           "out_dir": res.get("out_dir") or c0.get("out_dir")}
+        else:
+            # за шляхом теки або за `run_id`, що починається з імені теки етапу (у ньому відбиток
+            # шляху опису, тож воно не повторюється між описами); за порядком — ніколи
+            case = next((c for c in cases
+                         if _toi_samyi_shliakh(c.get("case_dir") or "", teka)
+                         or str(c.get("run_id") or "").split("__", 1)[0] == teka.name), None)
+        if case is None or not case.get("run_id"):
+            vypalo = next((x for x in (res.get("dropped") or [])
+                           if isinstance(x, dict) and _toi_samyi_shliakh(x.get("case") or "", teka)), None)
+            out[str(Path(z["d"]))] = HmaraError(
+                "захід не взяв цю теку" + (f": {vypalo.get('why')}" if vypalo and vypalo.get("why") else ""))
+            continue
+        zap = {"run_id": case.get("run_id") or "", "out_dir": case.get("out_dir") or "",
+               "teka": str(teka), "kadriv": len(_kadry(teka)), "verdict": verdict,
+               "mitka": z.get("mitka") or "", "fork_high": res.get("fork_high"),
+               "budget_usd": res.get("budget_usd"), "postavleno": teper}
+        if len(zapyty) > 1:
+            zap["razom"] = len(zapyty)   # скільки тек поїхало цим заходом
+        st = _reiestr(str(zap["run_id"] or ""))
+        if st is not None and st.out_dir:
+            zap["out_dir"] = st.out_dir   # реєстр пише наглядач у UTF-8 — адреса з нього надійніша
+        _zapysaty(z["d"], etap, zap)
+        out[str(Path(z["d"]))] = zap
+    return out
 
 
 def _reiestr(run_id: str) -> Any:

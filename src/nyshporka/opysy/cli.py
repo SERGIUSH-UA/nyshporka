@@ -359,7 +359,8 @@ def _next(d: dict[str, Any]) -> None:
 
 @app.command("read")
 def read_cmd(
-    folder: str = typer.Argument(..., help="робоча тека опису (повтор — продовжує з місця)"),
+    folders: list[str] = typer.Argument(..., help="робоча тека опису (повтор — продовжує з місця); "
+                                                   "кілька тек — одним заходом у хмару"),
     pdf: str = typer.Option("", "--pdf", help="PDF опису — той самий файл, що опубліковано"),
     repo: str = typer.Option("", "--repo", help="архів: ЦДІАК, ДАОО…"),
     fond: str = typer.Option("", "--fond", help="фонд"),
@@ -383,9 +384,34 @@ def read_cmd(
 ) -> None:
     """Прочитати опис фонду одним кроком: паспорт, сторінки, читання, таблиця справ, пачки
     нормалізації. Перервалось — та сама команда продовжить. Читання в хмарі відчеплене: команда
-    ставить захід і виходить, повтор забирає результат."""
+    ставить захід і виходить, повтор забирає результат. Кілька вже заведених тек — хмара читає їх
+    ОДНИМ заходом (одна черга на одну машину), а не орендою на кожен опис."""
     from nyshporka import ops as O
 
+    if len(folders) > 1:
+        zaivi = [k for k, v in (("--pdf", pdf), ("--repo", repo), ("--fond", fond), ("--opys", opys),
+                                ("--url", url), ("--published", published), ("--title", title),
+                                ("--years", years)) if v]
+        if zaivi:
+            console.print(f"[warn]![/warn] {', '.join(zaivi)} — лише для однієї нової теки: заведіть кожну "
+                          "окремо (`nysh opys read <тека> --pdf …`), а читайте разом")
+            raise typer.Exit(code=2)
+        env = O.call("opysy.read_many", {"dirs": folders, "language": language, "script": script,
+                                         "de": de, "hmara_param": hmara_param, "confirm": confirm})
+        if _answer(env, as_json):
+            return
+        d = env.data or {}
+        for r in d.get("opysy") or []:
+            mark = "[green]✓[/green]" if r.get("ok") else "[warn]![/warn]"
+            console.print(f"{mark} {_e(r.get('dir'))} · {_e(r.get('stan'))} · {_e(r.get('how'))}")
+        for z in d.get("zakhody") or []:
+            vylka = f" · кошторис до ${_e(z.get('vylka_do_usd'))}" if z.get("vylka_do_usd") is not None else ""
+            console.print(f"[warn]хмара[/warn] · {_e(z.get('etap'))}: тек {_e(z.get('tek'))}, поставлено "
+                          f"{_e(z.get('postavleno'))} одним заходом{vylka}")
+        console.print(f"  [muted]{_e(d.get('how'))}[/muted]")
+        _next(d)
+        return
+    folder = folders[0]
     env = O.call("opysy.read", {"dir": folder, "pdf": pdf, "repo": repo, "fond": fond,
                                 "opys": opys, "url": url, "published": published, "title": title,
                                 "years": years, "language": language, "script": script,

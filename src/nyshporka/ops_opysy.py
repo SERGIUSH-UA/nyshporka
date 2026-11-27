@@ -749,9 +749,95 @@ def _hmara_etap(d: Path, etap: str, kadry: Path, kudy: Path, a: ReadOpysArgs, *,
     if not pysmo and etap != "druk":
         raise H.HmaraError("для хмари треба письмо: назвіть мову опису (`--language ru|uk|pl`) або "
                            "письмо (`--script cyrillic|latin`)")
+    zbir = H.ZBIR.get()
+    if zbir is not None:
+        # `nysh opys read` на кілька тек: захід ставить сам `opysy.read_many` — одним `cloud go`
+        zbir.append({"d": d, "etap": etap, "kadry": kadry, "script": "" if etap == "druk" else pysmo,
+                     "mitka": mitka})
+        return "chekaie", {"etap": etap}
     zap = H.postavyty(d, etap, kadry, script=pysmo, params=a.hmara_param, confirm=a.confirm,
                       mitka=mitka)
     return "postavleno", zap
+
+
+class ReadManyArgs(BaseModel):
+    dirs: list[str] = Field(description="робочі теки описів, уже заведені (`nysh opys read <тека> --pdf …`)")
+    language: str = Field(default="", description="мова описів (ru, uk); порожньо — з паспорта кожної теки")
+    script: Literal["", "latin", "cyrillic"] = Field(default="", description="письмо; порожньо — з мови")
+    de: Literal["auto", "lokalno", "hmara"] = Field(default="auto", description="де читати, як у `opysy.read`")
+    hmara_param: list[str] = Field(default_factory=list, description="параметри хмарного заходу `ключ=значення`")
+    confirm: bool = Field(default=False, description="дозвіл ЛЮДИНИ на захід понад стелю автозапуску")
+
+
+@op("opysy.read_many", summary="Прочитати кілька описів разом: хмара — одним заходом на всі теки",
+    args=ReadManyArgs, mutates=True, long=True, section=SECTION, tier="rare",
+    when="кілька робочих тек описів: одна черга на одну машину замість оренди на кожен опис")
+def opysy_read_many(a: ReadManyArgs) -> Envelope:
+    """Кожна тека проходить свої кроки, як `opysy.read`, а заходи в хмару всіх тек — ОДИН `cloud go`
+    на етап і письмо (`hmara.postavyty_razom`). Повтор тієї самої команди забирає результат по теках.
+
+    🔴 Відмова всього заходу (понад стелю автозапуску) лишається відмовою для всіх тек — заходів «по
+    одному» замість неї немає. У `auto` хмара, що відмовила з іншої причини, як і для однієї теки:
+    сторінки й кропи читаються тут, машинопис — ні."""
+    from nyshporka.opysy import hmara as H
+    from nyshporka.opysy import workdir as W
+
+    dirs = list(dict.fromkeys(str(Path(x)) for x in a.dirs))
+    if len(dirs) < 2:
+        return fail("для однієї теки — `nysh opys read <тека>`")
+    nema = [x for x in dirs if not (Path(x) / W.PASSPORT).exists()]
+    if nema:
+        return fail(f"нові теки ({', '.join(nema)}) заводяться по одній: `nysh opys read <тека> --pdf … "
+                    f"--repo … --fond … --opys …`; разом читаються вже заведені")
+
+    def arg(x: str, de: str = "") -> ReadOpysArgs:
+        return ReadOpysArgs(dir=x, language=a.language, script=a.script, de=de or a.de,  # type: ignore[arg-type]
+                            hmara_param=list(a.hmara_param), confirm=a.confirm)
+
+    token = H.ZBIR.set([])
+    try:
+        envs = {x: opysy_read(arg(x)) for x in dirs}
+        zapyty = list(H.ZBIR.get() or [])
+    finally:
+        H.ZBIR.reset(token)
+
+    grupy: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for z in zapyty:
+        grupy.setdefault((z["etap"], z.get("script") or ""), []).append(z)
+    zakhody: list[dict[str, Any]] = []
+    for (etap, script), g in grupy.items():
+        got = H.postavyty_razom(g, params=list(a.hmara_param), confirm=a.confirm)
+        postavleni = [v for v in got.values() if isinstance(v, dict)]
+        zakhody.append({"etap": etap, "script": script, "tek": len(g), "postavleno": len(postavleni),
+                        "run_ids": [v.get("run_id") for v in postavleni],
+                        "vylka_do_usd": postavleni[0].get("fork_high") if postavleni else None})
+        for z in g:
+            x = str(Path(z["d"]))
+            v = got[x]
+            kroky = list((envs[x].data or {}).get("zrobleno") or [])
+            if isinstance(v, dict):
+                envs[x] = _hmara_vidpovid(Path(x), arg(x), kroky, etap, "postavleno", v)
+            elif a.de == "auto" and not v.zghoda and etap in ("storinky", "kropy"):
+                envs[x] = opysy_read(arg(x, "lokalno"))
+            else:
+                envs[x] = fail(f"{x}: захід у хмару не поставлено: {v}")
+
+    rows = []
+    for x in dirs:
+        e = envs[x]
+        dd = e.data if isinstance(e.data, dict) else {}
+        h = dd.get("hmara") or {}
+        rows.append({"dir": x, "ok": e.ok, "stan": h.get("stan") or ("hotovo" if e.ok else "zbii"),
+                     "run_id": h.get("run_id") or "", "how": dd.get("how") or e.error,
+                     "next": dd.get("next") or ""})
+    env = ok({"opysy": rows, "zakhody": zakhody,
+              "how": (f"заходів у хмару: {len(zakhody)} на {sum(z['tek'] for z in zakhody)} тек"
+                      if zakhody else "нових заходів у хмару немає"),
+              "next": "nysh opys read " + " ".join(dirs) + " — та сама команда забере результат"})
+    for r in rows:
+        if not r["ok"]:
+            env.warn("opys", f"{r['dir']}: {r['how']}")
+    return env
 
 
 def _pysmo(d: Path, a: ReadOpysArgs) -> str:
@@ -770,12 +856,19 @@ def _hmara_vidpovid(d: Path, a: ReadOpysArgs, kroky: list[str], etap: str, stan:
     nazva = {"storinky": "сторінки опису", "kropy": "кропи колонки №", "druk": "машинопис (рушій друку)"}[etap]
     run_id = zap.get("run_id") or ""
     tekst = (f"{nazva}: захід поставлено в хмару" if stan == "postavleno" else
+             f"{nazva}: чекає спільного заходу з іншими описами" if stan == "chekaie" else
              f"{nazva}: хмара ще читає — {zap.get('prochytano', 0)} з {zap.get('vsi', zap.get('kadriv', 0))}")
-    return ok({"dir": str(d.resolve()), "zrobleno": kroky, "hmara": {
+    env = ok({"dir": str(d.resolve()), "zrobleno": kroky, "hmara": {
         "etap": etap, "stan": stan, "run_id": run_id, "out_dir": zap.get("out_dir"),
         "byudzhet_usd": zap.get("budget_usd"), "vylka_do_usd": zap.get("fork_high")},
         "how": tekst + (f"; стан — `nysh cloud state {run_id}`" if run_id else ""),
         "next": f"nysh opys read {a.dir} — та сама команда забере результат, коли хмара дочитає"})
+    if stan == "postavleno" and not zap.get("razom"):
+        env.warn("razom", "кілька описів читайте одним викликом — `nysh opys read <тека1> <тека2> …`: "
+                          "хмара прочитає їх однією чергою на одній машині. Кожен окремий захід — "
+                          "окрема оренда з накладними від кількох центів (рукопис) до ~$0.2 (машинопис), "
+                          "хоч би в описі було кілька сторінок")
+    return env
 
 
 def _chytaty(pages: Path, run: Path, script: str, *, whole_line: bool = False) -> int:
